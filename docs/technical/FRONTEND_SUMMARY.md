@@ -18,7 +18,21 @@ Selecting a transformation requests new values from the backend without reloadin
 
 ### Search and Filtering
 
-Submitting the header search opens the series explorer at `/explore?q=…`. In the explorer, searches run after a 250 ms pause in typing once the trimmed query contains at least two characters. Source and frequency filters narrow the results; selecting a source also allows browsing its series without entering a search term. The query and filter choices are stored in the URL so the view can be bookmarked or shared.
+Submitting the header search opens the series explorer at `/explore?q=…`. In the explorer, searches run after a 250 ms pause in typing once the trimmed query contains at least two characters. A search shows up to its 100 most relevant results, 20 to a page, and can be re-sorted by title or by last update. Source and frequency filters narrow the results. Selecting a source without a query browses that source's series by title, 20 to a page fetched from the backend, through the whole source.
+
+The explorer's state is in its URL, so Back from a series, a reload or a shared link shows the same results:
+
+| Parameter | Meaning | Default |
+| --- | --- | --- |
+| `q` | Search text | None: browse the source, or ask for a search |
+| `source` | Data source id (a source name from an older link also works) | All sources |
+| `frequency` | Frequency, such as `Monthly` | All frequencies |
+| `sort` | `relevance`, `title` or `lastUpdated`; a browse is always by title | `relevance` |
+| `page` | 1-based results page; a page past the last shows the last | `1` |
+
+Default values are left out of the URL, and a `sort` or `page` that isn't valid falls back to its default. Changing the page scrolls back to the top. A series opened from the explorer links back to the same results.
+
+The global analysis map's indicator is the `/global` URL's `indicator` parameter, a World Development Indicators code such as `SP.POP.TOTL`. A code the dataset doesn't have shows the default, GDP per capita.
 
 ### Navigation and Mobile Layout
 

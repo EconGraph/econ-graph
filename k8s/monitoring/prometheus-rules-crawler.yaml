@@ -267,7 +267,18 @@ data:
             severity: warning
           annotations:
             summary: '{{ $labels.source }} catalog rejected by {{ $labels.reason }} guard'
-            description: A catalog exceeded its configured selection limit or disappearance threshold. The worker retained stored histories; inspect its catalog warning and upstream completeness before changing selection rules or retrying.
+            description: A catalog exceeded its configured selection limit or disappearance threshold. The worker retained stored histories; inspect its catalog warning and upstream completeness before changing selection rules or retrying. For mass_disappearance, review and accept a correct snapshot with `crawler accept-guarded-catalog` (crawler coverage runbook).
+
+        # A guarded snapshot waits for operator review until accepted or replaced. The one-off
+        # guard rejection alert clears after an hour; this one stays while the review is pending.
+        - alert: CrawlerCatalogGuardedSnapshotPending
+          expr: max by (source) (crawler_catalog_guarded_snapshot_pending{kubernetes_namespace="econ-graph"}) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: '{{ $labels.source }} has a guarded catalog snapshot waiting for review'
+            description: A {{ $labels.source }} catalog lost more than 20% of the last accepted catalog and was not applied. Review it with `crawler accept-guarded-catalog --source {{ $labels.source }}` and accept it only if the upstream change is real (crawler coverage runbook).
 
         - alert: CrawlerSeriesPublicationChanged
           expr: sum by (source, status) (increase(crawler_series_lifecycle_transitions_total{status=~"discontinued|missing_from_catalog|retired|superseded|restricted"}[1h])) > 0
@@ -292,6 +303,34 @@ data:
           annotations:
             summary: '{{ $value | humanize }} curated {{ $labels.source }} entries are missing upstream'
             description: The last {{ $labels.source }} discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for {{ $labels.source }} names them; review the selection rules and explicit overrides in data/catalog_selection/.
+
+        # A selection rule that matches nothing (a renamed table or release, a retitled family)
+        # selects no series while the other rules keep discovery succeeding, so the rule's
+        # series would age out silently. Same process-local gauge handling as above. Editing a
+        # rule changes its label, and the old label's last zero would linger for 8 days, so
+        # alert only while a worker still reports the rule as configured.
+        - alert: CrawlerCatalogRuleMatchesNothing
+          expr: |
+            last_over_time((min by (source, rule) (crawler_catalog_rule_matches{kubernetes_namespace="econ-graph"}))[8d:5m]) == 0
+            and on (source, rule)
+            max by (source, rule) (max_over_time(crawler_catalog_rule_configured{kubernetes_namespace="econ-graph"}[15m]))
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: '{{ $labels.source }} selection rule {{ $labels.rule }} matches nothing upstream'
+            description: The last {{ $labels.source }} discovery found no catalog entries for selection rule {{ $labels.rule }} (position:catalog in data/catalog_selection/). Its previously selected series may be counted as absent; check whether upstream renamed the table or release and update the rule.
+
+        # Tracked series that upstream still lists but the rules no longer select (for example a
+        # FRED series retitled out of a title rule). They stay published and scheduled.
+        - alert: CrawlerCatalogSeriesUnselected
+          expr: last_over_time((max by (source) (crawler_catalog_unselected_series{kubernetes_namespace="econ-graph"}))[8d:5m]) > 0
+          for: 15m
+          labels:
+            severity: info
+          annotations:
+            summary: '{{ $value | humanize }} tracked {{ $labels.source }} series no longer match the selection rules'
+            description: The last complete {{ $labels.source }} catalog still lists these series upstream, so they keep their publication state and are still fetched. The worker log's catalog warning counts them; review whether the rules in data/catalog_selection/ should follow the upstream change.
 
       # Coverage (at least 95% of each source's series have data), freshness (scheduled refresh
       # keeps series current), and crawl failures.

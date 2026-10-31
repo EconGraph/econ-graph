@@ -3,7 +3,7 @@
 # Public URL: http://localhost/idp through the gateway (HTTPRoute econ-graph-idp,
 # k8s/manifests/gateway/routes/httproutes.yaml), so the issuer is
 # http://localhost/idp/realms/econ-graph. With PUBLIC_HOST set, deploy.sh changes
-# KC_HOSTNAME and KC_WEB_BASE_URL below to https://<PUBLIC_HOST>, the backend's
+# KC_HOSTNAME, KC_WEB_BASE_URL and KC_WEB_E2E_BASE_URL below to https://<PUBLIC_HOST>, the backend's
 # OIDC_ISSUER and the routes' host names with them (scripts/deploy/render-public-host.py),
 # so the issuer is https://econgraph.com/idp/realms/econ-graph in production. Keycloak
 # builds its URLs from the full KC_HOSTNAME, not from request headers, and the public
@@ -81,6 +81,7 @@ spec:
         args:
         - |
           if [ -n "${KC_GOOGLE_CLIENT_ID:-}" ] && [ -n "${KC_GOOGLE_CLIENT_SECRET:-}" ]; then export KC_GOOGLE_ENABLED=true; fi
+          if [ -n "${KC_FACEBOOK_CLIENT_ID:-}" ] && [ -n "${KC_FACEBOOK_CLIENT_SECRET:-}" ]; then export KC_FACEBOOK_ENABLED=true; fi
           exec /opt/keycloak/bin/kc.sh start
         env:
         - name: KC_BOOTSTRAP_ADMIN_USERNAME
@@ -128,7 +129,9 @@ spec:
               key: anonymous-client-secret
         - name: KC_WEB_BASE_URL
           value: "http://localhost"
-        # Second allowed web origin; only the compose e2e stack needs a different one.
+        # Second allowed web origin: the compose e2e stack's frontend there. With PUBLIC_HOST,
+        # deploy.sh sets it to the public host like KC_WEB_BASE_URL, so the realm allows no
+        # localhost.
         - name: KC_WEB_E2E_BASE_URL
           value: "http://localhost"
         - name: KC_GOOGLE_CLIENT_ID
@@ -142,6 +145,18 @@ spec:
             secretKeyRef:
               name: econ-graph-keycloak
               key: google-idp-client-secret
+              optional: true
+        - name: KC_FACEBOOK_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: facebook-idp-client-id
+              optional: true
+        - name: KC_FACEBOOK_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: facebook-idp-client-secret
               optional: true
         ports:
         - containerPort: 8080

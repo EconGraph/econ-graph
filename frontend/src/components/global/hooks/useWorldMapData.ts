@@ -5,6 +5,7 @@
 
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { executeGraphQL, type GraphQLResponse } from '../../../utils/graphql';
+import type { SourceNotice } from '../../../hooks/useSeriesData';
 
 /** Code of the World Bank's World Development Indicators dataset. */
 export const MAP_DATASET_CODE = 'wdi';
@@ -21,6 +22,15 @@ export const GET_MAP_DATASETS = `
       id
       code
       name
+      source {
+        name
+        notice {
+          citation
+          notice
+          termsUrl
+          retrievalDateRequired
+        }
+      }
       dimensions {
         name
         label
@@ -82,9 +92,17 @@ export interface MapDimension {
 }
 
 /** The dataset the map reads, with the dimension it maps across and the one it picks from. */
+/** A dataset's source, with the notice its terms require (null for a source without one). */
+export interface MapDatasetSource {
+  name: string;
+  notice: SourceNotice | null;
+}
+
 export interface MapDataset {
   id: string;
   name: string;
+  /** Null or absent when the API did not return it. */
+  source?: MapDatasetSource | null;
   /** The country dimension, recognised by its `countries` code list. */
   areaDimension: string;
   /** The other dimension, whose codes the indicator picker offers. */
@@ -125,6 +143,7 @@ interface DatasetsData {
     id: string;
     code: string;
     name: string;
+    source?: MapDatasetSource | null;
     dimensions: MapDimension[];
   }>;
 }
@@ -178,6 +197,7 @@ export function pickMapDataset(datasets: DatasetsData['datasets']): MapDataset |
   return {
     id: dataset.id,
     name: dataset.name,
+    source: dataset.source ?? null,
     areaDimension: area.name,
     indicatorDimension: others[0].name,
     indicators: others[0].codes,

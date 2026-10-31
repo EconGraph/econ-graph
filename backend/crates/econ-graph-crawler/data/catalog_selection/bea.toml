@@ -4,7 +4,11 @@
 # matches SAINC11 and SAINC12) are listed in `exclude`.
 max_tables = 32
 max_series = 20000
-exclude = ["SAINC11", "SAINC12"]
+# SAGDP2S is the discontinued SIC-basis GDP by state (1963-1997); its industry lines do not
+# match the NAICS tables the SAGDP2 prefix is meant to follow (SAGDP2, and SAGDP2N while BEA
+# listed the table under that name). SAINC11 and SAINC12 share the SAINC1 prefix but are
+# different tables.
+exclude = ["SAGDP2S", "SAINC11", "SAINC12"]
 
 # NIPA Section 1: domestic product and income.
 [[rule]]

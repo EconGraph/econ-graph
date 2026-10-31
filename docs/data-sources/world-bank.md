@@ -9,7 +9,7 @@ and [integration post-mortem](../archive/technical/WORLD_BANK_INTEGRATION_POST_M
 
 ## Coverage and requests
 
-The adapter crawls the 53 curated World Development Indicators in
+The adapter crawls the 158 curated World Development Indicators in
 [wdi_indicators.csv](../../backend/crates/econ-graph-crawler/data/wdi_indicators.csv).
 Discovery lists supported areas with at least one non-null value for each indicator.
 Each series belongs to dataset `wdi`, defined in
@@ -109,8 +109,22 @@ WDI observations are mostly annual. Database updates can revise past years.
 Every point's `revision_date` is the response's `lastupdated`, the date the World Bank last
 updated the database. A changed release date therefore creates a new vintage of the series
 rather than overwriting the previous vintage. FRED and World Bank are the two adapters
-that use source vintage dates. `is_original_release` is `true` for World Bank points;
-the adapter retrieves the current edition, not a historical-vintage endpoint.
+that use source vintage dates. The adapter retrieves the current edition, not a
+historical-vintage endpoint.
+
+A release restates every observation, so persisting compares each one with the newest
+stored row for its date at or before the release date:
+
+| Stored row for the date | Written |
+|---|---|
+| None | a row at the release date, `is_original_release = true` |
+| An earlier release, same value | nothing; reads take the value from the earlier row |
+| An earlier release, different value | a row at the release date, `is_original_release = false` |
+| The same release (re-read) | the existing row, updated in place if its value differs |
+
+A WDI release therefore adds rows only for the values it changes or adds, rather than the
+whole history of every series. A value the World Bank drops from a release keeps its last
+stored row.
 
 When a download is needed, `since` does not trim the requested history. Returning earlier
 years preserves their revised values under the new release date, subject to the ten-page

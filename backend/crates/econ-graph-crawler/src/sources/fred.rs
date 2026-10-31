@@ -142,6 +142,17 @@ pub fn validate_catalog_rules() -> Result<(), CrawlError> {
     load_catalog_rules().map(|_| ())
 }
 
+/// Metric labels of the configured selection rules (see `crawler_catalog_rule_matches`).
+pub fn configured_rule_labels() -> Result<Vec<String>, CrawlError> {
+    let rules = load_catalog_rules()?;
+    Ok(rules
+        .rules
+        .iter()
+        .enumerate()
+        .map(|(index, rule)| rule.label(index))
+        .collect())
+}
+
 fn load_catalog_rules() -> Result<FredCatalogRules, CrawlError> {
     let path = data_dir().join(CATALOG_RULES_FILE);
     let text = std::fs::read_to_string(&path)
@@ -274,6 +285,15 @@ impl FredCatalogRules {
 }
 
 impl FredCatalogRule {
+    /// Bounded metric label: the rule's position and the catalog it walks.
+    fn label(&self, index: usize) -> String {
+        match (self.release_id, self.category_id) {
+            (Some(id), _) => format!("{index}:release:{id}"),
+            (None, Some(id)) => format!("{index}:category:{id}"),
+            (None, None) => format!("{index}"),
+        }
+    }
+
     fn matches(&self, series: &CatalogSeries) -> bool {
         self.title_contains.as_ref().is_none_or(|needle| {
             series
@@ -458,16 +478,28 @@ impl FredAdapter {
     ) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         let api_key = self.api_key(ctx)?;
         let mut selected = BTreeMap::new();
+        // Every id the walked releases and categories list, selected or not. Absence evidence
+        // counts only ids missing from the whole walked catalog: a series retitled or
+        // re-frequencied out of a rule is still published upstream.
+        let mut walked = BTreeSet::new();
         let mut scanned = 0;
         // Pin the realtime date for every page of this catalog walk. Count/order validation
         // below also refuses common forms of a catalog changing during pagination.
         let realtime = chrono::Utc::now().date_naive().to_string();
-        for rule in &rules.rules {
+        for (index, rule) in rules.rules.iter().enumerate() {
             let rows = self
                 .catalog_rows(ctx, api_key, rule, rules, &realtime, scanned)
                 .await?;
             scanned += rows.len();
+            crate::catalog_selection::record_rule_matches(
+                "FRED",
+                &rule.label(index),
+                rows.iter()
+                    .filter(|row| rule.matches(row) && !rules.exclude.contains(&row.id))
+                    .count(),
+            );
             for row in rows {
+                walked.insert(row.id.clone());
                 if !rule.matches(&row) || rules.exclude.contains(&row.id) {
                     continue;
                 }
@@ -527,6 +559,10 @@ impl FredAdapter {
                 "FRED catalog selection is empty; refusing to infer removals".into(),
             ));
         }
+        facts.unselected_ids = walked
+            .into_iter()
+            .filter(|id| !selected.contains_key(id))
+            .collect();
         let mut found = Vec::with_capacity(selected.len());
         for (id, metadata) in selected {
             if is_copyright_restricted(metadata.notes.as_deref()) {
@@ -675,8 +711,13 @@ impl FredAdapter {
             )
             .await
             .map_err(classify_fred_error)?;
+        // FRED reports a missing series as HTTP 400 "The series does not exist" (NotFound, see
+        // `classify_fred_error`). A 200 with no series is an anomalous response, not evidence
+        // that the series is gone, so it must not count toward fetch retirement.
         let s = body.seriess.into_iter().next().ok_or_else(|| {
-            CrawlError::NotFound(format!("FRED series {series_id}: no metadata returned"))
+            CrawlError::Transient(format!(
+                "FRED series {series_id}: a successful response returned no metadata"
+            ))
         })?;
         Ok((
             NewSeriesMetadataLite {
@@ -1333,6 +1374,9 @@ mod tests {
             adapter.catalog_lifecycle().confirmed_missing_ids,
             ["OLDGDP"]
         );
+        // Listed by the walked release but outside the title rule: still published, so a
+        // tracked OTHER (for example a retitled GDP series) never counts as absent.
+        assert_eq!(adapter.catalog_lifecycle().unselected_ids, ["OTHER"]);
         assert!(adapter.discovery_is_complete());
         assert_eq!(adapter.catalog_scope().unwrap(), rules.fingerprint());
         assert_eq!(
@@ -1340,6 +1384,44 @@ mod tests {
             2,
             "catalog discovery must not fetch any observations"
         );
+    }
+
+    /// A rule that matches nothing in its walked catalog is reported, even when another rule
+    /// keeps discovery working.
+    #[tokio::test]
+    async fn a_rule_matching_nothing_is_published_per_rule() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/release/series").query("release_id", "53"),
+            catalog_page(1, 0, vec![catalog_row("GDP", "Gross Domestic Product")]),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/category/series").query("category_id", "987654"),
+            catalog_page(1, 0, vec![catalog_row("RENAMED", "A renamed series")]),
+        )
+        .await;
+        let rules = FredCatalogRules::parse(
+            "max_series=10\nmax_catalog_series=10\n[[rules]]\nrelease_id=53\n\
+             [[rules]]\ncategory_id=987654\nid_prefix='ZZGONE'",
+        )
+        .unwrap();
+        let adapter = FredAdapter::new(mock.base_url());
+        // This test's labels are unique, so parallel tests cannot change them.
+        econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+            .rule_matches
+            .with_label_values(&["FRED", "1:category:987654"])
+            .set(-1);
+        let found = adapter.discover_catalog(&test_ctx(), &rules).await.unwrap();
+        assert_eq!(found.len(), 1);
+        let gauge = |rule: &str| {
+            econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+                .rule_matches
+                .with_label_values(&["FRED", rule])
+                .get()
+        };
+        assert_eq!(gauge("1:category:987654"), 0);
+        assert_eq!(adapter.catalog_lifecycle().unselected_ids, ["RENAMED"]);
     }
 
     #[tokio::test]
@@ -2390,8 +2472,10 @@ mod tests {
         assert_eq!(classify_fred_error(t.clone()), t);
     }
 
+    /// FRED reports a missing series as an HTTP 400; a 200 with no series is an anomaly and
+    /// must not count as NotFound evidence toward fetch retirement.
     #[tokio::test]
-    async fn empty_seriess_is_not_found() {
+    async fn empty_seriess_is_transient_not_lifecycle_evidence() {
         let mock = MockSource::start().await;
         mock.mount(
             &Route::get("/series"),
@@ -2402,7 +2486,7 @@ mod tests {
             .fetch_series(&test_ctx(), "GDP", None)
             .await
             .unwrap_err();
-        assert_eq!(e.kind(), "not_found");
+        assert_eq!(e.kind(), "transient");
     }
 
     /// A second series fixture (derived from [`SERIES_GDP`]) for tests that need more than one
@@ -2436,6 +2520,49 @@ mod tests {
         assert!(!rules.rules.is_empty());
         assert!(rules.max_series <= 1000);
         assert!(rules.include.len() <= 32);
+    }
+
+    /// The NBER recession indicator: `discover()` finds `USREC` in the
+    /// shipped list, and the copyright safety net keeps it given FRED's real notes for it.
+    #[tokio::test]
+    async fn discover_keeps_usrec_with_its_real_notes() {
+        const SERIES_USREC: &str = include_str!("../../tests/fixtures/fred/series_usrec.json");
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &Route::get("/series").query("series_id", "USREC"),
+            Reply::json_str(SERIES_USREC),
+            1,
+        )
+        .await;
+        // USREC is an explicit override in catalog_selection/fred.toml, outside the GDP release.
+        mock.mount(
+            &Route::get("/release/series").query("release_id", "53"),
+            catalog_page(1, 0, vec![catalog_row("GDP", "Gross Domestic Product")]),
+        )
+        .await;
+        mock.mount(&Route::get("/series"), Reply::json_str(SERIES_GDP))
+            .await;
+        let found = FredAdapter::new(mock.base_url())
+            .discover(&test_ctx())
+            .await
+            .unwrap();
+        let usrec = found
+            .iter()
+            .find(|s| s.external_id == "USREC")
+            .expect("USREC kept by discover()");
+        assert_eq!(
+            usrec.title,
+            "NBER based Recession Indicators for the United States from the Period following \
+             the Peak through the Trough"
+        );
+        assert_eq!(usrec.frequency.as_deref(), Some("Monthly"));
+        assert_eq!(usrec.units.as_deref(), Some("+1 or 0"));
+        assert!(usrec
+            .description
+            .as_deref()
+            .unwrap()
+            .contains("National Bureau of Economic Research"));
+        mock.server().verify().await;
     }
 
     #[test]

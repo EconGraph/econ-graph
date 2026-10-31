@@ -465,6 +465,12 @@ impl DataSourceType {
         self.updated_at
     }
 
+    /// The citation and notice this source's terms require wherever its data are shown or
+    /// exported; null for a source without one.
+    async fn notice(&self) -> Option<crate::source_notices::SourceNotice> {
+        crate::source_notices::notice_for_name(&self.name)
+    }
+
     /// Fetch all series for this data source using DataLoader
     async fn series(
         &self,

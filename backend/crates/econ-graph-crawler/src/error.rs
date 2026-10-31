@@ -27,6 +27,11 @@ pub enum CrawlError {
     /// HTTP 404, or the series does not exist at the source. Not retried.
     #[error("not found: {0}")]
     NotFound(String),
+    /// A successful, complete response for a whole table omitted this series (for example a
+    /// BEA line or area). Weaker than `NotFound`: not retried, and counted as lifecycle
+    /// evidence only with a higher threshold.
+    #[error("absent from the complete response: {0}")]
+    Absent(String),
     /// Verified source metadata forbids public redistribution. Not retried. Unlike a generic
     /// permission/authentication failure, this records a durable publication restriction.
     #[error("publication restricted: {0}")]
@@ -100,6 +105,7 @@ impl CrawlError {
             CrawlError::RateLimited { .. } => "rate_limited",
             CrawlError::Transient(_) => "transient",
             CrawlError::NotFound(_) => "not_found",
+            CrawlError::Absent(_) => "absent",
             CrawlError::Restricted(_) => "restricted",
             CrawlError::Auth(_) => "auth",
             CrawlError::Parse(_) => "parse",
@@ -120,7 +126,7 @@ impl From<CrawlError> for AppError {
         match err {
             CrawlError::RateLimited { .. } => AppError::RateLimitExceeded,
             CrawlError::Transient(m) => AppError::ServiceUnavailable(m),
-            CrawlError::NotFound(m) => AppError::NotFound(m),
+            CrawlError::NotFound(m) | CrawlError::Absent(m) => AppError::NotFound(m),
             CrawlError::Parse(m) => AppError::ParserError(m),
             CrawlError::Busy { message, .. } => AppError::ServiceUnavailable(message),
             e @ (CrawlError::Auth(_) | CrawlError::Permanent(_) | CrawlError::Restricted(_)) => {
@@ -149,6 +155,7 @@ mod tests {
                 message: "b".into(),
             },
             CrawlError::Restricted("redistribution prohibited".into()),
+            CrawlError::Absent("line 9".into()),
         ]
     }
 
@@ -157,7 +164,7 @@ mod tests {
         let retryable: Vec<bool> = all().iter().map(CrawlError::is_retryable).collect();
         assert_eq!(
             retryable,
-            [true, true, false, false, false, false, true, false]
+            [true, true, false, false, false, false, true, false, false]
         );
         assert!(CrawlError::RateLimited { retry_after: None }.is_retryable());
     }
@@ -189,6 +196,7 @@ mod tests {
                 "permanent",
                 "busy",
                 "restricted",
+                "absent",
             ]
         );
     }

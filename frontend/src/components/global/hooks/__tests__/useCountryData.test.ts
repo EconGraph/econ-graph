@@ -78,6 +78,40 @@ describe('useCountryData', () => {
       expect(result.current.colorScale(12614.1)).not.toBe(result.current.colorScale(82769.4));
     });
 
+    it('spaces equal ratios evenly and shares log positions with the legend', () => {
+      const values = [
+        country('IND', 356, '1000'),
+        country('CHN', 156, '10000'),
+        country('LUX', 442, '100000'),
+      ];
+      const { result } = renderHook(() => useCountryData(values, 'viridis', undefined, 'log'));
+      expect(result.current.scaleMode).toBe('log');
+      expect(result.current.valueAtPosition(0.5)).toBeCloseTo(10000);
+      expect(result.current.colorScale(10000)).toBe(result.current.colorScale.interpolator()(0.5));
+    });
+
+    it.each(['0', '-2'])('retains %s and falls back to linear with an explanation', value => {
+      const values = [country('IND', 356, value), country('CHN', 156, '10')];
+      const { result } = renderHook(() => useCountryData(values, 'viridis', undefined, 'log'));
+      expect(result.current.scaleMode).toBe('linear');
+      expect(result.current.logUnavailableReason).toContain('zero or negative');
+      expect(result.current.valuesByIsoNumeric.size).toBe(2);
+      expect(result.current.colorScale(Number(value))).toMatch(/^#/);
+    });
+
+    it('handles empty, one-value and constant log datasets', () => {
+      for (const values of [
+        [],
+        [country('IND', 356, '1000')],
+        [country('IND', 356, '1000'), country('CHN', 156, '1000')],
+      ]) {
+        const { result } = renderHook(() => useCountryData(values, 'viridis', undefined, 'log'));
+        expect(result.current.colorScale(1000)).toMatch(/^#/);
+        expect(Number.isFinite(result.current.valueAtPosition(0.5))).toBe(true);
+        expect(result.current.scaleMode).toBe(values.length ? 'log' : 'linear');
+      }
+    });
+
     it('falls back to 0 to 1 without values', () => {
       const { result } = renderHook(() => useCountryData([]));
 

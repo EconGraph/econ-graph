@@ -76,6 +76,15 @@ impl BeaSelection {
         Ok(rules)
     }
 
+    /// Bounded metric label per rule: its position, dataset and table prefix.
+    pub fn rule_labels(&self) -> Vec<String> {
+        self.rule
+            .iter()
+            .enumerate()
+            .map(|(index, rule)| format!("{index}:{}:{}", rule.dataset, rule.prefix))
+            .collect()
+    }
+
     /// Stable selection scope; changing operational limits preserves absence evidence.
     pub fn fingerprint(&self) -> String {
         let digest = Sha256::digest(serde_json::to_vec(self).expect("serializable selection"));
@@ -90,7 +99,8 @@ impl BeaSelection {
     ) -> Result<Vec<BeaTable>, CrawlError> {
         let excluded: HashSet<&str> = self.exclude.iter().map(String::as_str).collect();
         let mut selected: BTreeMap<(String, String), Vec<Frequency>> = BTreeMap::new();
-        for rule in &self.rule {
+        let labels = self.rule_labels();
+        for (index, rule) in self.rule.iter().enumerate() {
             let dataset = if rule.dataset == "NIPA" {
                 BeaDataset::Nipa
             } else {
@@ -102,14 +112,13 @@ impl BeaSelection {
                     rule.dataset
                 ))
             })?;
+            let matched = catalog
+                .iter()
+                .filter(|(name, title)| rule.matches_table(name, title, &excluded))
+                .count();
+            record_rule_matches("BEA", &labels[index], matched);
             for (name, title) in catalog {
-                if !name.starts_with(&rule.prefix)
-                    || excluded.contains(name.as_str())
-                    || rule
-                        .title_contains
-                        .as_ref()
-                        .is_some_and(|s| !title.to_lowercase().contains(&s.to_lowercase()))
-                {
+                if !rule.matches_table(name, title, &excluded) {
                     continue;
                 }
                 let frequencies = selected
@@ -178,6 +187,47 @@ impl BeaSelection {
     }
 }
 
+impl BeaRule {
+    fn matches_table(&self, name: &str, title: &str, excluded: &HashSet<&str>) -> bool {
+        name.starts_with(&self.prefix)
+            && !excluded.contains(name)
+            && self
+                .title_contains
+                .as_ref()
+                .is_none_or(|s| title.to_lowercase().contains(&s.to_lowercase()))
+    }
+}
+
+/// Publish how many catalog entries one selection rule matched, and warn when it matched
+/// none: a rule that quietly selects nothing (an upstream rename, a retitled table) would
+/// otherwise let its series age out with no alert while the other rules keep discovery
+/// working. `rule` is a bounded label naming the rule's position and catalog.
+pub(crate) fn record_rule_matches(source: &str, rule: &str, matched: usize) {
+    econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+        .rule_matches
+        .with_label_values(&[source, rule])
+        .set(i64::try_from(matched).unwrap_or(i64::MAX));
+    if matched == 0 {
+        tracing::warn!(
+            source,
+            rule,
+            "catalog selection rule matched nothing in the current upstream catalog; \
+             review data/catalog_selection/"
+        );
+    }
+}
+
+/// Publish `crawler_catalog_rule_configured` for every rule the worker loaded, so alerts on
+/// `crawler_catalog_rule_matches` ignore rules that were since edited or removed.
+pub fn publish_configured_rules(source: &str, labels: &[String]) {
+    for label in labels {
+        econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+            .rule_configured
+            .with_label_values(&[source, label])
+            .set(1);
+    }
+}
+
 fn volume_error(kind: &str, count: usize, max: usize) -> CrawlError {
     econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
         .guard_rejections_total
@@ -219,6 +269,43 @@ mod tests {
         .into_iter()
         .collect()
     }
+    /// The shipped Regional rule follows SAGDP2 through its N-suffix rename but not to the
+    /// discontinued SIC-basis SAGDP2S or to other families.
+    #[test]
+    fn shipped_regional_rule_selects_sagdp2_and_sagdp2n_only() {
+        let shipped = BeaSelection::parse(
+            &std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("data")
+                    .join(BEA_RULES_FILE),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let nipa: HashMap<String, String> = shipped
+            .rule
+            .iter()
+            .filter(|r| r.dataset == "NIPA")
+            .map(|r| (r.prefix.clone(), "NIPA table".to_string()))
+            .collect();
+        let regional = ["SAGDP2", "SAGDP2N", "SAGDP2S", "SAINC1", "CAGDP2"]
+            .into_iter()
+            .map(|n| (n.to_string(), "GDP".to_string()))
+            .collect();
+        let catalogs = [(BeaDataset::Nipa, nipa), (BeaDataset::Regional, regional)]
+            .into_iter()
+            .collect();
+        let mut selected: Vec<_> = shipped
+            .select(&catalogs)
+            .unwrap()
+            .into_iter()
+            .filter(|t| t.dataset == BeaDataset::Regional)
+            .map(|t| t.table_name)
+            .collect();
+        selected.sort();
+        assert_eq!(selected, ["SAGDP2", "SAGDP2N"]);
+    }
+
     #[test]
     fn rename_and_new_table_are_selected_without_config_changes() {
         let r = rules();
@@ -381,6 +468,29 @@ mod tests {
         assert_eq!(selected, expected);
         assert_eq!(rules.rule.len(), expected.len(), "one rule per table");
         assert!(expected.len() < rules.max_tables);
+    }
+
+    #[test]
+    fn a_rule_matching_nothing_is_published_even_when_other_rules_select_tables() {
+        let mut r = rules();
+        let mut renamed = r.rule[0].clone();
+        renamed.prefix = "ZZRENAMEDGONE".into();
+        r.rule.push(renamed);
+        let selected = r.select(&catalog(&["SAGDP2"])).unwrap();
+        assert_eq!(selected.len(), 1);
+        let gauge = |label: &str| {
+            econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+                .rule_matches
+                .with_label_values(&["BEA", label])
+                .get()
+        };
+        // Other tests share the global gauge, so only this test's unique label is checked.
+        econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+            .rule_matches
+            .with_label_values(&["BEA", "1:Regional:ZZRENAMEDGONE"])
+            .set(-1);
+        r.select(&catalog(&["SAGDP2"])).unwrap();
+        assert_eq!(gauge("1:Regional:ZZRENAMEDGONE"), 0);
     }
 
     #[test]

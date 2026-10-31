@@ -22,7 +22,9 @@ test.describe('release smoke', () => {
   test('the frontend reaches the seeded backend', async ({ request }) => {
     // Through the frontend's own origin, so this also checks the /graphql proxy. By search rather
     // than the plain series list, so it also holds against a deployed build's full catalog.
+    // FRED's series are admin-only: catalog-access.spec.ts checks them.
     for (const s of Object.values(SEEDED)) {
+      if (s.source === 'FRED') continue;
       await seededSeriesId(request, s);
     }
   });
@@ -43,6 +45,6 @@ test.describe('release smoke', () => {
     // The page's own search box, not the header's ("Search economic series...").
     await page.getByPlaceholder('Search economic series (e.g.', { exact: false }).fill('Gross Domestic');
     await page.getByRole('button', { name: 'Search', exact: true }).click();
-    await expect(page.getByText(SEEDED.fredGdp.title).first()).toBeVisible();
+    await expect(page.getByText(SEEDED.beaGdp.title, { exact: true }).first()).toBeVisible();
   });
 });

@@ -59,8 +59,18 @@
 //! Every fetch asks for the whole history (`Year` `X` for NIPA, `ALL` for Regional) and ignores
 //! `since`: BEA's annual updates revise several years and comprehensive updates revise (and
 //! re-base) the whole history, so an incremental window would keep stale values. A table's full
-//! history is still one modest request. A requested series with no rows in the response is
-//! `NotFound`.
+//! history is still one modest request. A requested series with no rows in a successful
+//! response is `Absent`, not `NotFound`: omitting a line or area is weaker evidence than an
+//! explicit "does not exist". That includes an empty response: a Regional request is filtered
+//! to the batch's areas, so it is empty when every requested area is gone (legacy counties),
+//! and BEA answers a NIPA table it no longer publishes at that frequency with no rows. A
+//! briefly empty table during a BEA update cannot retire anything: six misses about ten
+//! refresh intervals apart are needed, and listed series are not counted.
+//! It isn't retried (each retry would request the whole table again); the scheduler tries again
+//! after the same long backoff as NotFound. For a series the current accepted catalog lists,
+//! `Absent` is not counted at all: catalog discovery alone decides whether it was removed. For
+//! an unlisted or legacy series, six consecutive `Absent` results retire it from fetching (see
+//! [`lifecycle`](crate::lifecycle)), and it is then probed on a slow schedule.
 //!
 //! `DataValue` has thousands separators and is scaled by `10^UNIT_MULT`, so values are in base
 //! units (dollars, not millions of dollars). Units come from `CL_UNIT`, or `METRIC_NAME` when
@@ -336,6 +346,10 @@ pub struct BeaAdapter {
     /// populated from additive historical labels; cleared when its refresh fails.
     listed: tokio::sync::RwLock<HashMap<BeaDataset, HashSet<String>>>,
     selection: Option<BeaSelection>,
+    /// Series-id prefixes of tables the last successful discovery saw listed upstream but
+    /// did not select: their tracked series are still published (see
+    /// [`CatalogLifecycle::unselected_prefixes`](crate::lifecycle::CatalogLifecycle::unselected_prefixes)).
+    unselected_prefixes: std::sync::Mutex<Vec<String>>,
 }
 
 impl BeaAdapter {
@@ -347,6 +361,7 @@ impl BeaAdapter {
             titles: tokio::sync::RwLock::new(HashMap::new()),
             listed: tokio::sync::RwLock::new(HashMap::new()),
             selection: None,
+            unselected_prefixes: std::sync::Mutex::default(),
         }
     }
 
@@ -791,7 +806,8 @@ impl BeaAdapter {
                 continue;
             };
             let result = match by_line.get(line.as_str()) {
-                None => Err(CrawlError::NotFound(format!(
+                // Weaker than NotFound (see the module docs).
+                None => Err(CrawlError::Absent(format!(
                     "BEA {id}: no line {line} in {table_name} ({})",
                     frequency.code()
                 ))),
@@ -873,7 +889,8 @@ impl BeaAdapter {
                 continue;
             };
             let result = match by_geo.get(geo.as_str()) {
-                None => Err(CrawlError::NotFound(format!(
+                // Weaker than NotFound (see the module docs).
+                None => Err(CrawlError::Absent(format!(
                     "BEA {id}: no data for area {geo} in {table_name} line {line}"
                 ))),
                 Some(rows) => regional_series(
@@ -943,6 +960,24 @@ impl SourceAdapter for BeaAdapter {
             current_catalogs.insert(dataset, current);
         }
         let tables = rules.select(&current_catalogs)?;
+        let selected: HashSet<(BeaDataset, &str)> = tables
+            .iter()
+            .map(|t| (t.dataset, t.table_name.as_str()))
+            .collect();
+        let mut unselected_prefixes: Vec<String> = current_catalogs
+            .iter()
+            .flat_map(|(dataset, catalog)| {
+                catalog
+                    .keys()
+                    .filter(|name| !selected.contains(&(*dataset, name.as_str())))
+                    .map(|name| format!("{}/{name}.", dataset.code()))
+            })
+            .collect();
+        unselected_prefixes.sort_unstable();
+        *self
+            .unselected_prefixes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = unselected_prefixes;
         let mut found = Vec::new();
         for table in &tables {
             let title = &current_catalogs[&table.dataset][&table.table_name];
@@ -975,6 +1010,17 @@ impl SourceAdapter for BeaAdapter {
 
     fn catalog_scope(&self) -> Option<String> {
         self.selection().ok().map(BeaSelection::fingerprint)
+    }
+
+    fn catalog_lifecycle(&self) -> crate::lifecycle::CatalogLifecycle {
+        crate::lifecycle::CatalogLifecycle {
+            unselected_prefixes: self
+                .unselected_prefixes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+            ..Default::default()
+        }
     }
 
     async fn catalog_scope_members(&self, ctx: &CrawlCtx) -> Result<Vec<String>, CrawlError> {
@@ -2041,8 +2087,10 @@ mod tests {
         "SAINC4 Personal income and employment by major component",
     )];
 
-    /// After a successful title refresh, a curated table BEA no longer lists is skipped (and
-    /// reported through `curated_missing`) while every other table is still discovered.
+    /// After a successful title refresh, a table BEA no longer lists is not selected while every
+    /// other table is still discovered. BEA has no curated list, so `curated_missing` stays
+    /// empty; the rule that selected the table reports zero matches through
+    /// `crawler_catalog_rule_matches` (see `catalog_selection::record_rule_matches`).
     #[tokio::test]
     async fn discover_skips_a_curated_table_missing_from_a_successful_refresh() {
         let mock = MockSource::start().await;
@@ -2326,11 +2374,43 @@ mod tests {
             "Personal consumption expenditures (GDP, current dollars, quarterly)"
         );
         assert_eq!(out["bea_nipa/T10105.1.Q"].as_ref().unwrap().points.len(), 4);
+        // A line the response omits is weaker evidence than NotFound.
         assert_eq!(
             out["bea_nipa/T10105.99.Q"].as_ref().unwrap_err().kind(),
-            "not_found"
+            "absent"
         );
         mock.server().verify().await;
+    }
+
+    /// An empty response (every requested Regional area gone, or a NIPA table BEA no longer
+    /// publishes at that frequency) is `Absent` for each requested id, which lifecycle counts
+    /// only for series the accepted catalog does not list.
+    #[tokio::test]
+    async fn fetch_batch_marks_every_id_of_an_empty_response_absent() {
+        const EMPTY: &str = r#"{"BEAAPI":{"Results":{"Data":[]}}}"#;
+        let mock = MockSource::start().await;
+        mock.mount(&nipa_route("T10105", "Q"), Reply::json_str(EMPTY))
+            .await;
+        mock.mount(&regional_data(), Reply::json_str(EMPTY)).await;
+        mock.mount(
+            &regional_params("LineCode"),
+            Reply::json_str(REGIONAL_LINES),
+        )
+        .await;
+        for ids in [
+            vec!["bea_nipa/T10105.1.Q", "bea_nipa/T10105.2.Q"],
+            vec!["bea_regional/SAGDP2.1.09001", "bea_regional/SAGDP2.1.09003"],
+        ] {
+            let ids: Vec<String> = ids.into_iter().map(String::from).collect();
+            let out = adapter(&mock)
+                .fetch_batch(&test_ctx(), &ids, None)
+                .await
+                .unwrap();
+            assert_eq!(out.len(), ids.len());
+            for id in &ids {
+                assert_eq!(out[id].as_ref().unwrap_err().kind(), "absent", "{id}");
+            }
+        }
     }
 
     #[tokio::test]
@@ -2379,12 +2459,13 @@ mod tests {
         let wy = out["bea_regional/SAGDP2.1.56000"].as_ref().unwrap();
         assert_eq!(wy.points.len(), 1);
         assert_eq!(wy.points[0].value, None);
+        // An area the response omits is weaker evidence than NotFound.
         assert_eq!(
             out["bea_regional/SAGDP2.1.72000"]
                 .as_ref()
                 .unwrap_err()
                 .kind(),
-            "not_found"
+            "absent"
         );
         mock.server().verify().await;
     }

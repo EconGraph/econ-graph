@@ -2,8 +2,9 @@
 
 Adapter: `backend/crates/econ-graph-crawler/src/sources/bea.rs`. Selection rules:
 `backend/crates/econ-graph-crawler/data/catalog_selection/bea.toml`. Fixtures: `tests/fixtures/bea/`
-(`GetData` for six NIPA tables at each frequency, SAGDP2 line codes, areas and line 1,
-and an error). API key required (`BEA_API_KEY`); without it every call is `Permanent` before
+(`GetData` for six NIPA tables at each frequency, short extracts of BEA's NIPA and Regional
+table-title lists, SAGDP2 line codes, areas and line 1, and an error). API key required
+(`BEA_API_KEY`); without it every call is `Permanent` before
 any request.
 
 ## What we fetch today
@@ -30,7 +31,12 @@ any request.
   saved name. An unknown title after a failed refresh does not overwrite a stored good title.
 - **Publication state** is reconciled only after complete successful discovery under unchanged
   selection rules. Three consecutive absences mark a retained series missing. A sudden loss
-  above the disappearance threshold rejects the comparison. Histories remain public and
+  above the disappearance threshold is held for operator review. A table that BEA still lists
+  but the rules no longer select keeps its series' state. A fetch response that omits a
+  requested line or area (including an empty response) is not catalog removal evidence. For
+  a series the current catalog does not list outright, such as a line under a table the rules
+  no longer select, six such responses in a row (ten refresh intervals apart) stop routine
+  fetches, and it is then only probed occasionally. Histories remain public and
   badged; candidate successors need human confirmation and values are never merged. See the
   [catalog runbook](../monitoring/crawler-coverage-runbook.md#catalog-selection-and-retained-series).
 - **Fetch**: `GetData` per NIPA table and frequency, or per Regional table and line with the

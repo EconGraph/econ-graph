@@ -5,9 +5,12 @@
  */
 
 import React from 'react';
+import { geoEqualEarth, geoPath } from 'd3-geo';
+import { feature } from 'topojson-client';
+import { loadWorldAtlas } from '../worldAtlas';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import WorldMapTab from '../WorldMapTab';
 import { NO_DATA_FILL } from '../mapFormat';
@@ -54,9 +57,27 @@ const area = (name: string, iso3: string | null, isoNumeric: number | null, kind
 
 const CROSS_SECTIONS: Record<string, unknown[]> = {
   'NY.GDP.PCAP.CD': [
-    { key: 'CHN', seriesId: 's-chn', date: '2023-01-01', value: '12614.1', area: area('China', 'CHN', 156) },
-    { key: 'DEU', seriesId: 's-deu', date: '2022-01-01', value: '54343.2', area: area('Germany', 'DEU', 276) },
-    { key: 'USA', seriesId: 's-usa', date: '2023-01-01', value: '82769.4', area: area('United States', 'USA', 840) },
+    {
+      key: 'CHN',
+      seriesId: 's-chn',
+      date: '2023-01-01',
+      value: '12614.1',
+      area: area('China', 'CHN', 156),
+    },
+    {
+      key: 'DEU',
+      seriesId: 's-deu',
+      date: '2022-01-01',
+      value: '54343.2',
+      area: area('Germany', 'DEU', 276),
+    },
+    {
+      key: 'USA',
+      seriesId: 's-usa',
+      date: '2023-01-01',
+      value: '82769.4',
+      area: area('United States', 'USA', 840),
+    },
     // A microstate the 1:50m outline has no shape for: in the table, not on the map.
     {
       key: 'TUV',
@@ -68,14 +89,44 @@ const CROSS_SECTIONS: Record<string, unknown[]> = {
     // No value: shown as no data.
     { key: 'AUS', seriesId: 's-aus', date: null, value: null, area: area('Australia', 'AUS', 36) },
     // No ISO numeric code, so it can't be joined to the outline.
-    { key: 'XKX', seriesId: 's-xkx', date: '2023-01-01', value: '5943.1', area: area('Kosovo', null, null) },
+    {
+      key: 'XKX',
+      seriesId: 's-xkx',
+      date: '2023-01-01',
+      value: '5943.1',
+      area: area('Kosovo', null, null),
+    },
     // Aggregates are left out.
-    { key: 'WLD', seriesId: 's-wld', date: '2023-01-01', value: '13138.3', area: area('World', null, null, 'AGGREGATE') },
+    {
+      key: 'WLD',
+      seriesId: 's-wld',
+      date: '2023-01-01',
+      value: '13138.3',
+      area: area('World', null, null, 'AGGREGATE'),
+    },
   ],
   'FP.CPI.TOTL.ZG': [
-    { key: 'CHN', seriesId: 's-chn-cpi', date: '2023-01-01', value: '0.2', area: area('China', 'CHN', 156) },
-    { key: 'USA', seriesId: 's-usa-cpi', date: '2023-01-01', value: '4.1', area: area('United States', 'USA', 840) },
-    { key: 'AUS', seriesId: 's-aus-cpi', date: '2023-01-01', value: '5.6', area: area('Australia', 'AUS', 36) },
+    {
+      key: 'CHN',
+      seriesId: 's-chn-cpi',
+      date: '2023-01-01',
+      value: '0.2',
+      area: area('China', 'CHN', 156),
+    },
+    {
+      key: 'USA',
+      seriesId: 's-usa-cpi',
+      date: '2023-01-01',
+      value: '4.1',
+      area: area('United States', 'USA', 840),
+    },
+    {
+      key: 'AUS',
+      seriesId: 's-aus-cpi',
+      date: '2023-01-01',
+      value: '5.6',
+      area: area('Australia', 'AUS', 36),
+    },
   ],
 };
 
@@ -91,7 +142,9 @@ beforeEach(() => {
       }
       case 'GetMapSeriesMeta':
         return {
-          data: { series: { id: request.variables?.id, units: 'current US$', frequency: 'Annual' } },
+          data: {
+            series: { id: request.variables?.id, units: 'current US$', frequency: 'Annual' },
+          },
         };
       default:
         throw new Error(`unexpected operation ${request.operationName}`);
@@ -99,11 +152,24 @@ beforeEach(() => {
   });
 });
 
-const renderTab = () => {
+/** Shows the router's current URL, and stands in for the browser's Back button. */
+const RouterChrome: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid='url'>{`${location.pathname}${location.search}`}</output>
+      <button onClick={() => navigate(-1)}>Back</button>
+    </>
+  );
+};
+
+const renderTab = (url = '/global') => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/global']}>
+      <MemoryRouter initialEntries={[url]}>
+        <RouterChrome />
         <Routes>
           <Route path='/global' element={<WorldMapTab />} />
           <Route path='/series/:id' element={<div>series page</div>} />
@@ -116,8 +182,7 @@ const renderTab = () => {
 const countryPath = (isoNumeric: string) =>
   document.querySelector(`path.country[data-iso-numeric="${isoNumeric}"]`) as HTMLElement;
 
-const kosovoPath = () =>
-  document.querySelector('path.country[data-name="Kosovo"]') as HTMLElement;
+const kosovoPath = () => document.querySelector('path.country[data-name="Kosovo"]') as HTMLElement;
 
 /** Wait until the map is drawn and colored for the current indicator. */
 const waitForColors = () =>
@@ -126,6 +191,24 @@ const waitForColors = () =>
   }, WAIT);
 
 describe('WorldMapTab', () => {
+  it('starts with Equal Earth geometry and retains explicit projection choices', async () => {
+    renderTab();
+    await waitForColors();
+    const atlas = await loadWorldAtlas();
+    const germany = feature(atlas, atlas.objects.countries).features.find(
+      country => Number(country.id) === 276
+    )!;
+    const expectedPath = geoPath(geoEqualEarth().fitSize([960, 500], { type: 'Sphere' }))(germany);
+    expect(screen.getByRole('combobox', { name: 'Projection' })).toHaveTextContent('Equal Earth');
+    expect(countryPath('276')).toHaveAttribute('d', expectedPath);
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Projection' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Natural Earth' }));
+    await waitFor(() => expect(countryPath('276')).not.toHaveAttribute('d', expectedPath));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Indicator' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Inflation, consumer prices (annual %)' }));
+    expect(screen.getByRole('combobox', { name: 'Projection' })).toHaveTextContent('Natural Earth');
+  });
+
   it('offers the dataset indicators and starts on GDP per capita', async () => {
     renderTab();
     await waitForColors();
@@ -233,6 +316,87 @@ describe('WorldMapTab', () => {
     expect(countryPath('36').getAttribute('data-has-data')).toBe('true');
   });
 
+  it('defaults GDP to log and synchronizes the ramp and midpoint without refetching', async () => {
+    renderTab();
+    await waitForColors();
+    expect(screen.getByRole('combobox', { name: 'Color scale' })).toHaveTextContent('Logarithmic');
+    const midpoint = () =>
+      Number(screen.getAllByTestId('map-scale-tick')[1].getAttribute('data-value'));
+    expect(midpoint()).toBeCloseTo(Math.sqrt(12614.1 * 82769.4));
+    const germany = countryPath('276');
+    const logFill = germany.style.fill;
+    const calls = mockGraphQL.mock.calls.filter(
+      ([r]) => r.operationName === 'GetMapCrossSection'
+    ).length;
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Color scale' }));
+    fireEvent.click(screen.getByRole('option', { name: /^Linear$/ }));
+    expect(screen.getByTestId('map-legend')).toHaveTextContent('Scale: Linear');
+    expect(midpoint()).toBeCloseTo((12614.1 + 82769.4) / 2);
+    expect(germany.style.fill).not.toBe(logFill);
+    expect(countryPath('276')).toBe(germany);
+    expect(
+      mockGraphQL.mock.calls.filter(([r]) => r.operationName === 'GetMapCrossSection')
+    ).toHaveLength(calls);
+  });
+
+  it('remembers a separately chosen scale for each indicator', async () => {
+    renderTab();
+    await waitForColors();
+    const chooseScale = (name: string) => {
+      fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Color scale' }));
+      fireEvent.click(screen.getByRole('option', { name }));
+    };
+    const chooseIndicator = (name: string) => {
+      fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Indicator' }));
+      fireEvent.click(screen.getByRole('option', { name }));
+    };
+    chooseScale('Linear');
+    chooseIndicator('Inflation, consumer prices (annual %)');
+    await waitFor(() => expect(screen.getByTestId('map-legend')).toHaveTextContent('Inflation'));
+    chooseScale('Logarithmic');
+    chooseIndicator('GDP per capita (current US$)');
+    await waitFor(() =>
+      expect(screen.getByTestId('map-legend')).toHaveTextContent('GDP per capita')
+    );
+    expect(screen.getByRole('combobox', { name: 'Color scale' })).toHaveTextContent('Linear');
+    expect(screen.getByTestId('map-legend')).toHaveTextContent('Scale: Linear');
+    chooseIndicator('Inflation, consumer prices (annual %)');
+    await waitFor(() => expect(screen.getByTestId('map-legend')).toHaveTextContent('Inflation'));
+    expect(screen.getByRole('combobox', { name: 'Color scale' })).toHaveTextContent('Logarithmic');
+  });
+
+  it('keeps signed observations and explains why Log is disabled', async () => {
+    const signed = CROSS_SECTIONS['FP.CPI.TOTL.ZG'].map((row, i) => ({
+      ...(row as object),
+      ...(i === 0 ? { value: '-2' } : {}),
+    }));
+    mockGraphQL.mockImplementation(async request => {
+      if (request.operationName === 'GetMapDatasets') return { data: { datasets: [DATASET] } };
+      if (request.operationName === 'GetMapCrossSection')
+        return {
+          data: {
+            crossSection:
+              request.variables?.filter[0].value === 'FP.CPI.TOTL.ZG'
+                ? signed
+                : CROSS_SECTIONS['NY.GDP.PCAP.CD'],
+          },
+        };
+      return { data: { series: { units: 'current US$', frequency: 'Annual' } } };
+    });
+    renderTab();
+    await waitForColors();
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Indicator' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Inflation, consumer prices (annual %)' }));
+    await screen.findByText(/zero or negative country values/);
+    expect(screen.getByRole('combobox', { name: 'Color scale' })).toHaveTextContent('Linear');
+    expect(countryPath('156').getAttribute('data-has-data')).toBe('true');
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Color scale' }));
+    expect(screen.getByRole('option', { name: 'Logarithmic' })).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    );
+  });
+
   it('opens the series of a clicked country', async () => {
     renderTab();
     await waitForColors();
@@ -240,6 +404,55 @@ describe('WorldMapTab', () => {
     fireEvent.click(countryPath('840'));
 
     expect(await screen.findByText('series page')).toBeInTheDocument();
+  });
+
+  // ECO-732: Back from a country's series reset the map to GDP per capita.
+  it('keeps the picked indicator in the URL, so Back from a country returns to it', async () => {
+    renderTab();
+    await waitForColors();
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Indicator' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Inflation, consumer prices (annual %)' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('url')).toHaveTextContent('/global?indicator=FP.CPI.TOTL.ZG');
+      expect(screen.getByTestId('map-legend')).toHaveTextContent('Unit: %');
+    }, WAIT);
+
+    fireEvent.click(countryPath('840'));
+    expect(await screen.findByText('series page')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(await screen.findByRole('combobox', { name: 'Indicator' })).toHaveTextContent(
+      'Inflation, consumer prices (annual %)'
+    );
+    expect(screen.getByTestId('url')).toHaveTextContent('/global?indicator=FP.CPI.TOTL.ZG');
+  });
+
+  it("opens on the URL's indicator, without loading GDP per capita first", async () => {
+    renderTab('/global?indicator=FP.CPI.TOTL.ZG');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('map-legend')).toHaveTextContent('Unit: %');
+    }, WAIT);
+    expect(screen.getByRole('combobox', { name: 'Indicator' })).toHaveTextContent(
+      'Inflation, consumer prices (annual %)'
+    );
+    const requested = mockGraphQL.mock.calls
+      .filter(([request]) => request.operationName === 'GetMapCrossSection')
+      .map(([request]) => request.variables?.filter[0].value);
+    expect(requested).toEqual(['FP.CPI.TOTL.ZG']);
+  });
+
+  it('falls back to GDP per capita for an indicator the dataset does not have', async () => {
+    renderTab('/global?indicator=NOT.AN.INDICATOR');
+    await waitForColors();
+
+    expect(screen.getByRole('combobox', { name: 'Indicator' })).toHaveTextContent(
+      'GDP per capita (current US$)'
+    );
+    const requested = mockGraphQL.mock.calls
+      .filter(([request]) => request.operationName === 'GetMapCrossSection')
+      .map(([request]) => request.variables?.filter[0].value);
+    expect(requested).toEqual(['NY.GDP.PCAP.CD']);
   });
 
   it('ignores clicks on countries without data', async () => {
@@ -334,6 +547,52 @@ describe('WorldMapTab', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
+  it("shows the World Bank's attribution, notice and terms link", async () => {
+    mockGraphQL.mockImplementation(async request => {
+      if (request.operationName === 'GetMapDatasets') {
+        return {
+          data: {
+            datasets: [
+              {
+                ...DATASET,
+                source: {
+                  name: 'World Bank Open Data',
+                  notice: {
+                    citation: 'The World Bank: World Development Indicators',
+                    notice: 'World Bank data are licensed under CC BY 4.0.',
+                    termsUrl: 'https://www.worldbank.org/ext/en/legal/terms-conditions/datasets',
+                    retrievalDateRequired: false,
+                  },
+                },
+              },
+            ],
+          },
+        };
+      }
+      return { data: { crossSection: [] } };
+    });
+    renderTab();
+
+    const notice = await screen.findByTestId('source-notice', {}, WAIT);
+    expect(notice).toHaveTextContent('The World Bank: World Development Indicators');
+    expect(notice).toHaveTextContent('World Bank data are licensed under CC BY 4.0.');
+    expect(within(notice).getByRole('link', { name: 'Terms of use' })).toHaveAttribute(
+      'href',
+      'https://www.worldbank.org/ext/en/legal/terms-conditions/datasets'
+    );
+    // The caption doesn't repeat the citation the notice carries.
+    expect(screen.getAllByText(/The World Bank: World Development Indicators/)).toHaveLength(1);
+  });
+
+  it('falls back to the World Bank citation in the caption without a source notice', async () => {
+    renderTab();
+
+    expect(
+      await screen.findByText(/The World Bank: World Development Indicators\./, {}, WAIT)
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('source-notice')).not.toBeInTheDocument();
+  });
+
   it('says so when the WDI dataset is not loaded', async () => {
     mockGraphQL.mockImplementation(async () => ({ data: { datasets: [] } }));
     renderTab();
@@ -372,7 +631,7 @@ describe('WorldMapTab', () => {
 
     expect(screen.getByText('100%')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Reset zoom' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reset view' })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
     expect(await screen.findByText('150%')).toBeInTheDocument();
@@ -380,7 +639,7 @@ describe('WorldMapTab', () => {
       'scale(1.5)'
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reset zoom' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset view' }));
     expect(await screen.findByText('100%')).toBeInTheDocument();
   });
 });

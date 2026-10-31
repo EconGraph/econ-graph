@@ -82,6 +82,9 @@ case "$*" in
     # With FAKE_APPLY, deploy.sh finds a data database and its migrations done.
     "get secret econ-graph-secrets"*) [ -z "${FAKE_APPLY:-}" ] || printf 'eA==' ;;
     "get job crawler-migrate"*) [ -z "${FAKE_APPLY:-}" ] || printf 'Complete' ;;
+    # ... and none pending, by crawler-migrate-check (scripts/deploy/lib/data-migrations.sh).
+    "get pods -l job-name=crawler-migrate-check "*) [ -z "${FAKE_APPLY:-}" ] || echo pod/crawler-migrate-check-x ;;
+    "logs pod/crawler-migrate-check-x "*) [ -z "${FAKE_APPLY:-}" ] || echo "0 data migration(s) pending" ;;
     # deploy.sh checks the anonymous reader's key before its first apply (base64, fake).
     "get secret econ-graph-keycloak --ignore-not-found -o name") echo secret/econ-graph-keycloak ;;
     "get secret econ-graph-keycloak -o "*anonymous-client-secret*) printf 'ZmFrZQ==' ;;

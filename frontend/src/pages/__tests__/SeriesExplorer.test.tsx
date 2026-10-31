@@ -27,6 +27,7 @@ vi.mock('react-router-dom', () => ({
   Route: ({ children }: { children: React.ReactNode }) => children,
   useNavigate: () => vi.fn(),
   useLocation: () => ({ pathname: '/test', search: '', hash: '', state: null }),
+  useNavigationType: () => 'POP',
   useParams: () => ({}),
   useSearchParams: () => [routerTestState.searchParams, routerTestState.setSearchParams],
   Link: ({ children, to, ...props }: any) => React.createElement('a', { href: to, ...props }, children),
@@ -1291,11 +1292,10 @@ describe('SeriesExplorer shows only what the backend returned', () => {
 });
 
 describe('resolveSourceId', () => {
-  // The sidebar's "FRED Data" link and the data sources page's "Browse Series" link both used
-  // to put the source's display name in the `source` URL param instead of its id, and the
-  // backend's real FRED source name ("Federal Reserve Economic Data (FRED)") doesn't exactly
-  // match the sidebar's shorter label ("Federal Reserve Economic Data") — so an old bookmarked
-  // or hand-typed link needs to resolve by name too, not just by id.
+  // Older links put the source's display name in the `source` URL param instead of its id,
+  // sometimes a shorter one ("Federal Reserve Economic Data") than the backend's real FRED
+  // source name ("Federal Reserve Economic Data (FRED)") — so an old bookmarked or hand-typed
+  // link needs to resolve by name too, not just by id.
   const sources: DataSourceOption[] = [
     { id: 'fred', name: 'Federal Reserve Economic Data (FRED)' },
     { id: 'bls', name: 'Bureau of Labor Statistics' },
@@ -1356,8 +1356,7 @@ describe('the explorer resolves a `source` URL param that names a source', () =>
   });
 
   // End-to-end version of the resolveSourceId unit tests above: a `source` URL param holding a
-  // display name (as the sidebar's "FRED Data" link and the pre-fix `/sources` "Browse Series"
-  // link both sent) now pre-selects the matching source and filters by its id, instead of
+  // display name (as older links sent) now pre-selects the matching source and filters by its id, instead of
   // silently matching nothing.
   test('a source name in the URL pre-selects that source and searches by its id', async () => {
     routerTestState.searchParams = new URLSearchParams({ source: 'Federal Reserve Economic Data' });
@@ -1383,8 +1382,8 @@ describe('the explorer resolves a `source` URL param that names a source', () =>
     });
   });
 
-  // ECO-405: "Browse series" on /sources and the sidebar's FRED Data used to land on an empty
-  // page asking for a query. With a source and no query, the source's series are listed.
+  // ECO-405: "Browse series" on /sources used to land on an empty page asking for a
+  // query. With a source and no query, the source's series are listed.
   test('a source with no query lists that source\'s series by title', async () => {
     routerTestState.searchParams = new URLSearchParams({ source: 'Federal Reserve Economic Data' });
     renderSeriesExplorer();

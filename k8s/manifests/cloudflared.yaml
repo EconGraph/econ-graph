@@ -14,7 +14,11 @@
 # claim https, and plain http for the public host is redirected to https
 # (scripts/deploy/render-public-host.py). The certificate is self-signed
 # (k8s/manifests/gateway/selfsigned-issuer.yaml), hence No TLS Verify; this hop
-# never leaves the cluster, and the tunnel itself to Cloudflare is
+# never leaves the cluster. To enable verified origin TLS, stage the private CA
+# using scripts/deploy/stage-tunnel-origin-ca.sh and follow
+# docs/deployment/TUNNEL_ORIGIN_TLS.md; the optional mount below holds only the
+# public CA certificate. Dashboard settings remain unchanged until the operator
+# switches them explicitly. The tunnel itself to Cloudflare is
 # authenticated TLS. The visitor's address reaches the gateway in
 # X-Forwarded-For, which it trusts from pod addresses only
 # (k8s/manifests/gateway/client-traffic-policy.yaml). The NetworkPolicy
@@ -96,6 +100,12 @@ spec:
             secretKeyRef:
               name: cloudflare-tunnel
               key: token
+        # Public certificates only; never mount the CA signing Secret here.
+        # Optional until stage-tunnel-origin-ca.sh populates the ConfigMap.
+        volumeMounts:
+        - name: origin-ca
+          mountPath: /etc/cloudflared/origin-ca
+          readOnly: true
         ports:
         - containerPort: 2000
           name: metrics
@@ -135,6 +145,14 @@ spec:
             - ALL
           seccompProfile:
             type: RuntimeDefault
+      volumes:
+      - name: origin-ca
+        configMap:
+          name: cloudflared-origin-ca
+          optional: true
+          items:
+          - key: ca.crt
+            path: ca.crt
       securityContext:
         seccompProfile:
           type: RuntimeDefault
