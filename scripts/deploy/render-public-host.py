@@ -28,7 +28,10 @@ working on the host:
                                             host never returns to a local listener)
   Backend (env)                             OIDC_ISSUER=https://HOST/idp/realms/econ-graph
                                             (OIDC_JWKS_URL stays the in-cluster Service)
-  ConfigMap econ-graph-config               https://HOST prepended to CORS_ORIGIN
+  ConfigMap econ-graph-config               CORS_ORIGIN=https://HOST,https://www.HOST,
+                                            http://localhost: the public site, its www
+                                            name and the app on the host; the dev
+                                            server's http://localhost:3000 is dropped
 
 The public routes are separate objects so that they can differ from the localhost
 ones without touching them:
@@ -44,8 +47,10 @@ ones without touching them:
 
 www is redirected rather than served: sign-in goes through Keycloak on the app's own
 origin, and Keycloak has one issuer that the backend checks exactly. Serving www too
-would add a second origin to every redirect URI, web origin and CORS list and split
-sessions between two hosts, for nothing.
+would add a second origin to every redirect URI and web origin and split sessions
+between two hosts, for nothing. The CORS list names https://www.HOST anyway: while
+www redirects, no page is served from it, so the entry is unused, and it allows only
+the site's own www name.
 
 Keycloak's issuer must equal the backend's OIDC_ISSUER, which is why both are set from
 the one HOST here.
@@ -184,11 +189,9 @@ def add_public_targets(doc):
                 names.add(public)
 
 
-def add_cors_origin(doc, host):
-    data = doc.setdefault("data", {})
-    origin = f"https://{host}"
-    current = [o.strip() for o in (data.get("CORS_ORIGIN") or "").split(",") if o.strip()]
-    data["CORS_ORIGIN"] = ",".join([origin] + [o for o in current if o != origin])
+def set_cors_origin(doc, host):
+    origins = [f"https://{host}", f"https://www.{host}", "http://localhost"]
+    doc.setdefault("data", {})["CORS_ORIGIN"] = ",".join(origins)
 
 
 def render(doc, host, present=()):
@@ -207,7 +210,7 @@ def render(doc, host, present=()):
     elif kind in ("Deployment", "StatefulSet", "Job"):
         set_env(doc, host)
     elif kind == "ConfigMap" and meta.get("name") == "econ-graph-config":
-        add_cors_origin(doc, host)
+        set_cors_origin(doc, host)
     return [doc]
 
 
