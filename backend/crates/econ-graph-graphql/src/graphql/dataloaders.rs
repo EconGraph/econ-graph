@@ -404,7 +404,7 @@ impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
                         date: row.date,
                         value: row.value,
                         revision_date: row.revision_date,
-                        attributes: row.attributes.map(async_graphql::Json),
+                        attributes: row.attributes.map(crate::observation_json::ObservationJson),
                     }),
                 );
             }

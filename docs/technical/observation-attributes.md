@@ -53,7 +53,15 @@ adapter: its existing synthetic `revision_date = date` policy overwrites the cur
 row. Captured current metadata does not reconstruct past BLS preliminary states;
 `asOf` retains the existing synthetic-vintage limitation.
 
-GraphQL `DataPoint.attributes` and `LatestObservation.attributes` are nullable JSON.
+GraphQL `DataPoint.attributes` and `LatestObservation.attributes` use the nullable
+`ObservationAttributes` scalar. It retains the same JSON object wire shape and
+serializes arbitrary-precision numbers directly as JSON number tokens, including
+unknown nested provider fields. The scalar maps JSON/GraphQL value trees directly;
+the generic `Json<Value>` serde bridge would otherwise expose private number
+objects when arbitrary-precision parsing is enabled. Clients reading numeric
+extensions must use a precision-preserving JSON parser: JavaScript
+`JSON.parse` converts numbers to IEEE-754 and can round them. Economic observation
+values keep their existing exact decimal-string transport.
 Series pages, direct series reads, transformations and latest-observation summaries
 retain metadata from the selected stored revision. Attribute flags describe the
 source observation, not any derived transformation. `All`, `Original`, `Latest`
