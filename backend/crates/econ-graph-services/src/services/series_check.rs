@@ -428,8 +428,9 @@ mod tests {
     /// directly), a failed check's log line, its error detail and the client's `Debug` show
     /// only the redacted URL.
     ///
-    /// Serial with the other tests that reach the same `warn!` without a subscriber: run
-    /// alongside them, the scoped subscriber here intermittently captured nothing.
+    /// Serial (group `series_check_log`) with the tests that reach the same `warn!` without a
+    /// subscriber: run alongside them, the scoped subscriber here intermittently captured
+    /// nothing.
     #[tokio::test]
     #[serial_test::serial(series_check_log)]
     async fn failed_checks_never_log_the_full_url() {
@@ -494,6 +495,7 @@ mod tests {
     /// The data plane names the catalog, or null for a missing or (to it) unreadable series;
     /// the caller's own grants then decide, and a denial looks exactly like a missing series.
     #[tokio::test]
+    #[serial_test::serial(series_check_log)]
     async fn readable_series_exists_applies_the_plane_answer_and_the_callers_grants() {
         for (answer, can_read, expected) in [
             (serde_json::json!("FRED"), true, Ok(true)),

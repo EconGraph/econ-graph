@@ -123,9 +123,9 @@ pub struct TestContainer {
 }
 
 impl TestContainer {
-    /// A migrated database of the caller's own: a scratch database on the server
+    /// A database of the caller's own: a migrated scratch database on the server
     /// `DATABASE_URL` names, dropped when the returned value is. In this crate's own tests
-    /// without `DATABASE_URL`, an ephemeral Postgres container instead.
+    /// without `DATABASE_URL`, an ephemeral Postgres container instead, unmigrated.
     pub async fn new() -> Self {
         #[cfg(test)]
         if std::env::var("DATABASE_URL").is_err() {
