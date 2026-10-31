@@ -204,3 +204,46 @@ async fn database_repeat_load_failed_run_and_recovery() {
     assert!(store::check_freshness(&[downloaded], Utc::now()).is_err());
     assert!(store::check_freshness(&recovered, Utc::now() + TimeDelta::hours(25)).is_err());
 }
+
+#[test]
+fn active_load_grace_requires_a_fresh_verified_success() {
+    let now = Utc::now();
+    let completed = now - TimeDelta::hours(20);
+    let successful = store::LoadRun {
+        id: uuid::Uuid::new_v4(),
+        started_at: completed - TimeDelta::hours(1),
+        completed_at: Some(completed),
+        status: "succeeded".into(),
+        source_mode: "downloaded".into(),
+        companies_count: 1,
+        facts_count: 4,
+        filings_count: 3,
+        error: None,
+        companyfacts_sha256: Some("a".repeat(64)),
+        submissions_sha256: Some("b".repeat(64)),
+        companyfacts_last_modified: Some(completed - TimeDelta::hours(6)),
+        submissions_last_modified: Some(completed - TimeDelta::hours(6)),
+    };
+    // Publication is now 26h old but was fresh when this verified snapshot completed.
+    store::check_freshness(&[successful.clone()], now).unwrap();
+    let mut running = successful.clone();
+    running.id = uuid::Uuid::new_v4();
+    running.status = "running".into();
+    running.started_at = now - TimeDelta::hours(1);
+    running.completed_at = None;
+    store::check_freshness(&[running.clone(), successful.clone()], now).unwrap();
+    assert!(store::check_freshness(&[running.clone()], now).is_err());
+    running.started_at = now - TimeDelta::hours(9);
+    assert!(store::check_freshness(&[running, successful.clone()], now).is_err());
+    let mut staged = successful.clone();
+    staged.source_mode = "staged".into();
+    staged.started_at = now;
+    staged.completed_at = Some(now);
+    staged.companyfacts_last_modified = None;
+    staged.submissions_last_modified = None;
+    assert!(store::check_freshness(&[staged.clone()], now).is_err());
+    store::check_freshness(&[staged.clone(), successful.clone()], now).unwrap();
+    let mut stale = successful;
+    stale.completed_at = Some(now - TimeDelta::hours(25));
+    assert!(store::check_freshness(&[staged, stale], now).is_err());
+}

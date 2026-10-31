@@ -19,7 +19,7 @@ struct Cli {
     submissions_zip: Option<PathBuf>,
     #[arg(long, default_value = "EconGraph/1.0 (support@econgraph.com)")]
     user_agent: String,
-    /// Exit unsuccessfully if the latest run failed/is running, or is older than 24 hours.
+    /// Require a verified downloaded success within 24h; running loads expire after 8h.
     #[arg(long, conflicts_with = "companyfacts_zip")]
     check_freshness: bool,
     /// Print up to 30 recorded runs for the release evidence gate; never synthesizes nights.

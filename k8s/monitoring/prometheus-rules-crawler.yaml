@@ -472,4 +472,4 @@ data:
             severity: warning
           annotations:
             summary: SEC companyfacts freshness checks are failing or missing
-            description: The enabled freshness check has not passed within 30 minutes. It fails for missing evidence, a failed/interrupted latest load, or a successful load older than 24 hours. Inspect its Job logs and company_fact_load_runs.
+            description: The enabled freshness check has not passed within 30 minutes. It requires a verified downloaded success within 24 hours and rejects running loads older than eight hours. Staged imports do not establish freshness. Inspect its Job logs and company_fact_load_runs.

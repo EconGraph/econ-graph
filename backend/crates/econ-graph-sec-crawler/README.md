@@ -129,8 +129,10 @@ For operator-staged archives, run `sec-companyfacts-ingest --companyfacts-zip /p
 --submissions-zip /path/submissions.zip`. This explicit offline mode checks ZIP integrity but
 cannot prove archive publication freshness, so it is for fixtures or separately verified staging.
 No supplied archive is deleted. Network mode deletes its own temporary files on exit.
-`--check-freshness` fails for missing runs, a latest staged/failed/interrupted run, a successful
-load older than 24 hours, or upstream archive timestamps older than 24 hours; `--evidence` prints the last 30 recorded runs, with source hashes and
+`--check-freshness` requires a successful downloaded load completed within 24 hours, with
+upstream publication receipts fresh at completion. A running load has an eight-hour grace
+period while a prior verified success remains fresh; no prior success or an over-deadline
+running row fails. Failed Jobs alert separately; staged imports never establish freshness; `--evidence` prints the last 30 recorded runs, with source hashes and
 completion counts. Seven distinct nightly runs must be observed; repeated fixture loads do not
 satisfy release acceptance.
 
