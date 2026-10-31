@@ -458,6 +458,10 @@ type DataPointConnection {
 }
 
 type DataSourceType {
+	"""
+	Counts of retained historical series whose publication state changed upstream.
+	"""
+	lifecycleCounts: SourceLifecycleCounts!
 	id: ID!
 	name: String!
 	description: String
@@ -643,6 +647,10 @@ type EconomicSeriesType {
 	startDate: NaiveDate
 	endDate: NaiveDate
 	isActive: Boolean!
+	"""
+	Publication lifecycle, independent of the most recent crawl result.
+	"""
+	lifecycle: SeriesLifecycle
 	createdAt: DateTime!
 	updatedAt: DateTime!
 	"""
@@ -1144,6 +1152,28 @@ enum SeriesFrequency {
 }
 
 """
+Publication state is independent of the last crawl's success or failure.
+"""
+type SeriesLifecycle {
+	"""
+	active, discontinued, missing_from_catalog, retired or superseded.
+	"""
+	status: String!
+	"""
+	When this publication state was confirmed, not the last observation date.
+	"""
+	since: DateTime
+	"""
+	A human-confirmed successor. Histories remain separate.
+	"""
+	successorId: ID
+	"""
+	A possible successor that has not been confirmed; never presented as a replacement.
+	"""
+	proposedSuccessorId: ID
+}
+
+"""
 Input for sharing a chart with another user
 """
 input ShareChartInput {
@@ -1159,6 +1189,16 @@ input ShareChartInput {
 	Permission level (view, comment, edit, admin)
 	"""
 	permissionLevel: String!
+}
+
+"""
+Current retained-series counts. Restricted rows are excluded from this public summary.
+"""
+type SourceLifecycleCounts {
+	discontinued: Int!
+	missingFromCatalog: Int!
+	retired: Int!
+	superseded: Int!
 }
 
 """

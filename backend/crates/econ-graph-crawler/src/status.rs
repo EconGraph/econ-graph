@@ -7,9 +7,10 @@
 //! Workers keep no state outside the queue, so the queue *is* the crawler status: a job being
 //! processed means a worker is alive, `finished_at` records when work last finished, and
 //! `scheduled_for` says when the next job becomes due. [`crawler_status`] reads all of it in two
-//! aggregate queries, using the database clock throughout. The two queries run inside one
+//! aggregate queries, using the database clock throughout, plus each source's newest chunked
+//! discovery run from `discovery_runs` (see [`crate::discovery_run`]). The queries run inside one
 //! read-only `REPEATABLE READ` transaction, so a job transitioning between them can't make the
-//! global and per-source halves of the snapshot describe different queue states.
+//! parts of the snapshot describe different queue states.
 
 use chrono::{DateTime, Utc};
 use diesel::sql_types::{BigInt, Bool, Nullable, Text, Timestamptz};
@@ -18,6 +19,8 @@ use diesel_async::RunQueryDsl;
 use econ_graph_core::error::{AppError, AppResult};
 use econ_graph_core::DatabasePool;
 use serde::Serialize;
+
+use crate::discovery_run::{DiscoveryRunProgress, PROGRESS_SQL};
 
 /// A worker counts as recently active if any job finished within this many minutes.
 pub const RECENT_ACTIVITY_MINUTES: i64 = 10;
@@ -37,6 +40,9 @@ pub struct CrawlerStatusSnapshot {
     pub next_scheduled_crawl: Option<DateTime<Utc>>,
     /// Per-source counts, one entry per `crawl_queue.source` value present, ordered by source.
     pub per_source: Vec<SourceQueueStatus>,
+    /// Each source's newest chunked discovery run, ordered by source. Empty when no adapter
+    /// discovers in chunks.
+    pub discovery_runs: Vec<DiscoveryRunProgress>,
 }
 
 /// Queue counts for one `crawl_queue.source` value.
@@ -132,7 +138,7 @@ pub async fn crawler_status(pool: &DatabasePool) -> AppResult<CrawlerStatusSnaps
     // Use Diesel's transaction manager so cancellation marks the connection as holding an
     // unfinished transaction. The pool discards it instead of lending READ ONLY and an old
     // snapshot to the next caller.
-    let (global, per_source) = conn
+    let (global, per_source, discovery_runs) = conn
         .build_transaction()
         .repeatable_read()
         .read_only()
@@ -144,7 +150,10 @@ pub async fn crawler_status(pool: &DatabasePool) -> AppResult<CrawlerStatusSnaps
             let per_source = diesel::sql_query(PER_SOURCE_SQL)
                 .load::<SourceRow>(&mut *conn)
                 .await?;
-            Ok::<_, AppError>((global, per_source))
+            let discovery_runs = diesel::sql_query(PROGRESS_SQL)
+                .load::<DiscoveryRunProgress>(&mut *conn)
+                .await?;
+            Ok::<_, AppError>((global, per_source, discovery_runs))
         })
         .await?;
 
@@ -165,6 +174,7 @@ pub async fn crawler_status(pool: &DatabasePool) -> AppResult<CrawlerStatusSnaps
                 last_failure: r.last_failure,
             })
             .collect(),
+        discovery_runs,
     })
 }
 
@@ -181,10 +191,9 @@ mod tests {
         let (url, guard) = crate::testkit::lock_test_db("status").await?;
         let pool = econ_graph_core::create_pool(&url).await.expect("pool");
         let mut conn = pool.get().await.unwrap();
-        diesel::sql_query("DELETE FROM crawl_queue")
-            .execute(&mut conn)
-            .await
-            .unwrap();
+        for sql in ["DELETE FROM crawl_queue", "DELETE FROM discovery_runs"] {
+            diesel::sql_query(sql).execute(&mut conn).await.unwrap();
+        }
         drop(conn);
         Some((pool, guard))
     }
@@ -236,6 +245,7 @@ mod tests {
                 last_crawl: None,
                 next_scheduled_crawl: None,
                 per_source: vec![],
+                discovery_runs: vec![],
             }
         );
     }
@@ -525,5 +535,49 @@ mod tests {
             "cancelled crawler_status leaked its read-only transaction into the next pool borrow"
         );
         write.expect("a writer borrowing after cancelled crawler_status must succeed");
+    }
+
+    /// Each source's newest discovery run, with when its newest complete run finished and when
+    /// its oldest retained run started.
+    #[tokio::test]
+    async fn status_reports_each_sources_newest_discovery_run() {
+        let Some((pool, _guard)) = pool().await else {
+            return;
+        };
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query(
+            "INSERT INTO discovery_runs (source, state, started_at, finished_at, chunks_total, \
+                 chunks_done, chunks_failed) VALUES \
+             ('FRED', 'complete', NOW() - INTERVAL '9 days', NOW() - INTERVAL '8 days', 4, 4, 0), \
+             ('FRED', 'running', NOW() - INTERVAL '1 hour', NULL, 31, 12, 0), \
+             ('BEA', 'failed', NOW() - INTERVAL '2 days', NOW() - INTERVAL '1 day', 3, 1, 1)",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        drop(conn);
+        let runs = crawler_status(&pool).await.unwrap().discovery_runs;
+        assert_eq!(runs.len(), 2, "{runs:?}");
+        let (bea, fred) = (&runs[0], &runs[1]);
+        assert_eq!((bea.source.as_str(), bea.state.as_str()), ("BEA", "failed"));
+        assert!(!bea.is_active());
+        assert_eq!(bea.last_complete_at, None);
+        assert_eq!(
+            (
+                fred.source.as_str(),
+                fred.state.as_str(),
+                fred.chunks_total,
+                fred.chunks_done
+            ),
+            ("FRED", "running", 31, 12)
+        );
+        assert!(fred.is_active());
+        assert!(close(fred.last_complete_at, Utc::now() - Duration::days(8)));
+        assert!(
+            (fred.first_started_at - (Utc::now() - Duration::days(9)))
+                .num_seconds()
+                .abs()
+                <= 2
+        );
     }
 }

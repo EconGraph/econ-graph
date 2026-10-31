@@ -623,6 +623,12 @@ async fn series_dataset_fields_loader_runs_one_query_per_batch() {
     );
 }
 
+/// A migrated database of the test's own (a scratch database on `DATABASE_URL`'s server,
+/// dropped with the returned value), so the units tests below run in parallel with the rest.
+async fn own_database() -> econ_graph_core::test_utils::TestContainer {
+    econ_graph_core::test_utils::TestContainer::new().await
+}
+
 /// Sets a series' units columns directly, as the crawler stores them.
 async fn set_units(
     pool: &DatabasePool,
@@ -652,7 +658,8 @@ async fn set_units(
 /// which loads the units columns by id.
 #[tokio::test]
 async fn series_units_fields_resolve_from_the_row_and_for_search_results() {
-    let pool = test_pool().await;
+    let db = own_database().await;
+    let pool = db.pool().clone();
     let source = new_source(&pool).await;
     let bea = new_series(&pool, source.id, "units_bea", None).await;
     set_units(
@@ -758,7 +765,8 @@ async fn series_without_a_stored_units_source_derive_it() {
     use diesel_async::RunQueryDsl;
     use econ_graph_core::schema::economic_series::dsl;
 
-    let pool = test_pool().await;
+    let db = own_database().await;
+    let pool = db.pool().clone();
     let source = new_source(&pool).await;
     let with_units = new_series(&pool, source.id, "legacy_units", None).await;
     let blank = new_series(&pool, source.id, "legacy_blank", None).await;
@@ -793,7 +801,8 @@ async fn series_without_a_stored_units_source_derive_it() {
 /// `unknown` without.
 #[tokio::test]
 async fn create_records_the_units_source() {
-    let pool = test_pool().await;
+    let db = own_database().await;
+    let pool = db.pool().clone();
     let source = new_source(&pool).await;
     let plain = new_series(&pool, source.id, "create_no_units", None).await;
     assert_eq!(plain.units_source.as_deref(), Some("unknown"));
@@ -816,7 +825,8 @@ async fn create_records_the_units_source() {
 
 #[tokio::test]
 async fn series_units_loader_runs_one_query_per_batch() {
-    let pool = test_pool().await;
+    let db = own_database().await;
+    let pool = db.pool().clone();
     let source = new_source(&pool).await;
     let mut ids = Vec::new();
     for name in ["units_batch_a", "units_batch_b", "units_batch_c"] {

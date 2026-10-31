@@ -174,7 +174,10 @@ pub async fn data_source_id(pool: &DatabasePool, source: SourceId) -> AppResult<
     data_source_id_conn(&mut conn, source).await
 }
 
-async fn data_source_id_conn(conn: &mut AsyncPgConnection, source: SourceId) -> AppResult<Uuid> {
+pub(crate) async fn data_source_id_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+) -> AppResult<Uuid> {
     use data_sources::dsl;
     let template = data_source_template(source);
     if let Some(id) = dsl::data_sources
@@ -1060,18 +1063,21 @@ pub async fn persist_series(
     fetched: &FetchedSeries,
 ) -> AppResult<SeriesWrite> {
     let mut conn = pool.get().await.map_err(conn_err)?;
+    // Without the adapter registry, take the lifecycle lock as a tracking source would.
     conn.transaction::<SeriesWrite, AppError, _>(async move |conn| {
-        persist_series_conn(conn, source, external_id, fetched).await
+        persist_series_conn(conn, source, external_id, fetched, true).await
     })
     .await
 }
 
 /// Connection form; caller must wrap all related writes in a transaction.
+/// `tracks_lifecycle` is the adapter's [`tracks_catalog_lifecycle`](crate::SourceAdapter::tracks_catalog_lifecycle).
 pub(crate) async fn persist_series_conn(
     conn: &mut AsyncPgConnection,
     source: SourceId,
     external_id: &str,
     fetched: &FetchedSeries,
+    tracks_lifecycle: bool,
 ) -> AppResult<SeriesWrite> {
     let source_id = data_source_id_conn(conn, source).await?;
     let meta = fetched.metadata.as_ref();
@@ -1101,6 +1107,10 @@ pub(crate) async fn persist_series_conn(
     let frequency = meta.and_then(|m| clip_opt(m.frequency.as_deref(), 50));
     let seasonal = meta.and_then(|m| clip_opt(m.seasonal_adjustment.as_deref(), 100));
     let external_id = clip(external_id, 255);
+    // A successful historical fetch resets only its consecutive fetch misses. Catalog
+    // disappearance, legal restrictions and confirmed successor links remain authoritative.
+    crate::lifecycle::record_fetch_success_conn(conn, source_id, &external_id, tracks_lifecycle)
+        .await?;
     let id = stable_series_id(source, &external_id);
 
     // Last occurrence wins for duplicate keys (one INSERT can't touch a row twice).
@@ -1126,8 +1136,11 @@ pub(crate) async fn persist_series_conn(
                  SELECT $9, $1, $2, COALESCE($3, (SELECT title FROM discovered), $2), \
                      COALESCE($4, (SELECT description FROM discovered)), \
                      COALESCE($5, (SELECT units FROM discovered)), \
-                     COALESCE($6, (SELECT frequency FROM discovered), $7), $8, TRUE, NOW(), \
-                     NOW(), NOW(), 'success', NULL, $10, $11, \
+                     COALESCE($6, (SELECT frequency FROM discovered), $7), $8, \
+                     COALESCE((SELECT l.status <> 'restricted' FROM series_lifecycle l \
+                         WHERE l.source_id=$1 AND l.external_id=$2), TRUE), NOW(), \
+                     NOW(), NOW(), COALESCE((SELECT NULLIF(l.status, 'active') FROM series_lifecycle l \
+                         WHERE l.source_id=$1 AND l.external_id=$2), 'success'), NULL, $10, $11, \
                      CASE WHEN $5::text IS NOT NULL THEN $12 \
                          WHEN (SELECT units FROM discovered) IS NOT NULL THEN 'structured' \
                          ELSE 'unknown' END, \
@@ -1162,7 +1175,9 @@ pub(crate) async fn persist_series_conn(
                      seasonal_adjustment = COALESCE($8, economic_series.seasonal_adjustment), \
                      dataset_id = $10, dimensions = $11, \
                      last_crawled_at = NOW(), last_updated = NOW(), \
-                     crawl_status = 'success', crawl_error_message = NULL \
+                     crawl_status = COALESCE((SELECT NULLIF(l.status, 'active') \
+                         FROM series_lifecycle l WHERE l.source_id = $1 AND l.external_id = $2), 'success'), \
+                     crawl_error_message = NULL \
                  RETURNING id, (old.id IS NULL) AS inserted",
     )
     .bind::<SqlUuid, _>(source_id)
@@ -1305,7 +1320,9 @@ pub(crate) async fn persist_discovered_conn(
                 sm::data_url.eq(excluded(sm::data_url)),
                 sm::dataset_id.eq(excluded(sm::dataset_id)),
                 sm::dimensions.eq(excluded(sm::dimensions)),
-                sm::is_active.eq(true),
+                sm::is_active.eq(diesel::dsl::sql::<Bool>(
+                    "NOT EXISTS (SELECT 1 FROM series_lifecycle l WHERE l.source_id = series_metadata.source_id AND l.external_id = series_metadata.external_id AND l.status = 'restricted')"
+                )),
                 sm::last_discovered_at.eq(now),
                 sm::updated_at.eq(now),
             ))
@@ -1452,7 +1469,8 @@ pub(crate) async fn deactivate_metadata_conn(
 /// Records one `crawl_attempts` row for `series_id` (the table requires an existing series) and,
 /// on failure, sets `economic_series.crawl_status` to `'not_found'` (the error is
 /// [`CrawlError::NotFound`](crate::error::CrawlError::NotFound), confirming the source doesn't
-/// have the series) or `'failed'` (anything else), with the error message.
+/// have the series), `'absent'` ([`CrawlError::Absent`](crate::error::CrawlError::Absent), a
+/// complete response omitted it) or `'failed'` (anything else), with the error message.
 pub async fn record_attempt(
     pool: &DatabasePool,
     series_id: Uuid,
@@ -1502,14 +1520,17 @@ pub(crate) async fn record_attempt_conn(
         .execute(&mut *conn)
         .await?;
     if !attempt.success {
-        let status = if attempt.error_kind.as_deref() == Some("not_found") {
-            "not_found"
-        } else {
-            "failed"
+        // `absent` (a complete response omitted the series) backs off like `not_found`.
+        let status = match attempt.error_kind.as_deref() {
+            Some("not_found") => "not_found",
+            Some("absent") => "absent",
+            _ => "failed",
         };
         diesel::sql_query(
-            "UPDATE economic_series SET crawl_status = $3, crawl_error_message = $2 \
-             WHERE id = $1",
+            "UPDATE economic_series es SET crawl_status = COALESCE( \
+                (SELECT NULLIF(l.status, 'active') FROM series_lifecycle l \
+                 WHERE l.source_id=es.source_id AND l.external_id=es.external_id), $3), \
+                crawl_error_message = $2 WHERE es.id = $1",
         )
         .bind::<SqlUuid, _>(series_id)
         .bind::<Nullable<Text>, _>(attempt.error_message.as_deref())

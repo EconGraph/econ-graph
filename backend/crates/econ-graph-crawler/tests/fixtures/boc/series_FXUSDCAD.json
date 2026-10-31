@@ -1,0 +1,11 @@
+{
+    "terms": {
+        "url": "https://www.bankofcanada.ca/terms/"
+    },
+    "seriesDetails": {
+        "name": "FXUSDCAD",
+        "label": "USD/CAD",
+        "description": "Daily average exchange rate of the US dollar in Canadian dollars.",
+        "dateFormat": "daily",        "metadata": {"frequency":"Business daily","unit":"Canadian dollars per US dollar"}
+    }
+}

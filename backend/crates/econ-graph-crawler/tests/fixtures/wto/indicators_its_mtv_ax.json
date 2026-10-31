@@ -1,0 +1,26 @@
+[
+  {
+    "code": "ITS_MTV_AX",
+    "name": "Merchandise exports by product group - annual",
+    "categoryCode": "ITS_MTV",
+    "categoryLabel": "Merchandise trade values",
+    "subcategoryCode": "ITS_MTV_A",
+    "subcategoryLabel": "Annual merchandise trade values",
+    "unitCode": "USM",
+    "unitLabel": "Million US dollar",
+    "startYear": 1948,
+    "endYear": 2025,
+    "frequencyCode": "A",
+    "frequencyLabel": "Annual",
+    "numberReporters": 200,
+    "numberPartners": 1,
+    "productSectorClassificationCode": "SITC3",
+    "productSectorClassificationLabel": "Standard International Trade Classification, Revision 3",
+    "hasMetadata": "Y",
+    "numberDecimals": 0,
+    "numberDatapoints": 100000,
+    "updateFrequency": "Annual",
+    "description": "Value of merchandise exports by product group, in current US dollars.",
+    "sortOrder": 1
+  }
+]

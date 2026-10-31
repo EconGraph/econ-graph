@@ -50,11 +50,9 @@ pub struct EconomicSeriesType {
 }
 
 impl EconomicSeriesType {
-    /// The series' dataset columns, from the row it was built from or loaded by id.
+    /// Read through the guarded, non-caching loader even for preloaded rows: a schema or
+    /// caller may hold this object after the series becomes legally restricted.
     async fn load_dataset_fields(&self, ctx: &Context<'_>) -> Result<SeriesDatasetFields> {
-        if let Some(fields) = &self.dataset_fields {
-            return Ok(fields.clone());
-        }
         let series_id = Uuid::parse_str(&self.id)?;
         Ok(load_series_dataset_fields(ctx, series_id)
             .await?
@@ -185,6 +183,14 @@ impl EconomicSeriesType {
         self.is_active
     }
 
+    /// Publication lifecycle, independent of the most recent crawl result.
+    async fn lifecycle(
+        &self,
+        ctx: &Context<'_>,
+    ) -> Result<Option<crate::graphql::lifecycle::SeriesLifecycleType>> {
+        crate::graphql::lifecycle::load_series_lifecycle(ctx, &self.id).await
+    }
+
     async fn created_at(&self) -> DateTime<Utc> {
         self.created_at
     }
@@ -253,6 +259,7 @@ impl EconomicSeriesType {
         let mut conn = pool.get().await?;
         let data_points = dsl::data_points
             .filter(dsl::series_id.eq(series_uuid))
+            .filter(crate::graphql::dataloaders::public_data_points_predicate())
             .filter(models::revision_filter(None, false))
             .order(dsl::date.desc())
             .limit(limit as i64)
@@ -276,6 +283,7 @@ impl EconomicSeriesType {
         let mut conn = pool.get().await?;
         let count = dsl::data_points
             .filter(dsl::series_id.eq(series_uuid))
+            .filter(crate::graphql::dataloaders::public_data_points_predicate())
             .count()
             .get_result::<i64>(&mut conn)
             .await?;
@@ -329,6 +337,7 @@ impl EconomicSeriesType {
         let mut conn = pool.get().await?;
         let mut query = dsl::data_points
             .filter(dsl::series_id.eq(series_uuid))
+            .filter(crate::graphql::dataloaders::public_data_points_predicate())
             .into_boxed();
 
         if let Some(start_date) = filter.start_date {
@@ -352,7 +361,10 @@ impl EconomicSeriesType {
         }
 
         if as_of_or_latest {
-            query = query.filter(models::revision_filter(filter.as_of, original_only));
+            query = query.filter(models::revision_filter_excluding_synthetic(
+                filter.as_of,
+                original_only,
+            ));
         }
 
         let data_points = query
@@ -487,6 +499,14 @@ pub struct DataSourceType {
 
 #[Object]
 impl DataSourceType {
+    /// Counts of retained historical series whose publication state changed upstream.
+    async fn lifecycle_counts(
+        &self,
+        ctx: &Context<'_>,
+    ) -> Result<crate::graphql::lifecycle::SourceLifecycleCountsType> {
+        crate::graphql::lifecycle::load_source_counts(ctx, &self.id).await
+    }
+
     async fn id(&self) -> &ID {
         &self.id
     }
@@ -543,6 +563,7 @@ impl DataSourceType {
         let mut conn = pool.get().await?;
         let all_series = dsl::economic_series
             .filter(dsl::source_id.eq(source_uuid))
+            .filter(econ_graph_services::services::series_service::public_series_predicate())
             .filter(dsl::is_active.eq(true))
             .filter(dsl::end_date.is_not_null())
             .select(models::EconomicSeries::as_select())
@@ -596,6 +617,7 @@ impl DataSourceType {
         let mut conn = pool.get().await?;
         let count = dsl::economic_series
             .filter(dsl::source_id.eq(source_uuid))
+            .filter(econ_graph_services::services::series_service::public_series_predicate())
             .filter(dsl::is_active.eq(true))
             .filter(dsl::end_date.is_not_null())
             .count()

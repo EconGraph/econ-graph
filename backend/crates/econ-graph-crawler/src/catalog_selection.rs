@@ -1,0 +1,564 @@
+//! Declarative, bounded selection from BEA's current upstream table catalog.
+//!
+//! Historical dimension labels are intentionally not selection input: they are additive and
+//! include tables the source has removed. Changing these rules establishes a new lifecycle scope.
+
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::OnceLock;
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+use crate::error::CrawlError;
+use crate::reference::data_dir;
+use crate::sources::bea::{BeaDataset, BeaTable, Frequency};
+
+/// Runtime file under the crawler reference directory.
+pub const BEA_RULES_FILE: &str = "catalog_selection/bea.toml";
+
+/// A bounded collection of table-family rules, evaluated against the source catalog.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BeaSelection {
+    /// Maximum selected tables before any table's series are requested.
+    #[serde(skip_serializing)]
+    pub max_tables: usize,
+    /// Maximum expanded series before any are persisted or enqueued.
+    #[serde(skip_serializing)]
+    pub max_series: usize,
+    /// Optional table names excluded even when a rule matches.
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    /// Each rule combines dataset, table prefix, optional title text and frequencies.
+    pub rule: Vec<BeaRule>,
+}
+
+/// The dataset and table family a source publishes; titles and actual names stay upstream-owned.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BeaRule {
+    pub dataset: String,
+    pub prefix: String,
+    #[serde(default)]
+    pub title_contains: Option<String>,
+    pub frequencies: Vec<String>,
+    /// How many current tables this rule is meant to match at most. Discovery doesn't enforce
+    /// it (`max_tables` bounds the whole selection); `crawler check-selection` reports a rule
+    /// that matches more as over-broad. Like the other limits, it isn't part of the fingerprint.
+    #[serde(default, skip_serializing)]
+    pub max_matches: Option<usize>,
+}
+
+impl BeaRule {
+    fn dataset(&self) -> BeaDataset {
+        if self.dataset == "NIPA" {
+            BeaDataset::Nipa
+        } else {
+            BeaDataset::Regional
+        }
+    }
+
+    /// `NIPA T10101* frequencies=A,Q`, for reports.
+    pub fn describe(&self) -> String {
+        let mut out = format!("{} {}*", self.dataset, self.prefix);
+        if let Some(title) = &self.title_contains {
+            out.push_str(&format!(" title~{title:?}"));
+        }
+        out.push_str(&format!(" frequencies={}", self.frequencies.join(",")));
+        out
+    }
+}
+
+impl BeaSelection {
+    pub fn parse(text: &str) -> Result<Self, CrawlError> {
+        let rules: Self = toml::from_str(text)
+            .map_err(|e| CrawlError::Permanent(format!("BEA selection rules: {e}")))?;
+        if rules.max_tables == 0 || rules.max_series == 0 || rules.rule.is_empty() {
+            return Err(CrawlError::Permanent(
+                "BEA selection needs nonzero limits and at least one rule".into(),
+            ));
+        }
+        for r in &rules.rule {
+            let regional = r.dataset == "Regional";
+            if !(regional || r.dataset == "NIPA")
+                || r.prefix.is_empty()
+                || !r.prefix.bytes().all(|b| b.is_ascii_alphanumeric())
+                || r.frequencies.is_empty()
+                || r.frequencies
+                    .iter()
+                    .any(|f| Frequency::from_code(f).is_none())
+                || (regional && r.frequencies != ["A"])
+                || r.title_contains
+                    .as_ref()
+                    .is_some_and(|s| s.trim().is_empty())
+                || r.max_matches == Some(0)
+            {
+                return Err(CrawlError::Permanent(format!(
+                    "BEA invalid selection rule for {} {}",
+                    r.dataset, r.prefix
+                )));
+            }
+        }
+        Ok(rules)
+    }
+
+    /// Bounded metric label per rule: its position, dataset and table prefix.
+    pub fn rule_labels(&self) -> Vec<String> {
+        self.rule
+            .iter()
+            .enumerate()
+            .map(|(index, rule)| format!("{index}:{}:{}", rule.dataset, rule.prefix))
+            .collect()
+    }
+
+    /// Stable selection scope; changing operational limits preserves absence evidence.
+    pub fn fingerprint(&self) -> String {
+        let digest = Sha256::digest(serde_json::to_vec(self).expect("serializable selection"));
+        let hash: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        format!("bea-rules-v1:{hash}")
+    }
+
+    /// Matches only names in the current complete catalog, never the accumulated label cache.
+    pub fn select(
+        &self,
+        catalogs: &HashMap<BeaDataset, HashMap<String, String>>,
+    ) -> Result<Vec<BeaTable>, CrawlError> {
+        let excluded: HashSet<&str> = self.exclude.iter().map(String::as_str).collect();
+        let mut selected: BTreeMap<(String, String), Vec<Frequency>> = BTreeMap::new();
+        let labels = self.rule_labels();
+        for (index, rule) in self.rule.iter().enumerate() {
+            let dataset = rule.dataset();
+            let catalog = catalogs.get(&dataset).ok_or_else(|| {
+                CrawlError::Transient(format!(
+                    "BEA {}: current table catalog unavailable; title not yet known",
+                    rule.dataset
+                ))
+            })?;
+            let matched = catalog
+                .iter()
+                .filter(|(name, title)| rule.matches_table(name, title, &excluded))
+                .count();
+            record_rule_matches("BEA", &labels[index], matched);
+            for (name, title) in catalog {
+                if !rule.matches_table(name, title, &excluded) {
+                    continue;
+                }
+                let frequencies = selected
+                    .entry((rule.dataset.clone(), name.clone()))
+                    .or_default();
+                for code in &rule.frequencies {
+                    let f = Frequency::from_code(code).expect("validated frequency");
+                    if !frequencies.contains(&f) {
+                        frequencies.push(f);
+                    }
+                }
+                if selected.len() > self.max_tables {
+                    return Err(volume_error("tables", selected.len(), self.max_tables));
+                }
+            }
+        }
+        // An empty result may mean a truncated catalog or a broken rule. Never certify it as a
+        // complete disappearance; a later healthy refresh must establish what happened.
+        if selected.is_empty() {
+            return Err(CrawlError::Transient(EMPTY_SELECTION.into()));
+        }
+        Ok(selected
+            .into_iter()
+            .map(|((dataset, table_name), frequencies)| BeaTable {
+                dataset: if dataset == "NIPA" {
+                    BeaDataset::Nipa
+                } else {
+                    BeaDataset::Regional
+                },
+                table_name,
+                frequencies,
+            })
+            .collect())
+    }
+
+    /// The current tables each rule matches (exclusions applied), sorted, in rule order. A rule
+    /// whose dataset's catalog is missing matches nothing. Unlike [`select`](Self::select) it
+    /// never stops at `max_tables`, so a report can show how far a rule overshoots.
+    pub fn rule_matches(
+        &self,
+        catalogs: &HashMap<BeaDataset, HashMap<String, String>>,
+    ) -> Vec<Vec<String>> {
+        let excluded: HashSet<&str> = self.exclude.iter().map(String::as_str).collect();
+        self.rule
+            .iter()
+            .map(|rule| {
+                let mut names: Vec<String> = catalogs
+                    .get(&rule.dataset())
+                    .into_iter()
+                    .flatten()
+                    .filter(|(name, title)| rule.matches_table(name, title, &excluded))
+                    .map(|(name, _)| name.clone())
+                    .collect();
+                names.sort_unstable();
+                names
+            })
+            .collect()
+    }
+
+    /// Whether an already-stored canonical series belongs to these rules. Retained titles
+    /// may positively establish a title predicate, but cannot invent current membership.
+    pub fn includes_stored_series(
+        &self,
+        dataset: BeaDataset,
+        table: &str,
+        frequency: Frequency,
+        retained_title: Option<&str>,
+    ) -> bool {
+        !self.exclude.iter().any(|excluded| excluded == table)
+            && self.rule.iter().any(|rule| {
+                rule.dataset == dataset.api_name()
+                    && table.starts_with(&rule.prefix)
+                    && rule.frequencies.iter().any(|f| f == frequency.code())
+                    && rule.title_contains.as_ref().is_none_or(|needle| {
+                        retained_title.is_some_and(|title| {
+                            title.to_lowercase().contains(&needle.to_lowercase())
+                        })
+                    })
+            })
+    }
+
+    pub fn check_series_count(&self, count: usize) -> Result<(), CrawlError> {
+        if count > self.max_series {
+            Err(volume_error("series", count, self.max_series))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl BeaRule {
+    fn matches_table(&self, name: &str, title: &str, excluded: &HashSet<&str>) -> bool {
+        name.starts_with(&self.prefix)
+            && !excluded.contains(name)
+            && self
+                .title_contains
+                .as_ref()
+                .is_none_or(|s| title.to_lowercase().contains(&s.to_lowercase()))
+    }
+}
+
+/// Publish how many catalog entries one selection rule matched, and warn when it matched
+/// none: a rule that quietly selects nothing (an upstream rename, a retitled table) would
+/// otherwise let its series age out with no alert while the other rules keep discovery
+/// working. `rule` is a bounded label naming the rule's position and catalog.
+pub(crate) fn record_rule_matches(source: &str, rule: &str, matched: usize) {
+    econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+        .rule_matches
+        .with_label_values(&[source, rule])
+        .set(i64::try_from(matched).unwrap_or(i64::MAX));
+    if matched == 0 {
+        tracing::warn!(
+            source,
+            rule,
+            "catalog selection rule matched nothing in the current upstream catalog; \
+             review data/catalog_selection/"
+        );
+    }
+}
+
+/// Publish `crawler_catalog_rule_configured` for every rule the worker loaded, so alerts on
+/// `crawler_catalog_rule_matches` ignore rules that were since edited or removed.
+pub fn publish_configured_rules(source: &str, labels: &[String]) {
+    for label in labels {
+        econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+            .rule_configured
+            .with_label_values(&[source, label])
+            .set(1);
+    }
+}
+
+const VOLUME_GUARD: &str = "BEA catalog volume guard";
+const EMPTY_SELECTION: &str = "BEA selection matched no current tables";
+
+/// Whether `error` is [`BeaSelection::select`] finding no current table for any rule.
+pub fn is_empty_selection(error: &CrawlError) -> bool {
+    matches!(error, CrawlError::Transient(message) if message == EMPTY_SELECTION)
+}
+
+/// Whether `error` is the volume guard stopping a selection that grew past a limit.
+pub fn is_volume_guard(error: &CrawlError) -> bool {
+    matches!(error, CrawlError::Permanent(message) if message.starts_with(VOLUME_GUARD))
+}
+
+fn volume_error(kind: &str, count: usize, max: usize) -> CrawlError {
+    econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+        .guard_rejections_total
+        .with_label_values(&["BEA", "volume"])
+        .inc();
+    CrawlError::Permanent(format!(
+        "{VOLUME_GUARD}: selected {count} {kind}, limit {max}; no series enqueued"
+    ))
+}
+
+/// Loads the operator-controlled selection rules once per worker process.
+pub fn bea_rules() -> Result<&'static BeaSelection, CrawlError> {
+    static RULES: OnceLock<Result<BeaSelection, CrawlError>> = OnceLock::new();
+    RULES
+        .get_or_init(|| {
+            let path = data_dir().join(BEA_RULES_FILE);
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| CrawlError::Permanent(format!("reading {}: {e}", path.display())))?;
+            BeaSelection::parse(&text)
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn rules() -> BeaSelection {
+        BeaSelection::parse("max_tables=2\nmax_series=4\n[[rule]]\ndataset='Regional'\nprefix='SAGDP2'\nfrequencies=['A']").unwrap()
+    }
+    fn catalog(names: &[&str]) -> HashMap<BeaDataset, HashMap<String, String>> {
+        [(
+            BeaDataset::Regional,
+            names
+                .iter()
+                .map(|name| (name.to_string(), "GDP".to_string()))
+                .collect(),
+        )]
+        .into_iter()
+        .collect()
+    }
+    /// The shipped Regional rules follow SAGDP2 through its N-suffix rename but not to the
+    /// discontinued SIC-basis SAGDP2S, and select SAINC1 but not SAINC11, SAINC12 or other
+    /// families.
+    #[test]
+    fn shipped_regional_rules_select_sagdp2_sagdp2n_and_sainc1_only() {
+        let shipped = BeaSelection::parse(
+            &std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("data")
+                    .join(BEA_RULES_FILE),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let nipa: HashMap<String, String> = shipped
+            .rule
+            .iter()
+            .filter(|r| r.dataset == "NIPA")
+            .map(|r| (r.prefix.clone(), "NIPA table".to_string()))
+            .collect();
+        let regional = [
+            "SAGDP2", "SAGDP2N", "SAGDP2S", "SAINC1", "SAINC11", "SAINC12", "CAGDP2",
+        ]
+        .into_iter()
+        .map(|n| (n.to_string(), "GDP".to_string()))
+        .collect();
+        let catalogs = [(BeaDataset::Nipa, nipa), (BeaDataset::Regional, regional)]
+            .into_iter()
+            .collect();
+        let mut selected: Vec<_> = shipped
+            .select(&catalogs)
+            .unwrap()
+            .into_iter()
+            .filter(|t| t.dataset == BeaDataset::Regional)
+            .map(|t| t.table_name)
+            .collect();
+        selected.sort();
+        assert_eq!(selected, ["SAGDP2", "SAGDP2N", "SAINC1"]);
+    }
+
+    #[test]
+    fn rename_and_new_table_are_selected_without_config_changes() {
+        let r = rules();
+        assert_eq!(
+            r.select(&catalog(&["SAGDP2N"])).unwrap()[0].table_name,
+            "SAGDP2N"
+        );
+        let selected = r
+            .select(&catalog(&["SAGDP2", "SAGDP2NEW", "SAINC1"]))
+            .unwrap();
+        assert_eq!(
+            selected
+                .iter()
+                .map(|t| t.table_name.as_str())
+                .collect::<Vec<_>>(),
+            ["SAGDP2", "SAGDP2NEW"]
+        );
+    }
+    #[test]
+    fn bounds_reject_instead_of_truncating_and_accept_exact_limit() {
+        let r = rules();
+        assert_eq!(r.select(&catalog(&["SAGDP2", "SAGDP2N"])).unwrap().len(), 2);
+        assert!(r
+            .select(&catalog(&["SAGDP2", "SAGDP2N", "SAGDP2X"]))
+            .unwrap_err()
+            .to_string()
+            .contains("volume guard"));
+        assert!(r.check_series_count(4).is_ok());
+        assert!(r.check_series_count(5).is_err());
+    }
+    #[test]
+    fn exclusions_title_filters_and_overlapping_rules_are_deterministic() {
+        let mut r = rules();
+        r.exclude = vec!["SAGDP2N".into()];
+        r.rule.push(r.rule[0].clone());
+        r.rule[0].title_contains = Some("gdp".into());
+        let selected = r.select(&catalog(&["SAGDP2N", "SAGDP2"])).unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].frequencies, [Frequency::Annual]);
+        let fingerprint = r.fingerprint();
+        r.max_tables += 1;
+        assert_eq!(fingerprint, r.fingerprint());
+        r.max_series += 1;
+        assert_eq!(fingerprint, r.fingerprint());
+        r.rule[0].prefix.push('N');
+        assert_ne!(fingerprint, r.fingerprint());
+    }
+    #[test]
+    fn stored_scope_membership_requires_every_rule_predicate() {
+        let mut r = rules();
+        r.rule[0].title_contains = Some("GDP".into());
+        assert!(r.includes_stored_series(
+            BeaDataset::Regional,
+            "SAGDP2N",
+            Frequency::Annual,
+            Some("Historic GDP by state")
+        ));
+        assert!(!r.includes_stored_series(
+            BeaDataset::Regional,
+            "SAGDP2N",
+            Frequency::Annual,
+            None
+        ));
+        assert!(!r.includes_stored_series(
+            BeaDataset::Regional,
+            "SAGDP2N",
+            Frequency::Annual,
+            Some("Personal income")
+        ));
+        assert!(!r.includes_stored_series(
+            BeaDataset::Nipa,
+            "SAGDP2N",
+            Frequency::Annual,
+            Some("GDP")
+        ));
+        assert!(!r.includes_stored_series(
+            BeaDataset::Regional,
+            "SAINC1",
+            Frequency::Annual,
+            Some("GDP")
+        ));
+        assert!(!r.includes_stored_series(
+            BeaDataset::Regional,
+            "SAGDP2N",
+            Frequency::Quarterly,
+            Some("GDP")
+        ));
+        r.exclude.push("SAGDP2N".into());
+        assert!(!r.includes_stored_series(
+            BeaDataset::Regional,
+            "SAGDP2N",
+            Frequency::Annual,
+            Some("GDP")
+        ));
+    }
+
+    /// The shipped rules against BEA's published table lists select exactly the intended tables:
+    /// each prefix matches one table (neighbours such as SAINC11 are excluded), and the table
+    /// count leaves headroom under `max_tables` for a rename that briefly lists both names.
+    #[test]
+    fn shipped_rules_select_the_intended_tables_from_the_published_lists() {
+        let rules = BeaSelection::parse(include_str!("../data/catalog_selection/bea.toml"))
+            .expect("shipped BEA rules parse");
+        let mut catalogs: HashMap<BeaDataset, HashMap<String, String>> = HashMap::new();
+        for line in include_str!("../tests/fixtures/bea/published_table_names.txt").lines() {
+            if line.starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            let (dataset, name) = line.split_once(' ').expect("dataset and name");
+            let dataset = match dataset {
+                "NIPA" => BeaDataset::Nipa,
+                "Regional" => BeaDataset::Regional,
+                other => panic!("unknown dataset {other}"),
+            };
+            catalogs
+                .entry(dataset)
+                .or_default()
+                .insert(name.to_string(), format!("{name} title"));
+        }
+        let selected: Vec<(String, String)> = rules
+            .select(&catalogs)
+            .expect("shipped rules select within bounds")
+            .into_iter()
+            .map(|t| {
+                let freqs: Vec<&str> = t.frequencies.iter().map(|f| f.code()).collect();
+                (t.table_name, freqs.join(" "))
+            })
+            .collect();
+        let expected = [
+            ("T10101", "A Q"),
+            ("T10104", "A Q"),
+            ("T10105", "A Q"),
+            ("T10106", "A Q"),
+            ("T10107", "A Q"),
+            ("T10109", "A Q"),
+            ("T11000", "A Q"),
+            ("T20100", "A Q"),
+            ("T20301", "A Q"),
+            ("T20305", "A Q"),
+            ("T20600", "M"),
+            ("T20804", "M"),
+            ("T30100", "A Q"),
+            ("T30200", "A Q"),
+            ("T30300", "A Q"),
+            ("T40100", "A Q"),
+            ("T40205B", "A Q"),
+            ("T50100", "A Q"),
+            ("T50301", "A Q"),
+            ("T50305", "A Q"),
+            ("T60200D", "A"),
+            ("T61600D", "A Q"),
+            ("T70100", "A Q"),
+            ("SAGDP2", "A"),
+            ("SAINC1", "A"),
+        ];
+        let expected: Vec<(String, String)> = expected
+            .iter()
+            .map(|(t, f)| (t.to_string(), f.to_string()))
+            .collect();
+        assert_eq!(selected, expected);
+        assert_eq!(rules.rule.len(), expected.len(), "one rule per table");
+        assert!(expected.len() < rules.max_tables);
+    }
+
+    #[test]
+    fn a_rule_matching_nothing_is_published_even_when_other_rules_select_tables() {
+        let mut r = rules();
+        let mut renamed = r.rule[0].clone();
+        renamed.prefix = "ZZRENAMEDGONE".into();
+        r.rule.push(renamed);
+        let selected = r.select(&catalog(&["SAGDP2"])).unwrap();
+        assert_eq!(selected.len(), 1);
+        let gauge = |label: &str| {
+            econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+                .rule_matches
+                .with_label_values(&["BEA", label])
+                .get()
+        };
+        // Other tests share the global gauge, so only this test's unique label is checked.
+        econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+            .rule_matches
+            .with_label_values(&["BEA", "1:Regional:ZZRENAMEDGONE"])
+            .set(-1);
+        r.select(&catalog(&["SAGDP2"])).unwrap();
+        assert_eq!(gauge("1:Regional:ZZRENAMEDGONE"), 0);
+    }
+
+    #[test]
+    fn invalid_config_and_missing_catalog_fail_closed() {
+        for text in ["max_tables=0\nmax_series=1\nrule=[]", "max_tables=1\nmax_series=1\n[[rule]]\ndataset='Regional'\nprefix=''\nfrequencies=['A']"] {
+            assert!(BeaSelection::parse(text).is_err());
+        }
+        assert!(rules().select(&HashMap::new()).is_err());
+        assert!(rules().select(&catalog(&["SAINC1"])).is_err());
+    }
+}

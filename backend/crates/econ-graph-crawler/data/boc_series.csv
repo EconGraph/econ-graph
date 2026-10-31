@@ -1,0 +1,31 @@
+# Curated Bank of Canada Valet discovery list, read at runtime by the BOC adapter's discover().
+# Columns: series_id (the Valet series name, e.g. FXUSDCAD). Lines starting with # are comments.
+# The crawler looks for this file in $CRAWLER_DATA_DIR (the crawler-worker image sets /app/data).
+#
+# Only the names are listed here. Each series' title, description, unit and frequency come from
+# Valet's own /series/{name}/json at discovery and from /observations/{name}/json at fetch time.
+# Every name below is in Valet's /lists/series/json. See docs/data-sources/boc.md for the scope.
+series_id
+# Policy and money-market rates
+V39079
+AVG.INTWO
+V80691311
+# Daily exchange rates (Canadian dollars per unit of foreign currency)
+FXUSDCAD
+FXEURCAD
+FXGBPCAD
+FXJPYCAD
+FXCNYCAD
+# Government of Canada benchmark bond yields
+BD.CDN.2YR.DQ.YLD
+BD.CDN.5YR.DQ.YLD
+BD.CDN.10YR.DQ.YLD
+BD.CDN.LONG.DQ.YLD
+# The Bank of Canada's preferred core inflation measures
+CPI_TRIM
+CPI_MEDIAN
+CPI_COMMON
+# Monetary aggregates, M2 (gross) and M2++ (gross), seasonally adjusted. Valet's credit
+# aggregates (household and business credit) end in September 2020, so none are listed.
+V41552796
+V41552801

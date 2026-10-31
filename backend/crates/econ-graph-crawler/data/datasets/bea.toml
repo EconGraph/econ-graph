@@ -1,4 +1,4 @@
-# BEA datasets (see docs/data-sources/bea.md). Curated tables: data/bea_tables.csv.
+# BEA datasets (see docs/data-sources/bea.md). Table rules: data/catalog_selection/bea.toml.
 
 [[dataset]]
 code = "bea_nipa"

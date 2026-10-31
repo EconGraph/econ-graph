@@ -5,8 +5,8 @@
 //! FRED (Federal Reserve Economic Data, St. Louis Fed) adapter.
 //!
 //! Endpoints used (all `GET`, all with `api_key` and `file_type=json`):
-//! - `{base}/series?series_id=ID` — series metadata (`seriess[0]`); used both by discovery (one
-//!   request per curated id) and by fetching.
+//! - `{base}/release/series?release_id=ID` and `/category/series?category_id=ID` — catalog pages.
+//! - `{base}/series?series_id=ID` — metadata for include overrides and fetching.
 //! - `{base}/series/observations?series_id=ID&realtime_start=..&realtime_end=9999-12-31&limit=..&offset=..[&observation_start=YYYY-MM-DD]`
 //!   — observations with their vintages (ALFRED), paged. See [Vintages](#vintages).
 //! - `{base}/series/vintagedates?series_id=ID&realtime_start=..&realtime_end=..&limit=..&offset=..`
@@ -15,17 +15,17 @@
 //!
 //! # Discovery
 //!
-//! `discover()` looks up the live metadata for each id in [`crate::reference::fred_series`] (a
-//! curated headline list read from `data/fred_series.csv`), rather than walking
-//! `/series/search`. A search-term crawl has no bound on how many series it turns up (one
-//! "most popular" page plus several search terms, each paged to FRED's limit, can find tens of
-//! thousands of ids on the first run), and #214's per-series ALFRED vintage walk makes fetching
-//! all of them too slow to finish a first crawl in reasonable time. The curated list keeps
-//! discovery's own request count equal to its size (under two hundred, not unbounded), while still
-//! checking each series' live notes against [`is_copyright_restricted`] as a safety net before
-//! it is discovered. [`FredAdapter::fetch`] repeats the same check, so a series id fetched
-//! directly (a manual `triggerCrawl`, or a scheduled refresh of an already-stored series) without
-//! going through discovery is refused too, rather than only kept out of the curated list.
+//! `discover()` walks complete release/category catalogs selected by
+//! `data/catalog_selection/fred.toml`. Rules match live titles, id prefixes and frequency;
+//! a small include/exclude override list covers headline exceptions. Both the number of
+//! catalog rows inspected and the number of selected series are bounded before any observation
+//! work is enqueued. An empty catalog, failed page, changing count, truncated page or duplicate
+//! id fails the entire discovery, so a temporary upstream problem cannot look like retirement.
+//!
+//! Restricted series remain in the catalog metadata but are hidden by the lifecycle writer;
+//! `(DISCONTINUED)` titles retain their histories and carry a badge. Fetching any series still
+//! repeats the copyright-notes check before requesting observations. Pagination follows FRED's
+//! documented `series_id` ascending order with a pinned real-time date.
 //!
 //! # Vintages
 //!
@@ -106,12 +106,14 @@
 //! Every series belongs to the one dimensionless dataset [`DATASET`] (defined in
 //! `data/datasets/fred.toml`) and keeps its FRED series id as its external id.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
 use chrono::NaiveDate;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::adapter::{
     CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, NewSeriesMetadataLite, SourceAdapter,
@@ -119,8 +121,9 @@ use crate::adapter::{
 use crate::dataset::SeriesDataset;
 use crate::error::CrawlError;
 use crate::http::Validators;
+use crate::lifecycle::CatalogLifecycle;
 use crate::persist;
-use crate::reference::fred_series;
+use crate::reference::data_dir;
 use crate::source::SourceId;
 use crate::units::UnitsContext;
 use crate::value::parse_observation_value;
@@ -130,6 +133,290 @@ pub const DEFAULT_BASE_URL: &str = "https://api.stlouisfed.org/fred";
 
 /// Human-facing series page, used for [`DiscoveredSeries::data_url`] (never requested).
 const FRED_WEB_SERIES_URL: &str = "https://fred.stlouisfed.org/series";
+
+/// Declarative catalog selection in the runtime reference-data directory.
+pub const CATALOG_RULES_FILE: &str = "catalog_selection/fred.toml";
+const CATALOG_PAGE_SIZE: usize = 1000;
+
+/// Validate operator selection rules before the worker accepts jobs.
+pub fn validate_catalog_rules() -> Result<(), CrawlError> {
+    load_catalog_rules().map(|_| ())
+}
+
+/// Metric labels of the configured selection rules (see `crawler_catalog_rule_matches`).
+pub fn configured_rule_labels() -> Result<Vec<String>, CrawlError> {
+    let rules = load_catalog_rules()?;
+    Ok(rules
+        .rules
+        .iter()
+        .enumerate()
+        .map(|(index, rule)| rule.label(index))
+        .collect())
+}
+
+/// The catalog rules in [`CATALOG_RULES_FILE`].
+pub(crate) fn load_catalog_rules() -> Result<FredCatalogRules, CrawlError> {
+    let path = data_dir().join(CATALOG_RULES_FILE);
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| CrawlError::Permanent(format!("reading {}: {e}", path.display())))?;
+    FredCatalogRules::parse(&text)
+}
+
+/// Parsed `catalog_selection/fred.toml`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FredCatalogRules {
+    /// Operational guards do not change the selected catalog scope.
+    #[serde(skip_serializing)]
+    max_series: usize,
+    /// Bound the rows inspected, independently of how many match the selection predicates.
+    #[serde(skip_serializing)]
+    max_catalog_series: usize,
+    #[serde(default)]
+    include: Vec<String>,
+    /// Intentional retirement probes: still record lifecycle evidence, but their confirmed
+    /// absence is not an unexpected-missing alert. Must be a subset of `include`.
+    /// Alert policy does not change selection identity or reset catalog absence evidence.
+    #[serde(default, skip_serializing)]
+    expected_missing: Vec<String>,
+    #[serde(default)]
+    exclude: Vec<String>,
+    rules: Vec<FredCatalogRule>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct FredCatalogRule {
+    #[serde(default)]
+    release_id: Option<u32>,
+    #[serde(default)]
+    category_id: Option<u32>,
+    #[serde(default)]
+    title_contains: Option<String>,
+    #[serde(default)]
+    id_prefix: Option<String>,
+    #[serde(default)]
+    frequencies: Vec<String>,
+    /// How many catalog rows this rule is meant to match at most. Discovery doesn't enforce it
+    /// (`max_series` bounds the whole selection); `crawler check-selection` reports a rule that
+    /// matches more as over-broad. Like the other limits, it isn't part of the fingerprint.
+    #[serde(default, skip_serializing)]
+    max_matches: Option<usize>,
+}
+
+impl FredCatalogRules {
+    pub(crate) fn parse(text: &str) -> Result<Self, CrawlError> {
+        let rules: Self = toml::from_str(text)
+            .map_err(|e| CrawlError::Permanent(format!("FRED catalog rules: {e}")))?;
+        if rules.max_series == 0
+            || rules.max_series > 10_000
+            || rules.max_catalog_series == 0
+            || rules.max_catalog_series > 100_000
+            || rules.rules.is_empty()
+            || rules.rules.len() > 16
+            || rules.include.len() > 32
+            || rules.expected_missing.len() > 32
+            || rules.exclude.len() > 32
+        {
+            return Err(CrawlError::Permanent(
+                "FRED catalog rules: positive limits required (at most 10000 selected, \
+                 100000 catalog rows, 16 rules and 32 include/exclude/expected_missing ids)"
+                    .into(),
+            ));
+        }
+        for rule in &rules.rules {
+            if rule.release_id.is_some() == rule.category_id.is_some()
+                || rule.release_id == Some(0)
+                || rule
+                    .title_contains
+                    .as_ref()
+                    .is_some_and(|s| s.trim().is_empty())
+                || rule.id_prefix.as_ref().is_some_and(|s| s.trim().is_empty())
+                || rule.max_matches == Some(0)
+                || rule.frequencies.iter().any(|f| {
+                    !matches!(
+                        f.as_str(),
+                        "Daily"
+                            | "Weekly"
+                            | "Biweekly"
+                            | "Monthly"
+                            | "Quarterly"
+                            | "Semiannual"
+                            | "Annual"
+                    )
+                })
+            {
+                return Err(CrawlError::Permanent(
+                    "FRED catalog rule: specify exactly one release_id or category_id, \
+                     nonempty predicates and documented FRED frequencies"
+                        .into(),
+                ));
+            }
+        }
+        for id in rules.include.iter().chain(&rules.exclude) {
+            validate_catalog_id(id)?;
+        }
+        for (name, ids) in [
+            ("include", &rules.include),
+            ("exclude", &rules.exclude),
+            ("expected_missing", &rules.expected_missing),
+        ] {
+            if ids.iter().collect::<BTreeSet<_>>().len() != ids.len() {
+                return Err(CrawlError::Permanent(format!(
+                    "FRED catalog rules: {name} contains duplicate ids"
+                )));
+            }
+        }
+        if rules
+            .expected_missing
+            .iter()
+            .any(|id| !rules.include.contains(id) || rules.exclude.contains(id))
+        {
+            return Err(CrawlError::Permanent(
+                "FRED catalog rules: expected_missing must contain only non-excluded include ids"
+                    .into(),
+            ));
+        }
+        Ok(rules)
+    }
+
+    fn fingerprint(&self) -> String {
+        // Serializing the parsed rules keeps whitespace and comments out of the identity.
+        let bytes = serde_json::to_vec(self).expect("catalog rule serialization is infallible");
+        format!(
+            "fred-catalog-v1:{}",
+            Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        )
+    }
+}
+
+impl FredCatalogRules {
+    /// The bound on selected series.
+    pub(crate) fn max_series(&self) -> usize {
+        self.max_series
+    }
+
+    /// The bound on catalog rows inspected.
+    pub(crate) fn max_catalog_series(&self) -> usize {
+        self.max_catalog_series
+    }
+
+    /// These rules with no bound on selected series, for `crawler check-selection
+    /// --count-uncapped` only: the selection is counted in full instead of stopping past
+    /// `max_series`. The catalog walk is still bounded by `max_catalog_series`. Discovery never
+    /// uses this.
+    pub(crate) fn uncapped(&self) -> Self {
+        Self {
+            max_series: usize::MAX,
+            ..self.clone()
+        }
+    }
+
+    /// The explicit include overrides.
+    pub(crate) fn include(&self) -> &[String] {
+        &self.include
+    }
+
+    /// Include overrides kept as known-retired probes.
+    pub(crate) fn expected_missing(&self) -> &[String] {
+        &self.expected_missing
+    }
+
+    /// Each rule, described for a report, with its `max_matches`.
+    pub(crate) fn rule_summaries(&self) -> Vec<(String, Option<usize>)> {
+        self.rules
+            .iter()
+            .map(|rule| (rule.describe(), rule.max_matches))
+            .collect()
+    }
+}
+
+impl FredCatalogRule {
+    /// `release_id=53 title~"gross domestic product" frequencies=Quarterly,Annual`.
+    fn describe(&self) -> String {
+        let mut out = match (self.release_id, self.category_id) {
+            (Some(id), _) => format!("release_id={id}"),
+            (None, Some(id)) => format!("category_id={id}"),
+            (None, None) => String::new(),
+        };
+        if let Some(title) = &self.title_contains {
+            out.push_str(&format!(" title~{title:?}"));
+        }
+        if let Some(prefix) = &self.id_prefix {
+            out.push_str(&format!(" id_prefix={prefix}"));
+        }
+        if !self.frequencies.is_empty() {
+            out.push_str(&format!(" frequencies={}", self.frequencies.join(",")));
+        }
+        out
+    }
+
+    /// Bounded metric label: the rule's position and the catalog it walks.
+    fn label(&self, index: usize) -> String {
+        match (self.release_id, self.category_id) {
+            (Some(id), _) => format!("{index}:release:{id}"),
+            (None, Some(id)) => format!("{index}:category:{id}"),
+            (None, None) => format!("{index}"),
+        }
+    }
+
+    fn matches(&self, series: &CatalogSeries) -> bool {
+        self.title_contains.as_ref().is_none_or(|needle| {
+            series
+                .metadata
+                .title
+                .to_lowercase()
+                .contains(&needle.to_lowercase())
+        }) && self
+            .id_prefix
+            .as_ref()
+            .is_none_or(|prefix| series.id.starts_with(prefix))
+            && (self.frequencies.is_empty()
+                || series.metadata.frequency.as_ref().is_some_and(|f| {
+                    self.frequencies.iter().any(|want| {
+                        f == want
+                            || f.strip_prefix(want.as_str())
+                                .is_some_and(|rest| rest.starts_with(','))
+                    })
+                }))
+    }
+}
+
+fn validate_catalog_id(id: &str) -> Result<(), CrawlError> {
+    if id.is_empty() || id.len() > 255 || id.contains(char::is_whitespace) || id.contains('/') {
+        return Err(CrawlError::Parse(
+            "FRED catalog contains an invalid series id".into(),
+        ));
+    }
+    Ok(())
+}
+
+const CATALOG_VOLUME_GUARD: &str = "FRED catalog volume guard";
+
+/// Whether `error` is the catalog volume guard stopping a selection that grew past a limit.
+pub(crate) fn is_catalog_volume_guard(error: &CrawlError) -> bool {
+    matches!(error, CrawlError::Permanent(message) if message.starts_with(CATALOG_VOLUME_GUARD))
+}
+
+fn catalog_volume_error(what: &str, count: usize, limit: usize) -> CrawlError {
+    econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+        .guard_rejections_total
+        .with_label_values(&["FRED", "volume"])
+        .inc();
+    tracing::warn!(
+        count,
+        limit,
+        what,
+        "FRED catalog volume guard stopped discovery"
+    );
+    CrawlError::Permanent(format!(
+        "{CATALOG_VOLUME_GUARD}: {what} {count} exceeds {limit}; \
+        review selection rules before retrying"
+    ))
+}
 
 /// Code of the dataset every FRED series belongs to. It has no dimensions: a FRED series id is
 /// an opaque key, not a combination of dimension values.
@@ -228,13 +515,26 @@ fn is_copyright_restricted(notes: Option<&str>) -> bool {
         .any(|marker| lower.contains(marker))
 }
 
+/// A complete catalog selection ([`FredAdapter::select_catalog`]).
+#[derive(Debug)]
+pub(crate) struct CatalogSelection {
+    /// The selected series, as `discover` returns them.
+    pub found: Vec<DiscoveredSeries>,
+    /// Rows each rule matched (exclusions applied), in rule order. A series several rules match
+    /// counts for each.
+    pub rule_matches: Vec<usize>,
+    /// Catalog rows inspected, across every rule.
+    pub scanned: usize,
+}
+
 /// FRED adapter. See the module docs for endpoints and error mapping.
 #[derive(Debug, Clone)]
 pub struct FredAdapter {
     base_url: String,
-    /// The curated ids the last successful discovery skipped because their lookup failed, for
-    /// [`curated_missing`](SourceAdapter::curated_missing).
+    /// Explicit override ids whose last complete catalog confirmed NotFound.
     skipped_ids: Arc<Mutex<Vec<String>>>,
+    /// Facts and rule fingerprint from the last fully validated catalog only.
+    catalog: Arc<Mutex<Option<(String, CatalogLifecycle)>>>,
 }
 
 impl FredAdapter {
@@ -243,6 +543,7 @@ impl FredAdapter {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             skipped_ids: Arc::default(),
+            catalog: Arc::default(),
         }
     }
 
@@ -255,6 +556,248 @@ impl FredAdapter {
             .fred
             .as_deref()
             .ok_or_else(|| CrawlError::Auth("FRED_API_KEY not set".into()))
+    }
+
+    /// Returns a complete, validated selection or nothing. No observations are requested here.
+    async fn discover_catalog(
+        &self,
+        ctx: &CrawlCtx,
+        rules: &FredCatalogRules,
+    ) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+        Ok(self.select_catalog(ctx, rules).await?.found)
+    }
+
+    /// [`discover_catalog`](Self::discover_catalog), also saying how many rows each rule
+    /// matched and how many catalog rows were inspected (for `crawler check-selection`). Reads
+    /// and writes no database; the catalog facts it records are read back with
+    /// [`catalog_lifecycle`](SourceAdapter::catalog_lifecycle) and
+    /// [`curated_missing`](SourceAdapter::curated_missing).
+    pub(crate) async fn select_catalog(
+        &self,
+        ctx: &CrawlCtx,
+        rules: &FredCatalogRules,
+    ) -> Result<CatalogSelection, CrawlError> {
+        let api_key = self.api_key(ctx)?;
+        let mut selected = BTreeMap::new();
+        // Every id the walked releases and categories list, selected or not. Absence evidence
+        // counts only ids missing from the whole walked catalog: a series retitled or
+        // re-frequencied out of a rule is still published upstream.
+        let mut walked = BTreeSet::new();
+        let mut scanned = 0;
+        let mut rule_matches = Vec::with_capacity(rules.rules.len());
+        // Pin the realtime date for every page of this catalog walk. Count/order validation
+        // below also refuses common forms of a catalog changing during pagination.
+        let realtime = chrono::Utc::now().date_naive().to_string();
+        for (index, rule) in rules.rules.iter().enumerate() {
+            let rows = self
+                .catalog_rows(ctx, api_key, rule, rules, &realtime, scanned)
+                .await?;
+            scanned += rows.len();
+            let mut matched = 0;
+            crate::catalog_selection::record_rule_matches(
+                "FRED",
+                &rule.label(index),
+                rows.iter()
+                    .filter(|row| rule.matches(row) && !rules.exclude.contains(&row.id))
+                    .count(),
+            );
+            for row in rows {
+                walked.insert(row.id.clone());
+                if !rule.matches(&row) || rules.exclude.contains(&row.id) {
+                    continue;
+                }
+                matched += 1;
+                if selected
+                    .get(&row.id)
+                    .is_some_and(|previous| previous != &row.metadata)
+                {
+                    return Err(CrawlError::Transient(format!(
+                        "FRED catalog returned conflicting metadata for {}",
+                        row.id
+                    )));
+                }
+                selected.insert(row.id.clone(), row.metadata);
+                if selected.len() > rules.max_series {
+                    return Err(catalog_volume_error(
+                        "selected series",
+                        selected.len(),
+                        rules.max_series,
+                    ));
+                }
+            }
+            rule_matches.push(matched);
+        }
+        let mut facts = CatalogLifecycle::default();
+        for id in &rules.include {
+            if rules.exclude.contains(id) || selected.contains_key(id) {
+                continue;
+            }
+            match self.fetch_metadata(ctx, api_key, id).await {
+                Ok((meta, _)) => {
+                    selected.insert(
+                        id.clone(),
+                        FredSeries {
+                            title: meta.title,
+                            notes: meta.description,
+                            units: meta.units,
+                            frequency: meta.frequency,
+                            seasonal_adjustment: meta.seasonal_adjustment,
+                            last_updated: None,
+                        },
+                    );
+                    if selected.len() > rules.max_series {
+                        return Err(catalog_volume_error(
+                            "selected series",
+                            selected.len(),
+                            rules.max_series,
+                        ));
+                    }
+                }
+                Err(CrawlError::NotFound(_)) => facts.confirmed_missing_ids.push(id.clone()),
+                // Parse/permanent errors are not evidence of removal. Never publish a partial
+                // override list as a successful catalog, even if other entries succeeded.
+                Err(error) => return Err(error),
+            }
+        }
+        if selected.is_empty() {
+            return Err(CrawlError::Transient(
+                "FRED catalog selection is empty; refusing to infer removals".into(),
+            ));
+        }
+        facts.unselected_ids = walked
+            .into_iter()
+            .filter(|id| !selected.contains_key(id))
+            .collect();
+        let mut found = Vec::with_capacity(selected.len());
+        for (id, metadata) in selected {
+            if is_copyright_restricted(metadata.notes.as_deref()) {
+                facts.restricted_ids.push(id.clone());
+            } else if metadata
+                .title
+                .to_ascii_uppercase()
+                .contains("(DISCONTINUED)")
+            {
+                facts.discontinued_ids.push(id.clone());
+            }
+            found.push(DiscoveredSeries {
+                external_id: id.clone(),
+                title: metadata.title,
+                description: non_empty(metadata.notes),
+                units: non_empty(metadata.units),
+                frequency: non_empty(metadata.frequency),
+                data_url: Some(format!("{FRED_WEB_SERIES_URL}/{id}")),
+                dataset: fred_dataset(),
+            });
+        }
+        *self
+            .skipped_ids
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = facts
+            .confirmed_missing_ids
+            .iter()
+            .filter(|id| !rules.expected_missing.contains(id))
+            .cloned()
+            .collect();
+        *self.catalog.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some((rules.fingerprint(), facts));
+        Ok(CatalogSelection {
+            found,
+            rule_matches,
+            scanned,
+        })
+    }
+
+    async fn catalog_rows(
+        &self,
+        ctx: &CrawlCtx,
+        api_key: &str,
+        rule: &FredCatalogRule,
+        limits: &FredCatalogRules,
+        realtime: &str,
+        already_scanned: usize,
+    ) -> Result<Vec<CatalogSeries>, CrawlError> {
+        let (path, parameter, catalog_id) = if let Some(id) = rule.release_id {
+            ("/release/series", "release_id", id)
+        } else {
+            (
+                "/category/series",
+                "category_id",
+                rule.category_id.expect("validated rule"),
+            )
+        };
+        let catalog_id = catalog_id.to_string();
+        let page_size = CATALOG_PAGE_SIZE.to_string();
+        let mut rows = Vec::new();
+        let mut expected_count = None;
+        let mut last_id: Option<String> = None;
+        loop {
+            let offset = rows.len().to_string();
+            let query = [
+                (parameter, catalog_id.as_str()),
+                ("api_key", api_key),
+                ("file_type", "json"),
+                ("limit", page_size.as_str()),
+                ("offset", offset.as_str()),
+                ("order_by", "series_id"),
+                ("sort_order", "asc"),
+                ("realtime_start", realtime),
+                ("realtime_end", realtime),
+            ];
+            let page: CatalogPage = ctx
+                .http
+                .get_json(SourceId::Fred, &self.url(path), &query)
+                .await
+                .map_err(classify_fred_error)?;
+            if page.count.saturating_add(already_scanned) > limits.max_catalog_series {
+                return Err(catalog_volume_error(
+                    "catalog rows",
+                    page.count.saturating_add(already_scanned),
+                    limits.max_catalog_series,
+                ));
+            }
+            if page.offset != rows.len()
+                || page.limit != CATALOG_PAGE_SIZE
+                || expected_count.is_some_and(|count| page.count != count)
+                || page.seriess.len()
+                    != (page.count.saturating_sub(rows.len())).min(CATALOG_PAGE_SIZE)
+            {
+                return Err(CrawlError::Transient(format!(
+                    "FRED {parameter}={catalog_id}: incomplete or changing catalog pagination"
+                )));
+            }
+            expected_count = Some(page.count);
+            for row in page.seriess {
+                validate_catalog_id(&row.id)?;
+                if row.metadata.title.trim().is_empty()
+                    || row
+                        .metadata
+                        .frequency
+                        .as_ref()
+                        .is_none_or(|frequency| frequency.trim().is_empty())
+                {
+                    return Err(CrawlError::Parse(
+                        "FRED catalog row lacks a title or frequency; refusing a partial catalog"
+                            .into(),
+                    ));
+                }
+                if last_id.as_ref().is_some_and(|last| row.id <= *last) {
+                    return Err(CrawlError::Transient(format!(
+                        "FRED {parameter}={catalog_id}: repeated or out-of-order catalog series"
+                    )));
+                }
+                last_id = Some(row.id.clone());
+                rows.push(row);
+            }
+            if rows.len() == page.count {
+                break;
+            }
+        }
+        if rows.is_empty() {
+            return Err(CrawlError::Transient(format!(
+                "FRED {parameter}={catalog_id}: empty catalog; refusing to infer removals"
+            )));
+        }
+        Ok(rows)
     }
 
     /// The series' metadata and its `last_updated` (`None` if FRED sent none).
@@ -277,8 +820,13 @@ impl FredAdapter {
             )
             .await
             .map_err(classify_fred_error)?;
+        // FRED reports a missing series as HTTP 400 "The series does not exist" (NotFound, see
+        // `classify_fred_error`). A 200 with no series is an anomalous response, not evidence
+        // that the series is gone, so it must not count toward fetch retirement.
         let s = body.seriess.into_iter().next().ok_or_else(|| {
-            CrawlError::NotFound(format!("FRED series {series_id}: no metadata returned"))
+            CrawlError::Transient(format!(
+                "FRED series {series_id}: a successful response returned no metadata"
+            ))
         })?;
         Ok((
             NewSeriesMetadataLite {
@@ -485,91 +1033,6 @@ impl FredAdapter {
              {VINTAGE_DATES_PAGE_SIZE} vintage dates"
         )))
     }
-
-    /// Looks up each of `ids`' live metadata, dropping copyright-restricted series (the
-    /// [`is_copyright_restricted`] safety net) and building a [`DiscoveredSeries`] from the rest.
-    /// A per-id lookup failure is logged and that id skipped, unless every id fails; `Auth` and
-    /// `RateLimited` errors abort immediately and discard every id already found in this call
-    /// (matching the old search-based `discover`'s behaviour: a retry starts over from the top of
-    /// the list rather than resuming, so a rate limit partway through is more of a delay here,
-    /// since the list is walked in full on every discovery run either way).
-    ///
-    /// A `Transient` skip (a timeout or 5xx) means the list is incomplete for a reason that
-    /// should clear up on retry, so it fails the whole call instead of quietly persisting a
-    /// partial discovery: otherwise a blip partway through the list would look, from the finished
-    /// count alone, like those ids simply don't exist. `NotFound`/`Parse`/`Permanent` skips (a bad
-    /// id, a malformed response) won't resolve on retry, so they stay skip-and-continue as before.
-    async fn discover_ids(
-        &self,
-        ctx: &CrawlCtx,
-        api_key: &str,
-        ids: &[String],
-    ) -> Result<Vec<DiscoveredSeries>, CrawlError> {
-        let mut found = Vec::with_capacity(ids.len());
-        let mut restricted_count = 0usize;
-        let mut skipped_ids = Vec::new();
-        let mut last_err = None;
-        let mut first_transient = None;
-        let mut any_ok = false;
-
-        for id in ids {
-            match self.fetch_metadata(ctx, api_key, id).await {
-                Ok((meta, _)) => {
-                    any_ok = true;
-                    if is_copyright_restricted(meta.description.as_deref()) {
-                        tracing::info!(id, "dropping copyright-restricted series");
-                        restricted_count += 1;
-                        continue;
-                    }
-                    found.push(DiscoveredSeries {
-                        external_id: id.clone(),
-                        title: meta.title,
-                        description: meta.description,
-                        units: meta.units,
-                        frequency: meta.frequency,
-                        data_url: Some(format!("{FRED_WEB_SERIES_URL}/{id}")),
-                        dataset: fred_dataset(),
-                    });
-                }
-                Err(e) => {
-                    let e = skip_or_abort(e, id)?;
-                    if first_transient.is_none() && matches!(e, CrawlError::Transient(_)) {
-                        first_transient = Some(e.clone());
-                    }
-                    skipped_ids.push(id.as_str());
-                    last_err = Some(e);
-                }
-            }
-        }
-
-        if !skipped_ids.is_empty() {
-            let sample: Vec<&str> = skipped_ids.iter().take(5).copied().collect();
-            tracing::warn!(
-                skipped = skipped_ids.len(),
-                sample = ?sample,
-                "FRED discovery: some curated ids failed lookup"
-            );
-        }
-
-        match (any_ok, last_err, first_transient) {
-            (false, Some(e), _) => Err(e),
-            (_, _, Some(transient)) => Err(transient),
-            _ => {
-                tracing::info!(
-                    series = found.len(),
-                    dropped_restricted = restricted_count,
-                    dropped_errors = skipped_ids.len(),
-                    "FRED discovery finished"
-                );
-                *self
-                    .skipped_ids
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner) =
-                    skipped_ids.iter().map(|id| id.to_string()).collect();
-                Ok(found)
-            }
-        }
-    }
 }
 
 impl Default for FredAdapter {
@@ -588,17 +1051,41 @@ impl SourceAdapter for FredAdapter {
         &[DATASET]
     }
 
-    /// Looks up the curated list from [`crate::reference::fred_series`]. See the module docs.
+    /// Walks the complete configured catalog rules, under both scan and selection limits.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
-        let api_key = self.api_key(ctx)?;
-        let ids = fred_series()?;
-        self.discover_ids(ctx, api_key, ids).await
+        let rules = load_catalog_rules()?;
+        self.discover_catalog(ctx, &rules).await
+    }
+
+    fn discovery_is_complete(&self) -> bool {
+        true
+    }
+
+    fn tracks_catalog_lifecycle(&self) -> bool {
+        true
+    }
+
+    fn catalog_scope(&self) -> Option<String> {
+        self.catalog
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|(scope, _)| scope.clone())
+    }
+
+    fn catalog_lifecycle(&self) -> CatalogLifecycle {
+        self.catalog
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|(_, facts)| facts.clone())
+            .unwrap_or_default()
     }
 
     /// `/series` (metadata), then every vintage of the observations on or after `since` from
     /// `/series/observations` (one request per [`OBSERVATIONS_PAGE_SIZE`] rows per real-time
     /// window; see [Vintage-date limit](self#vintage-date-limit)). Refuses with
-    /// [`CrawlError::Permanent`] if the series' notes are copyright-restricted (see
+    /// [`CrawlError::Restricted`] if the series' notes are copyright-restricted (see
     /// [`is_copyright_restricted`]), whether or not it was reached via discovery.
     async fn fetch_series(
         &self,
@@ -609,8 +1096,8 @@ impl SourceAdapter for FredAdapter {
         self.fetch(ctx, external_id, since, None).await
     }
 
-    /// The curated ids the last successful discovery skipped because their lookup failed
-    /// (`NotFound`, `Parse` or `Permanent`; see `discover_ids`).
+    /// Unexpected missing overrides from the last complete catalog. Intentional retirement
+    /// probes remain lifecycle evidence but do not repeatedly trigger the missing-entry alert.
     fn curated_missing(&self) -> Vec<String> {
         self.skipped_ids
             .lock()
@@ -652,7 +1139,7 @@ impl FredAdapter {
                 series_id = external_id,
                 "refusing to fetch copyright-restricted series"
             );
-            return Err(CrawlError::Permanent(format!(
+            return Err(CrawlError::Restricted(format!(
                 "FRED {external_id}: copyright-restricted, refusing to fetch"
             )));
         }
@@ -691,18 +1178,6 @@ async fn stored_validators(ctx: &CrawlCtx, external_id: &str) -> Option<Validato
             tracing::warn!(series_id = external_id, %error,
                 "FRED: reading stored validators failed; fetching observations");
             None
-        }
-    }
-}
-
-/// Returns `err` for aborting errors (auth, rate limiting); otherwise logs it and hands it back
-/// to be remembered as the last failure.
-fn skip_or_abort(err: CrawlError, what: &str) -> Result<CrawlError, CrawlError> {
-    match err {
-        CrawlError::Auth(_) | CrawlError::RateLimited { .. } => Err(err),
-        e => {
-            tracing::warn!(series_id = what, error = %e, "FRED series lookup failed; skipping");
-            Ok(e)
         }
     }
 }
@@ -893,6 +1368,21 @@ struct SeriesResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct CatalogPage {
+    count: usize,
+    offset: usize,
+    limit: usize,
+    seriess: Vec<CatalogSeries>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogSeries {
+    id: String,
+    #[serde(flatten)]
+    metadata: FredSeries,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 struct FredSeries {
     title: String,
     #[serde(default)]
@@ -937,6 +1427,403 @@ mod tests {
 
     use super::*;
     use crate::testkit::{test_ctx, MockSource, Reply, Route, TEST_API_KEY};
+
+    fn catalog_rules(max_series: usize, max_catalog: usize) -> FredCatalogRules {
+        FredCatalogRules::parse(&format!(
+            "max_series={max_series}\nmax_catalog_series={max_catalog}\n\
+             [[rules]]\nrelease_id=53\ntitle_contains='domestic product'\nfrequencies=['Quarterly']"
+        ))
+        .unwrap()
+    }
+
+    fn catalog_row(id: &str, title: &str) -> serde_json::Value {
+        serde_json::json!({"id":id,"title":title,"frequency":"Quarterly","units":"Dollars"})
+    }
+
+    fn catalog_page(count: usize, offset: usize, rows: Vec<serde_json::Value>) -> Reply {
+        Reply::json_str(
+            serde_json::json!({
+                "count":count,"offset":offset,"limit":CATALOG_PAGE_SIZE,"seriess":rows
+            })
+            .to_string(),
+        )
+    }
+
+    #[tokio::test]
+    async fn catalog_automatically_selects_new_ids_and_reports_retired_overrides() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/release/series").query("release_id", "53"),
+            catalog_page(
+                3,
+                0,
+                vec![
+                    catalog_row("GDPNEW", "Gross Domestic Product"),
+                    catalog_row("OTHER", "An unrelated series"),
+                    catalog_row("REALGDPNEW", "Real Gross Domestic Product"),
+                ],
+            ),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/series").query("series_id", "OLDGDP"),
+            Reply::json_str(ERR_NO_SERIES).with_status(400),
+        )
+        .await;
+        let mut rules = catalog_rules(10, 10);
+        rules.include = vec!["OLDGDP".into()];
+        let adapter = FredAdapter::new(mock.base_url());
+        let found = adapter.discover_catalog(&test_ctx(), &rules).await.unwrap();
+        assert_eq!(
+            found
+                .iter()
+                .map(|s| s.external_id.as_str())
+                .collect::<Vec<_>>(),
+            ["GDPNEW", "REALGDPNEW"]
+        );
+        assert_eq!(
+            adapter.catalog_lifecycle().confirmed_missing_ids,
+            ["OLDGDP"]
+        );
+        // Listed by the walked release but outside the title rule: still published, so a
+        // tracked OTHER (for example a retitled GDP series) never counts as absent.
+        assert_eq!(adapter.catalog_lifecycle().unselected_ids, ["OTHER"]);
+        assert!(adapter.discovery_is_complete());
+        assert_eq!(adapter.catalog_scope().unwrap(), rules.fingerprint());
+        assert_eq!(
+            mock.received_requests().await.len(),
+            2,
+            "catalog discovery must not fetch any observations"
+        );
+    }
+
+    /// A rule that matches nothing in its walked catalog is reported, even when another rule
+    /// keeps discovery working.
+    #[tokio::test]
+    async fn a_rule_matching_nothing_is_published_per_rule() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/release/series").query("release_id", "53"),
+            catalog_page(1, 0, vec![catalog_row("GDP", "Gross Domestic Product")]),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/category/series").query("category_id", "987654"),
+            catalog_page(1, 0, vec![catalog_row("RENAMED", "A renamed series")]),
+        )
+        .await;
+        let rules = FredCatalogRules::parse(
+            "max_series=10\nmax_catalog_series=10\n[[rules]]\nrelease_id=53\n\
+             [[rules]]\ncategory_id=987654\nid_prefix='ZZGONE'",
+        )
+        .unwrap();
+        let adapter = FredAdapter::new(mock.base_url());
+        // This test's labels are unique, so parallel tests cannot change them.
+        econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+            .rule_matches
+            .with_label_values(&["FRED", "1:category:987654"])
+            .set(-1);
+        let found = adapter.discover_catalog(&test_ctx(), &rules).await.unwrap();
+        assert_eq!(found.len(), 1);
+        let gauge = |rule: &str| {
+            econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+                .rule_matches
+                .with_label_values(&["FRED", rule])
+                .get()
+        };
+        assert_eq!(gauge("1:category:987654"), 0);
+        assert_eq!(adapter.catalog_lifecycle().unselected_ids, ["RENAMED"]);
+    }
+
+    #[tokio::test]
+    async fn expected_retirement_probes_keep_evidence_without_suppressing_unexpected_missing() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/release/series"),
+            catalog_page(1, 0, vec![catalog_row("GDP", "Gross Domestic Product")]),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/series"),
+            Reply::json_str(ERR_NO_SERIES).with_status(400),
+        )
+        .await;
+        let rules = FredCatalogRules::parse(
+            "max_series=10\nmax_catalog_series=10\ninclude=['OLDGDP','UNEXPECTED']\n\
+             expected_missing=['OLDGDP']\n[[rules]]\nrelease_id=53",
+        )
+        .unwrap();
+        let adapter = FredAdapter::new(mock.base_url());
+        let found = adapter.discover_catalog(&test_ctx(), &rules).await.unwrap();
+        assert_eq!(found[0].external_id, "GDP");
+        assert_eq!(
+            adapter.catalog_lifecycle().confirmed_missing_ids,
+            ["OLDGDP", "UNEXPECTED"],
+            "both kinds of confirmed NotFound remain durable lifecycle evidence"
+        );
+        assert_eq!(
+            adapter.curated_missing(),
+            ["UNEXPECTED"],
+            "only the explicitly declared retirement probe is exempt from missing alerts"
+        );
+    }
+
+    #[test]
+    fn expected_missing_probes_must_be_bounded_unique_nonexcluded_include_ids() {
+        let prefix = "max_series=10\nmax_catalog_series=10\n";
+        let suffix = "\n[[rules]]\nrelease_id=53";
+        for lists in [
+            "include=['OLD']\nexpected_missing=['OTHER']",
+            "include=['OLD']\nexpected_missing=['OLD','OLD']",
+            "include=['OLD']\nexpected_missing=['OLD']\nexclude=['OLD']",
+            "include=['OLD','OLD']",
+            "exclude=['OLD','OLD']",
+        ] {
+            assert!(
+                FredCatalogRules::parse(&format!("{prefix}{lists}{suffix}")).is_err(),
+                "invalid probe configuration accepted: {lists}"
+            );
+        }
+        let ids = (0..33)
+            .map(|i| format!("'OLD{i}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(FredCatalogRules::parse(&format!(
+            "{prefix}include=[{ids}]\nexpected_missing=[{ids}]{suffix}"
+        ))
+        .is_err());
+        assert!(FredCatalogRules::parse(&format!(
+            "{prefix}include=['OLD']\nexpected_missing=['OLD']{suffix}"
+        ))
+        .is_ok());
+    }
+
+    #[tokio::test]
+    async fn catalog_picks_up_a_replacement_without_changing_rules_or_merging_histories() {
+        let mock = MockSource::start().await;
+        let route = Route::get("/release/series");
+        mock.mount(
+            &route,
+            catalog_page(1, 0, vec![catalog_row("OLDGDP", "Gross Domestic Product")]),
+        )
+        .await;
+        let adapter = FredAdapter::new(mock.base_url());
+        let rules = catalog_rules(10, 10);
+        let old = adapter.discover_catalog(&test_ctx(), &rules).await.unwrap();
+        let scope = adapter.catalog_scope();
+        mock.server().reset().await;
+        mock.mount(
+            &route,
+            catalog_page(1, 0, vec![catalog_row("NEWGDP", "Gross Domestic Product")]),
+        )
+        .await;
+        let new = adapter.discover_catalog(&test_ctx(), &rules).await.unwrap();
+        assert_eq!(old[0].external_id, "OLDGDP");
+        assert_eq!(new[0].external_id, "NEWGDP");
+        assert_eq!(
+            scope,
+            adapter.catalog_scope(),
+            "upstream changes do not change selection identity"
+        );
+        assert!(
+            new.iter().all(|s| s.external_id != "OLDGDP"),
+            "absence is evidence for the conservative lifecycle writer, not an id rewrite"
+        );
+    }
+
+    #[tokio::test]
+    async fn catalog_retains_restricted_and_discontinued_metadata_with_explicit_facts() {
+        let mock = MockSource::start().await;
+        let mut restricted = catalog_row("GDP1", "Gross Domestic Product");
+        restricted["notes"] = "All rights reserved.".into();
+        mock.mount(
+            &Route::get("/release/series"),
+            catalog_page(
+                2,
+                0,
+                vec![
+                    restricted,
+                    catalog_row("GDP2", "Gross Domestic Product (DISCONTINUED)"),
+                ],
+            ),
+        )
+        .await;
+        let adapter = FredAdapter::new(mock.base_url());
+        let found = adapter
+            .discover_catalog(&test_ctx(), &catalog_rules(10, 10))
+            .await
+            .unwrap();
+        assert_eq!(found.len(), 2, "metadata is kept internally, never deleted");
+        let facts = adapter.catalog_lifecycle();
+        assert_eq!(facts.restricted_ids, ["GDP1"]);
+        assert_eq!(facts.discontinued_ids, ["GDP2"]);
+    }
+
+    #[tokio::test]
+    async fn catalog_volume_guards_stop_before_overrides_or_observations() {
+        for (max_series, max_catalog, expected) in
+            [(1, 10, "selected series"), (10, 1, "catalog rows")]
+        {
+            let mock = MockSource::start().await;
+            mock.mount(
+                &Route::get("/release/series"),
+                catalog_page(
+                    2,
+                    0,
+                    vec![
+                        catalog_row("GDP1", "Gross Domestic Product"),
+                        catalog_row("GDP2", "Real Gross Domestic Product"),
+                    ],
+                ),
+            )
+            .await;
+            let mut rules = catalog_rules(max_series, max_catalog);
+            rules.include = vec!["UNRATE".into()];
+            let adapter = FredAdapter::new(mock.base_url());
+            let error = adapter
+                .discover_catalog(&test_ctx(), &rules)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+            assert!(adapter.catalog_scope().is_none());
+            assert_eq!(mock.received_requests().await.len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn catalog_validates_every_page_and_rejects_drift_without_publishing_partial_state() {
+        for scenario in ["valid", "count_change", "truncated", "duplicate"] {
+            let mock = MockSource::start().await;
+            let first = (0..CATALOG_PAGE_SIZE)
+                .map(|i| catalog_row(&format!("GDP{i:04}"), "Gross Domestic Product"))
+                .collect();
+            mock.mount(
+                &Route::get("/release/series").query("offset", "0"),
+                catalog_page(1001, 0, first),
+            )
+            .await;
+            let count = if scenario == "count_change" {
+                1002
+            } else {
+                1001
+            };
+            let last = if scenario == "truncated" {
+                vec![]
+            } else {
+                vec![catalog_row(
+                    if scenario == "duplicate" {
+                        "GDP0000"
+                    } else {
+                        "GDP1000"
+                    },
+                    "Gross Domestic Product",
+                )]
+            };
+            mock.mount(
+                &Route::get("/release/series").query("offset", "1000"),
+                catalog_page(count, 1000, last),
+            )
+            .await;
+            let adapter = FredAdapter::new(mock.base_url());
+            let result = adapter
+                .discover_catalog(&test_ctx(), &catalog_rules(2000, 3000))
+                .await;
+            if scenario == "valid" {
+                assert_eq!(result.unwrap().len(), 1001);
+            } else {
+                assert!(result.is_err(), "{scenario} must fail the entire snapshot");
+                assert!(adapter.catalog_scope().is_none());
+            }
+            assert_eq!(mock.received_requests().await.len(), 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn category_catalog_and_exclusions_use_the_same_complete_selection_path() {
+        let mock = MockSource::start().await;
+        mock.mount(
+            &Route::get("/category/series").query("category_id", "125"),
+            catalog_page(
+                2,
+                0,
+                vec![catalog_row("A", "Income"), catalog_row("B", "Income")],
+            ),
+        )
+        .await;
+        let rules = FredCatalogRules::parse(
+            "max_series=10\nmax_catalog_series=10\nexclude=['B']\n\
+            [[rules]]\ncategory_id=125\nfrequencies=['Quarterly']",
+        )
+        .unwrap();
+        let found = FredAdapter::new(mock.base_url())
+            .discover_catalog(&test_ctx(), &rules)
+            .await
+            .unwrap();
+        assert_eq!(
+            found
+                .iter()
+                .map(|s| s.external_id.as_str())
+                .collect::<Vec<_>>(),
+            ["A"]
+        );
+    }
+
+    #[test]
+    fn catalog_frequency_rules_match_qualified_values_without_unrelated_prefixes() {
+        for frequency in ["Daily", "Weekly", "Biweekly"] {
+            let rules = FredCatalogRules::parse(&format!(
+                "max_series=10\nmax_catalog_series=20\n[[rules]]\nrelease_id=53\nfrequencies=['{frequency}']"
+            )).unwrap();
+            let mut row = catalog_row("A", "Example");
+            for (actual, expected) in [
+                (frequency.to_string(), true),
+                (format!("{frequency}, Ending Friday"), true),
+                (format!("{frequency}Extra"), false),
+                ("Annual".to_string(), false),
+            ] {
+                row["frequency"] = actual.clone().into();
+                let series = serde_json::from_value(row.clone()).unwrap();
+                assert_eq!(rules.rules[0].matches(&series), expected, "{actual}");
+            }
+            row["frequency"] = serde_json::Value::Null;
+            assert!(!rules.rules[0].matches(&serde_json::from_value(row).unwrap()));
+        }
+    }
+
+    #[test]
+    fn catalog_scope_ignores_comments_and_rules_validate_before_any_request() {
+        let text = "max_series=10\nmax_catalog_series=20\n[[rules]]\nrelease_id=53";
+        assert_eq!(
+            FredCatalogRules::parse(text).unwrap().fingerprint(),
+            FredCatalogRules::parse(&format!("# comment\n{text}\n"))
+                .unwrap()
+                .fingerprint()
+        );
+        for changed in [
+            text.replace("max_series=10", "max_series=20"),
+            text.replace("max_catalog_series=20", "max_catalog_series=30"),
+        ] {
+            assert_eq!(
+                FredCatalogRules::parse(text).unwrap().fingerprint(),
+                FredCatalogRules::parse(&changed).unwrap().fingerprint()
+            );
+        }
+        let with_probe = format!("include=['GDP']\n{text}");
+        assert_eq!(
+            FredCatalogRules::parse(&with_probe).unwrap().fingerprint(),
+            FredCatalogRules::parse(&format!("expected_missing=['GDP']\n{with_probe}"))
+                .unwrap()
+                .fingerprint()
+        );
+        for suffix in [
+            "\ncategory_id=125",
+            "\nfrequencies=['Wrong']",
+            "\nid_prefix=''",
+            "\nmisspelled=true",
+        ] {
+            assert!(FredCatalogRules::parse(&format!("{text}{suffix}")).is_err());
+        }
+    }
 
     const SERIES_GDP: &str = include_str!("../../tests/fixtures/fred/series_gdp.json");
     const OBS_GDP: &str = include_str!("../../tests/fixtures/fred/observations_gdp.json");
@@ -1082,7 +1969,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err,
-            CrawlError::Permanent(
+            CrawlError::Restricted(
                 "FRED CBBTCUSD: copyright-restricted, refusing to fetch".to_string()
             )
         );
@@ -1229,7 +2116,7 @@ mod tests {
             .fetch_series_incremental(&ctx, "GDP", None, known)
             .await
             .unwrap_err();
-        assert!(matches!(refused, CrawlError::Permanent(_)), "{refused:?}");
+        assert!(matches!(refused, CrawlError::Restricted(_)), "{refused:?}");
 
         // A new `last_updated` fetches the observations again.
         mock.reset().await;
@@ -1696,8 +2583,10 @@ mod tests {
         assert_eq!(classify_fred_error(t.clone()), t);
     }
 
+    /// FRED reports a missing series as an HTTP 400; a 200 with no series is an anomaly and
+    /// must not count as NotFound evidence toward fetch retirement.
     #[tokio::test]
-    async fn empty_seriess_is_not_found() {
+    async fn empty_seriess_is_transient_not_lifecycle_evidence() {
         let mock = MockSource::start().await;
         mock.mount(
             &Route::get("/series"),
@@ -1708,7 +2597,7 @@ mod tests {
             .fetch_series(&test_ctx(), "GDP", None)
             .await
             .unwrap_err();
-        assert_eq!(e.kind(), "not_found");
+        assert_eq!(e.kind(), "transient");
     }
 
     /// A second series fixture (derived from [`SERIES_GDP`]) for tests that need more than one
@@ -1735,240 +2624,13 @@ mod tests {
         )
     }
 
-    #[tokio::test]
-    async fn discover_ids_looks_up_each_curated_id() {
-        let mock = MockSource::start().await;
-        mock.mount_expect(
-            &Route::get("/series").query("series_id", "GDP"),
-            Reply::json_str(SERIES_GDP),
-            1,
-        )
-        .await;
-        mock.mount_expect(
-            &Route::get("/series").query("series_id", "GDPC1"),
-            Reply::json_str(series_fixture("GDPC1", "Real Gross Domestic Product")),
-            1,
-        )
-        .await;
-
-        let ctx = test_ctx();
-        let ids = ["GDP".to_string(), "GDPC1".to_string()];
-        let found = FredAdapter::new(mock.base_url())
-            .discover_ids(&ctx, TEST_API_KEY, &ids)
-            .await
-            .unwrap();
-        let got: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
-        assert_eq!(got, ["GDP", "GDPC1"]);
-        assert_eq!(found[0].title, "Gross Domestic Product");
-        assert_eq!(found[1].title, "Real Gross Domestic Product");
-        assert_eq!(found[0].units.as_deref(), Some("Billions of Dollars"));
-        assert_eq!(found[0].frequency.as_deref(), Some("Quarterly"));
-        assert!(found[0]
-            .description
-            .as_deref()
-            .unwrap()
-            .starts_with("BEA Account Code: A191RC"));
-        assert_eq!(
-            found[0].data_url.as_deref(),
-            Some("https://fred.stlouisfed.org/series/GDP")
-        );
-        for s in &found {
-            let ds = &s.dataset;
-            assert_eq!(ds.code, DATASET, "{}", s.external_id);
-            assert!(ds.dimensions.0.is_empty(), "{}", s.external_id);
-        }
-        mock.server().verify().await;
-    }
-
-    #[tokio::test]
-    async fn discover_ids_drops_copyright_restricted_series_as_a_safety_net() {
-        let mock = MockSource::start().await;
-        let restricted = restricted_fixture("CBBTCUSD", "Coinbase Bitcoin");
-        mock.mount(
-            &Route::get("/series").query("series_id", "CBBTCUSD"),
-            Reply::json_str(restricted),
-        )
-        .await;
-        mock.mount(
-            &Route::get("/series").query("series_id", "GDPC1"),
-            Reply::json_str(series_fixture("GDPC1", "Real Gross Domestic Product")),
-        )
-        .await;
-
-        let ctx = test_ctx();
-        let ids = ["CBBTCUSD".to_string(), "GDPC1".to_string()];
-        let found = FredAdapter::new(mock.base_url())
-            .discover_ids(&ctx, TEST_API_KEY, &ids)
-            .await
-            .unwrap();
-        let got: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
-        assert_eq!(got, ["GDPC1"], "restricted series must be dropped");
-    }
-
-    #[tokio::test]
-    async fn discover_ids_skips_a_failing_id_but_keeps_going() {
-        let mock = MockSource::start().await;
-        mock.mount(
-            &Route::get("/series").query("series_id", "NOPE"),
-            Reply::json_str(ERR_NO_SERIES).with_status(400),
-        )
-        .await;
-        mock.mount(
-            &Route::get("/series").query("series_id", "GDP"),
-            Reply::json_str(SERIES_GDP),
-        )
-        .await;
-
-        let ctx = test_ctx();
-        let ids = ["NOPE".to_string(), "GDP".to_string()];
-        let adapter = FredAdapter::new(mock.base_url());
-        assert!(adapter.curated_missing().is_empty());
-        let found = adapter
-            .discover_ids(&ctx, TEST_API_KEY, &ids)
-            .await
-            .unwrap();
-        let got: Vec<&str> = found.iter().map(|s| s.external_id.as_str()).collect();
-        assert_eq!(got, ["GDP"]);
-        // The skipped id is reported for `crawler_curated_missing`.
-        assert_eq!(adapter.curated_missing(), ["NOPE"]);
-    }
-
-    #[tokio::test]
-    async fn discover_ids_aborts_on_rate_limit_and_fails_if_everything_fails() {
-        let mock = MockSource::start().await;
-        mock.mount(&Route::get("/series"), Reply::status(429).retry_after(60))
-            .await;
-        let ctx = test_ctx();
-        let ids = ["GDP".to_string(), "GDPC1".to_string()];
-        let e = FredAdapter::new(mock.base_url())
-            .discover_ids(&ctx, TEST_API_KEY, &ids)
-            .await
-            .unwrap_err();
-        assert_eq!(e.kind(), "rate_limited");
-        // Aborted on the first id: the second was never requested.
-        assert_eq!(mock.received_requests().await.len(), 1);
-
-        let mock = MockSource::start().await;
-        mock.mount(
-            &Route::get("/series"),
-            Reply::json_str(ERR_BAD_VARIABLE).with_status(400),
-        )
-        .await;
-        let e = FredAdapter::new(mock.base_url())
-            .discover_ids(&ctx, TEST_API_KEY, &ids)
-            .await
-            .unwrap_err();
-        assert_eq!(e.kind(), "permanent");
-        assert_eq!(
-            mock.received_requests().await.len(),
-            2,
-            "both ids fail, so both are tried before giving up"
-        );
-    }
-
-    /// A rate limit partway through the list aborts immediately, without trying the remaining
-    /// ids, even though earlier ones already succeeded (a bug that skipped instead of aborting
-    /// once `any_ok` was true would still request the third id).
-    #[tokio::test]
-    async fn discover_ids_aborts_mid_list_on_rate_limit() {
-        let mock = MockSource::start().await;
-        mock.mount(
-            &Route::get("/series").query("series_id", "GDP"),
-            Reply::json_str(SERIES_GDP),
-        )
-        .await;
-        mock.mount(
-            &Route::get("/series").query("series_id", "GDPC1"),
-            Reply::status(429).retry_after(60),
-        )
-        .await;
-        let ctx = test_ctx();
-        let ids = ["GDP".to_string(), "GDPC1".to_string(), "UNRATE".to_string()];
-        let e = FredAdapter::new(mock.base_url())
-            .discover_ids(&ctx, TEST_API_KEY, &ids)
-            .await
-            .unwrap_err();
-        assert_eq!(e.kind(), "rate_limited");
-        assert_eq!(
-            mock.received_requests().await.len(),
-            2,
-            "the third id must never be requested"
-        );
-    }
-
-    /// A `Transient` skip (e.g. a 500) fails discovery even though every other id in the list
-    /// succeeded, instead of quietly persisting a partial list: a blip partway through should
-    /// retry, not look like the failed id simply doesn't exist. Unlike a rate limit or auth
-    /// failure, a transient error doesn't abort mid-list: the rest of the ids are still tried
-    /// before the call fails.
-    #[tokio::test]
-    async fn discover_ids_fails_on_a_transient_skip_even_if_others_succeeded() {
-        let mock = MockSource::start().await;
-        mock.mount(
-            &Route::get("/series").query("series_id", "GDP"),
-            Reply::json_str(SERIES_GDP),
-        )
-        .await;
-        mock.mount(
-            &Route::get("/series").query("series_id", "GDPC1"),
-            Reply::status(500),
-        )
-        .await;
-        mock.mount(
-            &Route::get("/series").query("series_id", "UNRATE"),
-            Reply::json_str(series_fixture("UNRATE", "Unemployment Rate")),
-        )
-        .await;
-        let ctx = test_ctx();
-        let ids = ["GDP".to_string(), "GDPC1".to_string(), "UNRATE".to_string()];
-        let e = FredAdapter::new(mock.base_url())
-            .discover_ids(&ctx, TEST_API_KEY, &ids)
-            .await
-            .unwrap_err();
-        assert_eq!(e.kind(), "transient", "{e}");
-        assert_eq!(
-            mock.received_requests().await.len(),
-            5,
-            "GDPC1 costs 3 requests (HttpFetcher's in-process retries on a 5xx); \
-             a transient skip doesn't abort mid-list, unlike rate-limit/auth, so UNRATE is \
-             still tried"
-        );
-    }
-
-    /// A missing/invalid key (`Auth`) aborts discovery the same way a rate limit does.
-    #[tokio::test]
-    async fn discover_ids_aborts_on_auth_error() {
-        let mock = MockSource::start().await;
-        mock.mount(&Route::get("/series"), Reply::status(401)).await;
-        let ctx = test_ctx();
-        let ids = ["GDP".to_string(), "GDPC1".to_string()];
-        let e = FredAdapter::new(mock.base_url())
-            .discover_ids(&ctx, TEST_API_KEY, &ids)
-            .await
-            .unwrap_err();
-        assert_eq!(e.kind(), "auth");
-        assert_eq!(mock.received_requests().await.len(), 1);
-    }
-
-    /// `discover()` reads the shipped curated list ([`crate::reference::fred_series`]) and looks
-    /// up every one of its ids; none of the shipped ids' fixture notes are restricted, so all of
-    /// them come back.
-    #[tokio::test]
-    async fn discover_reads_curated_list_from_reference_data() {
-        let mock = MockSource::start().await;
-        mock.mount(&Route::get("/series"), Reply::json_str(SERIES_GDP))
-            .await;
-        let found = FredAdapter::new(mock.base_url())
-            .discover(&test_ctx())
-            .await
-            .unwrap();
-        let want = crate::reference::fred_series().unwrap();
-        assert_eq!(found.len(), want.len());
-        let got: std::collections::HashSet<&str> =
-            found.iter().map(|s| s.external_id.as_str()).collect();
-        for id in want {
-            assert!(got.contains(id.as_str()), "{id} missing from discover()");
-        }
+    #[test]
+    fn shipped_catalog_rules_are_valid_and_bounded() {
+        let text = std::fs::read_to_string(data_dir().join(CATALOG_RULES_FILE)).unwrap();
+        let rules = FredCatalogRules::parse(&text).unwrap();
+        assert!(!rules.rules.is_empty());
+        assert!(rules.max_series <= 1000);
+        assert!(rules.include.len() <= 32);
     }
 
     /// The NBER recession indicator: `discover()` finds `USREC` in the
@@ -1981,6 +2643,12 @@ mod tests {
             &Route::get("/series").query("series_id", "USREC"),
             Reply::json_str(SERIES_USREC),
             1,
+        )
+        .await;
+        // USREC is an explicit override in catalog_selection/fred.toml, outside the GDP release.
+        mock.mount(
+            &Route::get("/release/series").query("release_id", "53"),
+            catalog_page(1, 0, vec![catalog_row("GDP", "Gross Domestic Product")]),
         )
         .await;
         mock.mount(&Route::get("/series"), Reply::json_str(SERIES_GDP))
@@ -2060,10 +2728,17 @@ mod contract {
         expect_points: 6,
         setup: |mock| {
             mock.mount(
-                &Route::get("/series").query("series_id", "GDP"),
+                &Route::get("/series"),
                 Reply::json_str(include_str!("../../tests/fixtures/fred/series_gdp.json")),
             )
             .await;
+            for id in ["WPU00000000", "CAPUTLG2211S1"] {
+                mock.mount(
+                    &Route::get("/series").query("series_id", id),
+                    Reply::json_str(r#"{"error_code":400,"error_message":"Bad Request. The series does not exist."}"#)
+                        .with_status(400),
+                ).await;
+            }
             mock.mount(
                 &Route::get("/series/vintagedates").query("series_id", "GDP"),
                 Reply::json_str(include_str!("../../tests/fixtures/fred/vintagedates_gdp.json")),
@@ -2071,9 +2746,18 @@ mod contract {
             .await;
         },
         discover: {
-            route: Route::get("/series"),
-            reply: Reply::json_str(include_str!("../../tests/fixtures/fred/series_gdp.json")),
-            min_series: 100,
+            route: Route::get("/release/series").query("release_id", "53"),
+            reply: {
+                let metadata: serde_json::Value = serde_json::from_str(
+                    include_str!("../../tests/fixtures/fred/series_gdp.json")
+                ).unwrap();
+                Reply::json_str(serde_json::json!({
+                    "count":1, "offset":0, "limit":1000, "seriess":metadata["seriess"]
+                }).to_string())
+            },
+            // One catalog series and eight live headline overrides; the two confirmed
+            // NotFound probes remain available to lifecycle reconciliation instead.
+            min_series: 9,
         },
     }
 }

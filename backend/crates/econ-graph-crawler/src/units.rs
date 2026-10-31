@@ -271,9 +271,9 @@ impl UnitsContext {
     };
 
     /// What `source`'s units texts may be assumed to mean: US dollars for FRED, BEA and BLS,
-    /// nothing for the rest (the World Bank's units name their currency; Census, FHFA and the
-    /// static catalogs have no dollar amounts). Adapters set this on the metadata they return,
-    /// and readers parsing stored units use it, so both answer the same way.
+    /// nothing for the rest (the World Bank's units name their currency; the Bank of Canada, WTO,
+    /// Census, FHFA and the static catalogs state none). Adapters set this on the metadata they
+    /// return, and readers parsing stored units use it, so both answer the same way.
     pub const fn for_source(source: SourceId) -> Self {
         match source {
             SourceId::Fred | SourceId::Bea | SourceId::Bls => Self::US_DOLLARS,

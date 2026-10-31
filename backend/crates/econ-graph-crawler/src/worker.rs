@@ -37,7 +37,10 @@
 //! `fetch_series` with neither bound, whatever the adapter, and with
 //! [`CrawlCtx::bypass_validators`] set, so the adapter re-reads the full history even when its
 //! stored validators say nothing changed. `discover_catalog` calls
-//! [`SourceAdapter::discover`]. Adapter and handler calls run in
+//! [`SourceAdapter::discover`], or, for an adapter that
+//! [discovers in chunks](crate::SourceAdapter::chunked_discovery), starts a chunked discovery
+//! run whose `discover_chunk` and `finalize_discovery` jobs follow (see [`crate::discovery_run`]).
+//! Adapter and handler calls run in
 //! their own task, so a panic becomes a `Transient` error instead of killing the worker.
 //!
 //! Batching: when the claimed item is a `fetch_series` or `refetch_series` job with no
@@ -66,7 +69,9 @@
 //! A maintenance loop calls [`CrawlQueueItem::release_stuck`] every `stuck_after / 2`
 //! (clamped to 1 s ..= 5 min) so items held by crashed workers become claimable again (each
 //! release counts as an attempt). The same loop purges `completed` / `failed` rows older than
-//! `queue_retention` with [`CrawlQueueItem::purge_finished`], at start-up and then hourly.
+//! `queue_retention` with [`CrawlQueueItem::purge_finished`], at start-up and then hourly, and
+//! final discovery runs with [`discovery_run::purge_finished_runs`]. Every pass also fails
+//! discovery runs whose jobs ended without completing ([`discovery_run::fail_abandoned_runs`]).
 //!
 //! [`Worker::run`] stops claiming when its `shutdown` future resolves and returns once in-flight
 //! jobs have finished.
@@ -89,6 +94,7 @@ use crate::adapter::{
     AdapterRegistry, CrawlCtx, DiscoveredSeries, Discovery, FetchedSeries, SourceAdapter,
 };
 use crate::dataset::DatasetCatalog;
+use crate::discovery_run::{self, RunEvents};
 use crate::error::CrawlError;
 use crate::http::Validators;
 use crate::persist::{self, AttemptRecord};
@@ -285,15 +291,36 @@ enum JobWrite {
         found: Vec<DiscoveredSeries>,
         complete: bool,
         scope_prefix: Option<String>,
+        lifecycle: crate::lifecycle::CatalogLifecycle,
+        catalog_scope: Option<String>,
+        observed_at: chrono::DateTime<Utc>,
         /// `(url, validators)` to store with the discovered series.
         validator: Option<(String, Validators)>,
     },
     /// The adapter found its catalog unchanged: nothing to write.
     DiscoveryUnchanged,
     Handler(JobStats),
+    /// A chunked-discovery job's result (see [`crate::discovery_run`]).
+    DiscoveryRun(chunked_discovery::RunWrite),
 }
 
 type Fetched = Result<JobWrite, CrawlError>;
+
+/// What a catalog walk established besides its series, which decides how its discovery
+/// commits. A single-job discovery reads them from its adapter right after the walk; a chunked
+/// discovery's finalize reads them from its run, where enumeration and the chunks stored them.
+struct CatalogFacts {
+    /// Curated entries the walk found missing upstream.
+    missing: Vec<String>,
+    /// The scope the catalog was selected under, for lifecycle reconciliation.
+    catalog_scope: Option<String>,
+    /// Publication facts the walk established.
+    lifecycle: crate::lifecycle::CatalogLifecycle,
+    /// Whether the job's reference-data refresh succeeded.
+    reference_ok: bool,
+    /// When the walk observed the catalog.
+    observed_at: DateTime<Utc>,
+}
 
 impl Worker {
     /// A worker with no extension handlers.
@@ -407,6 +434,17 @@ impl Worker {
                 Ok(n) => tracing::warn!(released = n, "released stuck crawl_queue items"),
                 Err(e) => tracing::warn!(error = %e, "release_stuck failed"),
             }
+            match discovery_run::fail_abandoned_runs(&self.ctx.pool).await {
+                Ok(sources) => {
+                    for source in sources {
+                        tracing::warn!(%source, "failed a discovery run whose jobs ended without completing");
+                        if let Ok(source) = SourceId::from_str(&source) {
+                            discovery_run::publish(source, &discovery_run::RunEvent::Failed);
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "failing abandoned discovery runs failed"),
+            }
             if let Some(retention) = self.config.queue_retention
                 && last_purge.is_none_or(|t| t.elapsed() >= PURGE_INTERVAL)
             {
@@ -419,6 +457,11 @@ impl Worker {
                         "purged finished crawl_queue items"
                     ),
                     Err(e) => tracing::warn!(error = %e, "purging crawl_queue failed"),
+                }
+                match discovery_run::purge_finished_runs(&self.ctx.pool, retention).await {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!(deleted = n, "purged finished discovery runs"),
+                    Err(e) => tracing::warn!(error = %e, "purging discovery_runs failed"),
                 }
             }
             tokio::select! {
@@ -464,10 +507,12 @@ impl Worker {
     /// then its batch mates' in claim order.
     pub async fn run_batch_once(&self) -> Option<Vec<JobOutcome>> {
         let filter = self.claim_filter()?;
-        let item = match CrawlQueueItem::claim_next(
+        // Licence-gated sources are never claimed; their queued jobs stay as they are.
+        let item = match CrawlQueueItem::claim_next_except(
             &self.ctx.pool,
             &self.config.worker_id,
             filter.as_deref(),
+            &crate::licence::claim_exclusions(),
         )
         .await
         {
@@ -515,7 +560,8 @@ impl Worker {
     ) -> Option<(SourceId, Arc<dyn SourceAdapter>, Vec<CrawlQueueItem>)> {
         let source = SourceId::from_str(&lead.source).ok()?;
         let kind = JobKind::from_str(&lead.kind).ok()?;
-        if !matches!(kind, JobKind::FetchSeries | JobKind::RefetchSeries)
+        if crate::licence::blocking(source).is_some()
+            || !matches!(kind, JobKind::FetchSeries | JobKind::RefetchSeries)
             || self.handlers.contains_key(&(source, kind))
         {
             return None;
@@ -586,6 +632,10 @@ impl Worker {
                     .await
             }
         };
+        // A licence-gated job that got past the claim filter goes back unfetched.
+        if let Some(gate) = crate::licence::blocking(source) {
+            return crate::licence::hand_back(&self.ctx.pool, &item, gate).await;
+        }
         let kind = match JobKind::from_str(&item.kind) {
             Ok(k) => k,
             Err(_) => {
@@ -619,6 +669,7 @@ impl Worker {
 
         // A re-fetch is a full fetch of every series, ignoring stored validators.
         let refetch = items
+            .as_slice()
             .first()
             .is_some_and(|i| i.job_kind() == JobKind::RefetchSeries);
         // `since` for the batch is the earliest of its series (a full fetch if any has no points).
@@ -687,7 +738,7 @@ impl Worker {
                             .and_then(|_| check_fetched_values(&item.series_id, &series))
                             .map(|_| JobWrite::Series(series)),
                         Some(Err(e)) => Err(e),
-                        None => Err(CrawlError::NotFound(format!(
+                        None => Err(CrawlError::Transient(format!(
                             "{} missing from the batch response",
                             item.series_id
                         ))),
@@ -717,7 +768,14 @@ impl Worker {
         match kind {
             JobKind::FetchSeries => self.fetch_series(source, &item.series_id, false).await,
             JobKind::RefetchSeries => self.fetch_series(source, &item.series_id, true).await,
-            JobKind::DiscoverCatalog => self.discover(source).await,
+            JobKind::DiscoverCatalog => match self.chunked_discovery(source) {
+                Some((adapter, settings)) => {
+                    self.enumerate_run(source, adapter, settings, item).await
+                }
+                None => self.discover(source).await,
+            },
+            JobKind::DiscoverChunk => self.discover_chunk(source, item).await,
+            JobKind::FinalizeDiscovery => self.finalize_run(source, item).await,
             other => Err(CrawlError::Permanent(format!(
                 "no handler registered for {source} {other}"
             ))),
@@ -771,22 +829,23 @@ impl Worker {
             .registry
             .get(source)
             .ok_or_else(|| CrawlError::Permanent(format!("no adapter registered for {source}")))?;
-        let complete = adapter.discovery_is_complete();
-        let scope_prefix = adapter.retirement_scope_prefix().map(str::to_string);
+        let observed_at = Utc::now();
         let ctx = self.ctx.clone();
-        {
+        let reference_ok = {
             let adapter = adapter.clone();
             let ctx = ctx.clone();
-            if let Err(error) =
-                guarded(async move { adapter.refresh_reference_data(&ctx).await }).await
-            {
-                tracing::warn!(
-                    %source,
-                    %error,
-                    "refresh_reference_data failed; discovering with existing reference data"
-                );
+            match guarded(async move { adapter.refresh_reference_data(&ctx).await }).await {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(
+                        %source,
+                        %error,
+                        "refresh_reference_data failed; discovering with existing reference data"
+                    );
+                    false
+                }
             }
-        }
+        };
         let discovering = adapter.clone();
         let (found, validator) =
             match guarded(async move { discovering.discover_if_changed(&ctx).await }).await? {
@@ -796,14 +855,54 @@ impl Worker {
                 }
                 Discovery::Changed { found, validator } => (found, validator),
             };
+        // The walk's facts, read from the adapter right after it (see `lifecycle`'s known limits).
+        let facts = CatalogFacts {
+            missing: adapter.curated_missing(),
+            catalog_scope: adapter.catalog_scope(),
+            lifecycle: adapter.catalog_lifecycle(),
+            reference_ok,
+            observed_at,
+        };
+        self.discovery_write(source, &adapter, found, validator, facts)
+            .await
+    }
+
+    /// Checks a listed catalog and builds its discovery write. Shared by single-job discovery
+    /// and the finalize step of chunked discovery, which passes the facts its run stored, so
+    /// both commit the same way.
+    async fn discovery_write(
+        &self,
+        source: SourceId,
+        adapter: &Arc<dyn SourceAdapter>,
+        found: Vec<DiscoveredSeries>,
+        validator: Option<(String, Validators)>,
+        facts: CatalogFacts,
+    ) -> Fetched {
+        let CatalogFacts {
+            missing,
+            catalog_scope,
+            mut lifecycle,
+            reference_ok,
+            observed_at,
+        } = facts;
+        let scope_prefix = adapter.retirement_scope_prefix().map(str::to_string);
         // A curated entry the source no longer lists keeps its stored series: a discovery that
         // skipped one retires nothing, and the gauge alerts so the curated list gets fixed.
-        let missing = adapter.curated_missing();
         econ_graph_metrics::crawler::CRAWLER_DISCOVERY_METRICS
             .curated_missing
             .with_label_values(&[source.as_str()])
             .set(i64::try_from(missing.len()).unwrap_or(i64::MAX));
-        let complete = complete && missing.is_empty();
+        let complete = reference_ok
+            && adapter.discovery_is_complete()
+            && (missing.is_empty() || catalog_scope.is_some());
+        if complete && catalog_scope.is_some() {
+            let scope_adapter = adapter.clone();
+            let scope_ctx = self.ctx.clone();
+            lifecycle.scope_ids.extend(
+                guarded(async move { scope_adapter.catalog_scope_members(&scope_ctx).await })
+                    .await?,
+            );
+        }
         self.datasets.check_all(
             source,
             found.iter().map(|d| (d.external_id.as_str(), &d.dataset)),
@@ -812,6 +911,9 @@ impl Worker {
             found,
             complete,
             scope_prefix,
+            lifecycle,
+            catalog_scope,
+            observed_at,
             validator,
         })
     }
@@ -878,9 +980,20 @@ impl Worker {
         let mut conn = self.ctx.pool.get().await.map_err(|e| {
             AppError::DatabaseError(format!("Failed to get database connection: {e}"))
         })?;
+        let run_events = RunEvents::default();
+        let transaction_run_events = run_events.clone();
+        let pending_metrics = std::sync::Arc::new(std::sync::Mutex::new(Vec::<
+            crate::lifecycle::Reconciled,
+        >::new()));
+        let transaction_metrics = pending_metrics.clone();
+        let tracks_lifecycle = self
+            .registry
+            .get(source)
+            .is_some_and(|a| a.tracks_catalog_lifecycle());
         // This pooled connection starts a fresh transaction. READ COMMITTED rechecks
         // the token after a lock wait; the queue row stays locked through commit.
-        conn.build_transaction()
+        let outcome = conn
+            .build_transaction()
             .read_committed()
             .run::<JobOutcome, AppError, _>(async move |conn| {
                 if item.locked_by.as_deref() != Some(self.config.worker_id.as_str())
@@ -895,11 +1008,32 @@ impl Worker {
                         error: result.err().map(|e| e.to_string()),
                     });
                 }
+                // Every fetch job of every source takes the shared source lock before any row
+                // write. A discovery takes it exclusively and then updates series rows, so a
+                // fetch that wrote rows first and locked later could deadlock with it.
+                if matches!(
+                    item.job_kind(),
+                    JobKind::FetchSeries | JobKind::RefetchSeries
+                ) {
+                    let source_id = persist::data_source_id_conn(conn, source).await?;
+                    crate::lifecycle::lock_source_shared(conn, source_id).await?;
+                }
+                // A chunked-discovery write is applied here; a finalize hands back its discovery
+                // write only once its run is complete, for the arm below (which takes the
+                // exclusive source lock after this, as a single-job discovery does).
+                let result = self
+                    .commit_discovery_run_conn(conn, source, result, &transaction_run_events)
+                    .await?;
                 let result: Dispatched = match result {
                     Ok(JobWrite::Series(fetched)) => {
-                        let write =
-                            persist::persist_series_conn(conn, source, &item.series_id, &fetched)
-                                .await?;
+                        let write = persist::persist_series_conn(
+                            conn,
+                            source,
+                            &item.series_id,
+                            &fetched,
+                            tracks_lifecycle,
+                        )
+                        .await?;
                         Ok(JobStats {
                             series_id: Some(write.series_id),
                             points_written: write.points_upserted,
@@ -912,21 +1046,48 @@ impl Worker {
                         found,
                         complete,
                         scope_prefix,
+                        lifecycle,
+                        catalog_scope,
+                        observed_at,
                         validator,
                     }) => {
+                        // Lifecycle fetch writers take this source's advisory lock (shared)
+                        // before touching series/metadata. Take it exclusively before
+                        // validators and discovered metadata so catalog and per-series
+                        // lifecycle commits cannot hold each other's locks in opposite order.
+                        // Every discovery takes it, complete or not: metadata activation must
+                        // not interleave with a restriction recorded by a concurrent fetch.
+                        let source_id = persist::data_source_id_conn(conn, source).await?;
+                        crate::lifecycle::lock_source_exclusive(conn, source_id).await?;
                         if let Some((url, validators)) = &validator {
                             persist::set_url_validators_conn(conn, source, url, validators).await?;
                         }
                         let metadata_written =
                             persist::persist_discovered_conn(conn, source, &found).await?;
                         if complete {
-                            persist::retire_unlisted_conn(
-                                conn,
-                                source,
-                                &found,
-                                scope_prefix.as_deref(),
-                            )
-                            .await?;
+                            if let Some(scope) = catalog_scope {
+                                let metrics = crate::lifecycle::reconcile_conn(
+                                    conn,
+                                    source,
+                                    &found,
+                                    &lifecycle,
+                                    &scope,
+                                    observed_at,
+                                )
+                                .await?;
+                                transaction_metrics
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .push(metrics);
+                            } else {
+                                persist::retire_unlisted_conn(
+                                    conn,
+                                    source,
+                                    &found,
+                                    scope_prefix.as_deref(),
+                                )
+                                .await?;
+                            }
                         }
                         Ok(JobStats {
                             metadata_written,
@@ -935,6 +1096,9 @@ impl Worker {
                     }
                     Ok(JobWrite::DiscoveryUnchanged) => Ok(JobStats::default()),
                     Ok(JobWrite::Handler(stats)) => Ok(stats),
+                    Ok(JobWrite::DiscoveryRun(_)) => Err(CrawlError::Permanent(
+                        "discovery run write was not applied".into(),
+                    )),
                     Err(error) => Err(error),
                 };
                 if matches!(
@@ -947,12 +1111,40 @@ impl Worker {
                         item,
                         &result,
                         duration + commit_started.elapsed(),
+                        &transaction_metrics,
                     )
                     .await?;
                 }
-                self.transition_conn(conn, source, item, result).await
+                let outcome = self.transition_conn(conn, source, item, result).await?;
+                self.record_discovery_run_outcome_conn(
+                    conn,
+                    source,
+                    item,
+                    &outcome,
+                    &transaction_run_events,
+                )
+                .await?;
+                Ok(outcome)
             })
-            .await
+            .await?;
+        drop(conn);
+        run_events.publish(source);
+        let pending =
+            std::mem::take(&mut *pending_metrics.lock().unwrap_or_else(|e| e.into_inner()));
+        for metrics in &pending {
+            metrics.publish(source);
+        }
+        // Most jobs only update fetch health. Periodic coverage polling already restores
+        // lifecycle gauges after restart, so aggregate again only after a transition or a catalog
+        // snapshot (which may have stored or cleared a guarded snapshot).
+        if pending
+            .iter()
+            .any(|m| m.transitions > 0 || m.unselected_tracked.is_some())
+            && let Err(error) = crate::lifecycle::refresh_metrics(&self.ctx.pool, &[source]).await
+        {
+            tracing::warn!(%source, %error, "publication metrics refresh failed after commit");
+        }
+        Ok(outcome)
     }
 
     fn record_breaker(&self, source: SourceId, error: Option<&CrawlError>) {
@@ -979,7 +1171,45 @@ impl Worker {
         item: &CrawlQueueItem,
         result: &Dispatched,
         duration: Duration,
+        pending_metrics: &std::sync::Mutex<Vec<crate::lifecycle::Reconciled>>,
     ) -> AppResult<()> {
+        let tracks_lifecycle = self
+            .registry
+            .get(source)
+            .is_some_and(|a| a.tracks_catalog_lifecycle());
+        let fetch_miss = match result {
+            Err(CrawlError::NotFound(_)) if tracks_lifecycle => {
+                crate::lifecycle::record_not_found_conn(conn, source, &item.series_id).await?
+            }
+            Err(CrawlError::Absent(_)) if tracks_lifecycle => {
+                crate::lifecycle::record_absent_conn(conn, source, &item.series_id).await?
+            }
+            _ => None,
+        };
+        if let Some(status) = fetch_miss {
+            pending_metrics
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(crate::lifecycle::Reconciled {
+                    transitions: 1,
+                    transition_statuses: vec![status],
+                    ..Default::default()
+                });
+        }
+        if matches!(result, Err(CrawlError::Restricted(_)))
+            && let Some(status) =
+                crate::lifecycle::record_restricted_conn(conn, source, &item.series_id).await?
+        {
+            pending_metrics
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(crate::lifecycle::Reconciled {
+                    guarded: false,
+                    transitions: 1,
+                    transition_statuses: vec![status],
+                    ..Default::default()
+                });
+        }
         let series_id = match result {
             Ok(stats) => stats.series_id,
             Err(_) => persist::find_series_id_conn(conn, source, &item.series_id).await?,
@@ -991,7 +1221,10 @@ impl Worker {
         let Some(series_id) = series_id else {
             if let Err(e) = result
                 && e.kind() == "not_found"
+                && !tracks_lifecycle
             {
+                // Sources without catalog lifecycle tracking retain the legacy inactive
+                // metadata behavior; tracked histories stay browsable with a badge.
                 persist::deactivate_metadata_conn(conn, source, &item.series_id).await?;
             }
             return Ok(());
@@ -1051,6 +1284,8 @@ impl Worker {
             CrawlError::Transient(_) => Some((policy.backoff(attempt), true)),
             CrawlError::Busy { retry_after, .. } => Some((*retry_after, false)),
             CrawlError::NotFound(_)
+            | CrawlError::Absent(_)
+            | CrawlError::Restricted(_)
             | CrawlError::Auth(_)
             | CrawlError::Parse(_)
             | CrawlError::Permanent(_) => None,
@@ -1212,6 +1447,8 @@ mod breaker_tests {
         assert!(!b.record(SourceId::Bls, Some(&t), 1, pause));
     }
 }
+
+mod chunked_discovery;
 
 #[cfg(test)]
 mod tests;

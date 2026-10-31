@@ -1,0 +1,26 @@
+[
+  {
+    "code": "TP_A_0010",
+    "name": "MFN - Simple average ad valorem duty",
+    "categoryCode": "TP_A",
+    "categoryLabel": "Tariff profiles",
+    "subcategoryCode": null,
+    "subcategoryLabel": null,
+    "unitCode": "PCT",
+    "unitLabel": "Percent",
+    "startYear": 1996,
+    "endYear": 2025,
+    "frequencyCode": "A",
+    "frequencyLabel": "Annual",
+    "numberReporters": 170,
+    "numberPartners": 0,
+    "productSectorClassificationCode": null,
+    "productSectorClassificationLabel": null,
+    "hasMetadata": "N",
+    "numberDecimals": 1,
+    "numberDatapoints": 3000,
+    "updateFrequency": "Annual",
+    "description": "",
+    "sortOrder": 10
+  }
+]

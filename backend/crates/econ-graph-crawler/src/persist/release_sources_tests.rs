@@ -1,11 +1,12 @@
 //! ECO-392 regression: on a freshly migrated database, every source the release build registers
-//! (`FRED`, `BLS`, `CENSUS`, `BEA`, `WORLD_BANK`, `FHFA`; see `sources::default_registry`) must be
-//! due for crawling and counted by coverage. The consolidated baseline migration seeded World
-//! Bank and BEA as `is_enabled = false` behind an admin-approval step that v4.0 doesn't ship
-//! (the admin frontend is out of scope) -- Census was seeded disabled the same way but the same
-//! migration re-enables it further down. The scheduler's due and discovery queries, and the
-//! coverage report, all skip a source whose `data_sources` row has `is_enabled = false`, so World
-//! Bank and BEA were never crawled on a fresh v4.0 install.
+//! (`FRED`, `BLS`, `CENSUS`, `BEA`, `WORLD_BANK`, `FHFA`, `BOC`; see
+//! `sources::default_registry`) must be due for crawling and counted by coverage. The
+//! consolidated baseline migration seeded World Bank and BEA as `is_enabled = false` behind an
+//! admin-approval step that v4.0 doesn't ship (the admin frontend is out of scope) -- Census was
+//! seeded disabled the same way but the same migration re-enables it further down. The
+//! scheduler's due and discovery queries, and the coverage report, all skip a source whose
+//! `data_sources` row has `is_enabled = false`, so World Bank and BEA were never crawled on a
+//! fresh v4.0 install.
 //!
 //! This uses its own migrated database ([`FreshDb`]), not the shared one `scheduler`'s and
 //! `coverage`'s own DB-backed tests use: those share process-wide mutable `data_sources` rows
@@ -78,7 +79,7 @@ async fn fresh_migration_enables_every_release_source() {
 
     // The flag the scheduler's due/discovery queries and crawl_coverage filter on, straight from
     // the just-migrated `data_sources` rows (BEA and World Bank come from the baseline migration;
-    // FHFA has no seed row and is created here by `data_source_id`'s template fallback).
+    // FHFA and BOC have no seed row and are created here by `data_source_id`'s template fallback).
     let mut enabled = Vec::with_capacity(release_sources.len());
     for &source in &release_sources {
         let source_id = data_source_id(&db.pool, source).await.unwrap();
@@ -132,4 +133,72 @@ async fn fresh_migration_enables_every_release_source() {
             .unwrap_or_else(|| panic!("{source} missing from coverage: {coverage:?}"));
         assert!(c.discovered >= 1, "{source}: {c:?}");
     }
+}
+
+#[derive(diesel::QueryableByName, Debug, PartialEq)]
+struct SourceRow {
+    #[diesel(sql_type = SqlUuid)]
+    id: uuid::Uuid,
+    #[diesel(sql_type = diesel::sql_types::Nullable<Text>)]
+    description: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Integer)]
+    rate_limit_per_minute: i32,
+    #[diesel(sql_type = Bool)]
+    is_enabled: bool,
+}
+
+async fn source_row(pool: &DatabasePool, id: uuid::Uuid) -> SourceRow {
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query(
+        "SELECT id, description, rate_limit_per_minute, is_enabled FROM data_sources WHERE id = $1",
+    )
+    .bind::<SqlUuid, _>(id)
+    .get_result(&mut conn)
+    .await
+    .unwrap()
+}
+
+/// The Bank of Canada row matches the crawler: a new row comes from `DataSource::boc()`, whose
+/// rate is the crawler's policy, and the `boc_data_source_matches_valet_adapter` data migration
+/// brings a row created from the earlier template to the same description and rate, changing
+/// nothing else.
+#[tokio::test]
+async fn boc_row_matches_the_valet_adapter() {
+    use diesel_async::SimpleAsyncConnection;
+
+    let Some(admin_url) = database_url() else {
+        return;
+    };
+    let db = FreshDb::create(&admin_url, "econgraph_boc_source_row").await;
+    let template = data_source_template(SourceId::Boc);
+    let policy = crate::policy::SourcePolicy::default_for(SourceId::Boc);
+    let policy_per_minute = (policy.requests_per_second * 60.0).round() as i32;
+    assert_eq!(template.rate_limit_per_minute, policy_per_minute);
+
+    let id = data_source_id(&db.pool, SourceId::Boc).await.unwrap();
+    let created = source_row(&db.pool, id).await;
+    assert_eq!(created.description, template.description);
+    assert_eq!(created.rate_limit_per_minute, policy_per_minute);
+
+    // A row from the earlier template, then the migration.
+    {
+        let mut conn = db.pool.get().await.unwrap();
+        diesel::sql_query(
+            "UPDATE data_sources SET description = 'Canadian monetary policy, inflation, GDP, \
+             employment, and financial stability data', rate_limit_per_minute = 1000 \
+             WHERE id = $1",
+        )
+        .bind::<SqlUuid, _>(id)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        conn.batch_execute(include_str!(
+            "../../../../migrations/data/2026-10-30-160000_boc_data_source_matches_valet_adapter/up.sql"
+        ))
+        .await
+        .unwrap();
+    }
+    let migrated = source_row(&db.pool, id).await;
+    db.drop().await;
+    assert_eq!(migrated, created);
 }
