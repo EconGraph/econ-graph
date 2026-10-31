@@ -56,11 +56,10 @@ analysis accuracy.
 
 Use a disposable PostgreSQL database for database-backed tests. Handler tests apply migrations
 and delete SEC queue rows and the test company's records. Feature-enabled tests use
-`econ_graph_core::test_utils::TestContainer` as a dependency: in this mode it connects to
-`DATABASE_URL`, falling back to `postgres://localhost/econ_graph_test`; it does not start a
-Docker container. Its cleanup drops and recreates the entire `public` schema and then applies
-migrations. Set `DATABASE_URL` explicitly and run these suites without other tests or services
-using that database. See [Database Testing](../../../docs/testing/DATABASE_TESTING.md)
+`econ_graph_core::test_utils::TestContainer` as a dependency: it gives each test a migrated
+scratch database of its own on the server `DATABASE_URL` names (falling back to
+`postgres://localhost/econ_graph_test`), so the role needs `CREATEDB`; it does not start a
+Docker container. Its cleanup drops and recreates that test database's `public` schema only. See [Database Testing](../../../docs/testing/DATABASE_TESTING.md)
 for the shared helper and database setup.
 
 ### Running tests

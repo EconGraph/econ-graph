@@ -104,10 +104,10 @@ For deployment, follow [applying data migrations](../development/MIGRATIONS.md#a
 
 The [shared core test utilities](../../backend/crates/econ-graph-core/src/test_utils.rs) behave differently depending on how the core crate is compiled:
 
-- In core unit tests (`cfg(test)`), `TestContainer::new()` starts a PostgreSQL 18 container. With `DATABASE_URL`, the pool uses that external URL, but construction still starts a separate container, so Docker is required. Without the variable, the pool uses the container's dynamically mapped port.
-- When core is compiled as a dependency (`cfg(not(test))`), including integration tests and other crates' tests, construction uses `DATABASE_URL` or the fallback `postgres://localhost/econ_graph_test`. It does not start a container.
+- With `DATABASE_URL` set, and whenever core is compiled as a dependency (`cfg(not(test))`, falling back to `postgres://localhost/econ_graph_test`), `TestContainer::new()` creates a scratch database of the test's own on that server, applies both migration sets, and drops it with the test. The role needs `CREATEDB`; no container is started.
+- In core's own unit tests (`cfg(test)`) without `DATABASE_URL`, it starts a PostgreSQL 18 container instead, unmigrated.
 
-Neither constructor runs migrations or creates fixture rows. Each module must arrange those steps. `get_test_db()` stores one helper in a `OnceCell` per test binary; it does not create a separate database for every test.
+Neither creates fixture rows beyond what the migrations insert. `get_test_db()` shares one database per test binary, the one `DATABASE_URL` names, unmigrated, with a pool per call.
 
 Before running database tests, identify the selected module's pool URL, migration setup, fixture setup, and locking convention. Use a disposable target. For example, the dataset module uses its own external pool and runs migrations once. Set `TEST_DATABASE_URL` to a disposable database, or set `DATABASE_URL` to one whose name contains `test`, then run from `backend/`:
 
@@ -119,9 +119,7 @@ A test-name filter selects tests; it does not provision or migrate their databas
 
 ### Cleanup errors and target alignment
 
-The existing `TestContainer::clean_database()` returns `Result<(), Box<dyn std::error::Error>>`. It drops the pool connection's entire `public` schema with `CASCADE`, recreates it, grants permissions, and invokes `run_migrations()` to apply both planes. It does not merely truncate `countries` or roll back a test transaction.
-
-The migration URL comes from `DATABASE_URL`, falling back to `postgres://localhost/econ_graph_test`; it is not derived from the pool's mapped container port. Before using cleanup, ensure this URL and the pool name the **same disposable database**. Otherwise, cleanup can drop one database's schema and migrate another database.
+The existing `TestContainer::clean_database()` returns `Result<(), Box<dyn std::error::Error>>`. It drops the test database's entire `public` schema with `CASCADE`, recreates it, grants permissions, and invokes `run_migrations()` on that same database (`database_url()`) to apply both planes. It does not merely truncate `countries` or roll back a test transaction, and it never touches another test's database.
 
 Utilities should propagate cleanup failures to their callers. At the test call site, stop before writing fixtures or making assertions if cleanup fails:
 
@@ -133,7 +131,7 @@ container.clean_database().await.expect("Failed to clean database");
 
 ### Shared fixtures and country codes
 
-Tests sharing a database must coordinate cleanup and writes using the target module's locking convention. `#[serial]` coordinates participating tests; it does not protect against unrelated locks, other test binaries, or separate Cargo processes. `--test-threads=1` only serializes tests within one binary. Prefer unique fixture rows when a module can avoid destructive cleanup; the [dataset tests](../../backend/crates/econ-graph-core/src/models/dataset/tests.rs) demonstrate one-time migrations and separate rows per test.
+Tests on the shared `get_test_db()` database, or on another database they share, must not drop its schema and should use unique fixture rows; `#[serial]` coordinates only the tests that take part in it. Tests that need a clean database use `TestContainer::new()`, which is their own; the [dataset tests](../../backend/crates/econ-graph-core/src/models/dataset/tests.rs) demonstrate one-time migrations and separate rows per test.
 
 Use full UUIDs in fixture fields that accept them. Country-code fields have a finite namespace: `iso_code` is limited to three characters and `iso_code_2` to two, and both are unique. A value such as `format!("T{}", &uuid_text[..1])` has only 16 possible suffixes, so slicing a UUID does not prevent country-code collisions.
 

@@ -15,7 +15,7 @@ use econ_graph_core::models::{CrawlQueueItem, JobKind};
 use econ_graph_core::AppResult;
 use uuid::Uuid;
 
-use super::{db_error, guarded, Fetched, JobOutcome, JobStats, JobWrite, Worker};
+use super::{db_error, guarded, CatalogFacts, Fetched, JobOutcome, JobStats, JobWrite, Worker};
 use crate::adapter::SourceAdapter;
 use crate::discovery_run::{
     self, ChunkCommit, ChunkDiscovery, ChunkedDiscovery, DiscoveryUnit, Enumeration, RunEvent,
@@ -23,6 +23,7 @@ use crate::discovery_run::{
 };
 use crate::error::CrawlError;
 use crate::http::Validators;
+use crate::lifecycle::CatalogLifecycle;
 use crate::source::SourceId;
 
 /// A chunked-discovery job's upstream work is done; its writes happen in the result transaction.
@@ -35,6 +36,7 @@ pub(super) enum RunWrite {
         units_per_chunk: usize,
         validator: Option<(String, Validators)>,
         curated_missing: Vec<String>,
+        lifecycle: CatalogLifecycle,
     },
     /// Enumeration found the catalog unchanged.
     Unchanged { run_id: Uuid },
@@ -79,50 +81,62 @@ impl Worker {
         settings: ChunkedDiscovery,
         item: &CrawlQueueItem,
     ) -> Fetched {
-        {
+        // As in single-job discovery: the walk's observation time, and whether reference data
+        // refreshed (a discovery that couldn't refresh it is never a complete catalog). Both are
+        // stored on the run, since its finalize may run on another worker.
+        let observed_at = chrono::Utc::now();
+        let reference_ok = {
             let adapter = adapter.clone();
             let ctx = self.ctx.clone();
-            if let Err(error) =
-                guarded(async move { adapter.refresh_reference_data(&ctx).await }).await
-            {
-                tracing::warn!(
-                    %source,
-                    %error,
-                    "refresh_reference_data failed; discovering with existing reference data"
-                );
+            match guarded(async move { adapter.refresh_reference_data(&ctx).await }).await {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(
+                        %source,
+                        %error,
+                        "refresh_reference_data failed; discovering with existing reference data"
+                    );
+                    false
+                }
             }
-        }
-        let (run_id, superseded) =
-            match discovery_run::start_run(&self.ctx.pool, source, &settings, item)
-                .await
-                .map_err(db_error)?
-            {
-                RunStart::Started {
-                    run_id,
-                    superseded,
-                    abandoned,
-                } => {
-                    for _ in 0..abandoned {
-                        discovery_run::publish(source, &RunEvent::Failed);
-                    }
-                    if abandoned > 0 {
-                        tracing::warn!(%source, abandoned,
+        };
+        let (run_id, superseded) = match discovery_run::start_run(
+            &self.ctx.pool,
+            source,
+            &settings,
+            item,
+            reference_ok,
+            observed_at,
+        )
+        .await
+        .map_err(db_error)?
+        {
+            RunStart::Started {
+                run_id,
+                superseded,
+                abandoned,
+            } => {
+                for _ in 0..abandoned {
+                    discovery_run::publish(source, &RunEvent::Failed);
+                }
+                if abandoned > 0 {
+                    tracing::warn!(%source, abandoned,
                             "failed finalizing discovery runs whose finalize job ended");
-                    }
-                    (run_id, superseded)
                 }
-                // The result commit finds the claim gone too and reports the lost lease.
-                RunStart::ClaimLost => {
-                    return Err(CrawlError::Transient(
-                        "discover_catalog claim lost before starting a discovery run".into(),
-                    ))
-                }
-                RunStart::Finalizing { run_id } => {
-                    tracing::info!(%source, %run_id,
+                (run_id, superseded)
+            }
+            // The result commit finds the claim gone too and reports the lost lease.
+            RunStart::ClaimLost => {
+                return Err(CrawlError::Transient(
+                    "discover_catalog claim lost before starting a discovery run".into(),
+                ))
+            }
+            RunStart::Finalizing { run_id } => {
+                tracing::info!(%source, %run_id,
                         "a discovery run is finalizing; this discovery starts no new run");
-                    return Ok(JobWrite::DiscoveryUnchanged);
-                }
-            };
+                return Ok(JobWrite::DiscoveryUnchanged);
+            }
+        };
         discovery_run::publish(source, &RunEvent::Started);
         if superseded > 0 {
             discovery_run::publish(source, &RunEvent::Superseded(superseded));
@@ -155,12 +169,14 @@ impl Worker {
                 units,
                 validator,
                 curated_missing,
+                lifecycle,
             }) => Ok(JobWrite::DiscoveryRun(RunWrite::Enumerated {
                 run_id,
                 units,
                 units_per_chunk: settings.units_per_chunk.max(1),
                 validator,
                 curated_missing,
+                lifecycle,
             })),
         }
     }
@@ -188,7 +204,7 @@ impl Worker {
             return Ok(JobWrite::DiscoveryRun(RunWrite::Skipped));
         };
         // Chunks discovered under another selection must never finalize as this run's.
-        if settings.selection_fingerprint != chunk.selection_fingerprint {
+        if settings.catalog_scope != chunk.catalog_scope {
             return Err(CrawlError::Permanent(format!(
                 "{source} catalog selection changed since discovery run {run_id} started; \
                  failing the run"
@@ -236,18 +252,29 @@ impl Worker {
                 "{source} no longer discovers in chunks; not finalizing run {run_id}"
             )));
         };
-        if settings.selection_fingerprint != run.selection_fingerprint {
+        if settings.catalog_scope != run.catalog_scope {
             return Err(CrawlError::Permanent(format!(
                 "{source} catalog selection changed since discovery run {run_id} started; not \
                  finalizing it"
             )));
         }
-        let (found, missing) = discovery_run::assemble(&self.ctx.pool, &run)
+        // Fails unless every chunk is stored: a partial catalog is never committed.
+        let catalog = discovery_run::assemble(&self.ctx.pool, &run)
             .await
             .map_err(db_error)?;
         let validator = run.validator().map_err(db_error)?;
-        let discovery =
-            self.discovery_write(source, adapter.as_ref(), found, validator, missing)?;
+        // The run's own facts, never the adapter's in-memory ones: this worker may not have
+        // walked anything, and the run's chunks may have been discovered on several workers.
+        let facts = CatalogFacts {
+            missing: catalog.missing,
+            catalog_scope: run.catalog_scope.clone(),
+            lifecycle: catalog.lifecycle,
+            reference_ok: run.reference_ok,
+            observed_at: run.observed_at,
+        };
+        let discovery = self
+            .discovery_write(source, &adapter, catalog.found, validator, facts)
+            .await?;
         Ok(JobWrite::DiscoveryRun(RunWrite::Finalize {
             run_id,
             discovery: Box::new(discovery),
@@ -277,6 +304,7 @@ impl Worker {
                 units_per_chunk,
                 validator,
                 curated_missing,
+                lifecycle,
             } => {
                 match discovery_run::commit_enumeration_conn(
                     conn,
@@ -285,6 +313,7 @@ impl Worker {
                     units_per_chunk,
                     validator.as_ref(),
                     &curated_missing,
+                    &lifecycle,
                     max_retries,
                 )
                 .await?

@@ -221,6 +221,13 @@ database-side change; verify with a manual backup after deployment.
 Creates and waits on a one-off `Job` from the `postgres-backup` CronJob,
 then prints its logs. It dumps the same databases as the nightly run.
 
+- It waits up to an hour (`--timeout SECONDS`, or `BACKUP_WAIT_TIMEOUT`). A Job
+  that fails ends the wait at once.
+- A Job still running at the timeout is left running. The script says so and
+  prints the command to wait for it.
+- While a Job of the CronJob (scheduled or ad hoc) is running, it starts no
+  other one, names the running Job, and stops.
+
 ### Which cluster
 
 `backup-postgres-now.sh` and `restore-postgres-backup.sh` act on one kubectl

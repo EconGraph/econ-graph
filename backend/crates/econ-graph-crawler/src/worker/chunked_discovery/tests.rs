@@ -64,6 +64,7 @@ async fn db() -> Option<Db> {
         "DELETE FROM discovery_runs",
         "DELETE FROM series_metadata WHERE external_id LIKE 't745\\_%'",
         "DELETE FROM reference_file_cache WHERE url LIKE '%/t745/%'",
+        "DELETE FROM series_lifecycle WHERE external_id LIKE 't745\\_%'",
     ] {
         exec(&pool, sql).await;
     }
@@ -85,6 +86,16 @@ async fn db() -> Option<Db> {
 struct ChunkedAdapter {
     catalog: Mutex<Vec<String>>,
     chunked: Mutex<Option<ChunkedDiscovery>>,
+    /// What `catalog_scope()` reports after a single-job walk.
+    scope: Mutex<Option<String>>,
+    /// `tracks_catalog_lifecycle()`.
+    tracks_lifecycle: std::sync::atomic::AtomicBool,
+    /// Ids the listing reports upstream outside the selection rules.
+    unselected: Mutex<Vec<String>>,
+    /// The facts the last single-job walk established, for `catalog_lifecycle()`.
+    walked: Mutex<crate::lifecycle::CatalogLifecycle>,
+    /// `refresh_reference_data()` fails.
+    reference_fails: std::sync::atomic::AtomicBool,
     errors: Mutex<HashMap<String, VecDeque<CrawlError>>>,
     calls: Mutex<Vec<Vec<String>>>,
     missing: Mutex<Vec<String>>,
@@ -99,8 +110,13 @@ impl ChunkedAdapter {
             catalog: Mutex::new(ids.iter().map(|s| (*s).to_string()).collect()),
             chunked: Mutex::new(Some(ChunkedDiscovery {
                 units_per_chunk,
-                selection_fingerprint: Some("rules-v1".into()),
+                catalog_scope: None,
             })),
+            scope: Mutex::new(None),
+            tracks_lifecycle: std::sync::atomic::AtomicBool::new(false),
+            unselected: Mutex::new(Vec::new()),
+            walked: Mutex::new(Default::default()),
+            reference_fails: std::sync::atomic::AtomicBool::new(false),
             errors: Mutex::new(HashMap::new()),
             calls: Mutex::new(Vec::new()),
             missing: Mutex::new(Vec::new()),
@@ -147,6 +163,9 @@ impl ChunkedAdapter {
             if unit.key.starts_with("t745_missing") {
                 out.curated_missing.push(unit.key.clone());
                 continue;
+            }
+            if unit.key.starts_with("t745_restricted") {
+                out.lifecycle.restricted_ids.push(unit.key.clone());
             }
             let title = unit
                 .listing
@@ -204,9 +223,34 @@ impl SourceAdapter for ChunkedAdapter {
         self.chunked.lock().unwrap().clone()
     }
 
+    // One scope for both paths: what single-job discovery reports after a walk is what chunked
+    // discovery reports without one.
+    fn catalog_scope(&self) -> Option<String> {
+        self.scope.lock().unwrap().clone()
+    }
+
+    fn tracks_catalog_lifecycle(&self) -> bool {
+        std::sync::atomic::AtomicBool::load(&self.tracks_lifecycle, Ordering::SeqCst)
+    }
+
+    fn catalog_lifecycle(&self) -> crate::lifecycle::CatalogLifecycle {
+        self.walked.lock().unwrap().clone()
+    }
+
+    async fn refresh_reference_data(&self, _: &CrawlCtx) -> Result<(), CrawlError> {
+        if std::sync::atomic::AtomicBool::load(&self.reference_fails, Ordering::SeqCst) {
+            Err(CrawlError::Transient("reference file unavailable".into()))
+        } else {
+            Ok(())
+        }
+    }
+
     async fn discover(&self, _: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
         let detail = Self::detail(&self.units());
         *self.missing.lock().unwrap() = detail.curated_missing;
+        let mut walked = detail.lifecycle;
+        walked.unselected_ids = self.unselected.lock().unwrap().clone();
+        *self.walked.lock().unwrap() = walked;
         Ok(detail.found)
     }
 
@@ -222,6 +266,10 @@ impl SourceAdapter for ChunkedAdapter {
             units: self.units(),
             validator: Some(Self::validator()),
             curated_missing: Vec::new(),
+            lifecycle: crate::lifecycle::CatalogLifecycle {
+                unselected_ids: self.unselected.lock().unwrap().clone(),
+                ..Default::default()
+            },
         })
     }
 
@@ -493,7 +541,7 @@ async fn chunked_run_finalizes_once_with_the_single_job_result() {
     seed_stale(p).await;
     *adapter.chunked.lock().unwrap() = Some(ChunkedDiscovery {
         units_per_chunk: 3,
-        selection_fingerprint: Some("rules-v1".into()),
+        catalog_scope: None,
     });
     adapter.calls.lock().unwrap().clear();
     enqueue_discovery(p, 4).await;
@@ -773,7 +821,7 @@ async fn racing_chunk_commits_begin_finalize_once() {
     let p = &db.pool;
     let settings = ChunkedDiscovery {
         units_per_chunk: 1,
-        selection_fingerprint: None,
+        catalog_scope: None,
     };
     enqueue_discovery(p, 5).await;
     let claim = CrawlQueueItem::claim_next(p, "t745-w1", None)
@@ -781,17 +829,27 @@ async fn racing_chunk_commits_begin_finalize_once() {
         .unwrap()
         .unwrap();
     for _ in 0..10 {
-        let RunStart::Started { run_id, .. } = discovery_run::start_run(p, SRC, &settings, &claim)
-            .await
-            .unwrap()
+        let RunStart::Started { run_id, .. } =
+            discovery_run::start_run(p, SRC, &settings, &claim, true, chrono::Utc::now())
+                .await
+                .unwrap()
         else {
             panic!("run not started");
         };
         let mut conn = p.get().await.unwrap();
         let units = vec![DiscoveryUnit::new("t745_a"), DiscoveryUnit::new("t745_b")];
-        discovery_run::commit_enumeration_conn(&mut conn, run_id, &units, 1, None, &[], 3)
-            .await
-            .unwrap();
+        discovery_run::commit_enumeration_conn(
+            &mut conn,
+            run_id,
+            &units,
+            1,
+            None,
+            &[],
+            &Default::default(),
+            3,
+        )
+        .await
+        .unwrap();
         drop(conn);
         let commit = |index: i32| {
             let pool = p.clone();
@@ -834,7 +892,7 @@ async fn a_stale_discovery_claim_cannot_supersede_the_live_run() {
     let p = &db.pool;
     let settings = ChunkedDiscovery {
         units_per_chunk: 1,
-        selection_fingerprint: None,
+        catalog_scope: None,
     };
     enqueue_discovery(p, 5).await;
     let stale = CrawlQueueItem::claim_next(p, "t745-a", None)
@@ -854,14 +912,15 @@ async fn a_stale_discovery_claim_cannot_supersede_the_live_run() {
         .unwrap()
         .unwrap();
     assert_eq!(live.id, stale.id);
-    let RunStart::Started { run_id, .. } = discovery_run::start_run(p, SRC, &settings, &live)
-        .await
-        .unwrap()
+    let RunStart::Started { run_id, .. } =
+        discovery_run::start_run(p, SRC, &settings, &live, true, chrono::Utc::now())
+            .await
+            .unwrap()
     else {
         panic!("the live claim starts a run");
     };
     assert_eq!(
-        discovery_run::start_run(p, SRC, &settings, &stale)
+        discovery_run::start_run(p, SRC, &settings, &stale, true, chrono::Utc::now())
             .await
             .unwrap(),
         RunStart::ClaimLost
@@ -907,7 +966,7 @@ async fn a_finalizing_run_without_an_active_finalize_job_is_failed_and_replaced(
     let p = &db.pool;
     let settings = ChunkedDiscovery {
         units_per_chunk: 1,
-        selection_fingerprint: None,
+        catalog_scope: None,
     };
     for finalize_job in ["failed", "cancelled", "gone"] {
         exec(p, "DELETE FROM crawl_queue").await;
@@ -938,7 +997,7 @@ async fn a_finalizing_run_without_an_active_finalize_job_is_failed_and_replaced(
             .await
             .unwrap()
             .unwrap();
-        let start = discovery_run::start_run(p, SRC, &settings, &claim)
+        let start = discovery_run::start_run(p, SRC, &settings, &claim, true, chrono::Utc::now())
             .await
             .unwrap();
         assert!(
@@ -960,16 +1019,17 @@ async fn a_run_start_racing_the_last_chunk_commit_leaves_the_run_to_finalize() {
     let p = &db.pool;
     let settings = ChunkedDiscovery {
         units_per_chunk: 1,
-        selection_fingerprint: None,
+        catalog_scope: None,
     };
     enqueue_discovery(p, 5).await;
     let claim = CrawlQueueItem::claim_next(p, "t745-w1", None)
         .await
         .unwrap()
         .unwrap();
-    let RunStart::Started { run_id, .. } = discovery_run::start_run(p, SRC, &settings, &claim)
-        .await
-        .unwrap()
+    let RunStart::Started { run_id, .. } =
+        discovery_run::start_run(p, SRC, &settings, &claim, true, chrono::Utc::now())
+            .await
+            .unwrap()
     else {
         panic!("run not started");
     };
@@ -981,6 +1041,7 @@ async fn a_run_start_racing_the_last_chunk_commit_leaves_the_run_to_finalize() {
         1,
         None,
         &[],
+        &Default::default(),
         3,
     )
     .await
@@ -998,7 +1059,7 @@ async fn a_run_start_racing_the_last_chunk_commit_leaves_the_run_to_finalize() {
         let pool = p.clone();
         let claim = claim.clone();
         async move {
-            discovery_run::start_run(&pool, SRC, &settings, &claim)
+            discovery_run::start_run(&pool, SRC, &settings, &claim, true, chrono::Utc::now())
                 .await
                 .unwrap()
         }
@@ -1068,7 +1129,7 @@ async fn runs_without_any_active_job_are_failed_by_maintenance() {
     assert_eq!(states, vec!["failed", "failed", "running"]);
 }
 
-/// Chunks check the run's selection fingerprint too: after a selection change, the next chunk
+/// Chunks check the run's catalog scope too: after a selection change, the next chunk
 /// fails the run without calling upstream, so chunks discovered under other rules never commit.
 #[tokio::test]
 async fn a_selection_change_fails_the_run_at_the_next_chunk() {
@@ -1081,7 +1142,7 @@ async fn a_selection_change_fails_the_run_at_the_next_chunk() {
     w.run_once().await.unwrap();
     *adapter.chunked.lock().unwrap() = Some(ChunkedDiscovery {
         units_per_chunk: 3,
-        selection_fingerprint: Some("rules-v2".into()),
+        catalog_scope: Some("rules-v2".into()),
     });
     assert!(matches!(
         w.run_once().await,
@@ -1239,7 +1300,7 @@ async fn unchanged_catalog_and_changed_selection() {
     w.run_once().await.unwrap();
     *adapter.chunked.lock().unwrap() = Some(ChunkedDiscovery {
         units_per_chunk: 3,
-        selection_fingerprint: Some("rules-v2".into()),
+        catalog_scope: Some("rules-v2".into()),
     });
     drain(&w).await;
     let run = runs(p).await.pop().unwrap();
@@ -1292,4 +1353,348 @@ async fn purge_keeps_the_runs_alerts_need() {
             "CENSUS:running:44",
         ]
     );
+}
+
+// ---------------------------------------------------------------------------
+// Publication lifecycle: chunked runs feed the same reconciliation as single-job discovery
+// ---------------------------------------------------------------------------
+
+const SCOPE: &str = "t745-rules-v1";
+
+/// An adapter that tracks publication lifecycle under [`SCOPE`], on both paths.
+fn lifecycle_adapter(ids: &[&str], chunked: bool) -> Arc<ChunkedAdapter> {
+    let adapter = ChunkedAdapter::new(ids, 3);
+    *adapter.scope.lock().unwrap() = Some(SCOPE.into());
+    *adapter.chunked.lock().unwrap() = chunked.then(|| ChunkedDiscovery {
+        units_per_chunk: 3,
+        catalog_scope: Some(SCOPE.into()),
+    });
+    adapter.tracks_lifecycle.store(true, Ordering::SeqCst);
+    *adapter.unselected.lock().unwrap() = vec!["t745_outside".into()];
+    adapter
+}
+
+/// Lifecycle state of the test series, everything reconciliation decides.
+#[derive(Debug, PartialEq, Eq, QueryableByName)]
+struct LifecycleRow {
+    #[diesel(sql_type = Text)]
+    external_id: String,
+    #[diesel(sql_type = Text)]
+    status: String,
+    #[diesel(sql_type = Integer)]
+    missing_refreshes: i32,
+    #[diesel(sql_type = Bool)]
+    in_accepted_catalog: bool,
+    #[diesel(sql_type = Bool)]
+    listed_in_accepted_catalog: bool,
+    #[diesel(sql_type = Text)]
+    scope_fingerprint: String,
+}
+
+async fn lifecycle_rows(pool: &DatabasePool) -> Vec<LifecycleRow> {
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query(
+        "SELECT external_id, status, missing_refreshes, in_accepted_catalog, \
+             listed_in_accepted_catalog, scope_fingerprint \
+         FROM series_lifecycle WHERE external_id LIKE 't745\\_%' ORDER BY external_id",
+    )
+    .load(&mut conn)
+    .await
+    .unwrap()
+}
+
+/// The source's accepted scope: fingerprint, last refresh time, and whether a guarded
+/// snapshot is held.
+async fn accepted_scope(
+    pool: &DatabasePool,
+) -> Option<(String, chrono::DateTime<chrono::Utc>, bool)> {
+    #[derive(QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = Text)]
+        fingerprint: String,
+        #[diesel(sql_type = diesel::sql_types::Timestamptz)]
+        last_refresh_at: chrono::DateTime<chrono::Utc>,
+        #[diesel(sql_type = Bool)]
+        guarded: bool,
+    }
+    let source_id = persist::data_source_id(pool, SRC).await.unwrap();
+    let mut conn = pool.get().await.unwrap();
+    let rows: Vec<Row> = diesel::sql_query(format!(
+        "SELECT fingerprint, last_refresh_at, guarded_snapshot IS NOT NULL AS guarded \
+         FROM catalog_lifecycle_scopes WHERE source_id = '{source_id}'"
+    ))
+    .load(&mut conn)
+    .await
+    .unwrap();
+    rows.into_iter()
+        .next()
+        .map(|r| (r.fingerprint, r.last_refresh_at, r.guarded))
+}
+
+async fn reset_lifecycle(pool: &DatabasePool) {
+    exec(pool, "DELETE FROM crawl_queue").await;
+    exec(pool, "DELETE FROM discovery_runs").await;
+    exec(
+        pool,
+        "DELETE FROM series_metadata WHERE external_id LIKE 't745\\_%'",
+    )
+    .await;
+    exec(
+        pool,
+        "DELETE FROM series_lifecycle WHERE external_id LIKE 't745\\_%'",
+    )
+    .await;
+    let source_id = persist::data_source_id(pool, SRC).await.unwrap();
+    exec(
+        pool,
+        &format!("DELETE FROM catalog_lifecycle_scopes WHERE source_id = '{source_id}'"),
+    )
+    .await;
+}
+
+const LIFECYCLE_IDS: [&str; 8] = [
+    "t745_a",
+    "t745_b",
+    "t745_c",
+    "t745_d",
+    "t745_e",
+    "t745_f",
+    "t745_g",
+    "t745_restricted_x",
+];
+
+/// Two discoveries, the second no longer listing `t745_g`, on one path; returns the resulting
+/// lifecycle rows, metadata and accepted scope.
+async fn two_discoveries(
+    pool: &DatabasePool,
+    chunked: bool,
+) -> (Vec<LifecycleRow>, Vec<MetadataRow>, Option<(String, bool)>) {
+    reset_lifecycle(pool).await;
+    let adapter = lifecycle_adapter(&LIFECYCLE_IDS, chunked);
+    let w = worker(pool, &adapter, "t745-w1");
+    enqueue_discovery(pool, 5).await;
+    drain(&w).await;
+    adapter.catalog.lock().unwrap().retain(|id| id != "t745_g");
+    enqueue_discovery(pool, 5).await;
+    drain(&w).await;
+    let scope = accepted_scope(pool).await.map(|(f, _, g)| (f, g));
+    (lifecycle_rows(pool).await, metadata(pool).await, scope)
+}
+
+/// A chunked run reconciles exactly as single-job discovery does: the same scope, the same
+/// accepted-catalog membership, the same miss counts for a series the catalog stopped listing,
+/// the same restriction from a chunk's facts, and the same metadata.
+#[tokio::test]
+async fn chunked_and_single_job_discovery_reconcile_the_same_lifecycle() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    let single = two_discoveries(p, false).await;
+    let chunked = two_discoveries(p, true).await;
+    assert_eq!(chunked, single);
+
+    let (rows, _, scope) = chunked;
+    assert_eq!(scope, Some((SCOPE.to_string(), false)));
+    let g = rows.iter().find(|r| r.external_id == "t745_g").unwrap();
+    assert_eq!(g.missing_refreshes, 1, "one complete catalog without it");
+    let restricted = rows
+        .iter()
+        .find(|r| r.external_id == "t745_restricted_x")
+        .unwrap();
+    assert_eq!(
+        restricted.status, "restricted",
+        "a chunk's facts reach reconciliation"
+    );
+    assert!(rows.iter().all(|r| r.scope_fingerprint == SCOPE));
+}
+
+/// The run's observation time, taken as its walk started, is the snapshot's: finalize does not
+/// use its own clock.
+#[tokio::test]
+async fn a_chunked_run_reconciles_at_its_own_observation_time() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    reset_lifecycle(p).await;
+    let adapter = lifecycle_adapter(&LIFECYCLE_IDS, true);
+    let w = worker(p, &adapter, "t745-w1");
+    enqueue_discovery(p, 5).await;
+    w.run_once().await.unwrap();
+    #[derive(QueryableByName)]
+    struct Observed {
+        #[diesel(sql_type = diesel::sql_types::Timestamptz)]
+        observed_at: chrono::DateTime<chrono::Utc>,
+    }
+    let mut conn = p.get().await.unwrap();
+    let observed: Observed = diesel::sql_query("SELECT observed_at FROM discovery_runs")
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+    drop(conn);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    drain(&w).await;
+    let (_, last_refresh_at, _) = accepted_scope(p).await.unwrap();
+    assert_eq!(
+        last_refresh_at.timestamp_micros(),
+        observed.observed_at.timestamp_micros()
+    );
+}
+
+/// A run with a chunk that failed for good never counts as a complete catalog: a series the
+/// catalog stopped listing gains no miss, nothing is retired, and the accepted scope is not
+/// refreshed.
+#[tokio::test]
+async fn a_partial_run_never_advances_misses_or_retires() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    reset_lifecycle(p).await;
+    let adapter = lifecycle_adapter(&LIFECYCLE_IDS, true);
+    let w = worker(p, &adapter, "t745-w1");
+    enqueue_discovery(p, 5).await;
+    drain(&w).await;
+    let baseline = lifecycle_rows(p).await;
+    let scope = accepted_scope(p).await;
+
+    adapter.catalog.lock().unwrap().retain(|id| id != "t745_g");
+    adapter.fail_unit("t745_a", vec![CrawlError::Permanent("gone".into())]);
+    enqueue_discovery(p, 5).await;
+    drain(&w).await;
+    assert_eq!(runs(p).await.pop().unwrap().state, "failed");
+    assert_eq!(lifecycle_rows(p).await, baseline, "no miss counted");
+    assert_eq!(accepted_scope(p).await, scope, "scope not refreshed");
+    assert_eq!(is_active(p, "t745_g").await, Some(true));
+}
+
+/// The partial-catalog guard in finalize itself: a run that reached `finalizing` without one of
+/// its chunks stored (forced here; the chunk commits never allow it) fails at finalize and
+/// reconciles nothing. Removing the chunk-count check from `discovery_run::assemble` makes this
+/// test fail: the missing chunk's series are then counted as absent.
+#[tokio::test]
+async fn finalize_refuses_a_run_missing_a_chunk() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    reset_lifecycle(p).await;
+    let adapter = lifecycle_adapter(&LIFECYCLE_IDS, true);
+    let w = worker(p, &adapter, "t745-w1");
+    enqueue_discovery(p, 5).await;
+    drain(&w).await;
+    let baseline = lifecycle_rows(p).await;
+    let scope = accepted_scope(p).await;
+
+    // A second run: enumerate, store the chunks, then lose chunk 0 and finalize anyway.
+    enqueue_discovery(p, 5).await;
+    w.run_once().await.unwrap();
+    let run = runs(p).await.pop().unwrap();
+    let chunk_zero = format!("{}/0", run.id);
+    exec(
+        p,
+        &format!("DELETE FROM crawl_queue WHERE series_id = '{chunk_zero}'"),
+    )
+    .await;
+    // Chunks 1 and 2 are discovered and stored for real.
+    for _ in 0..2 {
+        assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
+    }
+    for sql in [
+        format!(
+            "DELETE FROM discovery_run_chunks WHERE run_id = '{}' AND chunk_index = 0",
+            run.id
+        ),
+        format!(
+            "UPDATE discovery_runs SET state = 'finalizing', chunks_done = chunks_total \
+             WHERE id = '{}'",
+            run.id
+        ),
+        format!(
+            "INSERT INTO crawl_queue (source, series_id, kind) \
+             VALUES ('{}', '{}', 'finalize_discovery')",
+            SRC.as_str(),
+            run.id
+        ),
+    ] {
+        exec(p, &sql).await;
+    }
+    assert!(matches!(
+        w.run_once().await,
+        Some(JobOutcome::Failed { .. })
+    ));
+    assert_eq!(runs(p).await.pop().unwrap().state, "failed");
+    assert_eq!(lifecycle_rows(p).await, baseline, "nothing counted absent");
+    assert_eq!(accepted_scope(p).await, scope);
+}
+
+/// A run whose reference-data refresh failed is not a complete catalog, as for single-job
+/// discovery: its metadata is written but no miss is counted. The run stores the refresh result
+/// for its finalize.
+#[tokio::test]
+async fn a_run_whose_reference_refresh_failed_counts_no_misses() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    reset_lifecycle(p).await;
+    let adapter = lifecycle_adapter(&LIFECYCLE_IDS, true);
+    let w = worker(p, &adapter, "t745-w1");
+    enqueue_discovery(p, 5).await;
+    drain(&w).await;
+    let baseline = lifecycle_rows(p).await;
+
+    adapter.catalog.lock().unwrap().retain(|id| id != "t745_g");
+    adapter.reference_fails.store(true, Ordering::SeqCst);
+    enqueue_discovery(p, 5).await;
+    drain(&w).await;
+    assert_eq!(runs(p).await.pop().unwrap().state, "complete");
+    assert_eq!(
+        lifecycle_rows(p).await,
+        baseline,
+        "incomplete: no miss counted"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Licence gate
+// ---------------------------------------------------------------------------
+
+/// A licence-gated source (IMF in a default build) is never enumerated, chunked or finalized:
+/// the claim skips its jobs, and one claimed some other way is handed back unfetched.
+#[tokio::test]
+async fn a_licence_gated_source_is_never_enumerated_chunked_or_finalized() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    assert!(
+        !crate::licence::allows(SourceId::Imf),
+        "IMF is gated in a default build"
+    );
+    let adapter = ChunkedAdapter::new(&IDS, 3);
+    let w = worker(p, &adapter, "t745-w1");
+    let run = "00000000-0000-0000-0000-0000000000d1";
+    exec(
+        p,
+        &format!(
+            "INSERT INTO crawl_queue (source, series_id, kind) VALUES \
+             ('IMF', 'catalog', 'discover_catalog'), \
+             ('IMF', '{run}/0', 'discover_chunk'), \
+             ('IMF', '{run}', 'finalize_discovery')"
+        ),
+    )
+    .await;
+    assert!(w.run_once().await.is_none(), "no IMF job is claimed");
+    assert_eq!(
+        count(
+            p,
+            "SELECT count(*) AS n FROM crawl_queue WHERE source = 'IMF' AND status = 'pending'"
+        )
+        .await,
+        3
+    );
+
+    // Claimed by something that ignores the gate: handed back, never dispatched.
+    for kind in ["discover_catalog", "discover_chunk", "finalize_discovery"] {
+        let item = CrawlQueueItem::claim_next(p, "t745-other", Some(&["IMF".to_string()]))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(w.process(item).await, JobOutcome::Retrying { .. }),
+            "{kind}"
+        );
+    }
+    assert!(runs(p).await.is_empty(), "no run started");
+    assert!(adapter.calls.lock().unwrap().is_empty());
 }

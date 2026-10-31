@@ -338,6 +338,9 @@ pub async fn coverage_gauge_loop(
         {
             tracing::warn!(error = %e, "updating coverage gauges failed");
         }
+        if let Err(e) = econ_graph_crawler::lifecycle::refresh_metrics(&pool, &sources).await {
+            tracing::warn!(error = %e, "updating catalog lifecycle gauges failed");
+        }
         tokio::select! {
             _ = tokio::time::sleep(interval) => {}
             changed = stop.changed() => if changed.is_err() { return; },

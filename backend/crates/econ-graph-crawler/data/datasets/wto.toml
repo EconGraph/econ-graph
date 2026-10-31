@@ -1,9 +1,30 @@
-# World Trade Organization dataset definitions. See README.md in this directory for the format.
+# World Trade Organization dataset definitions. See README.md in this directory.
 #
-# Development only: a static catalog (econ-graph-crawler src/sources/static_catalogs.rs), not a
-# live integration. Its hardcoded series ids are opaque, so it is one dataset with no dimensions.
+# The indicators the adapter crawls, and the product/sector and partner each is requested for,
+# are in data/wto_indicators.csv. The `indicator` dimension below ships no inline codes: names,
+# units and descriptions come from the WTO's own /indicators endpoint, merged in by
+# WtoAdapter's discovery (sync_datasets preserves them across restarts).
 
 [[dataset]]
-code = "catalog"
-name = "World Trade Organization catalog"
-description = "Hardcoded development catalog of World Trade Organization series (no live data)"
+code = "timeseries"
+name = "WTO Timeseries"
+description = "World Trade Organization trade and tariff indicators, one series per indicator and reporting economy"
+
+# Canonical ids: timeseries/{indicator}.{area}, for example timeseries/ITS_MTV_AX.USA
+[[dataset.dimensions]]
+name = "indicator"
+label = "Indicator"
+
+# The `key` of econ-graph-core's countries.csv: ISO 3166-1 alpha-3 for countries, WLD for the
+# world and EUU for the European Union. The WTO's names for those two aggregates are merged into
+# this dimension's codes by WtoAdapter's discovery.
+[[dataset.dimensions]]
+name = "area"
+label = "Reporting economy"
+codelist = "countries"
+
+# The API's ValueFlagCode (for example an estimate or a break in series). data_points has no
+# attribute column, so the adapter does not store it.
+[[dataset.attributes]]
+name = "value_flag"
+label = "Value flag"

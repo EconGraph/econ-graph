@@ -58,10 +58,9 @@ describe('useWorldMap', () => {
 
     it('builds a new projection when the type changes', () => {
       const ref = svgRef();
-      const { result, rerender } = renderHook(
-        ({ type }) => useWorldMap(ref, type, [960, 500]),
-        { initialProps: { type: 'naturalEarth' } }
-      );
+      const { result, rerender } = renderHook(({ type }) => useWorldMap(ref, type, [960, 500]), {
+        initialProps: { type: 'naturalEarth' },
+      });
       const before = result.current.projection;
 
       rerender({ type: 'mercator' });
@@ -85,7 +84,8 @@ describe('useWorldMap', () => {
   describe('zoom', () => {
     it('zooms by a factor and resets', () => {
       const ref = svgRef();
-      ref.current.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'g'))
+      ref.current
+        .appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'g'))
         .setAttribute('class', 'map-container');
       const { result } = renderHook(() => useWorldMap(ref, 'naturalEarth', [960, 500]));
       expect(result.current.zoomLevel).toBe(1);
@@ -131,6 +131,56 @@ describe('useWorldMap', () => {
       act(() => result.current.zoomBy(2));
       act(() => result.current.resetZoom());
       expect(result.current.zoomLevel).toBe(1);
+    });
+  });
+
+  describe('geographic movement', () => {
+    const pointer = (type: string, x: number, y: number, pointerId = 1) => {
+      const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 });
+      Object.defineProperty(event, 'pointerId', { value: pointerId });
+      REF.current.dispatchEvent(event);
+    };
+
+    it('drags across the geographic seam, keeps orientation through refitting, and resets', () => {
+      const { result, rerender } = renderHook(
+        ({ type, width }) => useWorldMap(REF, type, [width, 500]),
+        { initialProps: { type: 'naturalEarth', width: 960 } }
+      );
+      const before = result.current.projection([100, 30]);
+      act(() => {
+        pointer('pointerdown', 800, 250);
+        pointer('pointermove', 200, 250);
+        pointer('pointerup', 200, 250);
+      });
+      expect(result.current.projection([100, 30])).not.toEqual(before);
+      const longitude = result.current.projection.rotate()[0];
+      expect(result.current.isTransformed).toBe(true);
+      rerender({ type: 'orthographic', width: 700 });
+      expect(result.current.projection.rotate()[0]).toBe(longitude);
+      act(() => result.current.resetZoom());
+      expect(result.current.projection.rotate()).toEqual([0, 0, 0]);
+      expect(result.current.isTransformed).toBe(false);
+    });
+
+    it('rotates latitude on the globe and releases cancelled pointer gestures', () => {
+      const { result } = renderHook(() => useWorldMap(REF, 'orthographic', [960, 500]));
+      act(() => {
+        pointer('pointerdown', 500, 300);
+        pointer('pointermove', 450, 200);
+        pointer('pointercancel', 450, 200);
+      });
+      expect(result.current.projection.rotate()[1]).toBeGreaterThan(0);
+      expect(result.current.gestureActive.current).toBe(false);
+      const previous = result.current.projection.rotate();
+      act(() => pointer('pointermove', 200, 100));
+      expect(result.current.projection.rotate()).toEqual(previous);
+      act(() => {
+        pointer('pointerdown', 500, 300);
+        pointer('pointermove', 600, 300);
+        pointer('lostpointercapture', 600, 300);
+      });
+      expect(result.current.gestureActive.current).toBe(false);
+      expect(result.current.projection.rotate()).not.toEqual(previous);
     });
   });
 

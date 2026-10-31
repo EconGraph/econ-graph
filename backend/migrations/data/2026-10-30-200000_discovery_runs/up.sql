@@ -66,9 +66,15 @@ CREATE TABLE discovery_runs (
     chunks_total INTEGER NOT NULL DEFAULT 0,
     chunks_done INTEGER NOT NULL DEFAULT 0,
     chunks_failed INTEGER NOT NULL DEFAULT 0,
-    -- The adapter's fingerprint of its catalog selection when the run started, if it has one.
-    -- Finalize fails the run if the adapter's fingerprint has changed since.
-    selection_fingerprint TEXT,
+    -- The adapter's catalog scope (the fingerprint of its selection rules) when the run started,
+    -- if it tracks publication lifecycle. Finalize reconciles under this scope, and a chunk or
+    -- finalize job fails the run if the adapter's scope has changed since.
+    catalog_scope TEXT,
+    -- Whether the discover_catalog job's reference-data refresh succeeded: a discovery that
+    -- could not refresh its reference data is never a complete catalog.
+    reference_ok BOOLEAN NOT NULL DEFAULT FALSE,
+    -- The worker's clock as the walk started: the catalog snapshot's observation time.
+    observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     -- crawl_queue.id of the discover_catalog job that started the run (no foreign key: finished
     -- queue rows are purged). The scheduler takes that job's outcome from the run instead of
     -- from the job, which completes as soon as enumeration does.
@@ -84,6 +90,9 @@ CREATE TABLE discovery_runs (
     validator JSONB,
     -- Curated entries enumeration found missing upstream (a JSON array of strings).
     curated_missing JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- Publication facts enumeration established (the crawler's CatalogLifecycle as JSON); each
+    -- chunk's facts are stored with its result and merged in at finalize.
+    lifecycle JSONB NOT NULL DEFAULT '{}'::jsonb,
     -- Enumeration found the catalog unchanged: the run completed without chunks.
     catalog_unchanged BOOLEAN NOT NULL DEFAULT FALSE,
     error_message TEXT,

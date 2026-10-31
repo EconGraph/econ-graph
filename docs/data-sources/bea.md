@@ -1,9 +1,10 @@
 # BEA (Bureau of Economic Analysis)
 
-Adapter: `backend/crates/econ-graph-crawler/src/sources/bea.rs`. Curated tables:
-`backend/crates/econ-graph-crawler/data/bea_tables.csv`. Fixtures: `tests/fixtures/bea/`
-(`GetData` for every curated NIPA table and frequency, SAGDP2 line codes, areas and line 1,
-and an error). API key required (`BEA_API_KEY`); without it every call is `Permanent` before
+Adapter: `backend/crates/econ-graph-crawler/src/sources/bea.rs`. Selection rules:
+`backend/crates/econ-graph-crawler/data/catalog_selection/bea.toml`. Fixtures: `tests/fixtures/bea/`
+(`GetData` for six NIPA tables at each frequency, short extracts of BEA's NIPA and Regional
+table-title lists, SAGDP2 line codes, areas and line 1, and an error). API key required
+(`BEA_API_KEY`); without it every call is `Permanent` before
 any request.
 
 ## What we fetch today
@@ -11,24 +12,33 @@ any request.
 - **Ids** are BEA's own codes: `bea_nipa/{table}.{line_number}.{frequency}` (for example
   `bea_nipa/T10105.1.Q`, GDP quarterly) and `bea_regional/{table}.{line_code}.{geo_fips}`
   (for example `bea_regional/SAGDP2.1.06000`, California GDP).
-- **Discovery**: for each NIPA table and frequency in `bea_tables.csv`, `GetData` for the last
-  three years lists its lines (a table's line list isn't a `GetParameterValuesFiltered`
-  parameter). For Regional, `GetParameterValuesFiltered` lists the table's `LineCode`s and
-  `GeoFips`, kept to the US, states and BEA regions. Discovery is all or nothing: any failed
-  request or empty table fails it, and a successful one is complete, so the worker retires
-  series it no longer lists (dropped lines, and the old made-up ids such as `NIPA_GDP_TOTAL`).
-- **Table titles** are BEA's own, from `GetParameterValues(DatasetName, ParameterName=TableName)`
-  (one request per dataset, conditional `ETag`), not a curated column: `bea_tables.csv` only
-  lists which tables and frequencies we crawl. Titles are kept in an in-process cache the worker
-  fills from this call (so `discover`/`fetch` stay DB-free); until a worker process has run it at
-  least once, every table's title is unknown. `fetch` on an unknown title still fetches real
-  points but omits metadata so a previously stored good title isn't overwritten. `discover`
-  never persists the bare table name as every one of that table's series' titles: after a
-  successful title refresh, a curated table missing from BEA's `TableName` list (renamed or
-  dropped upstream) is skipped with a warning naming it, and the other tables are still
-  discovered. The worker counts it in `crawler_curated_missing{source="BEA"}` and retires
-  nothing for that discovery, so the skipped table's stored series are kept. If the refresh
-  failed or returned nothing, an unknown title fails discovery as `Transient` so it retries.
+- **Tables**: 25, one rule each: NIPA headline tables from sections 1 to 7 (GDP and prices,
+  GDI, personal income and consumption, government, foreign transactions, saving and
+  investment, compensation and corporate profits by industry, per capita series), Regional
+  GDP by state (SAGDP2) and the state personal income summary (SAINC1). A full refresh is
+  about 300 requests, about ten minutes at the 30-a-minute policy rate. A test checks the
+  rules against BEA's published table lists
+  (`tests/fixtures/bea/published_table_names.txt`).
+- **Discovery**: rules select dataset, table family prefix, optional title text and frequencies
+  from BEA's current `TableName` catalogs. NIPA `GetData` for the last three years lists lines;
+  Regional `GetParameterValuesFiltered` lists `LineCode` and `GeoFips`, limited to the US,
+  states and BEA regions. Table and expanded-series limits reject surprise growth before
+  observation jobs are enqueued. A failed or empty required table fails discovery.
+- **Table titles** come from `GetParameterValues(DatasetName, ParameterName=TableName)`.
+  Immutable snapshots keyed by source, reference URL and body hash let workers reuse the
+  exact current catalog after a conditional response, even when another worker refreshed it.
+  Historical dimension labels remain additive: removing a table upstream never deletes its
+  saved name. An unknown title after a failed refresh does not overwrite a stored good title.
+- **Publication state** is reconciled only after complete successful discovery under unchanged
+  selection rules. Three consecutive absences mark a retained series missing. A sudden loss
+  above the disappearance threshold is held for operator review. A table that BEA still lists
+  but the rules no longer select keeps its series' state. A fetch response that omits a
+  requested line or area (including an empty response) is not catalog removal evidence. For
+  a series the current catalog does not list outright, such as a line under a table the rules
+  no longer select, six such responses in a row (ten refresh intervals apart) stop routine
+  fetches, and it is then only probed occasionally. Histories remain public and
+  badged; candidate successors need human confirmation and values are never merged. See the
+  [catalog runbook](../monitoring/crawler-coverage-runbook.md#catalog-selection-and-retained-series).
 - **Fetch**: `GetData` per NIPA table and frequency, or per Regional table and line with the
   requested areas comma-separated, batched up to 64 series. Always the whole history (`Year`
   `X` or `ALL`), since revisions reach back years. Values are scaled by `UNIT_MULT`;
@@ -92,5 +102,5 @@ A BEA series is a table line (`data/datasets/bea.toml`):
 | `bea_nipa` | `table_name`, `line_number`, `frequency` | `value` |
 | `bea_regional` | `table_name`, `line_code`, `geo_fips` | `value` |
 
-Long shape (one value column), values scaled by `UNIT_MULT` on ingest. More tables are rows
-in `bea_tables.csv`.
+Long shape (one value column), values scaled by `UNIT_MULT` on ingest. Additional families are declarative rules
+in `catalog_selection/bea.toml`, subject to its table and series bounds.

@@ -10,7 +10,7 @@
  * the map.
  */
 
-import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState, useCallback, useId } from 'react';
 import * as d3 from 'd3';
 import * as topojson from 'topojson-client';
 import {
@@ -102,6 +102,7 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
   height,
   projection = DEFAULT_PROJECTION,
 }) => {
+  const instructionsId = useId();
   const svgRef = useRef<SVGSVGElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
@@ -109,12 +110,33 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
   // last tapped, so that a tap can show the tooltip before a second one opens the country.
   const lastPointerType = useRef<string | null>(null);
   const tappedIsoNumeric = useRef<number | null>(null);
+  const highlightedCountry = useRef<{
+    element: SVGElement;
+    stroke: string;
+    width: string;
+  } | null>(null);
+  const clearHighlight = useCallback(() => {
+    const previous = highlightedCountry.current;
+    if (!previous) return;
+    d3.select(previous.element)
+      .style('stroke', previous.stroke)
+      .style('stroke-width', previous.width);
+    highlightedCountry.current = null;
+  }, []);
 
-  const { path, zoomBehavior, zoomLevel, isTransformed, zoomBy, resetZoom } = useWorldMap(
-    svgRef,
-    projection,
-    [width, height]
-  );
+  const {
+    path,
+    zoomBehavior,
+    zoomLevel,
+    isTransformed,
+    zoomBy,
+    resetZoom,
+    rotateBy,
+    gestureActive,
+  } = useWorldMap(svgRef, projection, [width, height]);
+
+  const currentPath = useRef(path);
+  currentPath.current = path;
 
   // The SVG's event handlers read the latest values and callback from here, so new values or a
   // new callback don't need new handlers, and the map isn't rebuilt for them.
@@ -145,6 +167,7 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
     if (!svgRef.current) return;
 
     const svg = d3.select(svgRef.current);
+    clearHighlight();
     svg.selectAll('*').remove(); // Clear previous content
 
     svg
@@ -152,12 +175,24 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
       .style('background-color', '#f5f5f5')
       .style('border-radius', '8px');
 
+    // An SVG's CSS background does not receive pointer events in unpainted ocean areas.
+    // Paint the entire interaction surface so dragging can start anywhere on the map.
+    svg.append('rect').attr('width', width).attr('height', height).attr('fill', '#f5f5f5');
+
     // Create map container, keeping any zoom the user already applied
     const mapContainer = svg
       .append('g')
       .attr('class', 'map-container')
       .attr('transform', d3.zoomTransform(svg.node() as SVGSVGElement).toString());
 
+    mapContainer
+      .append('path')
+      .datum({ type: 'Sphere' } as const)
+      .attr('class', 'ocean')
+      .attr('d', d => currentPath.current(d))
+      .attr('fill', '#f5f5f5')
+      .attr('stroke', '#cfd8dc')
+      .style('vector-effect', 'non-scaling-stroke');
     const countriesGroup = mapContainer.append('g').attr('class', 'countries');
     const bordersGroup = mapContainer.append('g').attr('class', 'borders');
 
@@ -168,6 +203,17 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
     const borderWidth = showBorders ? '1' : '0.5';
 
     const pointerIn = (event: MouseEvent, d: any) => {
+      if (gestureActive.current) return;
+      const element = event.currentTarget as SVGElement;
+      const selected = d3.select(element);
+      if (highlightedCountry.current?.element !== element) {
+        clearHighlight();
+        highlightedCountry.current = {
+          element,
+          stroke: selected.style('stroke'),
+          width: selected.style('stroke-width'),
+        };
+      }
       const box = boxRef.current?.getBoundingClientRect();
       setHover({
         isoNumeric: featureIsoNumeric(d),
@@ -177,9 +223,7 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
         boxWidth: box?.width ?? 0,
         boxHeight: box?.height ?? 0,
       });
-      d3.select(event.currentTarget as SVGElement)
-        .style('stroke', '#1976d2')
-        .style('stroke-width', '2');
+      selected.style('stroke', '#1976d2').style('stroke-width', '2');
     };
 
     countriesGroup
@@ -190,7 +234,7 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
       .attr('class', 'country')
       .attr('data-iso-numeric', (d: any) => featureIsoNumeric(d) ?? '')
       .attr('data-name', (d: any) => d.properties?.name ?? '')
-      .attr('d', (d: any) => path(d))
+      .attr('d', (d: any) => currentPath.current(d))
       .style('stroke', borderStroke)
       .style('stroke-width', borderWidth)
       .style('vector-effect', 'non-scaling-stroke')
@@ -206,6 +250,7 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
         // a second tap opens it.
         if (lastPointerType.current === 'touch' && tappedIsoNumeric.current !== isoNumeric) {
           tappedIsoNumeric.current = isoNumeric;
+          pointerIn(_event, d);
           return;
         }
         if (!entry) return;
@@ -215,10 +260,9 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
       .on('mouseover', pointerIn)
       .on('mousemove', pointerIn)
       .on('mouseout', (event: MouseEvent) => {
+        if (lastPointerType.current === 'touch' && tappedIsoNumeric.current !== null) return;
         setHover(null);
-        d3.select(event.currentTarget as SVGElement)
-          .style('stroke', borderStroke)
-          .style('stroke-width', borderWidth);
+        if (highlightedCountry.current?.element === event.currentTarget) clearHighlight();
       });
 
     applyFills();
@@ -228,7 +272,7 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
         .append('path')
         .datum(topojson.mesh(worldData, countries, (a, b) => a !== b))
         .attr('class', 'border')
-        .attr('d', (d: any) => path(d))
+        .attr('d', (d: any) => currentPath.current(d))
         .style('fill', 'none')
         .style('stroke', '#ffffff')
         .style('stroke-width', '1')
@@ -244,8 +288,9 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
         .enter()
         .append('text')
         .attr('class', 'country-label')
-        .attr('x', (d: any) => path.centroid(d)[0])
-        .attr('y', (d: any) => path.centroid(d)[1])
+        .attr('display', (d: any) => (currentPath.current(d) ? null : 'none'))
+        .attr('x', (d: any) => currentPath.current.centroid(d)[0] || 0)
+        .attr('y', (d: any) => currentPath.current.centroid(d)[1] || 0)
         .attr('text-anchor', 'middle')
         .attr('font-size', labelSize)
         .attr('font-family', 'Arial, sans-serif')
@@ -268,10 +313,26 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
     showBorders,
     showLabels,
     labelSize,
-    path,
     zoomBehavior,
+    gestureActive,
     applyFills,
+    clearHighlight,
   ]);
+
+  // Geographic movement updates paths in place, preserving pointer gestures and country
+  // identity. D3 handles seam splitting and orthographic hemisphere clipping.
+  useEffect(() => {
+    const svg = d3.select(svgRef.current);
+    svg.selectAll<SVGElement, any>('path.country, path.border, path.ocean').attr('d', d => path(d));
+    svg
+      .selectAll<SVGElement, any>('text.country-label')
+      .attr('display', d => (path(d) ? null : 'none'))
+      .attr('x', d => path.centroid(d)[0] || 0)
+      .attr('y', d => path.centroid(d)[1] || 0);
+    clearHighlight();
+    setHover(null);
+    tappedIsoNumeric.current = null;
+  }, [path, clearHighlight]);
 
   // Restyle, without rebuilding, when the values or the color scale change.
   useEffect(() => {
@@ -299,11 +360,44 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
         ref={svgRef}
         role='img'
         aria-label='World map'
+        aria-describedby={instructionsId}
+        tabIndex={0}
+        onPointerMove={() => {
+          if (gestureActive.current) {
+            clearHighlight();
+            setHover(null);
+            tappedIsoNumeric.current = null;
+          }
+        }}
+        onKeyDown={event => {
+          const movements: Record<string, [number, number]> = {
+            ArrowLeft: [-15, 0],
+            ArrowRight: [15, 0],
+            ArrowUp: [0, 15],
+            ArrowDown: [0, -15],
+          };
+          const movement = movements[event.key];
+          if (movement && (movement[1] === 0 || projection === 'orthographic')) {
+            event.preventDefault();
+            rotateBy(...movement);
+          } else if (event.key === 'Home') {
+            event.preventDefault();
+            resetZoom();
+          } else if (event.key === '+' || event.key === '=') {
+            event.preventDefault();
+            zoomBy(ZOOM_STEP);
+          } else if (event.key === '-') {
+            event.preventDefault();
+            zoomBy(1 / ZOOM_STEP);
+          }
+        }}
         style={{
           display: 'block',
           width: '100%',
           height: 'auto',
           aspectRatio: `${width} / ${height}`,
+          touchAction: 'none',
+          cursor: 'grab',
         }}
       />
       {/* Overlaid on the map's top-right corner, except on a phone, where an overlay that size
@@ -351,11 +445,11 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
             </IconButton>
           </span>
         </Tooltip>
-        <Tooltip title='Reset zoom'>
+        <Tooltip title='Reset view'>
           <span>
             <IconButton
               size='small'
-              aria-label='Reset zoom'
+              aria-label='Reset view'
               onClick={resetZoom}
               disabled={!isTransformed}
             >
@@ -364,6 +458,11 @@ const WorldMapContent: React.FC<WorldMapContentProps> = ({
           </span>
         </Tooltip>
       </Box>
+      <Typography id={instructionsId} variant='caption' component='p' sx={{ px: 1, my: 0.5 }}>
+        {projection === 'orthographic'
+          ? 'Drag to spin the globe. Arrow keys rotate; +/− zoom; Home resets the view.'
+          : 'Drag left or right to move around the world. Left/right arrow keys rotate; +/− zoom; Home resets the view.'}
+      </Typography>
       {hover && (
         <CountryTooltip
           name={hoveredEntry?.name ?? hover.name}

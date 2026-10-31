@@ -82,20 +82,19 @@ P25 `0.10`, median `0.12`, P75 `0.15`, and P90 `0.18`.
 
 Use the repository's Rust toolchain and an already reachable, disposable
 PostgreSQL database. Set `DATABASE_URL` explicitly to that database. The database
-role must be able to drop and recreate its `public` schema and run migrations.
+role must be able to create databases.
 
-In this target, core is compiled as a dependency, so `TestContainer::new()` connects
-to `DATABASE_URL`; it does not start a container or create a database. Its fallback
-is `postgres://localhost/econ_graph_test`. Each of the four database-backed tests
-calls `clean_database()`, which **drops the entire `public` schema with `CASCADE`,
-recreates it, and runs migrations**. The parser-construction test does not call
-this helper. See [TestContainer lifecycle](DATABASE_TESTING.md#testcontainer-lifecycle)
+In this target, core is compiled as a dependency, so `TestContainer::new()` creates a
+migrated scratch database of the test's own on the server `DATABASE_URL` names (its
+fallback is `postgres://localhost/econ_graph_test`) and drops it afterwards; it does not
+start a container. Each of the four database-backed tests also calls
+`clean_database()`, which drops and recreates that test database's `public` schema
+and migrates it again. The parser-construction test does not call this helper. See [TestContainer lifecycle](DATABASE_TESTING.md#testcontainer-lifecycle)
 and [cleaning and migration targets](DATABASE_TESTING.md#cleaning-and-migration-targets).
 
-Run the target serially, and do not run other tests against the same database at
-the same time. `--test-threads=1` only serializes tests within a test binary; it
-does not coordinate separate Cargo processes. The helper applies migrations, so
-these commands do not require a separate Diesel CLI migration step.
+Because each test has a database of its own, the target can run in parallel and
+alongside other test processes. The helper applies migrations, so these commands do
+not require a separate Diesel CLI migration step.
 
 ### Frontend
 
@@ -114,14 +113,14 @@ database before executing the tests; the schema cleanup described above applies.
 
 ```bash
 export DATABASE_URL='postgres://localhost/econ_graph_test'
-cargo test -p econ-graph-sec-crawler --features xbrl-parser --test xbrl_financial_integration_tests -- --nocapture --test-threads=1
+cargo test -p econ-graph-sec-crawler --features xbrl-parser --test xbrl_financial_integration_tests -- --nocapture
 ```
 
 To select one test, run this command from `backend/`, with `DATABASE_URL` already
 set to the same disposable database:
 
 ```bash
-cargo test -p econ-graph-sec-crawler --features xbrl-parser --test xbrl_financial_integration_tests test_xbrl_taxonomy_schema_storage -- --nocapture --test-threads=1
+cargo test -p econ-graph-sec-crawler --features xbrl-parser --test xbrl_financial_integration_tests test_xbrl_taxonomy_schema_storage -- --nocapture
 ```
 
 ### Frontend file
@@ -145,8 +144,7 @@ integration-file exclusions in the [default Vitest configuration](../../frontend
 ## Continuous integration
 
 [Core CI](../../.github/workflows/ci-core.yml) runs the SEC crawler's tests with
-`--features xbrl-parser --no-fail-fast --tests -- --test-threads=1` in its workspace
-test step, which selects this backend integration target. Its database setup is
+`--features xbrl-parser --no-fail-fast --tests` in its workspace test step, which selects this backend integration target. Its database setup is
 part of the workflow; the local commands above require an existing database.
 
 The job named “Frontend Integration Tests” runs `npm run test:coverage`. That

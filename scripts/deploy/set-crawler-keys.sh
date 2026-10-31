@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 #
-# Enter the crawler API keys (and, with --google, the Google sign-in client)
+# Enter crawler API keys, or the optional Google sign-in credentials,
 # into the kind cluster's Secrets without the values ever appearing on screen,
 # in shell history, in process arguments, or in an AI agent's context.
 #
 # Usage (run it yourself, in your own terminal):
 #   scripts/deploy/set-crawler-keys.sh [--google] [--no-start-crawler] [--dry-run]
 #   scripts/deploy/set-crawler-keys.sh --tunnel [--dry-run]
+#   scripts/deploy/set-crawler-keys.sh --facebook [--dry-run]
+# --facebook refuses: Facebook sign-in is disabled
+# (https://linear.app/econgraph/issue/ECO-470). It stops before any prompt,
+# cluster call or write, and exits non-zero, with --dry-run too.
 #
 # --tunnel asks only for the Cloudflare Tunnel token (Secret cloudflare-tunnel,
 # key token; ECO-457), the one the dashboard shows for the tunnel's connector:
@@ -22,11 +26,33 @@
 # create-secrets.sh runs with an environment cut down to the basics plus the
 # keys of the selected mode, so credentials exported in your shell for other
 # keys (another mode's keys, database or Grafana passwords) are not written.
+# APP_DATABASE (shared or separate, not a credential) is passed on: on a cluster
+# whose econ-graph-secrets has no app-database-url yet, create-secrets.sh needs
+# it (docs/deployment/APP_DATA_CONVERSION.md).
 #
 # Afterwards the crawler worker is scaled to one replica and restarted so it
 # picks up the keys (skip with --no-start-crawler). With --google, Keycloak is
 # restarted and the keycloak-realm-import Job is run again (as deploy.sh
 # does), since that Job is what puts the Google client into the realm.
+# The Job applies the realm in the cluster's keycloak-realm ConfigMap, so the
+# script first checks that this ConfigMap holds this checkout's
+# realm files (config/keycloak/econ-graph-realm.json and the two helpers
+# scripts/deploy/deploy.sh puts next to it); if it does not, the script stops
+# before asking for anything, since the import could succeed without the
+# provider. Run the script from a checkout of the commit the cluster runs
+# (for production, the release tag), or roll out a release with
+# scripts/deploy/release-deploy.sh; scripts/deploy/deploy.sh from a working
+# checkout is only for clusters that are not production.
+# The Job is rendered for the public host the cluster serves (render_manifest
+# in scripts/deploy/lib/public-host.sh, as deploy.sh renders it), so the realm
+# keeps that host's redirect URIs and web origins. A PUBLIC_HOST in the
+# environment, or in the host's deploy config read as release-deploy.sh reads
+# it (ECONGRAPH_DEPLOY_ENV, else ECONGRAPH_CONFIG_DIR/deploy.env, else
+# ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env; see lib/deploy-config.sh), must name the host
+# the cluster serves; and a cluster marked production that serves no public
+# host (its routes missing after a recreate or a partial deploy) is refused,
+# since the realm would then lose the public redirect URIs. Every refusal
+# exits non-zero, in a dry run too.
 #
 # --dry-run prints which keys are currently set (names only) and what would
 # happen (with --tunnel, whether the cluster is marked production: these reads
@@ -43,18 +69,25 @@ set +x
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NAMESPACE="${NAMESPACE:-econ-graph}"
 
+# The PUBLIC_HOST the environment had, before the libraries are sourced.
+ENV_PUBLIC_HOST_SET="${PUBLIC_HOST+set}"
+ENV_PUBLIC_HOST="${PUBLIC_HOST-}"
+unset PUBLIC_HOST
+
 DRY_RUN=false
 GOOGLE=false
+FACEBOOK=false
 TUNNEL=false
 START_CRAWLER=true
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=true ;;
         --google) GOOGLE=true ;;
+        --facebook) FACEBOOK=true ;;
         --tunnel) TUNNEL=true ;;
         --no-start-crawler) START_CRAWLER=false ;;
         -h | --help)
-            sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,/^set -euo pipefail/{ /^set -euo pipefail/d; p; }' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -63,6 +96,13 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# Facebook sign-in is disabled: refuse before anything else, a dry run included.
+if [ "$FACEBOOK" = true ]; then
+    echo "error: Facebook sign-in is disabled until its email rules are built" \
+        "(https://linear.app/econgraph/issue/ECO-470); nothing was asked for, read or written" >&2
+    exit 1
+fi
 
 # Refuse before selecting an operator config, reading credentials or prompting.
 # shellcheck source=scripts/deploy/lib/agent-access.sh
@@ -83,8 +123,11 @@ source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
 cluster_role_use_context "kind-${KIND_CLUSTER}" || die "${KUBECTL} has no context kind-${KIND_CLUSTER}"
 kubectl() { kc "$@"; }
 
-if [ "$TUNNEL" = true ] && [ "$GOOGLE" = true ]; then
-    die "--tunnel and --google are separate runs; run the script once for each"
+if [ "$TUNNEL" = true ] && { [ "$GOOGLE" = true ] || [ "$FACEBOOK" = true ]; }; then
+    die "--tunnel and social sign-in modes are separate runs; run the script once for each"
+fi
+if [ "$FACEBOOK" = true ] && [ "$GOOGLE" = true ]; then
+    die "--facebook and --google are separate runs; run the script once for each"
 fi
 if [ "$TUNNEL" = true ] &&
     ! grep -q 'CLOUDFLARE_TUNNEL_TOKEN' "$PROJECT_ROOT/scripts/deploy/create-secrets.sh"; then
@@ -92,8 +135,9 @@ if [ "$TUNNEL" = true ] &&
         "(ECO-457); update the checkout first"
 fi
 
-CRAWLER_KEYS=(FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY)
+CRAWLER_KEYS=(FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY WTO_API_KEY)
 GOOGLE_KEYS=(KEYCLOAK_GOOGLE_CLIENT_ID KEYCLOAK_GOOGLE_CLIENT_SECRET)
+FACEBOOK_KEYS=(KEYCLOAK_FACEBOOK_CLIENT_ID KEYCLOAK_FACEBOOK_CLIENT_SECRET)
 TUNNEL_KEYS=(CLOUDFLARE_TUNNEL_TOKEN)
 
 # Secret and key each variable lands in (see create-secrets.sh).
@@ -110,8 +154,11 @@ key_of() {
         BLS_API_KEY) echo bls-api-key ;;
         BEA_API_KEY) echo bea-api-key ;;
         CENSUS_API_KEY) echo census-api-key ;;
+        WTO_API_KEY) echo wto-api-key ;;
         KEYCLOAK_GOOGLE_CLIENT_ID) echo google-idp-client-id ;;
         KEYCLOAK_GOOGLE_CLIENT_SECRET) echo google-idp-client-secret ;;
+        KEYCLOAK_FACEBOOK_CLIENT_ID) echo facebook-idp-client-id ;;
+        KEYCLOAK_FACEBOOK_CLIENT_SECRET) echo facebook-idp-client-secret ;;
         CLOUDFLARE_TUNNEL_TOKEN) echo token ;;
     esac
 }
@@ -133,6 +180,9 @@ if [ "$TUNNEL" = true ]; then
     # Only the token: the crawler is not touched.
     vars=("${TUNNEL_KEYS[@]}")
     START_CRAWLER=false
+elif [ "$FACEBOOK" = true ]; then
+    vars=("${FACEBOOK_KEYS[@]}")
+    START_CRAWLER=false
 else
     vars=("${CRAWLER_KEYS[@]}")
 fi
@@ -144,6 +194,80 @@ echo "==> Keys in namespace ${NAMESPACE}"
 for v in "${vars[@]}"; do
     printf '  %-30s %s/%s: %s\n' "$v" "$(secret_of "$v")" "$(key_of "$v")" "$(key_state "$v")"
 done
+
+# The realm-import Job reads the realm from ConfigMap keycloak-realm, which only
+# deploy.sh writes. Check, before asking for anything, that it holds this
+# checkout's files: an older realm has no provider for the new keys, and the
+# import would succeed without it. Also read the public host the cluster serves
+# now, so the Job is rendered for it as deploy.sh renders it; otherwise the
+# realm's redirect URIs and web origins would fall back to http://localhost.
+REALM_FILES=(
+    "econ-graph-realm.json=config/keycloak/econ-graph-realm.json"
+    "render-realm.sh=scripts/keycloak/render-realm.sh"
+    "preserve-catalog-grants.py=scripts/keycloak/preserve-catalog-grants.py"
+)
+# Prints why the cluster's realm ConfigMap is not this checkout's; nothing if it is.
+realm_configmap_mismatch() {
+    local entry key file live
+    if [ -z "$(kubectl -n "$NAMESPACE" get configmap keycloak-realm --ignore-not-found -o name)" ]; then
+        echo "ConfigMap keycloak-realm does not exist"
+        return 0
+    fi
+    for entry in "${REALM_FILES[@]}"; do
+        key="${entry%%=*}"
+        file="${entry#*=}"
+        live="$(kubectl -n "$NAMESPACE" get configmap keycloak-realm \
+            -o "go-template={{index .data \"$key\"}}")" || {
+            echo "could not read ConfigMap keycloak-realm"
+            return 0
+        }
+        if [ "$live" != "$(cat "$PROJECT_ROOT/$file")" ]; then
+            echo "ConfigMap keycloak-realm's ${key} differs from ${file} in this checkout"
+            return 0
+        fi
+    done
+}
+REIMPORT_REALM=false
+if { [ "$GOOGLE" = true ] || [ "$FACEBOOK" = true ]; } &&
+    kubectl -n "$NAMESPACE" get deployment keycloak >/dev/null 2>&1; then
+    REIMPORT_REALM=true
+    realm_mismatch="$(realm_configmap_mismatch)"
+    if [ -n "$realm_mismatch" ]; then
+        [ "$DRY_RUN" != true ] || echo "==> Dry run: would refuse: ${realm_mismatch}"
+        die "refusing to set sign-in keys: ${realm_mismatch}." \
+            "The realm import would apply the cluster's older realm, which may lack this provider." \
+            "Run this script from a checkout of the commit the cluster runs (for production, the release tag)," \
+            "or roll out a release with scripts/deploy/release-deploy.sh; scripts/deploy/deploy.sh is only for" \
+            "clusters that are not production. Nothing was asked for or written."
+    fi
+    # The public host the Job is rendered for: the one the cluster serves now.
+    PUBLIC_HOST="$(public_host_in_cluster)" ||
+        die "could not read the cluster's routes to see which public host it serves; nothing was asked for or written"
+    PUBLIC_HOST="${PUBLIC_HOST,,}"
+    if [ -z "$PUBLIC_HOST" ]; then
+        production=0
+        cluster_is_marked_production || production=$?
+        case "$production" in
+            0) die "refusing to set sign-in keys: this cluster is marked production but serves no public host" \
+                "(no public HTTPRoute or Ingress), so the realm would lose its public redirect URIs." \
+                "Restore its routes with scripts/deploy/release-deploy.sh, then run this again." \
+                "Nothing was asked for or written." ;;
+            1) ;;
+            *) die "refusing to set sign-in keys: ${CLUSTER_ROLE_REASON}. Nothing was asked for or written." ;;
+        esac
+    fi
+    # A host named in the environment or the deploy config must be the one served.
+    if [ "$ENV_PUBLIC_HOST_SET" = set ] && [ "${ENV_PUBLIC_HOST,,}" != "$PUBLIC_HOST" ]; then
+        die "refusing to set sign-in keys: PUBLIC_HOST='${ENV_PUBLIC_HOST}' is set in the environment," \
+            "but the cluster serves '${PUBLIC_HOST:-(no public host)}'. Nothing was asked for or written."
+    fi
+    read_configured_public_host ||
+        die "refusing to set sign-in keys: ${PUBLIC_HOST_CONFIG_ERROR}. Nothing was asked for or written."
+    if [ "$PUBLIC_HOST_CONFIGURED" = true ] && [ "$CONFIGURED_PUBLIC_HOST" != "$PUBLIC_HOST" ]; then
+        die "refusing to set sign-in keys: ${DEPLOY_ENV} says PUBLIC_HOST=${CONFIGURED_PUBLIC_HOST}," \
+            "but the cluster serves '${PUBLIC_HOST:-(no public host)}'. Nothing was asked for or written."
+    fi
+fi
 
 # The tunnel token goes only into the production cluster: refuse before asking
 # for it (create-secrets.sh would refuse it too, but only after it was typed).
@@ -165,8 +289,11 @@ fi
 if [ "$DRY_RUN" = true ]; then
     echo "==> Dry run: would prompt (hidden) for each key above, then run create-secrets.sh"
     [ "$START_CRAWLER" = true ] && echo "  then: kubectl -n ${NAMESPACE} scale deployment/crawler-worker --replicas=1 and restart it"
-    [ "$GOOGLE" = true ] && echo "  then: kubectl -n ${NAMESPACE} rollout restart deployment/keycloak," \
-        "then delete and re-apply job/keycloak-realm-import and wait for it"
+    # The realm allows the public host only when there is one, else http://localhost.
+    realm_origin="http://localhost"
+    [ -n "${PUBLIC_HOST:-}" ] && realm_origin="https://${PUBLIC_HOST}"
+    [ "$REIMPORT_REALM" = true ] && echo "  then: kubectl -n ${NAMESPACE} rollout restart deployment/keycloak," \
+        "then delete and re-apply job/keycloak-realm-import (for ${realm_origin}) and wait for it"
     [ "$TUNNEL" = true ] && echo "  then: start cloudflared through apply_cloudflared for the public host the cluster serves, and restart it"
     exit 0
 fi
@@ -200,7 +327,7 @@ else
     # on any command line). KUBECTL and CLUSTER_ROLE_CONTEXT are kept, so
     # create-secrets.sh uses the same kind kubectl and context as this script.
     (
-        keep=" PATH HOME USER LOGNAME LANG LC_ALL TERM TMPDIR KUBECONFIG KUBECTL CLUSTER_ROLE_CONTEXT ${vars[*]} "
+        keep=" PATH HOME USER LOGNAME LANG LC_ALL TERM TMPDIR KUBECONFIG KUBECTL CLUSTER_ROLE_CONTEXT APP_DATABASE ${vars[*]} "
         while IFS= read -r name; do
             case "$keep" in
                 *" $name "*) ;;
@@ -221,17 +348,18 @@ if [ "$START_CRAWLER" = true ] &&
     kubectl -n "$NAMESPACE" scale deployment/crawler-worker --replicas=1
     kubectl -n "$NAMESPACE" rollout restart deployment/crawler-worker
 fi
-if [ "$GOOGLE" = true ] && [ "$entered" -gt 0 ] &&
-    kubectl -n "$NAMESPACE" get deployment keycloak >/dev/null 2>&1; then
-    echo "==> Restarting Keycloak for the new Google client"
+if [ "$REIMPORT_REALM" = true ] && [ "$entered" -gt 0 ]; then
+    echo "==> Restarting Keycloak for the new sign-in client"
     kubectl -n "$NAMESPACE" rollout restart deployment/keycloak
     kubectl -n "$NAMESPACE" rollout status deployment/keycloak --timeout=600s
-    # The realm-import Job renders the Google client from the Secret into
+    # The realm-import Job renders the sign-in client from the Secret into
     # the realm; a restart alone does not re-run it. A finished Job cannot be
-    # re-run in place, so the old one goes first (as in deploy.sh).
-    echo "==> Re-running the Keycloak realm import for the new Google client"
+    # re-run in place, so the old one goes first (as in deploy.sh). Rendered
+    # for the public host read above, as deploy.sh renders it.
+    echo "==> Re-running the Keycloak realm import for the new sign-in client${PUBLIC_HOST:+ (public host https://${PUBLIC_HOST})}"
     kubectl -n "$NAMESPACE" delete job keycloak-realm-import --ignore-not-found
-    kubectl -n "$NAMESPACE" apply -f "$PROJECT_ROOT/k8s/manifests/keycloak/realm-import-job.yaml"
+    (cd "$PROJECT_ROOT" && render_manifest k8s/manifests/keycloak/realm-import-job.yaml) |
+        kubectl -n "$NAMESPACE" apply -f -
     realm_import_status=""
     for _ in $(seq 1 120); do
         realm_import_status="$(kubectl -n "$NAMESPACE" get job keycloak-realm-import \
@@ -242,7 +370,7 @@ if [ "$GOOGLE" = true ] && [ "$entered" -gt 0 ] &&
         sleep 5
     done
     case "$realm_import_status" in
-        *Complete*) echo "==> Keycloak realm applied with the new Google client" ;;
+        *Complete*) echo "==> Keycloak realm applied with the new sign-in client" ;;
         *)
             kubectl -n "$NAMESPACE" logs job/keycloak-realm-import --all-containers || true
             die "the Keycloak realm import did not complete (status: ${realm_import_status:-none})"

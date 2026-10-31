@@ -1,0 +1,11 @@
+{
+    "terms": {
+        "url": "https://www.bankofcanada.ca/terms/"
+    },
+    "seriesDetails": {
+        "name": "V39079",
+        "label": "Target for the overnight rate (business daily)",
+        "description": "Also called the policy interest rate, the average rate that the Bank of Canada wants to see in the market for overnight money market financing. (V39079)",
+        "dateFormat": "daily",        "metadata": {"frequency":"Business daily","unit":"Percent","unit_symbol":"%"}
+    }
+}

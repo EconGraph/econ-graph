@@ -29,9 +29,19 @@
 //!    after enumeration's, and checks them exactly as a single-job discovery checks its list. Its
 //!    result transaction moves the run to `complete`, deletes the chunk rows, and writes the
 //!    series through the same discovery commit as a single-job discovery: the validator, the
-//!    catalog metadata and, for a complete discovery with nothing missing, retirement.
+//!    catalog metadata and, for a complete discovery, publication lifecycle reconciliation
+//!    under the run's catalog scope or retirement.
 //!
-//! A run that fails or is superseded commits nothing: no metadata, no validator, no retirement.
+//! **The walk's facts live on the run.** A single-job discovery reads its catalog scope,
+//! publication facts ([`CatalogLifecycle`]), reference-refresh result and observation time from
+//! its adapter's memory right after the walk. A finalize may run on a worker that walked
+//! nothing, so the run stores them: the scope ([`ChunkedDiscovery::catalog_scope`]), the refresh
+//! result and the observation time when the run starts, enumeration's facts with its units, and
+//! each chunk's facts with its result. Finalize merges them and passes them to the same write.
+//!
+//! **A partial run is never a catalog.** A run that fails or is superseded commits nothing: no
+//! metadata, no validator, no miss counted, no retirement. Finalize itself ([`assemble`])
+//! refuses, permanently, a run without every one of its chunks stored.
 //!
 //! **Exactly one finalize.** Every chunk commit locks its run row (`SELECT ... FOR UPDATE`) inside
 //! the worker's lease-fenced result transaction, so chunk commits of one run serialize. Only the
@@ -81,6 +91,7 @@ use uuid::Uuid;
 use crate::adapter::DiscoveredSeries;
 use crate::dataset::SeriesDataset;
 use crate::http::Validators;
+use crate::lifecycle::CatalogLifecycle;
 use crate::source::SourceId;
 
 /// How an adapter discovers in chunks; see [`SourceAdapter::chunked_discovery`](crate::SourceAdapter::chunked_discovery).
@@ -89,10 +100,13 @@ pub struct ChunkedDiscovery {
     /// Units per `discover_chunk` job (at least 1 is used). Size it so one chunk's upstream calls
     /// take a few minutes at the source's rate limit, well inside the worker's `stuck_after`.
     pub units_per_chunk: usize,
-    /// A fingerprint of the adapter's catalog selection (its configured lists or rules), if it
-    /// has one. It is recorded when a run starts; a chunk or finalize job whose adapter reports a
-    /// different fingerprint fails the run rather than commit a catalog listed under other rules.
-    pub selection_fingerprint: Option<String>,
+    /// The adapter's catalog scope: the fingerprint of its selection rules that
+    /// [`SourceAdapter::catalog_scope`](crate::SourceAdapter::catalog_scope) reports after a
+    /// single-job walk, computed here without one. `None` for an adapter without lifecycle
+    /// tracking. It is recorded when a run starts and is the scope the run's finalize reconciles
+    /// under; a chunk or finalize job whose adapter reports a different scope fails the run
+    /// rather than commit a catalog listed under other rules.
+    pub catalog_scope: Option<String>,
 }
 
 /// One work unit of a chunked discovery: a series id, a table, ... as the adapter's
@@ -128,6 +142,8 @@ impl DiscoveryUnit {
 
 /// Outcome of [`SourceAdapter::enumerate_discovery`](crate::SourceAdapter::enumerate_discovery).
 #[derive(Debug, Clone, PartialEq, Eq)]
+// Returned once per discovery and moved straight into the run: boxing `Units` buys nothing.
+#[allow(clippy::large_enum_variant)]
 pub enum Enumeration {
     /// The catalog hasn't changed since the last discovery that stored a validator, as for
     /// [`Discovery::Unchanged`](crate::Discovery::Unchanged): the run completes with no chunks
@@ -143,6 +159,10 @@ pub enum Enumeration {
         /// Curated or configured entries the listing found missing upstream, named as
         /// [`curated_missing`](crate::SourceAdapter::curated_missing) names them.
         curated_missing: Vec<String>,
+        /// Publication facts the listing established (for example ids listed upstream outside
+        /// the selection rules), as [`catalog_lifecycle`](crate::SourceAdapter::catalog_lifecycle)
+        /// reports them after a single-job walk. Merged with every chunk's at finalize.
+        lifecycle: CatalogLifecycle,
     },
 }
 
@@ -156,6 +176,10 @@ pub struct ChunkDiscovery {
     /// [`curated_missing`](crate::SourceAdapter::curated_missing) names them. Any entry missing
     /// in any chunk stops the run's retirement, as for a single-job discovery.
     pub curated_missing: Vec<String>,
+    /// Publication facts about this chunk's units (restricted, discontinued, confirmed
+    /// missing, ...), as [`catalog_lifecycle`](crate::SourceAdapter::catalog_lifecycle) reports
+    /// them for the whole catalog after a single-job walk.
+    pub lifecycle: CatalogLifecycle,
 }
 
 /// `discovery_runs.state`.
@@ -250,6 +274,23 @@ impl From<StoredSeries> for DiscoveredSeries {
 struct StoredChunkResult {
     found: Vec<StoredSeries>,
     missing: Vec<String>,
+    #[serde(default)]
+    lifecycle: CatalogLifecycle,
+}
+
+/// Merges `more` into `facts`: every list concatenated, sorted and deduplicated.
+pub(crate) fn merge_lifecycle(facts: &mut CatalogLifecycle, more: CatalogLifecycle) {
+    fn add(into: &mut Vec<String>, more: Vec<String>) {
+        into.extend(more);
+        into.sort();
+        into.dedup();
+    }
+    add(&mut facts.scope_ids, more.scope_ids);
+    add(&mut facts.restricted_ids, more.restricted_ids);
+    add(&mut facts.discontinued_ids, more.discontinued_ids);
+    add(&mut facts.confirmed_missing_ids, more.confirmed_missing_ids);
+    add(&mut facts.unselected_ids, more.unselected_ids);
+    add(&mut facts.unselected_prefixes, more.unselected_prefixes);
 }
 
 #[derive(Serialize, Deserialize)]
@@ -395,11 +436,19 @@ pub(crate) struct RunRow {
     #[diesel(sql_type = Text)]
     pub state: String,
     #[diesel(sql_type = Nullable<Text>)]
-    pub selection_fingerprint: Option<String>,
+    pub catalog_scope: Option<String>,
     #[diesel(sql_type = Nullable<Jsonb>)]
     pub validator: Option<serde_json::Value>,
     #[diesel(sql_type = Jsonb)]
     pub curated_missing: serde_json::Value,
+    #[diesel(sql_type = Jsonb)]
+    pub lifecycle: serde_json::Value,
+    #[diesel(sql_type = diesel::sql_types::Bool)]
+    pub reference_ok: bool,
+    #[diesel(sql_type = Timestamptz)]
+    pub observed_at: DateTime<Utc>,
+    #[diesel(sql_type = Integer)]
+    pub chunks_total: i32,
 }
 
 impl RunRow {
@@ -411,6 +460,11 @@ impl RunRow {
     /// Curated entries enumeration found missing.
     pub(crate) fn curated_missing(&self) -> AppResult<Vec<String>> {
         from_json(self.curated_missing.clone())
+    }
+
+    /// Publication facts enumeration established.
+    pub(crate) fn lifecycle(&self) -> AppResult<CatalogLifecycle> {
+        from_json(self.lifecycle.clone())
     }
 }
 
@@ -473,15 +527,21 @@ pub(crate) enum RunStart {
 /// Starts a run of `source` in state `enumerating` for the `discover_catalog` job `claim`, first
 /// superseding any older run that is `enumerating` or `running` (and cancelling its queued
 /// jobs). See [`RunStart`] for when it starts nothing.
+///
+/// `reference_ok` (whether the job's reference-data refresh succeeded) and `observed_at` (the
+/// worker's clock as the walk starts) are stored on the run for its finalize, as a single-job
+/// discovery holds them in memory.
 pub(crate) async fn start_run(
     pool: &DatabasePool,
     source: SourceId,
     settings: &ChunkedDiscovery,
     claim: &CrawlQueueItem,
+    reference_ok: bool,
+    observed_at: DateTime<Utc>,
 ) -> AppResult<RunStart> {
     let mut conn = pool.get().await.map_err(conn_err)?;
     let source = source.as_str();
-    let fingerprint = settings.selection_fingerprint.clone();
+    let fingerprint = settings.catalog_scope.clone();
     let priority = claim.priority;
     conn.transaction::<_, AppError, _>(async move |conn| {
         // The claim row stays locked until commit, so the lease can't be released and re-claimed
@@ -549,14 +609,16 @@ pub(crate) async fn start_run(
         )
         .await?;
         let run: IdRow = diesel::sql_query(
-            "INSERT INTO discovery_runs \
-                 (source, state, selection_fingerprint, priority, discovery_job_id) \
-             VALUES ($1, 'enumerating', $2, $3, $4) RETURNING id",
+            "INSERT INTO discovery_runs (source, state, catalog_scope, priority, \
+                 discovery_job_id, reference_ok, observed_at) \
+             VALUES ($1, 'enumerating', $2, $3, $4, $5, $6) RETURNING id",
         )
         .bind::<Text, _>(source)
         .bind::<Nullable<Text>, _>(fingerprint)
         .bind::<Integer, _>(priority)
         .bind::<SqlUuid, _>(claim.id)
+        .bind::<diesel::sql_types::Bool, _>(reference_ok)
+        .bind::<Timestamptz, _>(observed_at)
         .get_result(conn)
         .await?;
         Ok(RunStart::Started {
@@ -592,7 +654,8 @@ pub(crate) async fn fail_enumerating_run(
 pub(crate) async fn load_run(pool: &DatabasePool, run_id: Uuid) -> AppResult<Option<RunRow>> {
     let mut conn = pool.get().await.map_err(conn_err)?;
     let rows: Vec<RunRow> = diesel::sql_query(
-        "SELECT id, state::text AS state, selection_fingerprint, validator, curated_missing \
+        "SELECT id, state::text AS state, catalog_scope, validator, curated_missing, \
+             lifecycle, reference_ok, observed_at, chunks_total \
          FROM discovery_runs WHERE id = $1",
     )
     .bind::<SqlUuid, _>(run_id)
@@ -613,11 +676,11 @@ pub(crate) async fn pending_chunk_units(
         #[diesel(sql_type = Jsonb)]
         units: serde_json::Value,
         #[diesel(sql_type = Nullable<Text>)]
-        selection_fingerprint: Option<String>,
+        catalog_scope: Option<String>,
     }
     let mut conn = pool.get().await.map_err(conn_err)?;
     let rows: Vec<Row> = diesel::sql_query(
-        "SELECT c.units, r.selection_fingerprint \
+        "SELECT c.units, r.catalog_scope \
          FROM discovery_run_chunks c JOIN discovery_runs r ON r.id = c.run_id \
          WHERE c.run_id = $1 AND c.chunk_index = $2 AND c.state = 'pending' \
            AND r.state = 'running'",
@@ -631,24 +694,33 @@ pub(crate) async fn pending_chunk_units(
         .map(|r| {
             Ok(PendingChunk {
                 units: from_json(r.units)?,
-                selection_fingerprint: r.selection_fingerprint,
+                catalog_scope: r.catalog_scope,
             })
         })
         .transpose()
 }
 
-/// A chunk still waiting for its details, with its run's selection fingerprint.
+/// A chunk still waiting for its details, with its run's catalog scope.
 pub(crate) struct PendingChunk {
     pub units: Vec<DiscoveryUnit>,
-    pub selection_fingerprint: Option<String>,
+    pub catalog_scope: Option<String>,
 }
 
-/// Every chunk's series in chunk order, then every curated entry missing (enumeration's first,
-/// then each chunk's in chunk order). Errors if any chunk isn't done.
-pub(crate) async fn assemble(
-    pool: &DatabasePool,
-    run: &RunRow,
-) -> AppResult<(Vec<DiscoveredSeries>, Vec<String>)> {
+/// A run's catalog, assembled from its chunks for finalize.
+pub(crate) struct AssembledCatalog {
+    pub found: Vec<DiscoveredSeries>,
+    pub missing: Vec<String>,
+    pub lifecycle: CatalogLifecycle,
+}
+
+/// Every chunk's series in chunk order, every curated entry missing (enumeration's first, then
+/// each chunk's in chunk order) and the merged publication facts.
+///
+/// This is the partial-catalog guard: it errors unless every one of the run's `chunks_total`
+/// chunks is stored as done, so a catalog missing a chunk (failed, superseded, deleted) can
+/// never be committed, reconciled or retired against as if it were complete. The error is a
+/// validation error, so the finalize job fails for good (and fails its run) rather than retry.
+pub(crate) async fn assemble(pool: &DatabasePool, run: &RunRow) -> AppResult<AssembledCatalog> {
     #[derive(QueryableByName)]
     struct Row {
         #[diesel(sql_type = Text)]
@@ -664,11 +736,20 @@ pub(crate) async fn assemble(
     .bind::<SqlUuid, _>(run.id)
     .load(&mut conn)
     .await?;
+    if rows.len() != usize::try_from(run.chunks_total).unwrap_or(usize::MAX) {
+        return Err(AppError::ValidationError(format!(
+            "discovery run {} has {} of its {} chunks at finalize",
+            run.id,
+            rows.len(),
+            run.chunks_total
+        )));
+    }
     let mut found = Vec::new();
     let mut missing = run.curated_missing()?;
+    let mut lifecycle = run.lifecycle()?;
     for row in rows {
         let Some(result) = row.result.filter(|_| row.state == "done") else {
-            return Err(AppError::InternalError(format!(
+            return Err(AppError::ValidationError(format!(
                 "discovery run {} has a chunk in state {} at finalize",
                 run.id, row.state
             )));
@@ -676,8 +757,13 @@ pub(crate) async fn assemble(
         let chunk: StoredChunkResult = from_json(result)?;
         found.extend(chunk.found.into_iter().map(DiscoveredSeries::from));
         missing.extend(chunk.missing);
+        merge_lifecycle(&mut lifecycle, chunk.lifecycle);
     }
-    Ok((found, missing))
+    Ok(AssembledCatalog {
+        found,
+        missing,
+        lifecycle,
+    })
 }
 
 /// Inserts the `finalize_discovery` job of `run_id`.
@@ -726,6 +812,7 @@ async fn begin_finalize_conn(
 /// chunks and enqueues their jobs (or, with no units, goes straight to `finalizing`). Returns
 /// the number of chunks, or `None` when the run is no longer `enumerating` (superseded), in
 /// which case nothing is written.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn commit_enumeration_conn(
     conn: &mut AsyncPgConnection,
     run_id: Uuid,
@@ -733,6 +820,7 @@ pub(crate) async fn commit_enumeration_conn(
     units_per_chunk: usize,
     validator: Option<&(String, Validators)>,
     curated_missing: &[String],
+    lifecycle: &CatalogLifecycle,
     max_retries: i32,
 ) -> AppResult<Option<usize>> {
     let chunks: Vec<&[DiscoveryUnit]> = units.chunks(units_per_chunk.max(1)).collect();
@@ -740,13 +828,14 @@ pub(crate) async fn commit_enumeration_conn(
         .map_err(|_| AppError::ValidationError("too many discovery chunks".into()))?;
     let moved: Vec<IdRow> = diesel::sql_query(
         "UPDATE discovery_runs SET state = 'running', chunks_total = $2, validator = $3, \
-             curated_missing = $4, enumerated_at = NOW(), updated_at = NOW() \
+             curated_missing = $4, lifecycle = $5, enumerated_at = NOW(), updated_at = NOW() \
          WHERE id = $1 AND state = 'enumerating' RETURNING id",
     )
     .bind::<SqlUuid, _>(run_id)
     .bind::<Integer, _>(total)
     .bind::<Nullable<Jsonb>, _>(validator_json(validator)?)
     .bind::<Jsonb, _>(to_json(&curated_missing)?)
+    .bind::<Jsonb, _>(to_json(lifecycle)?)
     .load(conn)
     .await?;
     if moved.is_empty() {
@@ -847,6 +936,7 @@ pub(crate) async fn commit_chunk_conn(
     let stored = StoredChunkResult {
         found: result.found.iter().map(StoredSeries::from).collect(),
         missing: result.curated_missing.clone(),
+        lifecycle: result.lifecycle.clone(),
     };
     let n = diesel::sql_query(
         "UPDATE discovery_run_chunks SET state = 'done', result = $3, finished_at = NOW() \
@@ -889,6 +979,7 @@ pub(crate) async fn complete_run_conn(
     let done: Vec<Row> = diesel::sql_query(
         "UPDATE discovery_runs SET state = 'complete', finished_at = NOW(), updated_at = NOW() \
          WHERE id = $1 AND state = 'finalizing' \
+           AND chunks_done = chunks_total AND chunks_failed = 0 \
          RETURNING EXTRACT(EPOCH FROM (NOW() - started_at))::float8 AS seconds",
     )
     .bind::<SqlUuid, _>(run_id)

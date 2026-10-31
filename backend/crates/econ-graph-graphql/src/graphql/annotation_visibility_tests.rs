@@ -93,8 +93,7 @@ async fn make_series(pool: &DatabasePool) -> String {
 }
 
 /// Runs `query` against the real schema, as `user` (or anonymous when `None`); never staff.
-/// Anonymous callers hold every catalog read, as with the default `catalog-public` grants, so
-/// these tests see annotation visibility alone.
+/// Anonymous callers here hold every catalog read, so these tests see annotation visibility alone.
 async fn run_as(pool: &DatabasePool, user: Option<User>, query: &str) -> async_graphql::Response {
     let context = match user {
         Some(user) => GraphQLContext::for_test_user(Some(user), false),

@@ -310,6 +310,7 @@ async fn make_worker(
             bls: Some("soak-bls-key".into()),
             bea: None,
             census: None,
+            wto: None,
         },
         bypass_validators: false,
     };

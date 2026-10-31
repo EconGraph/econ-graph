@@ -57,7 +57,7 @@ def run_main(argv, env, scenario_dir=runner.DEFAULT_SCENARIO_DIR):
 
 class DeclarationTest(unittest.TestCase):
     def test_every_scenario_declares_what_it_changes(self):
-        self.assertGreaterEqual(len(SCENARIOS), 9)
+        self.assertGreaterEqual(len(SCENARIOS), 12)
         for scenario in SCENARIOS:
             with self.subTest(scenario.name):
                 self.assertIsNone(scenario.declaration_problem)
@@ -67,11 +67,12 @@ class DeclarationTest(unittest.TestCase):
     def test_state_changing_scenarios(self):
         mutating = {s.name for s in SCENARIOS if s.mutates}
         self.assertEqual(mutating, {'annotation-round-trip', 'catalog-roles', 'backup-restore',
-                                    'crawl-sample'})
+                                    'crawl-sample', 'branch-isolation', 'data-survives-redeploy'})
 
     def test_lab_only_scenarios(self):
         lab_only = {s.name for s in SCENARIOS if s.profiles == ('lab',)}
-        self.assertEqual(lab_only, {'backup-restore', 'conversion-checks', 'crawl-sample'})
+        self.assertEqual(lab_only, {'backup-restore', 'conversion-checks', 'crawl-sample',
+                                    'branch-isolation', 'data-survives-redeploy'})
 
     def test_a_missing_or_unclear_declaration_counts_as_changing_state(self):
         with tempfile.TemporaryDirectory() as tmp:

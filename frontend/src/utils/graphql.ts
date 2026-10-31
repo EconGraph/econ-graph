@@ -370,6 +370,7 @@ export const QUERIES = {
           startDate
           endDate
           lastUpdated
+          lifecycle { status since successorId proposedSuccessorId }
         }
         totalCount
         pageInfo {
@@ -392,6 +393,12 @@ export const QUERIES = {
         description
         source {
           name
+          notice {
+            citation
+            notice
+            termsUrl
+            retrievalDateRequired
+          }
         }
         frequency
         units
@@ -400,6 +407,7 @@ export const QUERIES = {
         endDate
         lastUpdated
         isActive
+        lifecycle { status since successorId proposedSuccessorId }
       }
     }
   `,
@@ -499,6 +507,7 @@ export const QUERIES = {
           startDate
           endDate
           lastUpdated
+          lifecycle { status since successorId proposedSuccessorId }
         }
         totalCount
         query
@@ -518,8 +527,15 @@ export const QUERIES = {
         apiKeyRequired
         rateLimitPerMinute
         seriesCount
+        lifecycleCounts { discontinued missingFromCatalog retired superseded }
         createdAt
         updatedAt
+        notice {
+          citation
+          notice
+          termsUrl
+          retrievalDateRequired
+        }
       }
     }
   `,
@@ -692,8 +708,25 @@ export const MUTATIONS = {
   `,
 };
 
+// Publication state is separate from crawl health and observation dates.
+export interface SeriesLifecycle {
+  status:
+    'active' | 'discontinued' | 'missing_from_catalog' | 'retired' | 'restricted' | 'superseded';
+  since: string | null;
+  successorId: string | null;
+  proposedSuccessorId: string | null;
+}
+
+export interface SourceLifecycleCounts {
+  discontinued: number;
+  missingFromCatalog: number;
+  retired: number;
+  superseded: number;
+}
+
 // Type definitions for better TypeScript support
 export interface SeriesListNode {
+  lifecycle?: SeriesLifecycle | null;
   id: string;
   externalId: string;
   title: string;

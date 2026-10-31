@@ -1,13 +1,13 @@
 # keycloak-realm-import: applies config/keycloak/econ-graph-realm.json to the running
 # Keycloak on every deploy, so the realm (clients, roles, composites, mappers, the
-# Google identity provider) stays what the repository says. Existing catalog grants
+# Google and optional Facebook identity providers) stays what the repository says. Existing catalog grants
 # remain operator-managed in Keycloak and are merged into the import before apply.
 #
 # `kc.sh start --import-realm` only creates a realm that does not exist yet, and
 # `kc.sh import --override true` would delete the realm and every account in it. So
 # this Job runs keycloak-config-cli, which diffs the realm file against the server
 # through the admin API and changes only what differs. Users, their role mappings,
-# sessions and Google-brokered accounts are untouched. The only declared user is the
+# sessions and Google- or Facebook-brokered accounts are untouched. The only declared user is the
 # anonymous service account, whose catalog policy is preserved by the render init step.
 #
 # The admin API does not resolve the ${VAR:default} placeholders that Keycloak's own
@@ -49,6 +49,7 @@ spec:
         - |
           set -euo pipefail
           if [ -n "${KC_GOOGLE_CLIENT_ID:-}" ] && [ -n "${KC_GOOGLE_CLIENT_SECRET:-}" ]; then export KC_GOOGLE_ENABLED=true; fi
+          if [ -n "${KC_FACEBOOK_CLIENT_ID:-}" ] && [ -n "${KC_FACEBOOK_CLIENT_SECRET:-}" ]; then export KC_FACEBOOK_ENABLED=true; fi
           bash /config/render-realm.sh /config/econ-graph-realm.json > /rendered/realm-template.json
           python /config/preserve-catalog-grants.py /rendered/realm-template.json > /rendered/econ-graph-realm.json
         env:
@@ -73,7 +74,9 @@ spec:
               key: anonymous-client-secret
         - name: KC_WEB_BASE_URL
           value: "http://localhost"
-        # Second allowed web origin; only the compose e2e stack needs a different one.
+        # Second allowed web origin: the compose e2e stack's frontend there. With PUBLIC_HOST,
+        # deploy.sh sets it to the public host like KC_WEB_BASE_URL, so the realm allows no
+        # localhost.
         - name: KC_WEB_E2E_BASE_URL
           value: "http://localhost"
         - name: KC_GOOGLE_CLIENT_ID
@@ -87,6 +90,18 @@ spec:
             secretKeyRef:
               name: econ-graph-keycloak
               key: google-idp-client-secret
+              optional: true
+        - name: KC_FACEBOOK_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: facebook-idp-client-id
+              optional: true
+        - name: KC_FACEBOOK_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-keycloak
+              key: facebook-idp-client-secret
               optional: true
         volumeMounts:
         - name: realm

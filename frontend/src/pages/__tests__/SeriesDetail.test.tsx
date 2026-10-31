@@ -36,15 +36,17 @@ import {
 vi.mock('../../hooks/useSeriesData', async () => vi.importActual('../../hooks/useSeriesData'));
 
 vi.mock('../../utils/graphql', async () => {
-  const actual = await vi.importActual<typeof import('../../utils/graphql')>(
-    '../../utils/graphql'
-  );
+  const actual = await vi.importActual<typeof import('../../utils/graphql')>('../../utils/graphql');
   return { ...actual, executeGraphQL: vi.fn() };
 });
 
+// The history state the page was opened with, and where it navigates
+const router = vi.hoisted(() => ({ state: null as unknown, navigate: vi.fn() }));
+
 vi.mock('react-router-dom', () => ({
   useParams: vi.fn(),
-  useNavigate: () => vi.fn(),
+  useNavigate: () => router.navigate,
+  useLocation: () => ({ pathname: '/series', search: '', hash: '', state: router.state }),
 }));
 
 // Chart.js needs a canvas; render the points it would plot instead.
@@ -135,8 +137,86 @@ async function chooseTransformation(label: string) {
 }
 
 describe('SeriesDetail', () => {
+  test('keeps retained history visible with the confirmed publication date and successor', async () => {
+    serve();
+    const original = mockExecute.getMockImplementation()!;
+    mockExecute.mockImplementation(async request => {
+      if (request.query === QUERIES.GET_SERIES_DETAIL) {
+        return {
+          data: {
+            series: {
+              ...seriesResponses[UNRATE_ID].series,
+              lifecycle: {
+                status: 'superseded',
+                since: '2026-10-25T00:00:00Z',
+                successorId: GDP_Q_ID,
+                proposedSuccessorId: null,
+              },
+            },
+          },
+        };
+      }
+      return original(request);
+    });
+    renderPage(UNRATE_ID);
+    expect(
+      await screen.findByText(/Superseded series from .* since 2026-10-25/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Superseded by another series' })).toHaveAttribute(
+      'href',
+      `/series/${GDP_Q_ID}`
+    );
+    await screen.findByTestId('line-chart');
+    expect(plottedPoints()).toHaveLength(3);
+  });
+
   beforeEach(() => {
     mockExecute.mockReset();
+    router.state = null;
+    router.navigate.mockReset();
+  });
+
+  // ECO-732: the Explore breadcrumb went to an empty explorer, dropping the search and page.
+  test('the Explore links return to the explorer results the series was opened from', async () => {
+    serve();
+    router.state = { explorerUrl: '/explore?q=rate&page=2' };
+    renderPage(UNRATE_ID);
+    await screen.findByRole('heading', { name: 'Unemployment Rate', level: 1 });
+
+    const explore = within(screen.getByRole('navigation', { name: 'breadcrumb' })).getByRole('link', {
+      name: 'Explore',
+    });
+    expect(explore).toHaveAttribute('href', '/explore?q=rate&page=2');
+    await userEvent.setup().click(explore);
+    expect(router.navigate).toHaveBeenCalledWith('/explore?q=rate&page=2');
+  });
+
+  test('Back to Explorer on a missing series returns to those results too', async () => {
+    serve();
+    router.state = { explorerUrl: '/explore?source=fred&page=3' };
+    renderPage(UNKNOWN_ID);
+
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Back to Explorer' }));
+    expect(router.navigate).toHaveBeenCalledWith('/explore?source=fred&page=3');
+  });
+
+  test.each([
+    ['no history state', null],
+    ['no explorer URL', {}],
+    ['a non-string', { explorerUrl: 42 }],
+    ['another site', { explorerUrl: 'https://evil.example/explore' }],
+    ['a protocol-relative URL', { explorerUrl: '//evil.example/explore' }],
+    ['another page', { explorerUrl: '/admin' }],
+    ['a path that only starts like it', { explorerUrl: '/explorer-elsewhere' }],
+  ])('with %s, the Explore link goes to the explorer itself', async (_case, state) => {
+    serve();
+    router.state = state;
+    renderPage(UNRATE_ID);
+    await screen.findByRole('heading', { name: 'Unemployment Rate', level: 1 });
+
+    expect(within(screen.getByRole('navigation', { name: 'breadcrumb' })).getByRole('link', {
+      name: 'Explore',
+    })).toHaveAttribute('href', '/explore');
   });
 
   test('shows the series and its observations from the API', async () => {
@@ -203,9 +283,9 @@ describe('SeriesDetail', () => {
 
     expect(screen.getByText('Last Fetched')).toBeInTheDocument();
     expect(screen.queryByText('Last Updated')).not.toBeInTheDocument();
-    expect(screen.getByTitle('When EconGraph last fetched this series from FRED')).toHaveTextContent(
-      'Apr 5, 2024'
-    );
+    expect(
+      screen.getByTitle('When EconGraph last fetched this series from FRED')
+    ).toHaveTextContent('Apr 5, 2024');
   });
 
   test('marks an original release in a neutral colour, not the red accent', async () => {
@@ -268,7 +348,9 @@ describe('SeriesDetail', () => {
 
     await chooseTransformation(label);
 
-    await waitFor(() => expect(dataRequests().slice(-1)[0]?.variables?.transformation).toBe(enumValue));
+    await waitFor(() =>
+      expect(dataRequests().slice(-1)[0]?.variables?.transformation).toBe(enumValue)
+    );
     await waitFor(() => expect(plottedPoints()).toContainEqual(['2024-02-01', 5.4054]));
   });
 
@@ -368,7 +450,9 @@ describe('SeriesDetail', () => {
     expect(
       await screen.findByText(/Could not load observations for this series/)
     ).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Unemployment Rate', level: 1 })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Unemployment Rate', level: 1 })
+    ).toBeInTheDocument();
   });
 
   test('a failed transformation can go back to levels', async () => {

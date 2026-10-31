@@ -2,7 +2,7 @@
  * Privacy Policy page.
  *
  * Describes what EconGraph stores about a signed-in user:
- * a Google account signed in through Keycloak, the annotations and comments
+ * an identity provider account signed in through Keycloak, the annotations and comments
  * a user writes, and the theme preference kept in the browser, plus ordinary
  * server logs. Nothing else about visitors is collected.
  *
@@ -34,7 +34,7 @@ import {
   ExpandMore,
 } from '@mui/icons-material';
 
-const LAST_UPDATED = 'September 27, 2026';
+const LAST_UPDATED = 'October 26, 2026';
 const REPOSITORY_URL = 'https://github.com/EconGraph/econ-graph';
 
 const PrivacyPolicy: React.FC = () => {
@@ -64,7 +64,7 @@ const PrivacyPolicy: React.FC = () => {
               marginBottom: '16px',
             }}
           >
-            Sign-in uses Keycloak with Google as the identity provider. When you sign in, Google
+            Sign-in uses Keycloak with Google or Facebook when configured. The provider you choose
             shares your profile with Keycloak, and EconGraph keeps:
           </Typography>
           <List dense>
@@ -77,13 +77,13 @@ const PrivacyPolicy: React.FC = () => {
             <ListItem>
               <ListItemText
                 primary='Email address'
-                secondary='From your Google account, used to identify you'
+                secondary='From your chosen sign-in provider, used to identify you'
               />
             </ListItem>
             <ListItem>
               <ListItemText
-                primary='Name and profile picture'
-                secondary='From your Google account, shown next to your public annotations and comments'
+                primary='Name and profile picture, when supplied'
+                secondary='From your chosen sign-in provider, shown next to your public annotations and comments'
               />
             </ListItem>
             <ListItem>
@@ -100,8 +100,8 @@ const PrivacyPolicy: React.FC = () => {
               marginBottom: '16px',
             }}
           >
-            EconGraph never sees your Google password, and we do not ask Google for anything beyond
-            your basic profile.
+            EconGraph never sees your sign-in provider's password, and we do not ask for anything
+            beyond your basic profile.
           </Typography>
 
           <Typography variant='h6' component='h3' gutterBottom sx={{ mt: 3 }}>
@@ -250,8 +250,8 @@ const PrivacyPolicy: React.FC = () => {
           <List dense>
             <ListItem>
               <ListItemText
-                primary='Google'
-                secondary='Handles your sign-in under its own privacy policy. Google learns that you signed in to EconGraph'
+                primary='Your sign-in provider (Google or Facebook)'
+                secondary='Handles your sign-in under its own privacy policy. The provider you choose learns that you signed in to EconGraph'
               />
             </ListItem>
             <ListItem>
@@ -275,8 +275,8 @@ const PrivacyPolicy: React.FC = () => {
             }}
           >
             The economic data shown on EconGraph comes from public statistical sources (FRED, BLS,
-            Census BDS, FHFA, BEA and the World Bank). Reading it sends nothing about you to those
-            sources.
+            Census BDS, FHFA, BEA, the World Bank and the Bank of Canada). Reading it sends nothing
+            about you to those sources.
           </Typography>
         </Box>
       ),
@@ -313,8 +313,8 @@ const PrivacyPolicy: React.FC = () => {
               marginBottom: '16px',
             }}
           >
-            You can also revoke EconGraph's access to your Google account from your Google account
-            settings.
+            You can also revoke EconGraph's access from your Google account settings or from
+            Facebook's Apps and Websites settings.
           </Typography>
         </Box>
       ),
@@ -349,9 +349,9 @@ const PrivacyPolicy: React.FC = () => {
           }}
         >
           EconGraph is an open-source economic data explorer. Browsing needs no account. If you sign
-          in with Google, we keep your basic Google profile and the annotations and comments you
-          write. Annotations are private unless you make them public. We use no trackers and share
-          no personal information with third parties.
+          in through a configured provider, we keep your basic profile and the annotations and
+          comments you write. Annotations are private unless you make them public. We use no
+          trackers and share no personal information with third parties.
         </Typography>
       </Paper>
 
@@ -376,9 +376,9 @@ const PrivacyPolicy: React.FC = () => {
         </Accordion>
       ))}
 
-      <Paper elevation={1} sx={{ p: 3, mb: 4 }}>
+      <Paper id='account-deletion' elevation={1} sx={{ p: 3, mb: 4 }}>
         <Typography variant='h5' component='h2' gutterBottom>
-          Questions and requests
+          Account deletion and other requests
         </Typography>
         <Typography
           variant='body2'
@@ -389,8 +389,10 @@ const PrivacyPolicy: React.FC = () => {
         >
           To ask about this policy, request a copy of your data or have your account deleted, open
           an issue in the project repository at <Link href={REPOSITORY_URL}>{REPOSITORY_URL}</Link>.
-          If your request involves personal details you would rather not post publicly, say so in
-          the issue and we will follow up privately.
+          For deletion, say that you want your EconGraph account and associated data removed. This
+          applies whether you signed in with Google or Facebook. Do not post passwords, access
+          tokens or other credentials. If your request involves personal details you would rather
+          not post publicly, say so in the issue and we will follow up privately.
         </Typography>
       </Paper>
 

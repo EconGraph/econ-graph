@@ -632,10 +632,6 @@ mod tests {
     /// lock is released. A test that instead just ran two `run_migrations` calls concurrently
     /// would pass even without the lock, since both would likely finish before either raced the
     /// other (few migrations, no contention to force a slow one to wait).
-    ///
-    /// Connects directly with `DATABASE_URL` (unlike the other tests here) because
-    /// `TestContainer` always starts a throwaway Docker container even when pointed at an
-    /// external database, and this test's environment has no Docker daemon.
     #[tokio::test]
     #[serial_test::serial]
     async fn test_migrations_block_while_another_session_holds_the_lock() {
@@ -892,7 +888,7 @@ mod tests {
     }
 
     /// The tables of each set, as listed in docs/development/MIGRATIONS.md.
-    const DATA_TABLES: [&str; 28] = [
+    const DATA_TABLES: [&str; 31] = [
         "data_sources",
         "datasets",
         "economic_series",
@@ -902,6 +898,9 @@ mod tests {
         "series_metadata",
         "reference_file_cache",
         "series_fetch_validators",
+        "series_lifecycle",
+        "catalog_lifecycle_scopes",
+        "catalog_reference_snapshots",
         "discovery_runs",
         "discovery_run_chunks",
         "countries",
@@ -960,6 +959,46 @@ mod tests {
         let mut all = DATA_TABLES.to_vec();
         all.extend(APP_TABLES);
         assert_eq!(public_tables(&mut conn), sorted(&all));
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn reverting_catalog_evidence_preserves_the_schema_and_migration_record() {
+        use diesel::connection::SimpleConnection;
+        use diesel::migration::MigrationSource;
+        use diesel_migrations::MigrationHarness;
+
+        let db = ScratchDatabase::create("catalog_forward_only");
+        run_migration_set(&db.url, MigrationSet::Data)
+            .await
+            .unwrap();
+        let mut conn = db.connect();
+        conn.batch_execute("INSERT INTO catalog_reference_snapshots(source,url,content_sha256,codes) \
+            VALUES('BEA','https://example.test/catalog','test','[{\"code\":\"OLD\",\"label\":\"Retained\"}]')")
+            .unwrap();
+        let versions = recorded_versions(&mut conn);
+        let schema = schema_signature(&mut conn);
+        // The consolidated migration must retain both publication evidence and snapshots.
+        let lifecycle = MigrationSource::<diesel::pg::Pg>::migrations(&DATA_MIGRATIONS)
+            .unwrap()
+            .into_iter()
+            .find(|m| m.name().version().to_string() == "20261026000200")
+            .expect("the lifecycle migration is embedded");
+        let error = conn.revert_migration(&lifecycle).unwrap_err();
+        assert!(error.to_string().contains("forward-only"), "{error}");
+        assert_eq!(recorded_versions(&mut conn), versions);
+        assert_eq!(schema_signature(&mut conn), schema);
+        assert_eq!(
+            text_rows(
+                &mut conn,
+                "SELECT codes->0->>'label' AS value FROM catalog_reference_snapshots"
+            ),
+            vec!["Retained"]
+        );
+        assert!(run_migration_set(&db.url, MigrationSet::Data)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     /// Each set builds on an empty database by itself and creates only its own tables, so the
@@ -1126,15 +1165,17 @@ mod tests {
 
         let db = ScratchDatabase::create(name);
         let mut conn = db.connect();
-        let pending = conn
-            .pending_migrations(MigrationSet::Data.migrations())
-            .expect("should read the data migrations");
-        for migration in pending {
-            if migration.name().version().to_string().as_str() <= DATA_BASELINE_VERSION {
-                conn.run_migration(&migration)
-                    .expect("the data set through its baseline should apply");
-            }
-        }
+        // Reconstruct the historical baseline, not today's whole data migration set.
+        // Later data migrations must be exercised by the upgrade below.
+        let mut baseline = conn
+            .pending_migrations(DATA_MIGRATIONS)
+            .expect("embedded data migrations")
+            .into_iter()
+            .filter(|m| m.name().version().to_string().as_str() <= DATA_BASELINE_VERSION)
+            .collect::<Vec<_>>();
+        baseline.sort_by_key(|m| m.name().version().to_string());
+        conn.run_migrations(&baseline)
+            .expect("the data baseline should apply");
         conn.batch_execute(include_str!(
             "../../../migrations/app/2026-10-21-000200_v4_0_app_baseline/up.sql"
         ))

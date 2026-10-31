@@ -21,6 +21,7 @@ import {
   Code as CodeIcon,
   GitHub as GitHubIcon,
 } from '@mui/icons-material';
+import { useDataSources } from '../hooks/useSeriesData';
 
 /**
  * REQUIREMENT: About page explaining the modern application features
@@ -66,6 +67,9 @@ const About: React.FC = () => {
     { name: 'Grafana', category: 'Monitoring' },
   ];
 
+  // Every notice the sources' terms require, collected in one place.
+  const sourcesWithNotices = (useDataSources().data ?? []).filter(source => source.notice);
+
   const dataSources = [
     'Federal Reserve Economic Data (FRED)',
     'Bureau of Labor Statistics (BLS)',
@@ -73,6 +77,7 @@ const About: React.FC = () => {
     'Federal Housing Finance Agency (FHFA)',
     'Bureau of Economic Analysis (BEA)',
     'World Bank World Development Indicators (WDI)',
+    'Bank of Canada (Valet), available on request',
   ];
 
   return (
@@ -239,6 +244,35 @@ const About: React.FC = () => {
               ))}
             </List>
           </Paper>
+
+          {/* Source notices */}
+          {sourcesWithNotices.length > 0 && (
+            <Paper sx={{ p: 3, mb: 3 }} component='section' aria-label='Source notices'>
+              <Typography variant='h6' gutterBottom>
+                Source Notices
+              </Typography>
+              {sourcesWithNotices.map(source => (
+                <Box key={source.id} sx={{ mb: 2 }}>
+                  <Typography variant='subtitle2'>{source.name}</Typography>
+                  {source.notice?.citation && (
+                    <Typography variant='body2' sx={{ color: 'text.secondary' }}>
+                      {source.notice.citation}
+                    </Typography>
+                  )}
+                  <Typography variant='body2' sx={{ color: 'text.secondary' }}>
+                    {source.notice?.notice}{' '}
+                    <Link href={source.notice?.termsUrl} target='_blank' rel='noopener noreferrer'>
+                      Terms of use
+                    </Link>
+                  </Typography>
+                </Box>
+              ))}
+              <Typography variant='body2' sx={{ color: 'text.secondary' }}>
+                Values marked as transformed (such as percent changes) are computed by EconGraph,
+                not published by the source.
+              </Typography>
+            </Paper>
+          )}
 
           {/* Technology Stack */}
           <Paper sx={{ p: 3, mb: 3 }}>
