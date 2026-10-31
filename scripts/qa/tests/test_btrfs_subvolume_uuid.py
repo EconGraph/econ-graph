@@ -1,5 +1,6 @@
 """Read-only ioctl contract tests; no real filesystem or cluster is changed."""
 import importlib.util
+import io
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -60,6 +61,23 @@ class SubvolumeUuidTests(unittest.TestCase):
         self.inode = 123
         self.zero_uuid = True
         self.assertEqual(helper.subvolume_uuid('/qa', require_root=False), str(uuid.UUID(int=0)))
+
+    def test_check_cli_accepts_directory_inside_subvolume(self):
+        self.inode = 123
+        with patch.object(helper.sys, 'argv', ['btrfs-subvolume-uuid.py', '--check', '/qa']), \
+                patch.object(helper.sys, 'stdout', new_callable=io.StringIO) as output:
+            self.assertEqual(helper.main(), 0)
+        self.assertEqual(output.getvalue().strip(), str(self.expected))
+        self.assertEqual(self.calls, [('close', 9)])
+
+    def test_check_cli_accepts_top_level_tree_without_uuid(self):
+        self.inode = 123
+        self.zero_uuid = True
+        with patch.object(helper.sys, 'argv', ['btrfs-subvolume-uuid.py', '--check', '/qa']), \
+                patch.object(helper.sys, 'stdout', new_callable=io.StringIO) as output:
+            self.assertEqual(helper.main(), 0)
+        self.assertEqual(output.getvalue().strip(), str(uuid.UUID(int=0)))
+        self.assertEqual(self.calls, [('close', 9)])
 
     def test_zero_uuid_is_refused(self):
         self.zero_uuid = True
