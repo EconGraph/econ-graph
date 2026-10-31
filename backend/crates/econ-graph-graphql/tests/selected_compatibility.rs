@@ -169,7 +169,7 @@ async fn selected_compatibility_contract() {
         .unwrap();
     let context = Arc::new(GraphQLContext::new(Some(caller)));
     let query = format!(
-        r#"{{series(id:"{series}"){{id dataPointCount dataPoints{{id value attributes revisedFromOriginal}} latest:dataPoints(filter:{{latestRevisionOnly:true}}){{value}} original:dataPoints(filter:{{originalOnly:true}}){{value}} early:dataPoints(filter:{{asOf:"2024-01-15"}}){{id}} vintage:dataPoints(filter:{{asOf:"2024-02-15"}}){{value}} transformed:dataPoints(transformation:PERCENT_CHANGE){{value}} recentDataPoints(limit:2){{date value}} latestObservation{{date value attributes}} }} crossSection(datasetId:"{dataset}",across:"area",latest:true){{key date value}} earlyCross:crossSection(datasetId:"{dataset}",across:"area",date:"2024-01-01",asOf:"2024-01-15"){{key date value}} onDate:crossSection(datasetId:"{dataset}",across:"area",date:"2024-03-01"){{key date value}} }}"#
+        r#"{{series(id:"{series}"){{id dataPointCount dataPoints{{id value attributes revisedFromOriginal}} latest:dataPoints(filter:{{latestRevisionOnly:true}}){{value}} original:dataPoints(filter:{{originalOnly:true}}){{value}} early:dataPoints(filter:{{asOf:"2024-01-15"}}){{id}} vintage:dataPoints(filter:{{asOf:"2024-02-15"}}){{value}} transformed:dataPoints(transformation:PERCENT_CHANGE){{value}} recentDataPoints(limit:2){{date value revisedFromOriginal}} latestObservation{{date value attributes}} }} crossSection(datasetId:"{dataset}",across:"area",latest:true){{key date value}} earlyCross:crossSection(datasetId:"{dataset}",across:"area",date:"2024-01-01",asOf:"2024-01-15"){{key date value}} onDate:crossSection(datasetId:"{dataset}",across:"area",date:"2024-03-01"){{key date value}} }}"#
     );
     let result = schema
         .execute(Request::new(query).data(context.clone()))
@@ -265,7 +265,7 @@ async fn selected_compatibility_contract() {
     assert_eq!(json["series"]["transformed"].as_array().unwrap().len(), 3);
     assert_eq!(
         json["series"]["recentDataPoints"],
-        json!([{"date":"2024-03-01","value":null},{"date":"2024-02-01","value":"20"}])
+        json!([{"date":"2024-03-01","value":null,"revisedFromOriginal":true},{"date":"2024-02-01","value":"20","revisedFromOriginal":false}])
     );
     assert_eq!(json["series"]["latestObservation"]["value"], Value::Null);
     assert_eq!(json["series"]["latestObservation"]["date"], "2024-03-01");

@@ -253,7 +253,7 @@ impl EconomicSeriesType {
         let series_uuid = Uuid::parse_str(&self.id)?;
 
         use econ_graph_services::services::observation_compatibility::{self, PointsQuery};
-        let mut rows = observation_compatibility::points_batch(
+        let (mut rows, revised) = observation_compatibility::points_batch_with_revised(
             pool,
             &[series_uuid],
             PointsQuery {
@@ -270,7 +270,7 @@ impl EconomicSeriesType {
             .remove(&series_uuid)
             .unwrap_or_default()
             .into_iter()
-            .map(DataPointType::from)
+            .map(|point| DataPointType::with_revised(point, &revised))
             .collect();
 
         Ok(limited_points)
