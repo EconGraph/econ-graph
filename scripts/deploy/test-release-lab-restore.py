@@ -106,11 +106,16 @@ SOURCES = {
         INSERT INTO credential VALUES ('cr1', 'u1', 'synthetic-password-hash');
         CREATE TABLE user_attribute (user_id text REFERENCES user_entity, name text, value text);
         INSERT INTO user_attribute VALUES ('u1', 'country', 'synthetic');
+        CREATE TABLE server_config (server_config_key text PRIMARY KEY, value text, version int);
+        INSERT INTO server_config VALUES ('crt_jgroups', '{"prvKey": "synthetic-jgroups-private-key"}', 1),
+                                         ('synthetic_setting', 'kept', 1);
+        CREATE TABLE jgroups_ping (address text PRIMARY KEY, name text, cluster_name text, ip text);
+        INSERT INTO jgroups_ping VALUES ('a1', 'keycloak-0', 'ISPN', '10.244.0.7:7800');
     '''),
 }
 CLEARED = ['idp_mapper_config', 'identity_provider_mapper', 'identity_provider_config', 'federated_identity',
            'identity_provider', 'offline_client_session', 'offline_user_session', 'realm_smtp_config',
-           'revoked_token', 'event_entity', 'admin_event_entity']
+           'revoked_token', 'event_entity', 'admin_event_entity', 'jgroups_ping']
 
 KUBECTL = textwrap.dedent('''\
     #!/usr/bin/env python3
@@ -260,7 +265,9 @@ class RestoreRehearsal(unittest.TestCase):
                          .split('\n'), ['max.attempts|3', 'secret|'])
         # The source (what the dump holds) still has them; the copy has none.
         everything = "select string_agg(t::text, ' ') from {} t"
-        for table in ('client', 'component_config', 'client_attributes', 'authenticator_config_entry'):
+        self.assertEqual(self.sql('keycloak', 'select server_config_key from server_config'), 'synthetic_setting')
+        for table in ('client', 'component_config', 'client_attributes', 'authenticator_config_entry',
+                      'server_config'):
             source = self.sql('src_keycloak', everything.format(table))
             copy_ = self.sql('keycloak', everything.format(table))
             self.assertIn('synthetic-', source, table)

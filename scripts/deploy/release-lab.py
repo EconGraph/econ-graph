@@ -78,8 +78,9 @@ directory is kept as .NAME.torn-down-<time>/ in the lab root.
 port-forward: forwards the frontend, backend, Keycloak and the data database to 127.0.0.1
 only, on the ports in the record. env: prints the shell lines that point the kind-env.sh
 scripts (convert-app-data.sh, set-catalog-access.sh) at the lab instead of production; use
-it as eval "$(scripts/deploy/release-lab.sh env --lab NAME)". measure: memory, CPU and disk
-of each lab (docs/deployment/RELEASE_LAB.md).
+it in a subshell, so nothing stays set in your shell:
+  ( eval "$(scripts/deploy/release-lab.sh env --lab NAME)"; scripts/deploy/convert-app-data.sh ... )
+measure: memory, CPU and disk of each lab (docs/deployment/RELEASE_LAB.md).
 """
 import argparse
 import contextlib
@@ -92,6 +93,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shlex
 import socket
 import subprocess
 import sys
@@ -136,7 +138,8 @@ DATABASES = {
 }
 
 # Run on the restored Keycloak database before Keycloak starts, in one transaction.
-# Removed, so no production secret or sign-in path survives in the lab:
+# Removed: the production keys and secrets that would let the lab sign, decrypt or join
+# as production, or reach production's identity providers and mail server:
 #   - identity providers, their mappers, configuration and account links (no sign-in
 #     through Google or Facebook, and none of their client secrets);
 #   - the realms' key providers (RSA, HMAC and AES private keys): Keycloak makes new
@@ -144,12 +147,16 @@ DATABASES = {
 #     the lab signs is valid in production;
 #   - every confidential client's secret, replaced by a random one (the realm import
 #     then sets the clients it manages from the lab's Secret), and rotated secrets;
+#   - the cluster's JGroups CA (server_config crt_jgroups, with its private key) and the
+#     JGroups member addresses (jgroups_ping): Keycloak makes a new certificate;
 #   - offline sessions, revoked tokens, login and admin events, SMTP settings;
 #   - secret-looking values (secret, password, credential, token, key) in the remaining
 #     components' and authenticators' configuration, such as a federation bind password.
-# Kept on purpose, for realistic sign-in tests: users, their password hashes and other
-# credentials, attributes, groups, roles and consents. Tables a Keycloak version lacks
-# are skipped.
+# Kept on purpose, for realistic sign-in tests, so the copy still holds production
+# secrets of its users: users, attributes, groups, roles and consents, and in credential
+# their password hashes, TOTP seeds and WebAuthn keys; fed_user_credential;
+# user_federation_config; and a SAML client's private key in client_attributes, if any.
+# Tables a Keycloak version lacks are skipped.
 KEYCLOAK_SANITIZE_SQL = """
 DO $$
 DECLARE t text;
@@ -171,6 +178,9 @@ BEGIN
   IF to_regclass('public.client_attributes') IS NOT NULL THEN
     DELETE FROM public.client_attributes WHERE name LIKE 'client.secret.rotated%';
   END IF;
+  IF to_regclass('public.server_config') IS NOT NULL THEN
+    DELETE FROM public.server_config WHERE server_config_key = 'crt_jgroups';
+  END IF;
   IF to_regclass('public.authenticator_config_entry') IS NOT NULL THEN
     UPDATE public.authenticator_config_entry SET value = ''
       WHERE name ~* '(secret|password|credential|token|key)';
@@ -178,7 +188,7 @@ BEGIN
   FOREACH t IN ARRAY ARRAY['idp_mapper_config', 'identity_provider_mapper', 'identity_provider_config',
                            'federated_identity', 'identity_provider', 'offline_client_session',
                            'offline_user_session', 'realm_smtp_config', 'revoked_token',
-                           'event_entity', 'admin_event_entity'] LOOP
+                           'event_entity', 'admin_event_entity', 'jgroups_ping'] LOOP
     IF to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE format('DELETE FROM public.%I', t);
     END IF;
@@ -310,12 +320,16 @@ def check_inputs_unchanged(inputs):
                            'SHA-256')
 
 
-def check_free_space(root, inputs):
-    needed = FREE_RESERVE_BYTES + FREE_DUMP_FACTOR * sum(facts['size'] for facts in inputs.values())
-    probe = root
+def existing_ancestor(path):
+    probe = Path(path)
     while not probe.exists() and probe != probe.parent:
         probe = probe.parent
-    free = kind_tools.free_bytes(probe)
+    return probe
+
+
+def check_free_space(root, inputs):
+    needed = FREE_RESERVE_BYTES + FREE_DUMP_FACTOR * sum(facts['size'] for facts in inputs.values())
+    free = kind_tools.free_bytes(existing_ancestor(root))
     if free < needed:
         raise LabError(f'{root} has {free // 1024 ** 3} GiB free; a lab of these dumps needs '
                        f'{needed // 1024 ** 3} GiB (10 GiB plus 8 times the dumps)')
@@ -730,7 +744,21 @@ def check_docker_space(tools, images, free=kind_tools.free_bytes):
     if available < needed:
         raise LabError(f'the Docker data root {root} has {available // 1024 ** 3} GiB free; the lab needs '
                        f'{needed // 1024 ** 3} GiB (10 GiB plus twice its images)')
-    return available, needed
+    return available, needed, root
+
+
+def check_shared_space(lab_root_path, lab_free, lab_needed, docker_root, docker_needed, device=None):
+    """When the lab root and the Docker data root are on one filesystem, it must hold both:
+    the volumes' and the images' room, with one 10 GiB reserve."""
+    device = device or (lambda path: os.stat(path).st_dev)
+    if device(existing_ancestor(lab_root_path)) != device(docker_root):
+        return False
+    together = lab_needed + docker_needed - DOCKER_RESERVE_BYTES
+    if lab_free < together:
+        raise LabError(f'{lab_root_path} and the Docker data root {docker_root} share a filesystem with '
+                       f'{lab_free // 1024 ** 3} GiB free; the lab needs {together // 1024 ** 3} GiB there '
+                       '(its volumes and its images together)')
+    return True
 
 
 def release_commit(release):
@@ -845,9 +873,11 @@ def create(args):
             print(f'WARNING: the {image} image is from commit {facts["revision"]}, but the manifests come from '
                   f'this checkout at {record["source"]["commit"]}. Run the lab from a worktree at the '
                   'candidate.', file=sys.stderr)
-    docker_free, docker_needed = check_docker_space(tools, record['images'])
+    docker_free, docker_needed, docker_root = check_docker_space(tools, record['images'])
     log(f'The Docker data root has {docker_free // 1024 ** 3} GiB free, the lab needs '
         f'{docker_needed // 1024 ** 3} GiB')
+    if check_shared_space(root, free, needed, docker_root, docker_needed):
+        log(f'{root} and {docker_root} share a filesystem; it holds both')
     config = kind_config(record, directory)
     check_kind_config(config)
     docs = render_manifests(record)
@@ -1007,16 +1037,17 @@ def port_forward(args):
 def env(args):
     """Print the shell lines that point the kind-env.sh scripts at this lab, not production."""
     record, directory, tools = open_lab(check_name(args.lab))
-    lines = [
-        f'export KIND_CLUSTER={record["cluster"]}',
+    values = [
+        ('KIND_CLUSTER', record['cluster']),
         # kind-env.sh requires it for any cluster but econ-graph. The lab has no host
         # storage there, so the host-storage scripts find nothing and stop.
-        f'export ECONGRAPH_SCRATCH_STORAGE={directory / "no-host-storage"}',
-        f'export XDG_CACHE_HOME={directory / "cache"}',
-        f'export ECONGRAPH_BACKUP_ROOT={directory / "backups"}',
-        f'export KEYCLOAK_BACKUP_ROOT={directory / "backups/keycloak"}',
-        'unset KUBECTL KUBECONFIG ECONGRAPH_KUBE_DIR CLUSTER_ROLE_CONTEXT PUBLIC_HOST',
+        ('ECONGRAPH_SCRATCH_STORAGE', directory / 'no-host-storage'),
+        ('XDG_CACHE_HOME', directory / 'cache'),
+        ('ECONGRAPH_BACKUP_ROOT', directory / 'backups'),
+        ('KEYCLOAK_BACKUP_ROOT', directory / 'backups/keycloak'),
     ]
+    lines = [f'export {name}={shlex.quote(str(value))}' for name, value in values]
+    lines.append('unset KUBECTL KUBECONFIG ECONGRAPH_KUBE_DIR CLUSTER_ROLE_CONTEXT PUBLIC_HOST')
     print('\n'.join(lines))
 
 

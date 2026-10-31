@@ -168,11 +168,13 @@ cluster_role_show_identity() {
     [ -n "$server" ] || verified=1
     nodes="$(kc get nodes -o 'jsonpath={.items[*].metadata.name}' 2>/dev/null)" || { nodes="(unknown)"; verified=1; }
     uid="$(kube_system_uid 2>/dev/null)" || { uid="(unknown)"; verified=1; }
-    if cluster_is_marked_production; then
-        role="PRODUCTION (marked by mark-production-cluster.sh)"
-    else
-        role="not production: ${CLUSTER_ROLE_REASON}"
-    fi
+    local role_status=0
+    cluster_is_marked_production || role_status=$?
+    case "$role_status" in
+        0) role="PRODUCTION (marked by mark-production-cluster.sh)" ;;
+        1) role="not production: ${CLUSTER_ROLE_REASON}" ;;
+        *) role="unknown: ${CLUSTER_ROLE_REASON}" ;;
+    esac
     echo "  this host       $(hostname 2>/dev/null || echo '(unknown)')"
     echo "  kubectl         ${KUBECTL:-kubectl}"
     echo "  KUBECONFIG      ${KUBECONFIG:-(unset)}"

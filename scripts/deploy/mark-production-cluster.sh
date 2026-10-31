@@ -149,11 +149,17 @@ if [[ "$UNMARK" == true ]]; then
         log "context $context: not marked production, cloudflared not running, no tunnel token; nothing to do"
         exit 0
     fi
-    if cluster_is_marked_production; then
+    role_status=0
+    cluster_is_marked_production || role_status=$?
+    if [[ "$role_status" == 0 ]]; then
         echo
         echo "!!! WARNING: context $context is the cluster marked production, the one serving"
         echo "!!! econgraph.com now. Unmarking it stops cloudflared and takes the public site down."
         echo "!!! Go on only if another cluster is taking over, or the site is meant to go down."
+    elif [[ "$role_status" != 1 ]]; then
+        echo
+        echo "!!! WARNING: whether context $context is production is unknown: $CLUSTER_ROLE_REASON"
+        echo "!!! It may be the cluster serving econgraph.com. Unmarking it stops cloudflared there."
     fi
     if [[ "$DRY_RUN" == true ]]; then
         [[ "$running" == false ]] ||

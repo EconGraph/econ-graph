@@ -68,6 +68,7 @@ STUB
 
 # The stub cluster.
 #   STUB_MARKER=production   the cluster carries the production marker
+#   STUB_LAB=1|fails         the cluster carries the release lab marker too / its lookup fails
 #   STUB_SERVER=17.4         the servers' version (default 18.1)
 #   STUB_ACTIVE_JOBS=NAME    a Job is running
 #   STUB_BACKUP_FAILS=1      pg_dump in backup-kind-databases.sh fails
@@ -87,8 +88,10 @@ set -- "${args[@]}"
 case "$*" in
   "version --request-timeout=15s") ;;
   "get namespace kube-system "*) printf 'uid-this-cluster' ;;
-  # Not a release lab (lib/cluster-role.sh, cluster_role_is_lab).
-  "get configmap econgraph-lab-owner "*) ;;
+  # The release lab marker (lib/cluster-role.sh, cluster_role_is_lab).
+  "get configmap econgraph-lab-owner "*)
+    [ "${STUB_LAB:-}" != fails ] || exit 1
+    [ "${STUB_LAB:-}" != 1 ] || echo configmap/econgraph-lab-owner ;;
   # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
   "get configmap econgraph-cluster-role "*)
     [ "${STUB_MARKER:-none}" = production ] || exit 0
@@ -196,7 +199,7 @@ convert() {
 }
 reset() {
   sleep 1; : >"$STUB_LOG"; rm -f "$STUB_LOG.sleeping" "$STUB_LOG.app_url"
-  unset STUB_MARKER STUB_SERVER STUB_ACTIVE_JOBS STUB_BACKUP_FAILS STUB_PY_FAIL STUB_CLIENT STUB_SCALE_FAILS \
+  unset STUB_MARKER STUB_LAB STUB_SERVER STUB_ACTIVE_JOBS STUB_BACKUP_FAILS STUB_PY_FAIL STUB_CLIENT STUB_SCALE_FAILS \
     STUB_SOURCE_USERS STUB_KILL_READER STUB_PY_SLEEP_ON STUB_RESTORE_PATCH_FAILS
 }
 never() { # never PATTERN WHAT: no log line matches PATTERN
@@ -237,6 +240,23 @@ grep -q "pass --production" "$tmp/out" || fail "no message for a production clus
 convert --cluster kg-test --production --source-map "$map" --dry-run || fail "--production on a production cluster refused"
 unset STUB_MARKER
 if convert --cluster kg-test --production --source-map "$map" --dry-run; then fail "--production on a non-production cluster"; fi
+
+# Production status unknown (conflicting markers, or the lab marker lookup fails on a marked
+# cluster): stops before anything, with or without --production, never "not production".
+for lab in 1 fails; do
+  for production in "" --production; do
+    reset
+    export STUB_MARKER=production STUB_LAB=$lab
+    # shellcheck disable=SC2086 # $production is one flag or none
+    if convert --cluster kg-test $production --source-map "$map"; then
+      fail "unknown production status (lab=$lab ${production:-no flag}) was converted"
+    fi
+    grep -q "production status unknown" "$tmp/out" || fail "unknown status (lab=$lab ${production:-no flag}): no message: $(tail -3 "$tmp/out")"
+    grep -q "not a production cluster" "$tmp/out" && fail "unknown status (lab=$lab) reported as not production"
+    never "scale |patch |port-forward|get secret|pg_dump|^python |^docker run" "unknown status (lab=$lab ${production:-no flag}) changed or read something"
+  done
+done
+unset STUB_MARKER STUB_LAB
 
 # Version mismatches and running Jobs stop the dry run.
 reset

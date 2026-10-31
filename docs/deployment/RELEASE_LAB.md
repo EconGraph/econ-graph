@@ -69,7 +69,8 @@ What `create` does, in order:
 
 1. Checks the dumps and the free space: the lab root needs 10 GiB plus 8 times the dumps'
    size, and the Docker data root (`docker info`'s `DockerRootDir`, `/var/lib/docker`)
-   10 GiB plus twice the images' size (the node keeps its own copy of each).
+   10 GiB plus twice the images' size (the node keeps its own copy of each). When both are
+   on one filesystem, it must have room for both together, with one 10 GiB reserve.
 2. Creates the lab directory `${ECONGRAPH_LAB_ROOT:-~/econgraph-labs}/NAME/` (the lock
    on the name; never under `/tmp` or on a tmpfs) and writes the lab record `lab.json`.
 3. Creates the kind cluster with the pinned kind (`scripts/deploy/install-kind.sh`) on the
@@ -136,13 +137,14 @@ Scaling it up is a deliberate step, and the lab has no API keys unless you add
 ### Run the deploy scripts against a lab
 
 The scripts that use `scripts/deploy/lib/kind-env.sh` default to the production cluster
-and its paths. In the shell that runs them against a lab, first:
+and its paths. Run each of them against a lab in a subshell that first evaluates
+`release-lab.sh env`, so none of its settings stays in your shell:
 
 ```bash
-eval "$(scripts/deploy/release-lab.sh env --lab NAME)"
+( eval "$(scripts/deploy/release-lab.sh env --lab NAME)"; scripts/deploy/SCRIPT ... )
 ```
 
-That sets `KIND_CLUSTER=econ-graph-lab-NAME`; `ECONGRAPH_SCRATCH_STORAGE` to a path in the
+`env` sets `KIND_CLUSTER=econ-graph-lab-NAME`; `ECONGRAPH_SCRATCH_STORAGE` to a path in the
 lab directory that does not exist (kind-env.sh requires it for any cluster but
 `econ-graph`; the lab has no host storage, so the host-storage scripts stop there);
 `XDG_CACHE_HOME` (the copy of the lab's kubectl and kubeconfig), `ECONGRAPH_BACKUP_ROOT`
@@ -153,7 +155,8 @@ and `KEYCLOAK_BACKUP_ROOT` to directories in the lab; and unsets `KUBECTL`,
   created with `--app-database shared`:
 
   ```bash
-  scripts/deploy/convert-app-data.sh --cluster econ-graph-lab-NAME --source-map FILE [--drop-source-app]
+  ( eval "$(scripts/deploy/release-lab.sh env --lab NAME)"
+    scripts/deploy/convert-app-data.sh --cluster econ-graph-lab-NAME --source-map FILE [--drop-source-app] )
   ```
 
   It leaves the backend at 0 replicas once the app tables have moved. Start it again with
@@ -161,7 +164,8 @@ and `KEYCLOAK_BACKUP_ROOT` to directories in the lab; and unsets `KUBECTL`,
 - Catalog access in the lab's Keycloak:
 
   ```bash
-  scripts/keycloak/set-catalog-access.sh --context kind-econ-graph-lab-NAME --dry-run --admin-only ROLES
+  ( eval "$(scripts/deploy/release-lab.sh env --lab NAME)"
+    scripts/keycloak/set-catalog-access.sh --context kind-econ-graph-lab-NAME --dry-run --admin-only ROLES )
   ```
 
 - The v4.1 first-deploy measurements, on the data database forwarded by `port-forward`:
@@ -216,13 +220,18 @@ Before Keycloak starts, the lab removes from its copy, in one transaction:
   valid in production;
 - every confidential client's secret, replaced by a random one (the realm import then
   sets the clients it manages from the lab's Secret), and rotated client secrets;
+- the JGroups CA certificate and its private key (`server_config` key `crt_jgroups`) and
+  the JGroups member addresses (`jgroups_ping`); Keycloak makes a new certificate;
 - offline sessions, revoked tokens, login events, admin events and SMTP settings;
 - secret-looking values (names containing secret, password, credential, token or key)
   in the remaining components' and authenticators' configuration.
 
-Kept on purpose, so sign-in can be tested with realistic accounts: users, their password
-hashes and other credentials, attributes, groups, roles and consents. The restored
-production admins keep their passwords; the lab adds its own admin.
+Kept on purpose, so sign-in can be tested with realistic accounts: users, attributes,
+groups, roles and consents. The copy therefore still holds its users' production secrets:
+in `credential`, password hashes, TOTP seeds and WebAuthn keys; `fed_user_credential`;
+`user_federation_config`; and a SAML client's private key in `client_attributes`, if
+any. Treat a lab's storage like a production backup. The restored production admins keep
+their passwords; the lab adds its own admin.
 
 ## Never production
 

@@ -412,8 +412,12 @@ class CreateTests(Stubbed):
         self.assert_inputs_unchanged()
         removal = [c for c in self.calls('docker') if c['args'][:1] == ['run']]
         self.assertEqual(len(removal), 1)
-        self.assertIn(f'{self.scratch / "labs/one/node-storage"}:/lab-storage', removal[0]['args'])
-        self.assertIn('none', removal[0]['args'])
+        args = removal[0]['args']
+        self.assertIn(f'{self.scratch / "labs/one/node-storage"}:/lab-storage', args)
+        self.assertEqual(args[args.index('--network') + 1], 'none')
+        # Only below the mount, never across another filesystem mounted inside it.
+        self.assertEqual(args[args.index('--entrypoint') + 1], '/usr/bin/find')
+        self.assertEqual(args[-5:], ['/lab-storage', '-xdev', '-mindepth', '1', '-delete'])
 
     def test_refuses_dumps_inside_the_lab_root_and_non_archives(self):
         (self.scratch / 'labs').mkdir()
@@ -502,7 +506,20 @@ class CreateTests(Stubbed):
         needed = 10 * 1024 ** 3 + 2 * 3 * 4 * 1024 ** 3
         with self.assertRaisesRegex(lab.LabError, 'Docker data root'):
             lab.check_docker_space(Tools(), images, free=lambda path: needed - 1)
-        self.assertEqual(lab.check_docker_space(Tools(), images, free=lambda path: needed), (needed, needed))
+        self.assertEqual(lab.check_docker_space(Tools(), images, free=lambda path: needed),
+                         (needed, needed, '/var/lib/docker'))
+
+    def test_one_filesystem_holds_both_the_volumes_and_the_images(self):
+        gib = 1024 ** 3
+        same = lambda path: 1  # noqa: E731
+        apart = iter([1, 2])
+        self.assertFalse(lab.check_shared_space(self.scratch, 15 * gib, 12 * gib, '/var/lib/docker', 12 * gib,
+                                                device=lambda path: next(apart)))
+        # 12 + 12 GiB with one 10 GiB reserve: 14 GiB together.
+        self.assertTrue(lab.check_shared_space(self.scratch, 14 * gib, 12 * gib, '/var/lib/docker', 12 * gib,
+                                               device=same))
+        with self.assertRaisesRegex(lab.LabError, 'share a filesystem'):
+            lab.check_shared_space(self.scratch, 14 * gib - 1, 12 * gib, '/var/lib/docker', 12 * gib, device=same)
 
     def test_env_points_the_deploy_scripts_at_the_lab(self):
         self.create()
@@ -515,6 +532,21 @@ class CreateTests(Stubbed):
         self.assertIn(f'export ECONGRAPH_BACKUP_ROOT={directory / "backups"}', lines)
         self.assertTrue(any(line.startswith('export ECONGRAPH_SCRATCH_STORAGE=' + str(directory)) for line in lines))
         self.assertIn('unset KUBECTL KUBECONFIG ECONGRAPH_KUBE_DIR CLUSTER_ROLE_CONTEXT PUBLIC_HOST', lines)
+        self.assertIn(f'export KEYCLOAK_BACKUP_ROOT={directory / "backups/keycloak"}', lines)
+
+    def test_env_is_shell_quoted(self):
+        # A lab root with a space and a quote: evaluated in bash, every value survives.
+        self.env['ECONGRAPH_LAB_ROOT'] = str(self.scratch / "lab root's")
+        self.create()
+        printed = self.lab_cli('env', '--lab', 'one').stdout
+        script = (printed + '\nprintf "%s\\n" "$KIND_CLUSTER" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT" '
+                  '"$KEYCLOAK_BACKUP_ROOT" "$ECONGRAPH_SCRATCH_STORAGE"')
+        result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, timeout=30,
+                                env={'PATH': os.environ['PATH'], 'KUBECONFIG': '/production/kubeconfig'})
+        directory = self.scratch / "lab root's/one"
+        self.assertEqual(result.stdout.splitlines(), [
+            'econ-graph-lab-one', str(directory / 'cache'), str(directory / 'backups'),
+            str(directory / 'backups/keycloak'), str(directory / 'no-host-storage')])
 
     def test_dry_run_creates_and_changes_nothing(self):
         result = self.lab_cli(*self.create_args(), '--dry-run')
@@ -709,6 +741,19 @@ class TeardownTests(Stubbed):
         self.assertEqual(listed.returncode, 0, listed.stderr)
         self.assertNotIn('unreadable', listed.stdout)
 
+    def test_never_removes_through_a_symlinked_storage_directory(self):
+        storage = self.scratch / 'labs/one/node-storage'
+        elsewhere = self.scratch / 'elsewhere'
+        elsewhere.mkdir()
+        (elsewhere / 'keep').write_text('not the lab\'s')
+        storage.rmdir()
+        storage.symlink_to(elsewhere)
+        result = self.teardown('--yes')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('is not the lab\'s storage directory', result.stderr)
+        self.assertFalse(any(c['args'][:1] == ['run'] for c in self.calls('docker')))
+        self.assertEqual((elsewhere / 'keep').read_text(), 'not the lab\'s')
+
     def test_keeps_a_network_another_container_uses(self):
         self.state(network_containers='2')
         result = self.teardown('--yes')
@@ -886,6 +931,16 @@ class ClusterRoleTests(unittest.TestCase):
         failed = self.check('fails').stdout
         self.assertIn('rc=2', failed)
         self.assertIn('unknown', failed)
+
+    def test_identity_says_unknown_for_conflicting_markers(self):
+        def role(lab_state):
+            out = self.run_bash(f'source {HERE}/lib/cluster-role.sh; CLUSTER_ROLE_CONTEXT=kind-x '
+                                'cluster_role_show_identity', lab_state).stdout
+            return next(line for line in out.splitlines() if 'cluster role' in line)
+        self.assertIn('PRODUCTION', role('0'))
+        self.assertIn('unknown: ', role('1'))
+        self.assertNotIn('not production', role('1'))
+        self.assertIn('unknown: ', role('fails'))
 
     def test_mark_production_refuses_a_lab(self):
         result = self.run_bash(f'{HERE}/mark-production-cluster.sh', '1')
