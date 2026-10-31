@@ -283,6 +283,43 @@ async fn company_research_postgres_revision_pagination_statement_peer_and_anchor
         "5",
     )
     .await;
+    // More unknown subjects than the hard response cap; the raw evidence stays
+    // fully accessible through bounded pages without serializing every anchor.
+    for index in 0..251 {
+        insert_fact(
+            &pool,
+            "0000320193",
+            &format!("ZUnmapped{index:03}"),
+            Some("2024-07-01"),
+            "2024-12-31",
+            "0000320193-25-000001",
+            "2025-02-01",
+            "1",
+        )
+        .await;
+    }
+    insert_fact(
+        &pool,
+        "0000320193",
+        "ZOtherPeriod",
+        Some("2024-01-01"),
+        "2024-06-30",
+        "0000320193-25-000001",
+        "2025-02-01",
+        "2",
+    )
+    .await;
+    insert_fact(
+        &pool,
+        "0000320193",
+        "ZOtherInstant",
+        None,
+        "2023-12-31",
+        "0000320193-25-000001",
+        "2025-02-01",
+        "3",
+    )
+    .await;
     let schema = schema(Some(pool.clone()), true);
     let companies = result(
         &schema,
@@ -371,6 +408,56 @@ async fn company_research_postgres_revision_pagination_statement_peer_and_anchor
         .unwrap()
         .iter()
         .any(|l| l["concept"] == "UnmappedButReportedConcept" && l["value"] == "7.125"));
+    assert_eq!(
+        statement["financialStatement"]["unclassifiedFacts"]
+            .as_array()
+            .unwrap()
+            .len(),
+        100
+    );
+    let metadata=result(&schema,r#"{financialStatement(cik:"320193",kind:INCOME_STATEMENT,unclassifiedFirst:0){unclassifiedFacts{key}periods{start end}}}"#,json!({})).await;
+    assert!(metadata["financialStatement"]["unclassifiedFacts"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(metadata["financialStatement"]["periods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p["end"] == "2024-06-30"));
+    let query = r#"query($after:String){financialStatement(cik:"320193",kind:INCOME_STATEMENT,periodStart:"2024-07-01",periodEnd:"2024-12-31",unclassifiedFirst:100,unclassifiedAfter:$after){unclassifiedFacts{key periodStart periodEnd}unclassifiedHasNextPage unclassifiedEndCursor}}"#;
+    let mut after = Value::Null;
+    let mut seen = std::collections::BTreeSet::new();
+    loop {
+        let page = result(&schema, query, json!({"after":after})).await;
+        let data = &page["financialStatement"];
+        let rows = data["unclassifiedFacts"].as_array().unwrap();
+        assert!(rows.len() <= 100);
+        for row in rows {
+            assert!(seen.insert(row["key"].as_str().unwrap().to_owned()));
+            assert_eq!(row["periodStart"], "2024-07-01");
+            assert_eq!(row["periodEnd"], "2024-12-31");
+        }
+        if data["unclassifiedHasNextPage"] == false {
+            break;
+        }
+        after = data["unclassifiedEndCursor"].clone();
+        assert!(after.is_string());
+    }
+    assert_eq!(seen.len(), 252);
+    let instants=result(&schema,r#"{financialStatement(cik:"320193",kind:INCOME_STATEMENT,instantOnly:true,periodEnd:"2023-12-31",unclassifiedFirst:250){unclassifiedFacts{concept periodStart}}}"#,json!({})).await;
+    assert_eq!(
+        instants["financialStatement"]["unclassifiedFacts"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let too_large=(&schema).execute(r#"{financialStatement(cik:"320193",kind:INCOME_STATEMENT,unclassifiedFirst:251){unclassifiedFacts{key}}}"#).await;
+    assert_eq!(
+        too_large.errors[0].extensions.as_ref().unwrap().get("code"),
+        Some(&async_graphql::Value::from("BAD_USER_INPUT"))
+    );
     let ratios=result(&schema,r#"{companyRatios(cik:"320193",periodEnd:"2024-12-31"){name value unavailableReason}companyPeers(cik:"320193",periodEnd:"2024-12-31"){company{cik}ratios{name value unavailableReason}}}"#,json!({})).await;
     let current = ratios["companyRatios"]
         .as_array()
