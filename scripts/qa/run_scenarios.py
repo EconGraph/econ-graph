@@ -308,12 +308,25 @@ _stopping = False
 _grace = float(DEFAULT_GRACE)
 
 
+_stop_timer: threading.Timer | None = None
+
+
 def _stop_group(group: int) -> None:
     """SIGTERM a scenario's group so it cleans up, and SIGKILL it after the grace period."""
+    global _stop_timer
     _signal_group(group, signal.SIGTERM)
-    timer = threading.Timer(_grace, _signal_group, (group, signal.SIGKILL))
-    timer.daemon = True
-    timer.start()
+    _stop_timer = threading.Timer(_grace, _signal_group, (group, signal.SIGKILL))
+    _stop_timer.daemon = True
+    _stop_timer.start()
+
+
+def _cancel_stop_timer() -> None:
+    """Once the scenario has ended its group is gone; its number may be reused, so the pending
+    SIGKILL must not fire."""
+    global _stop_timer
+    if _stop_timer is not None:
+        _stop_timer.cancel()
+        _stop_timer = None
 
 
 def _on_sigterm(signum, frame):
@@ -376,22 +389,36 @@ def _marked(needle: bytes, group: int) -> dict[int, str]:
     return found
 
 
-def _signal_verified(pid: int, needle: bytes, sig: int) -> int | None:
-    """Signal PID if it still carries NEEDLE, through a pidfd, so a PID reused since it was found
-    is never signalled. Returns the pidfd to reuse, or None."""
-    try:
-        fd = os.pidfd_open(pid)
-    except OSError:
-        return None
-    if not _carries(pid, needle):
-        os.close(fd)
-        return None
-    try:
-        signal.pidfd_send_signal(fd, sig)
-    except OSError:
-        os.close(fd)
-        return None
-    return fd
+class _Handle:
+    """A process to signal: through a pidfd, so a PID reused since it was found is never
+    signalled; where pidfds are missing (Python 3.8, Linux before 5.3, a seccomp profile that
+    blocks them), by PID after checking the marker again."""
+
+    def __init__(self, pid: int, needle: bytes):
+        self.pid = pid
+        self.fd = None
+        try:
+            self.fd = os.pidfd_open(pid)
+        except (AttributeError, OSError) as error:
+            if isinstance(error, ProcessLookupError):
+                raise
+        if not _carries(pid, needle):
+            self.close()
+            raise ProcessLookupError(pid)
+        self.needle = needle
+
+    def signal(self, sig: int) -> None:
+        if self.fd is not None:
+            signal.pidfd_send_signal(self.fd, sig)
+        elif _carries(self.pid, self.needle):
+            os.kill(self.pid, sig)
+        else:
+            raise ProcessLookupError(self.pid)
+
+    def close(self) -> None:
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
 
 
 def stop_leftovers(marker: str, group: int) -> list[str]:
@@ -410,22 +437,36 @@ def stop_leftovers(marker: str, group: int) -> list[str]:
     while _marked(needle, group) and time.monotonic() < deadline:
         time.sleep(0.1)
     killed: dict[int, str] = {}
+    unkillable: dict[int, str] = {}
     for _ in range(20):
         found = _marked(needle, group)
-        if not found:
+        if not found or set(found) <= set(unkillable):
             break
-        stopped = [(pid, fd) for pid in found
-                   if (fd := _signal_verified(pid, needle, signal.SIGSTOP)) is not None]
-        for pid, fd in stopped:
+        stopped = []
+        for pid in found:
             try:
-                signal.pidfd_send_signal(fd, signal.SIGKILL)
-                killed[pid] = found[pid]
+                handle = _Handle(pid, needle)
+                handle.signal(signal.SIGSTOP)
+            except ProcessLookupError:
+                continue
             except OSError:
+                unkillable[pid] = found[pid]
+                continue
+            stopped.append(handle)
+        for handle in stopped:
+            try:
+                handle.signal(signal.SIGKILL)
+                killed[handle.pid] = found[handle.pid]
+            except ProcessLookupError:
                 pass
+            except OSError:
+                unkillable[handle.pid] = found[handle.pid]
             finally:
-                os.close(fd)
+                handle.close()
         time.sleep(0.05)
-    return [f'{name} ({pid})' for pid, name in killed.items()]
+    return ([f'{name} ({pid})' for pid, name in killed.items()]
+            + [f'{name} ({pid}, could not be killed)' for pid, name in unkillable.items()
+               if pid not in killed])
 
 
 def run_bounded(command: list[str], env: dict[str, str], timeout: float,
@@ -450,16 +491,19 @@ def run_bounded(command: list[str], env: dict[str, str], timeout: float,
         _stop_group(proc.pid)
     try:
         code, timed_out = _wait_bounded(proc, timeout, grace)
-        # Whatever of the group outlived the scenario itself, then whatever left the group.
-        _signal_group(proc.pid, signal.SIGKILL)
-        marker = env.get(RUN_MARKER)
-        leftovers = stop_leftovers(marker, proc.pid) if marker else []
-        # The pipe closes once the last process holding it has gone; something the sweep can't
-        # see may still hold it, so don't wait for ever.
-        reader.join(timeout=10)
-        return code, b''.join(chunks), timed_out, leftovers
     finally:
+        # The scenario has ended: a stop request from now on has no group to signal.
         _current_group = None
+        _cancel_stop_timer()
+    # Whatever of the group outlived the scenario itself, then whatever left the group.
+    _signal_group(proc.pid, signal.SIGKILL)
+    marker = env.get(RUN_MARKER)
+    leftovers = stop_leftovers(marker, proc.pid) if marker else []
+    # The pipe closes once the last process holding it has gone; something the sweep can't see
+    # may still hold it, so don't wait for ever. Closing it ends the reader either way.
+    reader.join(timeout=10)
+    proc.stdout.close()
+    return code, b''.join(chunks), timed_out, leftovers
 
 
 def _read_all(stream, chunks: list[bytes]) -> None:
@@ -479,7 +523,10 @@ def _wait_bounded(proc: subprocess.Popen, timeout: float, grace: float) -> tuple
         proc.wait(timeout=grace)
     except subprocess.TimeoutExpired:
         _signal_group(proc.pid, signal.SIGKILL)
-        proc.wait()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass  # Unkillable (uninterruptible sleep): report the overrun and go on.
     return -1, True
 
 

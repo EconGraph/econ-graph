@@ -78,6 +78,12 @@ def _on_sigterm(signum, frame):
 signal.signal(signal.SIGTERM, _on_sigterm)
 
 
+def _margin() -> float:
+    """What a cleanup command leaves of the grace period: for the wait after it overruns (half)
+    and the rest of the cleanup."""
+    return min(5.0, STOP_GRACE / 5)
+
+
 def run(command: list[str], timeout: float, env: dict | None = None,
         capture: bool = True) -> subprocess.CompletedProcess:
     """Run a command in its own process group, killing the whole group if it overruns.
@@ -91,7 +97,7 @@ def run(command: list[str], timeout: float, env: dict | None = None,
     if stopped_at is not None:
         # Cleanup after the runner's SIGTERM: end before its SIGKILL, keeping a margin for the
         # rest of the cleanup.
-        left = stopped_at + STOP_GRACE - min(5.0, STOP_GRACE / 5) - time.monotonic()
+        left = stopped_at + STOP_GRACE - _margin() - time.monotonic()
         if left <= 0:
             raise subprocess.TimeoutExpired(command, 0)
         timeout = min(timeout, left)
@@ -107,7 +113,7 @@ def run(command: list[str], timeout: float, env: dict | None = None,
         _signal_group(proc.pid, signal.SIGKILL)
         try:
             # During cleanup the margin left before the runner's SIGKILL is short.
-            proc.communicate(timeout=1 if stopped_at is not None else 5)
+            proc.communicate(timeout=_margin() / 2 if stopped_at is not None else 5)
         except subprocess.TimeoutExpired:
             # Something outside the group (a setsid) still holds the output; the runner kills
             # it once the scenario ends. Don't let it hold up the rest of the cleanup.

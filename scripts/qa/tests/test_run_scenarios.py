@@ -15,7 +15,10 @@ import hashlib
 import io
 import json
 import os
+import errno
 import re
+import secrets
+import shutil
 import signal
 import stat
 import subprocess
@@ -24,6 +27,7 @@ import tempfile
 import threading
 import time
 import unittest
+import unittest.mock
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -415,7 +419,7 @@ finally:
         self.assertEqual(cleaned.read_text(), 'yes')
         self.assertLess(report['scenarios'][0]['duration_seconds'], 10)
 
-    @unittest.skipUnless(Path('/proc').is_dir(), 'finding leftovers needs /proc')
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
     def test_an_overrun_kills_and_reports_what_escaped_the_process_group(self):
         # setsid moves the child out of the scenario's process group, so the group kill misses
         # it; the runner finds it by the run's marker.
@@ -432,7 +436,7 @@ finally:
                          f'timed out after 1s; left running, now killed: sleep ({pid})')
         assert_stopped(self, pid)
 
-    @unittest.skipUnless(Path('/proc').is_dir(), 'finding leftovers needs /proc')
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
     def test_a_scenario_that_leaves_a_process_running_fails(self):
         pid_file = self.dir / 'left.pid'
         # Exit only once the child has its own session (its session id is its pid), so the
@@ -447,7 +451,25 @@ finally:
                          ('fail', f'left running, now killed: sleep ({pid})'))
         assert_stopped(self, pid)
 
-    @unittest.skipUnless(Path('/proc').is_dir(), 'finding leftovers needs /proc')
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
+    def test_leftovers_are_killed_without_pidfds(self):
+        # Python 3.8, Linux before 5.3, or a seccomp profile blocking pidfd_open: kill by PID.
+        pid_file = self.dir / 'left2.pid'
+        # Exit only once the child has its own session (its session id is its pid), so the
+        # group kill can't catch it before setsid has run.
+        self.scenario('leaver2', mutates='no',
+                      body=f'setsid sleep 300 >/dev/null 2>&1 & echo $! > "{pid_file}"\n'
+                           'until [ "$(cut -d" " -f6 /proc/$!/stat)" = "$!" ]; do sleep 0.05; done')
+        with unittest.mock.patch.object(os, 'pidfd_open', side_effect=OSError(errno.ENOSYS, 'no pidfd'),
+                                        create=True):
+            code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
+        self.assertEqual(code, 1)
+        pid = int(pid_file.read_text())
+        self.assertEqual((report['scenarios'][0]['status'], report['scenarios'][0]['reason']),
+                         ('fail', f'left running, now killed: sleep ({pid})'))
+        assert_stopped(self, pid)
+
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
     def test_an_escapee_holding_the_output_doesnt_hold_up_the_scenario(self):
         # It inherited the scenario's output pipe, so it would keep it open; the scenario has
         # ended, so the runner kills it at once and keeps what the scenario printed.
@@ -468,10 +490,11 @@ finally:
         self.assertLess(result['duration_seconds'], 10)
         assert_stopped(self, pid)
 
-    @unittest.skipUnless(Path('/proc').is_dir(), 'finding leftovers needs /proc')
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
     def test_processes_forked_while_leftovers_are_killed_are_killed_too(self):
         # An escapee that keeps forking: each pass stops all it finds before killing any.
-        self.scenario('forker', mutates='no',
+        name = f'forker-{secrets.token_hex(4)}'
+        self.scenario(name, mutates='no',
                       body='setsid bash -c "while :; do sleep 300 & sleep 0.001; done" >/dev/null 2>&1 &\n'
                            'sleep 0.5')
         code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
@@ -480,7 +503,7 @@ finally:
         marker_left = []
         for entry in Path('/proc').glob('[0-9]*'):
             try:
-                carries = b'QA_RUN_MARKER=forker-' in (entry / 'environ').read_bytes()
+                carries = f'QA_RUN_MARKER={name}-'.encode() in (entry / 'environ').read_bytes()
             except OSError:
                 continue
             stat = runner._proc_stat(int(entry.name))
@@ -488,7 +511,7 @@ finally:
                 marker_left.append(entry.name)
         self.assertEqual(marker_left, [])
 
-    @unittest.skipUnless(Path('/proc').is_dir(), 'finding leftovers needs /proc')
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
     def test_leftovers_keep_the_scenarios_own_reason(self):
         self.scenario('skipper', mutates='no',
                       body='setsid sleep 300 >/dev/null 2>&1 &\n'
@@ -499,6 +522,7 @@ finally:
         self.assertEqual(result['status'], 'fail')
         self.assertRegex(result['reason'], r'^nothing to do; left running, now killed: sleep \(\d+\)$')
 
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
     def test_a_cleanup_command_whose_child_holds_its_output_still_returns(self):
         # A grandchild that left the command's group keeps its output pipe open; the cleanup
         # goes on regardless, before the runner's SIGKILL.
@@ -521,12 +545,15 @@ finally:
         open({str(done)!r}, 'w').write(str(error.timeout))
 ''')
         path.chmod(0o755)
-        code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'],
-                                      dict(self.env, QA_TIMEOUT_GRACE_SECONDS='12'))
-        self.assertEqual(code, 1)
-        # The capped timeout, not the 1200 asked for, was what applied.
-        self.assertLess(float(done.read_text()), 12)
-        self.assertIn('left running, now killed: sleep (', report['scenarios'][0]['reason'])
+        for grace in ('12', '4'):
+            with self.subTest(grace=grace):
+                done.unlink(missing_ok=True)
+                code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'],
+                                              dict(self.env, QA_TIMEOUT_GRACE_SECONDS=grace))
+                self.assertEqual(code, 1)
+                # The capped timeout, not the 1200 asked for, was what applied.
+                self.assertLess(float(done.read_text()), float(grace))
+                self.assertIn('left running, now killed: sleep (', report['scenarios'][0]['reason'])
 
     def test_a_cleanup_command_ends_within_the_grace_period(self):
         # qa.run starts commands in their own session, outside the group the runner kills, so
