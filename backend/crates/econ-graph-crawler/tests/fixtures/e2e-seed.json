@@ -70,6 +70,16 @@
           "path": "/",
           "query": { "method": "GetParameterValues", "DatasetName": "NIPA", "ParameterName": "TableName" },
           "fixture": "bea/nipa_table_titles_t10105.json"
+        },
+        {
+          "method": "GET",
+          "path": "/",
+          "query": {
+            "method": "GetParameterValues",
+            "DatasetName": "Regional",
+            "ParameterName": "TableName"
+          },
+          "fixture": "bea/regional_table_titles.json"
         }
       ]
     },
