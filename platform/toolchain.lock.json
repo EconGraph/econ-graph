@@ -8,11 +8,11 @@
     }
   },
   "kubectl": {
-    "version": "1.34.0",
-    "kustomize_version": "5.7.1",
+    "version": "1.36.4",
+    "kustomize_version": "5.8.1",
     "linux_amd64": {
-      "url": "https://dl.k8s.io/release/v1.34.0/bin/linux/amd64/kubectl",
-      "sha256": "cfda68cba5848bc3b6c6135ae2f20ba2c78de20059f68789c090166d6abc3e2c"
+      "url": "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl",
+      "sha256": "8b8f088da2dab964f853b38464033b1be15ede2839eca751482357c45abdd05a"
     }
   }
 }

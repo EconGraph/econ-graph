@@ -131,6 +131,9 @@ def main():
             documents.append(document)
     for name, entry in LOCK['charts'].items():
         release = next(d for d in documents if d['kind'] == 'HelmRelease' and d['metadata']['name'] == name)
+        if name == 'cilium':
+            assert release['spec']['releaseName'] == 'cilium'
+            assert release['spec']['targetNamespace'] == release['spec']['storageNamespace'] == 'kube-system', 'Cilium bootstrap and Flux Helm history must share identity'
         assert release['spec']['chart']['spec']['version'] == entry['version'], 'unlocked chart version'
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as values:
             values.write(yaml.safe_dump(release['spec'].get('values', {})))

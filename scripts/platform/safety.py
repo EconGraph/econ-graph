@@ -33,6 +33,12 @@ class Kubernetes:
         config = Path(kubeconfig).resolve()
         if not config.is_file() or not context:
             raise ValueError('explicit existing kubeconfig and context required')
+        version = json.loads(subprocess.run([binary, 'version', '--client', '-o', 'json'], check=True, text=True, capture_output=True).stdout)['clientVersion']['gitVersion']
+        match = re.fullmatch(r'v(\d+)\.(\d+)\.\d+(?:[-+].*)?', version)
+        target = json.loads((Path(__file__).resolve().parents[2] / 'platform/versions.lock.json').read_text())['kubernetes']
+        major, minor = map(int, target.split('.')[:2])
+        if not match or int(match[1]) != major or abs(int(match[2]) - minor) > 1:
+            raise ValueError('kubectl must be within one minor of target Kubernetes ' + target + '; use platform/toolchain.lock.json')
         self.prefix = [binary, '--kubeconfig', str(config), '--context', context, '--request-timeout=30s']
 
     def run(self, *args, input=None, timeout=180):

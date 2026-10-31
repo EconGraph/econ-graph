@@ -117,8 +117,24 @@ class PlatformTests(unittest.TestCase):
         self.assertEqual(command.args[command.args.index('-U') + 1], 'postgres')
         self.assertTrue(command.kwargs['input'].startswith('SET ROLE \"econgraph\";'))
 
+    def test_live_client_skew_is_checked_before_api_calls(self):
+        with tempfile.NamedTemporaryFile() as config:
+            for version, accepted in [('v1.34.0', False), ('v1.35.9', True), ('v1.36.4', True), ('v1.37.1', True), ('v1.38.0', False)]:
+                response = SimpleNamespace(stdout=json.dumps({'clientVersion': {'gitVersion': version}}))
+                with patch('safety.subprocess.run', return_value=response) as run:
+                    if accepted:
+                        safety.Kubernetes('kubectl', config.name, 'owned')
+                    else:
+                        with self.assertRaises(ValueError):
+                            safety.Kubernetes('kubectl', config.name, 'owned')
+                    self.assertEqual(run.call_args.args[0], ['kubectl', 'version', '--client', '-o', 'json'])
+                    self.assertEqual(run.call_count, 1)
+
     def test_cilium_talos_hostdns_contract(self):
         release = yaml.safe_load((ROOT / 'platform/addons/cilium/release.yaml').read_text())
+        self.assertEqual(release['spec']['releaseName'], 'cilium')
+        self.assertEqual(release['spec']['targetNamespace'], 'kube-system')
+        self.assertEqual(release['spec']['storageNamespace'], 'kube-system')
         self.assertTrue(release['spec']['values']['bpf']['hostLegacyRouting'])
         self.assertFalse(release['spec']['values']['gatewayAPI']['enabled'])
         self.assertTrue(release['spec']['values']['kubeProxyReplacement'])
