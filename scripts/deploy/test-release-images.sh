@@ -286,7 +286,7 @@ case "$*" in
   "config view --minify -o jsonpath="*) echo "https://127.0.0.1:6443" ;;
   "get nodes -o jsonpath="*) echo "$NODES" ;;
   "get namespace kube-system -o jsonpath="*) echo "11111111-2222-3333-4444-555555555555" ;;
-  "get configmap econgraph-cluster-role --ignore-not-found -o jsonpath="*) ;;
+  "get configmap econgraph-cluster-role --ignore-not-found -o name") ;;
   "get job crawler-migrate --ignore-not-found -o jsonpath={.metadata.uid}")
     [ "${STUB_JOB_GET_FAILS:-0}" != 1 ] || { echo "error: the server is unavailable" >&2; exit 1; }
     [ ! -f "$STUB_STATE/job-uid" ] || cat "$STUB_STATE/job-uid" ;;

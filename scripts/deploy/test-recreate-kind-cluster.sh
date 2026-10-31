@@ -88,9 +88,11 @@ EOF
 # docker. FAKE_UID: the kube-system UID. The marker ConfigMap: FAKE_MARKER
 # "ROLE UID" (split at the first space, nothing trimmed; unset: no ConfigMap),
 # or FAKE_ROLE and FAKE_MARKER_UID for exact values (newlines included), or
-# FAKE_MARKER_EMPTY set for a ConfigMap with no data. FAKE_MARKER_FAILS set:
-# the marker can't be read; FAKE_MARKER_GONE set: the ConfigMap exists when
-# asked, then is gone when its values are read. FAKE_EXEC_FAILS set: nothing
+# FAKE_MARKER_EMPTY set for a ConfigMap with no data, FAKE_ROLE_NUL set to
+# follow the role with a NUL byte. FAKE_MARKER_FAILS set: the marker can't be
+# read; FAKE_MARKER_GONE set: the ConfigMap exists when asked, then is gone
+# when its values are read; FAKE_ROLE_READ_FAILS set: only reading the role
+# fails. FAKE_EXEC_FAILS set: nothing
 # can be read inside the control plane. FAKE_UNREACHABLE set: the copied
 # kubectl can't reach the API server.
 cat >"$WORK/bin/docker" <<EOF
@@ -105,14 +107,15 @@ case "\$*" in
     "exec econ-graph-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=30s -n kube-system get configmap econgraph-cluster-role --ignore-not-found -o name")
         [ -z "\${FAKE_EXEC_FAILS:-}" ] || exit 1
         [ -z "\${FAKE_MARKER_FAILS:-}" ] || exit 1
-        if [ -n "\${FAKE_MARKER+x}\${FAKE_ROLE+x}\${FAKE_MARKER_UID+x}\${FAKE_MARKER_EMPTY:-}\${FAKE_MARKER_GONE:-}" ]; then
+        if [ -n "\${FAKE_MARKER+x}\${FAKE_ROLE+x}\${FAKE_MARKER_UID+x}\${FAKE_MARKER_EMPTY:-}\${FAKE_MARKER_GONE:-}\${FAKE_ROLE_READ_FAILS:-}" ]; then
             echo configmap/econgraph-cluster-role
         fi
         exit 0 ;;
     "exec econ-graph-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=30s -n kube-system get configmap econgraph-cluster-role -o jsonpath={.data.role}{\"#\"}")
-        [ -z "\${FAKE_MARKER_GONE:-}" ] || exit 1
+        [ -z "\${FAKE_MARKER_GONE:-}\${FAKE_ROLE_READ_FAILS:-}" ] || exit 1
         if [ -n "\${FAKE_ROLE+x}" ]; then role="\$FAKE_ROLE"; else role="\${FAKE_MARKER-}"; role="\${role%% *}"; fi
-        printf '%s#' "\$role"; exit 0 ;;
+        printf '%s' "\$role"; [ -z "\${FAKE_ROLE_NUL:-}" ] || printf '\\000'
+        printf '#'; exit 0 ;;
     "exec econ-graph-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=30s -n kube-system get configmap econgraph-cluster-role -o jsonpath={.data.kube-system-uid}{\"#\"}")
         [ -z "\${FAKE_MARKER_GONE:-}" ] || exit 1
         if [ -n "\${FAKE_MARKER_UID+x}" ]; then muid="\$FAKE_MARKER_UID"
@@ -325,7 +328,15 @@ malformed_case "a role of ' none'" "FAKE_ROLE= none"
 malformed_case "a role of 'none '" "FAKE_ROLE=none "
 malformed_case "role none with a trailing newline" "FAKE_ROLE=none"$'\n'
 malformed_case "role none with a UID containing a newline" FAKE_ROLE=none "FAKE_MARKER_UID=$(printf 'uid-a\nproduction')"
+malformed_case "role none with a UID with a leading space" FAKE_ROLE=none "FAKE_MARKER_UID= uid-a"
+malformed_case "role none with a UID with a trailing newline" FAKE_ROLE=none "FAKE_MARKER_UID=uid-a"$'\n'
+malformed_case "role none followed by a NUL byte" FAKE_ROLE=none FAKE_ROLE_NUL=1 FAKE_MARKER_UID=uid-a
 malformed_case "a ConfigMap that is gone when read" FAKE_MARKER_GONE=1
+grep -q "could not read ConfigMap kube-system/econgraph-cluster-role" <<<"$out" ||
+    fail "a ConfigMap gone when read is not reported as unreadable:"$'\n'"$out"
+malformed_case "a ConfigMap whose role can't be read" FAKE_ROLE_READ_FAILS=1 FAKE_MARKER_UID=uid-a
+grep -q "could not read ConfigMap kube-system/econgraph-cluster-role" <<<"$out" ||
+    fail "a role that can't be read is not reported as unreadable:"$'\n'"$out"
 reset
 out="$(env "${RECREATE_ENV[@]}" FAKE_ROLE="$(printf '\nproduction')" FAKE_MARKER_UID=uid-kind-cluster \
     "$PROJECT_ROOT/scripts/deploy/recreate-kind-cluster.sh" --config "$CONFIG" --yes </dev/null 2>&1)"

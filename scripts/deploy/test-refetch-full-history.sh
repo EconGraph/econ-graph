@@ -61,7 +61,13 @@ case " \$* " in
   *" get namespace kube-system "*) echo "$cluster_uid" ;;
   *" get configmap econgraph-cluster-role "*)
     if [ "\${STUB_MARKER_FAILS:-0}" = 1 ]; then echo "connection refused" >&2; exit 1; fi
-    [ "\${STUB_PRODUCTION:-true}" = true ] && printf 'production $cluster_uid' ;;
+    # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
+    [ "\${STUB_PRODUCTION:-true}" = true ] || exit 0
+    case " \$* " in
+      *" -o name "*) echo configmap/econgraph-cluster-role ;;
+      *"{.data.role}"*) printf 'production#' ;;
+      *) printf '$cluster_uid#' ;;
+    esac ;;
   *" exec deploy/crawler-worker -- /app/crawler "*) echo "crawler ran" ;;
 esac
 exit 0

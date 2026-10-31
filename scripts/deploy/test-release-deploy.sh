@@ -129,8 +129,14 @@ case "$*" in
         [ "${STUB_CERT_ISSUER-}" != fail ] || exit 1
         printf '%s' "${STUB_CERT_ISSUER-econ-graph-selfsigned}" ;;
     "get configmap econgraph-cluster-role"*)
+        # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
         case "${STUB_MARKER:-production}" in
-            production) printf 'production %s' "$uid" ;;
+            production)
+                case "$*" in
+                    *"-o name"*) echo configmap/econgraph-cluster-role ;;
+                    *"{.data.role}"*) printf 'production#' ;;
+                    *) printf '%s#' "$uid" ;;
+                esac ;;
             fails) exit 1 ;;
         esac ;;
     # create-secrets.sh --app-database-only --dry-run, which the preflight runs.

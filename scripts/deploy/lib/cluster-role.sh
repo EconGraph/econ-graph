@@ -223,8 +223,9 @@ kube_system_uid() {
 # Existence is asked on its own, so an existing but empty ConfigMap is told
 # apart from a missing one, and each value is read with a trailing "#" that is
 # then removed, so leading, trailing and inner whitespace and newlines all
-# survive. Fails when the cluster cannot be asked, including when the
-# ConfigMap goes away between the reads.
+# survive. A NUL byte, which bash would drop, is read as a newline. Fails when
+# the cluster cannot be asked, including when the ConfigMap goes away between
+# the reads.
 # shellcheck disable=SC2034 # the CLUSTER_ROLE_MARKER_* values are read by the callers.
 cluster_role_read_marker() {
     local -a get=("$@")
@@ -238,10 +239,10 @@ cluster_role_read_marker() {
     [ -n "$name" ] || return 0
     CLUSTER_ROLE_MARKER_EXISTS=true
     value="$("${get[@]}" -n "$CLUSTER_ROLE_NAMESPACE" get configmap "$CLUSTER_ROLE_CONFIGMAP" \
-        -o 'jsonpath={.data.role}{"#"}')" || return 1
+        -o 'jsonpath={.data.role}{"#"}' | tr '\000' '\n'; exit "${PIPESTATUS[0]}")" || return 1
     CLUSTER_ROLE_MARKER_ROLE="${value%#}"
     value="$("${get[@]}" -n "$CLUSTER_ROLE_NAMESPACE" get configmap "$CLUSTER_ROLE_CONFIGMAP" \
-        -o 'jsonpath={.data.kube-system-uid}{"#"}')" || return 1
+        -o 'jsonpath={.data.kube-system-uid}{"#"}' | tr '\000' '\n'; exit "${PIPESTATUS[0]}")" || return 1
     CLUSTER_ROLE_MARKER_UID="${value%#}"
 }
 

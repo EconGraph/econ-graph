@@ -669,7 +669,7 @@ Asks for the cluster name, typed on a terminal, before deleting the cluster. Del
 cluster loses what is stored only in its nodes: the in-cluster nightly backups and Grafana's
 data. `scripts/deploy/recreate-kind-cluster.sh` replaces a cluster with a confirmation, then a
 dump. On a cluster with a production marker (any ConfigMap `kube-system/econgraph-cluster-role`
-except one with role exactly `none`; see [Production marker](#production-marker)), or one
+except `none` or `none <uid>`, exactly; see [Production marker](#production-marker)), or one
 whose marker can't be read, the confirmation is the first 8 characters of its kube-system UID, typed or given
 as `--confirm-production`; `--yes` does not answer it. `terraform destroy` in `terraform/k8s/`
 does not delete the cluster.
