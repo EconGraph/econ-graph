@@ -410,6 +410,47 @@ diesel::table! {
 }
 
 diesel::table! {
+    discovery_run_chunks (run_id, chunk_index) {
+        run_id -> Uuid,
+        chunk_index -> Int4,
+        #[max_length = 20]
+        state -> Varchar,
+        units -> Jsonb,
+        result -> Nullable<Jsonb>,
+        error_message -> Nullable<Text>,
+        finished_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    discovery_runs (id) {
+        id -> Uuid,
+        #[max_length = 50]
+        source -> Varchar,
+        #[max_length = 20]
+        state -> Varchar,
+        started_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        finished_at -> Nullable<Timestamptz>,
+        enumerated_at -> Nullable<Timestamptz>,
+        chunks_total -> Int4,
+        chunks_done -> Int4,
+        chunks_failed -> Int4,
+        catalog_scope -> Nullable<Text>,
+        reference_ok -> Bool,
+        observed_at -> Timestamptz,
+        discovery_job_id -> Nullable<Uuid>,
+        deferred_discovery_job_ids -> Array<Nullable<Uuid>>,
+        priority -> Int4,
+        validator -> Nullable<Jsonb>,
+        curated_missing -> Jsonb,
+        lifecycle -> Jsonb,
+        catalog_unchanged -> Bool,
+        error_message -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::Tsvector;
 
@@ -982,6 +1023,7 @@ diesel::joinable!(chart_annotations -> users (user_id));
 diesel::joinable!(crawl_attempts -> economic_series (series_id));
 diesel::joinable!(data_points -> economic_series (series_id));
 diesel::joinable!(datasets -> data_sources (source_id));
+diesel::joinable!(discovery_run_chunks -> discovery_runs (run_id));
 diesel::joinable!(economic_series -> data_sources (source_id));
 diesel::joinable!(event_country_impacts -> countries (country_id));
 diesel::joinable!(event_country_impacts -> global_economic_events (event_id));
@@ -1021,6 +1063,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     data_points,
     data_sources,
     datasets,
+    discovery_run_chunks,
+    discovery_runs,
     economic_series,
     event_country_impacts,
     financial_annotations,

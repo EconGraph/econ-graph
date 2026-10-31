@@ -37,6 +37,18 @@
 #                                                    the last discovery skipped because the source
 #                                                    no longer lists them
 #
+# Chunked discovery run metrics, also served by crawler-worker (econ-graph-metrics
+# crawler::discovery_runs), for sources whose adapter discovers in chunks; the gauges are polled
+# from discovery_runs with the queue gauges:
+#   crawler_discovery_runs_total{source,outcome}     counter; outcome = started|complete|failed|superseded
+#   crawler_discovery_chunks_total{source,outcome}   counter; outcome = completed|failed|discarded
+#   crawler_discovery_chunk_duration_seconds{source}  histogram; upstream time of one chunk
+#   crawler_discovery_run_duration_seconds{source}    histogram; start to completion of a run
+#   crawler_discovery_run_chunks{source,state}       gauge; newest run's chunks (total|done|failed)
+#   crawler_discovery_run_active{source}             gauge; 1 while the newest run isn't final
+#   crawler_discovery_last_complete_run_timestamp_seconds{source}  gauge; when the newest complete
+#                                                    run finished (none: when the oldest run started)
+#
 # How QA forces each coverage alert: docs/monitoring/crawler-coverage-runbook.md.
 #
 # Scraping: crawler-worker serves GET /metrics on :9102 (CRAWLER_METRICS_ADDR), and its pod
@@ -331,6 +343,21 @@ data:
           annotations:
             summary: '{{ $value | humanize }} tracked {{ $labels.source }} series no longer match the selection rules'
             description: The last complete {{ $labels.source }} catalog still lists these series upstream, so they keep their publication state and are still fetched. The worker log's catalog warning counts them; review whether the rules in data/catalog_selection/ should follow the upstream change.
+
+        # Enabled sources whose adapter discovers in chunks today only: the worker drops the gauge
+        # of a source that stops opting in or is disabled, which clears the alert. Discovery is
+        # scheduled every 7 days, so a source with no complete run for twice that has missed at
+        # least one: runs keep failing (a chunk failed for good) or never finish. The gauge is
+        # polled from discovery_runs, so it survives worker restarts; a source that never
+        # completed a run ages from its oldest retained run.
+        - alert: CrawlerDiscoveryRunOverdue
+          expr: time() - max by (source) (crawler_discovery_last_complete_run_timestamp_seconds{kubernetes_namespace="econ-graph"}) > 2 * 7 * 86400
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: No complete {{ $labels.source }} catalog discovery in over 14 days
+            description: '{{ $labels.source }} discovers its catalog in chunks and has had no complete discovery run for more than twice its 7-day discovery interval. `crawler status` shows its newest run; discovery_runs.error_message and the failed discover_chunk or finalize_discovery rows in crawl_queue say why it stopped.'
 
       # Coverage (at least 95% of each source's series have data), freshness (scheduled refresh
       # keeps series current), and crawl failures.

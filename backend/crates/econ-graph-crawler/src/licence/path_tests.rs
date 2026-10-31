@@ -194,6 +194,7 @@ fn status_notes_that_gated_jobs_are_not_claimed() {
         last_crawl: None,
         next_scheduled_crawl: None,
         per_source: vec![row("FRED"), row("IMF")],
+        discovery_runs: vec![],
     };
     let out = format_status(&snapshot);
     let line = |source: &str| {

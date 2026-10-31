@@ -58,6 +58,12 @@ pub enum JobKind {
     /// so every stored observation is rewritten from what the source serves now (see the
     /// crawler's `refetch` module).
     RefetchSeries,
+    /// Discover the details of one chunk of a chunked catalog discovery run. `series_id` is
+    /// `<run id>/<chunk index>` (see the crawler's `discovery_run` module).
+    DiscoverChunk,
+    /// Commit a chunked catalog discovery run whose chunks have all succeeded. `series_id` is
+    /// the run id.
+    FinalizeDiscovery,
 }
 
 impl JobKind {
@@ -68,6 +74,8 @@ impl JobKind {
             JobKind::DiscoverCatalog => "discover_catalog",
             JobKind::FetchFiling => "fetch_filing",
             JobKind::RefetchSeries => "refetch_series",
+            JobKind::DiscoverChunk => "discover_chunk",
+            JobKind::FinalizeDiscovery => "finalize_discovery",
         }
     }
 }
@@ -87,6 +95,8 @@ impl FromStr for JobKind {
             "discover_catalog" => Ok(JobKind::DiscoverCatalog),
             "fetch_filing" => Ok(JobKind::FetchFiling),
             "refetch_series" => Ok(JobKind::RefetchSeries),
+            "discover_chunk" => Ok(JobKind::DiscoverChunk),
+            "finalize_discovery" => Ok(JobKind::FinalizeDiscovery),
             other => Err(AppError::Validation(format!("unknown job kind: {other}"))),
         }
     }
@@ -145,7 +155,7 @@ pub struct CrawlQueueItem {
     pub scheduled_for: Option<DateTime<Utc>>,
     pub locked_by: Option<String>,
     pub locked_at: Option<DateTime<Utc>>,
-    /// One of `fetch_series` | `discover_catalog` | `fetch_filing`; see [`JobKind`].
+    /// The job kind's string ([`JobKind::as_str`]).
     pub kind: String,
     /// When the current/last attempt was claimed (reset on every claim).
     pub started_at: Option<DateTime<Utc>>,
@@ -956,6 +966,8 @@ mod _inline_tests {
             JobKind::DiscoverCatalog,
             JobKind::FetchFiling,
             JobKind::RefetchSeries,
+            JobKind::DiscoverChunk,
+            JobKind::FinalizeDiscovery,
         ] {
             assert_eq!(kind.as_str().parse::<JobKind>().unwrap(), kind);
             assert_eq!(kind.to_string(), kind.as_str());

@@ -63,9 +63,17 @@
 //!    source already has an active discovery job, a successful discovery within
 //!    [`DISCOVERY_INTERVAL`], or its `data_sources` row exists and is disabled. A failed discovery
 //!    instead backs off for one hour, doubling on consecutive failed jobs up to one day. A
-//!    successful discovery resets this backoff. Cancellation retains the weekly delay. History
-//!    comes from retained queue rows (14 days by default); purging that history resets the
-//!    backoff, never lengthens it.
+//!    successful discovery resets this backoff. Cancellation retains the weekly delay. For an
+//!    adapter that [discovers in chunks](crate::discovery_run), the `discover_catalog` job only
+//!    lists the catalog, so the discovery's outcome is its run's (`discovery_runs.discovery_job_id`
+//!    links them, and `deferred_discovery_job_ids` the jobs that found a run finalizing and started
+//!    none): the job's completion settles nothing, a run that is not final is an active
+//!    discovery, a complete run is a successful one, and a run that fails after enumeration
+//!    (`enumerated_at` set) is one failed discovery, however many of its chunk jobs failed.
+//!    Consecutive failed runs therefore double the backoff as failed jobs do. A superseded run
+//!    counts as nothing. History comes from retained queue
+//!    rows and runs (14 days by default); purging that history resets the backoff, never
+//!    lengthens it.
 //!
 //! Deployment runs a single `crawler-worker` replica (which hosts the scheduler), and duplicates
 //! are prevented by the queue's unique index anyway, so there is no leader election.
@@ -310,7 +318,19 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
 /// matching data_sources names, `$3` weekly interval, `$4` retry base, `$5` retry cap (seconds).
 const DISCOVERY_DUE_SQL: &str = "WITH history AS ( \
          SELECT source, status, COALESCE(finished_at, updated_at) AS finished_at \
-         FROM crawl_queue WHERE kind = 'discover_catalog' AND source = ANY($1) \
+         FROM crawl_queue q WHERE kind = 'discover_catalog' AND source = ANY($1) \
+           AND NOT (status = 'completed' AND ( \
+                 q.id IN (SELECT r.discovery_job_id FROM discovery_runs r \
+                          WHERE r.discovery_job_id IS NOT NULL) \
+                 OR q.id IN (SELECT d FROM discovery_runs r, \
+                                 unnest(r.deferred_discovery_job_ids) AS d \
+                             WHERE r.deferred_discovery_job_ids <> '{}' AND d IS NOT NULL))) \
+         UNION ALL \
+         SELECT source, CASE state WHEN 'complete' THEN 'completed' WHEN 'failed' THEN 'failed' \
+                ELSE 'processing' END, COALESCE(finished_at, updated_at) \
+         FROM discovery_runs WHERE source = ANY($1) \
+           AND (state IN ('complete', 'enumerating', 'running', 'finalizing') \
+                OR (state = 'failed' AND enumerated_at IS NOT NULL)) \
      ), summary AS ( \
          SELECT source, bool_or(status IN ('pending', 'processing', 'retrying')) AS active, \
                 max(finished_at) FILTER (WHERE status = 'completed') AS last_success, \
@@ -656,6 +676,7 @@ mod tests {
         let (url, guard) = crate::testkit::lock_test_db("scheduler").await?;
         let pool = econ_graph_core::create_pool(&url).await.expect("pool");
         exec(&pool, "DELETE FROM crawl_queue").await;
+        exec(&pool, "DELETE FROM discovery_runs").await;
         for sql in [
             "DELETE FROM series_lifecycle WHERE external_id LIKE 't15c\\_%'",
             "DELETE FROM economic_series WHERE external_id LIKE 't15c\\_%'",
@@ -1767,6 +1788,234 @@ mod tests {
         assert_eq!(s.tick().await.unwrap().discover_enqueued, 1);
         assert_eq!(queued_discovery(p).await, set(&["FRED"]));
         assert_eq!(s.tick().await.unwrap().discover_enqueued, 0, "active job");
+    }
+
+    /// A chunked discovery run that fails after its listing completed is one failed discovery,
+    /// however many of its chunk jobs failed: it retries after an hour, not a week, and not after
+    /// the longer backoff of several failures.
+    #[tokio::test]
+    async fn a_failed_discovery_run_counts_as_one_failure() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        finished_discovery(p, "completed", 2.0).await;
+        exec(
+            p,
+            "WITH run AS ( \
+                 INSERT INTO discovery_runs (source, state, started_at, enumerated_at, \
+                     finished_at, chunks_total, chunks_failed) \
+                 VALUES ('FRED', 'failed', NOW() - INTERVAL '2 hours', \
+                     NOW() - INTERVAL '2 hours', NOW() - INTERVAL '30 minutes', 4, 1) \
+                 RETURNING id) \
+             INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) \
+             SELECT 'FRED', run.id::text || '/' || g, 'discover_chunk', 'failed', \
+                 NOW() - INTERVAL '30 minutes' FROM run, generate_series(0, 3) AS g",
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            0,
+            "within the hour"
+        );
+        exec(
+            p,
+            "UPDATE discovery_runs SET finished_at = NOW() - INTERVAL '70 minutes'",
+        )
+        .await;
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            1,
+            "one failure: an hour, not the eight hours four failures would give"
+        );
+    }
+
+    /// Failed chunk jobs of a superseded run, or of a run that failed during enumeration, are
+    /// not failed discoveries: the weekly delay after the last completed discovery holds.
+    #[tokio::test]
+    async fn superseded_runs_and_their_late_chunk_failures_are_not_failed_discoveries() {
+        superseded_runs_case().await;
+    }
+
+    /// `n` discovery jobs that each completed at enumeration and started a run that ended in
+    /// `state`, the newest run finishing `newest_minutes_ago`, one hour apart.
+    async fn runs_from_jobs(pool: &DatabasePool, n: i32, state: &str, newest_minutes_ago: i32) {
+        exec(
+            pool,
+            &format!(
+                "WITH jobs AS ( \
+                     INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) \
+                     SELECT 'FRED', 'catalog', 'discover_catalog', 'completed', \
+                         NOW() - make_interval(mins => {newest_minutes_ago} + 30 + 60 * g) \
+                     FROM generate_series(0, {n} - 1) AS g RETURNING id, finished_at) \
+                 INSERT INTO discovery_runs (source, state, started_at, enumerated_at, \
+                     finished_at, discovery_job_id) \
+                 SELECT 'FRED', '{state}', finished_at - INTERVAL '1 minute', finished_at, \
+                     finished_at + INTERVAL '30 minutes', id FROM jobs"
+            ),
+        )
+        .await;
+    }
+
+    /// Consecutive failed runs double the backoff like failed discovery jobs, though each run's
+    /// discovery job completed at enumeration; a complete run resets it.
+    #[tokio::test]
+    async fn consecutive_failed_runs_double_the_backoff_and_a_complete_run_resets_it() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        runs_from_jobs(p, 4, "failed", 70).await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            0,
+            "four failures: eight hours"
+        );
+        exec(
+            p,
+            "UPDATE discovery_runs SET finished_at = finished_at - INTERVAL '6 hours'",
+        )
+        .await;
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0, "7h10m < 8h");
+        exec(
+            p,
+            "UPDATE discovery_runs SET finished_at = finished_at - INTERVAL '1 hour'",
+        )
+        .await;
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 1, "8h10m");
+
+        // A complete run settles the discovery: the weekly delay, then one failure is an hour.
+        exec(p, "DELETE FROM crawl_queue WHERE status = 'pending'").await;
+        runs_from_jobs(p, 1, "complete", 200).await;
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0, "weekly");
+        runs_from_jobs(p, 1, "failed", 70).await;
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            1,
+            "reset to one hour"
+        );
+    }
+
+    /// A discovery job that found a run finalizing and started none settles nothing itself: its
+    /// outcome is that run's, so a run that then fails keeps the failure backoff instead of the
+    /// job's completion resetting it to the weekly delay.
+    #[tokio::test]
+    async fn a_deferred_discovery_job_takes_its_runs_outcome() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        runs_from_jobs(p, 2, "failed", 130).await;
+        exec(
+            p,
+            "WITH job AS ( \
+                 INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) \
+                 VALUES ('FRED', 'catalog', 'discover_catalog', 'completed', \
+                     NOW() - INTERVAL '100 minutes') RETURNING id) \
+             UPDATE discovery_runs SET deferred_discovery_job_ids = ARRAY[(SELECT id FROM job)] \
+             WHERE id = (SELECT id FROM discovery_runs ORDER BY finished_at DESC LIMIT 1)",
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(
+            s.tick().await.unwrap().discover_enqueued,
+            1,
+            "two failures: two hours, and the last was 130 minutes ago"
+        );
+    }
+
+    /// The schema rejects a NULL deferred job id, and the discovery query ignores one anyway: a
+    /// NULL in the set would otherwise drop every unlinked completed discovery job from the
+    /// history (`id IN (..., NULL)` is NULL, never false) and make the source due at once.
+    #[tokio::test]
+    async fn a_null_deferred_job_id_is_rejected_and_ignored() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        finished_discovery(p, "completed", 2.0).await;
+        let mut conn = p.get().await.unwrap();
+        let rejected = diesel::sql_query(
+            "INSERT INTO discovery_runs (source, state, deferred_discovery_job_ids) \
+             VALUES ('FRED', 'running', ARRAY[NULL::uuid])",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap_err();
+        assert!(
+            rejected
+                .to_string()
+                .contains("check_discovery_runs_deferred_jobs_not_null"),
+            "{rejected}"
+        );
+
+        // With the check dropped (rolled back below), the query still ignores the NULL.
+        diesel::sql_query("BEGIN").execute(&mut conn).await.unwrap();
+        for sql in [
+            "ALTER TABLE discovery_runs \
+             DROP CONSTRAINT check_discovery_runs_deferred_jobs_not_null",
+            "INSERT INTO discovery_runs (source, state, finished_at, deferred_discovery_job_ids) \
+             VALUES ('FRED', 'complete', NOW() - INTERVAL '30 days', ARRAY[NULL::uuid])",
+        ] {
+            diesel::sql_query(sql).execute(&mut conn).await.unwrap();
+        }
+        let due: Result<Vec<DueSource>, _> = diesel::sql_query(DISCOVERY_DUE_SQL)
+            .bind::<Array<Text>, _>(vec!["FRED".to_string()])
+            .bind::<Array<Text>, _>(vec![data_source_template(SourceId::Fred).name])
+            .bind::<Double, _>(DISCOVERY_INTERVAL.as_secs_f64())
+            .bind::<Double, _>(DISCOVERY_RETRY_BASE.as_secs_f64())
+            .bind::<Double, _>(DISCOVERY_RETRY_CAP.as_secs_f64())
+            .load(&mut conn)
+            .await;
+        diesel::sql_query("ROLLBACK")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        let due = due.unwrap();
+        assert_eq!(due.len(), 1);
+        assert!(
+            !due[0].due,
+            "the discovery completed two hours ago still counts"
+        );
+    }
+
+    /// A run that is not final is an active discovery, though its job completed.
+    #[tokio::test]
+    async fn a_running_discovery_run_is_an_active_discovery() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        runs_from_jobs(p, 1, "complete", 8 * 24 * 60).await;
+        runs_from_jobs(p, 1, "failed", 70).await;
+        exec(
+            p,
+            "UPDATE discovery_runs SET state = 'running', finished_at = NULL \
+             WHERE state = 'failed'",
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0);
+    }
+
+    async fn superseded_runs_case() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        finished_discovery(p, "completed", 2.0).await;
+        exec(
+            p,
+            "WITH run AS ( \
+                 INSERT INTO discovery_runs (source, state, started_at, enumerated_at, \
+                     finished_at, chunks_total) \
+                 VALUES ('FRED', 'superseded', NOW() - INTERVAL '3 hours', \
+                     NOW() - INTERVAL '3 hours', NOW() - INTERVAL '2 hours', 2) \
+                 RETURNING id) \
+             INSERT INTO crawl_queue (source, series_id, kind, status, finished_at) \
+             SELECT 'FRED', run.id::text || '/0', 'discover_chunk', 'failed', \
+                 NOW() - INTERVAL '90 minutes' FROM run",
+        )
+        .await;
+        exec(
+            p,
+            "INSERT INTO discovery_runs (source, state, started_at, finished_at) \
+             VALUES ('FRED', 'failed', NOW() - INTERVAL '100 minutes', \
+                 NOW() - INTERVAL '95 minutes')",
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Fred], 0);
+        assert_eq!(s.tick().await.unwrap().discover_enqueued, 0);
     }
 
     #[tokio::test]

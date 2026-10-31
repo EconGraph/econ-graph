@@ -269,3 +269,17 @@ and the worker’s logs (`RUST_LOG`) to diagnose failures. The `crawler_queue_*`
 `crawler_coverage_*` Prometheus metrics in `econ-graph-metrics` show queue activity and source
 coverage; see the [crawler coverage and freshness runbook](../monitoring/crawler-coverage-runbook.md)
 for queries and alerts.
+
+Sources whose adapter discovers its catalog in chunks (see the crawler README's
+[chunked catalog discovery](../../backend/crates/econ-graph-crawler/README.md#chunked-catalog-discovery))
+also report their runs. `crawler status` lists each such source's newest run with its chunk
+progress. The worker counts `crawler_discovery_runs_total{source,outcome}` (started, complete,
+failed, superseded) and `crawler_discovery_chunks_total{source,outcome}` (completed, failed,
+discarded), and records `crawler_discovery_chunk_duration_seconds` and
+`crawler_discovery_run_duration_seconds`. It polls `crawler_discovery_run_chunks{source,state}`,
+`crawler_discovery_run_active{source}` and
+`crawler_discovery_last_complete_run_timestamp_seconds{source}` from `discovery_runs` for the
+enabled sources that discover in chunks today, so a source that stops opting in or is disabled
+drops out. The `CrawlerDiscoveryRunOverdue` alert fires when a source has had no complete run for more than
+twice its 7-day discovery interval; `discovery_runs.error_message` and the source's failed
+`discover_chunk` or `finalize_discovery` rows in `crawl_queue` say why.

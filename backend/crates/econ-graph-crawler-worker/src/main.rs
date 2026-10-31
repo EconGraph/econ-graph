@@ -298,8 +298,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })?;
         tracing::info!(addr = %bound, "metrics server listening (/metrics, /healthz)");
         background.push(tokio::spawn(server));
+        // Run gauges (and their alert) cover the sources that discover in chunks today.
+        let chunked_sources: Vec<SourceId> = registry
+            .ids()
+            .into_iter()
+            .filter(|&id| {
+                registry
+                    .get(id)
+                    .is_some_and(|a| a.chunked_discovery().is_some())
+            })
+            .collect();
         background.push(tokio::spawn(metrics::queue_gauge_loop(
             ctx.pool.clone(),
+            chunked_sources,
             Duration::from_secs(args.queue_metrics_interval_secs.max(1)),
             stop_rx.clone(),
         )));

@@ -14,6 +14,7 @@ use chrono::NaiveDate;
 use econ_graph_core::DatabasePool;
 
 use crate::dataset::SeriesDataset;
+use crate::discovery_run::{ChunkDiscovery, ChunkedDiscovery, DiscoveryUnit, Enumeration};
 use crate::error::CrawlError;
 use crate::http::{HttpFetcher, Validators};
 use crate::policy::SourcePolicy;
@@ -267,6 +268,10 @@ pub trait SourceAdapter: Send + Sync {
     /// are never deleted. Defaults to `false`, for discoveries that return a sample (FRED by
     /// popularity, World Bank by topic) or tolerate partial failure. A
     /// [`Discovery::Unchanged`] result retires nothing: the last changed discovery already did.
+    ///
+    /// It must not depend on what a walk found: for an adapter that
+    /// [discovers in chunks](Self::chunked_discovery), the worker calls it at finalize, which may
+    /// run on a worker that walked nothing.
     fn discovery_is_complete(&self) -> bool {
         false
     }
@@ -318,6 +323,54 @@ pub trait SourceAdapter: Send + Sync {
     /// it exclusively.
     fn retirement_scope_prefix(&self) -> Option<&str> {
         None
+    }
+
+    /// Opts this adapter into chunked catalog discovery (see [`crate::discovery_run`]): the
+    /// `discover_catalog` job calls [`enumerate_discovery`](Self::enumerate_discovery) instead of
+    /// [`discover_if_changed`](Self::discover_if_changed), each chunk of
+    /// [`ChunkedDiscovery::units_per_chunk`] units becomes its own `discover_chunk` job that calls
+    /// [`discover_units`](Self::discover_units), and once every chunk has succeeded one
+    /// `finalize_discovery` job commits the concatenated results as a single discovery would.
+    /// `None`, the default, keeps single-job discovery. An adapter that wraps another must
+    /// forward this and both methods.
+    ///
+    /// An adapter that tracks publication lifecycle returns its catalog scope in
+    /// [`ChunkedDiscovery::catalog_scope`], computed without a walk, and reports its publication
+    /// facts with its units and chunks ([`Enumeration::Units`], [`ChunkDiscovery::lifecycle`])
+    /// rather than through [`catalog_scope`](Self::catalog_scope) and
+    /// [`catalog_lifecycle`](Self::catalog_lifecycle): a run's finalize may run on a worker that
+    /// walked nothing, so it reads them from the run.
+    fn chunked_discovery(&self) -> Option<ChunkedDiscovery> {
+        None
+    }
+
+    /// Lists the work units of a chunked discovery: the cheap listing step (one request for a
+    /// table list, a curated id list, ...). Each unit carries whatever the listing already
+    /// returned for it, so [`discover_units`](Self::discover_units) needn't fetch it again.
+    /// Called only when [`chunked_discovery`](Self::chunked_discovery) is `Some`.
+    async fn enumerate_discovery(&self, ctx: &CrawlCtx) -> Result<Enumeration, CrawlError> {
+        let _ = ctx;
+        Err(CrawlError::Permanent(format!(
+            "{} does not support chunked discovery",
+            self.id()
+        )))
+    }
+
+    /// The details of one chunk of units from [`enumerate_discovery`](Self::enumerate_discovery),
+    /// in unit order. Concatenating every chunk's `found`, in chunk order, must give what
+    /// [`discover`](Self::discover) returns for the same catalog. Called by `discover_chunk` jobs,
+    /// each retried on its own under the source's retry policy, so an error should describe this
+    /// chunk only.
+    async fn discover_units(
+        &self,
+        ctx: &CrawlCtx,
+        units: &[DiscoveryUnit],
+    ) -> Result<ChunkDiscovery, CrawlError> {
+        let _ = (ctx, units);
+        Err(CrawlError::Permanent(format!(
+            "{} does not support chunked discovery",
+            self.id()
+        )))
     }
 
     /// Fetches observations for `external_id`, only those on or after `since` when given

@@ -27,6 +27,8 @@
 //! CRAWLER_METRICS.record_error("sec_edgar", "sec.gov", "network_timeout");
 //! ```
 
+pub mod discovery_runs;
+
 use crate::DEFAULT_REGISTRY;
 use once_cell::sync::Lazy;
 use prometheus::{
