@@ -38,7 +38,7 @@ fn nullable_attributes_preserve_the_populated_history_and_accept_only_objects() 
     loop {
         let pending = conn.pending_migrations(DATA_MIGRATIONS).unwrap();
         let next = pending.first().unwrap();
-        if next.name().version().to_string() == "20261031010000" {
+        if next.name().version().to_string() == "20261101000110" {
             break;
         }
         conn.run_migration(next.as_ref()).unwrap();
