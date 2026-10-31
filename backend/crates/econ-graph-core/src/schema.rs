@@ -276,6 +276,9 @@ diesel::table! {
         error -> Nullable<Text>,
         companyfacts_sha256 -> Nullable<Text>,
         submissions_sha256 -> Nullable<Text>,
+        source_mode -> Text,
+        companyfacts_last_modified -> Nullable<Timestamptz>,
+        submissions_last_modified -> Nullable<Timestamptz>,
     }
 }
 

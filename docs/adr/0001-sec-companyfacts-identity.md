@@ -67,10 +67,14 @@ and are never inserted as fabricated filed facts. Calculations must match
 periods, concepts and units and report missing/incompatible inputs explicitly.
 
 `company_fact_load_runs` records each bulk attempt and its completion status,
-counts, source digests and failure. A running or failed attempt is not a
-successful freshness observation. This evidence supports the release requirement
-for seven consecutive nightly successes; implementing the ledger does not by
-itself satisfy that operational acceptance gate.
+counts, source digests and failure. Its `source_mode` distinguishes upstream
+`downloaded` archives from operator `staged` files. Successful downloaded runs
+must retain both upstream Last-Modified timestamps, each within 24 hours before
+completion and at most five minutes in the future. Running or failed attempts
+and all staged imports are ineligible freshness observations. Existing attempts
+without source provenance migrate to staged conservatively. This evidence
+supports the release requirement for seven consecutive nightly successes;
+implementing the ledger does not by itself satisfy that operational gate.
 
 Executable examples in `models/company_fact.rs` verify exact decimal round trips,
 economic-period/unit/taxonomy separation, amendment identities and shared note

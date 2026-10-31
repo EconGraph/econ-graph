@@ -11,6 +11,10 @@ use testcontainers::{runners::AsyncRunner, GenericImage, ImageExt};
 const UP: &str = include_str!("../../../migrations/data/2026-10-31-120000_company_facts/up.sql");
 const DOWN: &str =
     include_str!("../../../migrations/data/2026-10-31-120000_company_facts/down.sql");
+const PROVENANCE_UP: &str =
+    include_str!("../../../migrations/data/2026-10-31-120100_company_fact_run_provenance/up.sql");
+const PROVENANCE_DOWN: &str =
+    include_str!("../../../migrations/data/2026-10-31-120100_company_fact_run_provenance/down.sql");
 
 #[derive(QueryableByName)]
 struct Value {
@@ -84,6 +88,32 @@ async fn companyfacts_migration_preserves_precision_and_revision_boundaries() {
         .execute(&mut conn)
         .unwrap();
 
+    // Applying provenance after an existing successful local run must not turn
+    // that run into evidence of a real nightly upstream download.
+    conn.batch_execute(PROVENANCE_UP).unwrap();
+    assert_eq!(
+        diesel::sql_query("SELECT count(*)::numeric AS value FROM company_fact_load_runs WHERE source_mode='staged'")
+            .get_result::<Value>(&mut conn).unwrap().value,
+        BigDecimal::from(1)
+    );
+    for invalid in [
+        "INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode) VALUES (gen_random_uuid(),'succeeded',now(),'downloaded')",
+        "INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode,companyfacts_last_modified,submissions_last_modified) VALUES (gen_random_uuid(),'succeeded',now(),'downloaded',now()-interval '25 hours',now())",
+        "INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode,companyfacts_last_modified,submissions_last_modified) VALUES (gen_random_uuid(),'succeeded',now(),'downloaded',now(),now()+interval '10 minutes')",
+        "INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode,companyfacts_last_modified,submissions_last_modified) VALUES (gen_random_uuid(),'succeeded',now(),'staged',now(),now())",
+    ] {
+        assert!(diesel::sql_query(invalid).execute(&mut conn).is_err());
+    }
+    diesel::sql_query("INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode,companyfacts_last_modified,submissions_last_modified) VALUES (gen_random_uuid(),'succeeded',now(),'downloaded',now(),now())")
+        .execute(&mut conn).unwrap();
+    // Failed downloads may have only one receipt; a running attempt has neither.
+    diesel::sql_query("INSERT INTO company_fact_load_runs (id,status,source_mode) VALUES (gen_random_uuid(),'running','downloaded')")
+        .execute(&mut conn).unwrap();
+    diesel::sql_query("INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode,companyfacts_last_modified) VALUES (gen_random_uuid(),'failed',now(),'downloaded',now())")
+        .execute(&mut conn).unwrap();
+
+    conn.batch_execute(PROVENANCE_DOWN).unwrap();
     conn.batch_execute(DOWN).unwrap();
     conn.batch_execute(UP).unwrap();
+    conn.batch_execute(PROVENANCE_UP).unwrap();
 }
