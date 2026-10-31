@@ -37,7 +37,15 @@ group gets SIGTERM, so a Python scenario stops the commands it started and runs 
 anonymous reader's roles). After `QA_TIMEOUT_GRACE_SECONDS` (default 60), whatever remains is
 killed. Stopping the runner with SIGTERM or Ctrl-C does the same to the running scenario, and
 the runner then starts no further scenario and exits 1. A scenario's own waits during cleanup
-use at most half the grace period.
+use at most half the grace period, and a command it starts during cleanup with `qa.run` gets
+only what is left of the grace period, less a margin, so it ends before the scenario is killed.
+
+`qa.run` starts each command in its own session, outside the scenario's process group, and a
+command can leave it with `setsid`. So when a scenario ends, however it ends, the runner also
+finds every process still carrying the scenario's `QA_RUN_MARKER` environment variable and kills
+it. The scenario then fails, and its reason names each one (`left running, now killed: psql
+(4242)`). A process that clears its environment can't be found this way, and neither can
+anything on macOS, which has no `/proc`.
 
 ## Profiles
 
