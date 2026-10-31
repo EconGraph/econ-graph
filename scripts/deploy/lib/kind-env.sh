@@ -288,7 +288,9 @@ try_use_kind_kubectl() {
             return 0
         fi
         dir="$(mktemp -d "${TMPDIR:-/tmp}/econgraph-kube.XXXXXX")" || return 1
-        add_exit_cleanup "rm -rf '${dir}'"
+        local cleanup
+        printf -v cleanup 'rm -rf -- %q' "$dir"
+        add_exit_cleanup "$cleanup"
     fi
     mkdir -p "${dir}/bin"
     docker cp -q -L "${KIND_CONTROL_PLANE}:/usr/bin/kubectl" "${dir}/bin/kubectl.new" || return 1
@@ -312,10 +314,16 @@ point_kubectl_at() {
 # add_exit_cleanup CMD: run CMD on exit as well as whatever EXIT trap is
 # already set. A caller that sets its own EXIT trap later must chain it.
 add_exit_cleanup() {
-    local prev
-    prev="$(trap -p EXIT | sed -E "s/^trap -- '(.*)' EXIT$/\1/")"
+    local cmd="$1" prev
+    # `trap -p EXIT` prints `trap -- 'CMD' EXIT` with CMD's quotes escaped for the shell;
+    # let the shell unquote it, so a CMD that holds a quote is kept exactly.
+    prev="$(trap -p EXIT)"
+    if [ -n "$prev" ]; then
+        eval "set -- ${prev}"
+        prev="$3"
+    fi
     # shellcheck disable=SC2064  # expand now: the trap keeps this exact command
-    trap "${prev:+${prev}; }$1" EXIT
+    trap "${prev:+${prev}; }${cmd}" EXIT
 }
 
 # use_kind_kubectl, unless a parent script already did.
