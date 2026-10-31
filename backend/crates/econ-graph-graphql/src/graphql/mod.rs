@@ -6,6 +6,7 @@
 
 pub(crate) mod audit;
 pub mod catalogs;
+pub mod company_notes;
 pub mod company_research;
 pub mod context;
 pub mod cross_section;

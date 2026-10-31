@@ -269,9 +269,17 @@ impl TryFrom<&ChartAnnotation> for AnnotationAnchor {
 impl TryFrom<&FinancialAnnotation> for AnnotationAnchor {
     type Error = ReferenceError;
     fn try_from(note: &FinancialAnnotation) -> Result<Self, Self::Error> {
+        if let Some(value) = &note.research_anchor {
+            let anchor: Self = serde_json::from_value(value.clone())
+                .map_err(|_| ReferenceError("invalid stored research anchor"))?;
+            anchor.validate()?;
+            return Ok(anchor);
+        }
         let anchor = Self::V1 {
             target: SubjectRef::LegacyFinancial {
-                statement_id: note.statement_id,
+                statement_id: note
+                    .statement_id
+                    .ok_or(ReferenceError("annotation has no target"))?,
                 line_item_id: note.line_item_id,
             },
             chart_id: None,

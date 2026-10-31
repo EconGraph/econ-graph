@@ -149,6 +149,17 @@ impl Query {
         crate::graphql::company_research::company_research_target_exists(ctx, anchor).await
     }
 
+    /// Read private authored notes, including notes whose source target disappeared.
+    async fn company_notes(
+        &self,
+        ctx: &Context<'_>,
+        cik: String,
+        anchor: Option<String>,
+        offset: Option<i32>,
+    ) -> Result<Vec<crate::graphql::company_notes::CompanyNote>> {
+        crate::graphql::company_notes::company_notes(ctx, cik, anchor, offset).await
+    }
+
     /// Get a specific economic series by ID
     async fn series(&self, ctx: &Context<'_>, id: ID) -> Result<Option<EconomicSeriesType>> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
