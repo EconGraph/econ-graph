@@ -9,7 +9,8 @@
 //! dataloader, and `crossSection` without `asOf`.
 //!
 //! A source scan also fails when code outside tests reads with the plain `revision_filter`,
-//! which lets synthetic rows count.
+//! which lets synthetic rows count, splits the pair of filters, or reads `data_points` in raw
+//! SQL that isn't accounted for.
 //!
 //! The DB test needs `DATABASE_URL` and is skipped without it. It creates its own data source
 //! (unique name), so it can share the database.
@@ -223,14 +224,28 @@ async fn every_latest_reader_agrees_with_data_points_on_a_synthetic_row_date() {
     assert_eq!(loaded, latest, "data-point dataloader");
 }
 
-/// Code outside tests that resolves revisions must not let synthetic legacy rows count: it
-/// uses `revision_filter_excluding_synthetic` with `exclude_synthetic_legacy_rows`, or
-/// `synthetic_legacy_row` in raw SQL. This fails on a call of the plain `revision_filter`
-/// anywhere in the workspace's crates outside test files and the filter's own definition.
-#[test]
-fn no_reader_uses_the_plain_revision_filter() {
+/// Raw SQL reading `data_points`, outside tests, by file: whether it resolves revisions, and so
+/// must use `synthetic_legacy_row`. A new file must be added here, which forces that question.
+const RAW_DATA_POINTS_SQL: &[(&str, bool)] = &[
+    // The filters' own definitions.
+    ("econ-graph-core/src/models/data_point.rs", true),
+    // latestObservation.
+    ("econ-graph-graphql/src/graphql/dataloaders.rs", true),
+    (
+        "econ-graph-services/src/services/cross_section_service.rs",
+        true,
+    ),
+    // Whether a successor series has any data.
+    ("econ-graph-crawler/src/lifecycle.rs", false),
+    // The crawler's change detection on write.
+    ("econ-graph-crawler/src/persist.rs", false),
+];
+
+/// Each non-test source file of the workspace's crates, relative to `crates/`, with its code
+/// lines: whole-line comments dropped, and the file cut at its inline `#[cfg(test)]` module.
+fn sources() -> Vec<(String, Vec<(usize, String)>)> {
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    let mut offenders = Vec::new();
+    let mut files = Vec::new();
     let mut pending = vec![crates.clone()];
     while let Some(dir) = pending.pop() {
         for entry in std::fs::read_dir(&dir).unwrap() {
@@ -244,25 +259,66 @@ fn no_reader_uses_the_plain_revision_filter() {
             }
             let is_test =
                 name == "tests.rs" || name.ends_with("_tests.rs") || name.ends_with("_test.rs");
-            if !name.ends_with(".rs") || is_test || path.ends_with("models/data_point.rs") {
+            if !name.ends_with(".rs") || is_test {
                 continue;
             }
-            let source = std::fs::read_to_string(&path).unwrap();
-            for (n, line) in source.lines().enumerate() {
-                let code = line.split("//").next().unwrap();
-                if code.contains("revision_filter(") {
-                    offenders.push(format!(
-                        "{}:{}",
-                        path.strip_prefix(&crates).unwrap().display(),
-                        n + 1
-                    ));
-                }
+            let lines = std::fs::read_to_string(&path)
+                .unwrap()
+                .lines()
+                .enumerate()
+                .take_while(|(_, line)| line.trim() != "#[cfg(test)]")
+                .filter(|(_, line)| !line.trim_start().starts_with("//"))
+                .map(|(n, line)| (n + 1, line.to_string()))
+                .collect();
+            let relative = path.strip_prefix(&crates).unwrap().display().to_string();
+            files.push((relative, lines));
+        }
+    }
+    files
+}
+
+/// Code outside tests that resolves revisions must not let synthetic legacy rows count.
+///
+/// - The plain `revision_filter` is called only where it is defined.
+/// - `revision_filter_excluding_synthetic` comes with `exclude_synthetic_legacy_rows`: alone,
+///   it keeps a synthetic row beside the projection, two rows for one date.
+/// - Raw SQL on `data_points` is only in the files listed in [`RAW_DATA_POINTS_SQL`], and those
+///   that resolve revisions use `synthetic_legacy_row`.
+#[test]
+fn no_reader_lets_synthetic_legacy_rows_count() {
+    let mut problems = Vec::new();
+    for (file, lines) in sources() {
+        let code = lines
+            .iter()
+            .map(|(_, l)| l.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let definition = file.ends_with("econ-graph-core/src/models/data_point.rs");
+        for (n, line) in &lines {
+            if line.contains("revision_filter(") && !definition {
+                problems.push(format!("{file}:{n}: the plain revision_filter"));
+            }
+        }
+        if code.contains("revision_filter_excluding_synthetic(")
+            && !code.contains("exclude_synthetic_legacy_rows(")
+            && !definition
+        {
+            problems.push(format!(
+                "{file}: revision_filter_excluding_synthetic without exclude_synthetic_legacy_rows"
+            ));
+        }
+        if code.contains("FROM data_points") || code.contains("JOIN data_points") {
+            match RAW_DATA_POINTS_SQL.iter().find(|(f, _)| file.ends_with(f)) {
+                None => problems.push(format!(
+                    "{file}: raw SQL on data_points; add it to RAW_DATA_POINTS_SQL, using \
+                     synthetic_legacy_row if it resolves revisions"
+                )),
+                Some((_, true)) if !code.contains("synthetic_legacy_row(") => problems.push(
+                    format!("{file}: resolves revisions without synthetic_legacy_row"),
+                ),
+                _ => {}
             }
         }
     }
-    assert!(
-        offenders.is_empty(),
-        "these read with the plain revision_filter, which lets synthetic legacy rows count; use \
-         revision_filter_excluding_synthetic with exclude_synthetic_legacy_rows: {offenders:?}"
-    );
+    assert!(problems.is_empty(), "{problems:#?}");
 }

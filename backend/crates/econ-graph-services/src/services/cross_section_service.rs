@@ -125,7 +125,8 @@ pub async fn cross_section(
     // current value never lets an earlier, superseded value show through.
     //
     // With `asOf` ($5), revisions first published after it are invisible (`dp.revision_date <=
-    // $5`); a date with none left is skipped. A pre-vintage-tracking synthetic row never counts,
+    // $5`); a date with none left is skipped, already in the walk (`dd.revision_date <= $5`), so
+    // an `asOf` early in a long history doesn't probe every later date. A pre-vintage-tracking synthetic row never counts,
     // with `asOf` or without — see [`econ_graph_core::models::exclude_synthetic_legacy_rows`] —
     // so it can't stand in for "known on `$5`", or for the latest value, when it really only
     // means "current as of an old crawl", and the cross-section agrees with `dataPoints`.
@@ -137,6 +138,7 @@ pub async fn cross_section(
              FROM ( \
                  SELECT DISTINCT dd.date FROM data_points dd \
                  WHERE dd.series_id = s.id AND ($4::date IS NULL OR dd.date = $4) \
+                   AND ($5::date IS NULL OR dd.revision_date <= $5) \
                  ORDER BY dd.date DESC \
              ) d \
              CROSS JOIN LATERAL ( \
