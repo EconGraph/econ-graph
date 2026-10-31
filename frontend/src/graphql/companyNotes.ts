@@ -10,8 +10,6 @@ export interface CompanyNote {
   targetStatus: 'found' | 'not_found' | 'unavailable';
 }
 
-const FIELDS = 'id anchor cik content createdAt updatedAt targetStatus';
-
 /**
  * Build the common versioned company target.
  * @param cik - Canonical ten-digit issuer CIK.
@@ -40,7 +38,7 @@ export async function getCompanyNotes(
   offset = 0
 ): Promise<CompanyNote[]> {
   const result = await executeGraphQL<{ companyNotes: CompanyNote[] }>({
-    query: `query CompanyNotes($cik: String!, $anchor: String, $offset: Int) { companyNotes(cik: $cik, anchor: $anchor, offset: $offset) { ${FIELDS} } }`,
+    query: `query CompanyNotes($cik: String!, $anchor: String, $offset: Int) { companyNotes(cik: $cik, anchor: $anchor, offset: $offset) { id anchor cik content createdAt updatedAt targetStatus } }`,
     variables: { cik, anchor, offset },
   });
   if (!result.data) throw new Error('Company notes could not be loaded');
@@ -55,7 +53,7 @@ export async function getCompanyNotes(
  */
 export async function createCompanyNote(anchor: string, content: string): Promise<CompanyNote> {
   const result = await executeGraphQL<{ createCompanyNote: CompanyNote }>({
-    query: `mutation CreateCompanyNote($anchor: String!, $content: String!) { createCompanyNote(anchor: $anchor, content: $content) { ${FIELDS} } }`,
+    query: `mutation CreateCompanyNote($anchor: String!, $content: String!) { createCompanyNote(anchor: $anchor, content: $content) { id anchor cik content createdAt updatedAt targetStatus } }`,
     variables: { anchor, content },
   });
   if (!result.data) throw new Error('Company note could not be saved');
@@ -70,7 +68,7 @@ export async function createCompanyNote(anchor: string, content: string): Promis
  */
 export async function updateCompanyNote(id: string, content: string): Promise<CompanyNote> {
   const result = await executeGraphQL<{ updateCompanyNote: CompanyNote }>({
-    query: `mutation UpdateCompanyNote($id: ID!, $content: String!) { updateCompanyNote(id: $id, content: $content) { ${FIELDS} } }`,
+    query: `mutation UpdateCompanyNote($id: ID!, $content: String!) { updateCompanyNote(id: $id, content: $content) { id anchor cik content createdAt updatedAt targetStatus } }`,
     variables: { id, content },
   });
   if (!result.data) throw new Error('Company note could not be updated');
