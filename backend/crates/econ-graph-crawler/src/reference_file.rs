@@ -239,7 +239,7 @@ pub async fn refresh_code_list_with(
         let parse = Arc::clone(&list.parse);
         let db_err = db_err(source, &list.url);
         Box::pin(async move {
-            let codes = non_empty(&list.url, parse(&body)?)?;
+            let codes = non_empty(&list.url, parse(&body).map_err(|e| scrub_parse(e, list))?)?;
             persist::merge_dataset_dimension_code_entries(
                 &ctx.pool,
                 source,
@@ -380,9 +380,18 @@ pub(crate) async fn download_seed_codes(
             list.url
         )));
     };
-    let mut codes = non_empty(&list.url, (list.parse)(&body)?)?;
+    let mut codes = non_empty(
+        &list.url,
+        (list.parse)(&body).map_err(|e| scrub_parse(e, list))?,
+    )?;
     codes.sort_by(|a, b| a.code.cmp(&b.code));
     Ok((validators, codes))
+}
+
+/// A parser's error with the request URL's secrets (an API key) scrubbed: the body it quotes
+/// came back successfully, so the fetcher's error scrubbing never saw it.
+fn scrub_parse(e: CrawlError, list: &CodeList) -> CrawlError {
+    crate::http::scrub_error(e, &crate::http::url_secrets(list.request_url()))
 }
 
 /// A SQL string literal.
@@ -1074,6 +1083,39 @@ mod tests {
     }
 
     /// A keyed list is requested at its `request_url` but cached and seeded under its keyless
+    /// A parser error quoting the body (a 200 the fetcher's error scrubbing never saw) has the
+    /// request URL's key scrubbed, in whatever encoding the source echoed it.
+    #[tokio::test]
+    async fn parser_errors_never_quote_the_request_key() {
+        let key = "k+y/1=2&3%4 5";
+        let form: String = url::form_urlencoded::byte_serialize(key.as_bytes()).collect();
+        for echoed in [key.to_owned(), form.clone(), form.to_lowercase()] {
+            let mock = MockSource::start().await;
+            wiremock::Mock::given(wiremock::matchers::path(URL_PATH))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(200)
+                        .set_body_string(format!("Invalid UserID {echoed}")),
+                )
+                .mount(mock.server())
+                .await;
+            let parse: ParseCodes =
+                Arc::new(|body: &str| Err(CrawlError::Parse(format!("not a code list: {body}"))));
+            let list = CodeList {
+                request_url: Some(format!("{}?UserID={form}", mock.url(URL_PATH))),
+                ..CodeList::new("https://example.test/state-codes", "bds", "state", parse)
+            };
+            let e = download_seed_codes(&test_ctx().http, SourceId::Census, &list)
+                .await
+                .unwrap_err();
+            let msg = e.to_string();
+            assert!(matches!(e, CrawlError::Parse(_)), "{e:?}");
+            assert!(msg.contains("Invalid UserID REDACTED"), "{msg}");
+            for leaked in [key, form.as_str(), "k%2b", "k+y"] {
+                assert!(!msg.contains(leaked), "{leaked} leaked: {msg}");
+            }
+        }
+    }
+
     /// `url`, with descriptions and units kept; the key never reaches the database or the seed.
     #[tokio::test]
     async fn keyed_lists_cache_and_seed_under_the_keyless_url() {

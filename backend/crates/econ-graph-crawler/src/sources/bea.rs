@@ -133,6 +133,7 @@ use crate::adapter::{
 use crate::catalog_selection::{bea_rules, BeaSelection};
 use crate::dataset::{DatasetDef, SeriesDataset};
 use crate::error::CrawlError;
+use crate::http::scrub_error;
 use crate::persist;
 #[cfg(test)]
 use crate::reference_file::{download_seed_entries, seed_migration_sql};
@@ -450,9 +451,16 @@ impl BeaAdapter {
             .http
             .get_json(SourceId::Bea, &format!("{}/", self.base_url), &query)
             .await?;
-        let results = decode_results(body, method)?;
-        serde_json::from_value(results)
-            .map_err(|e| CrawlError::Parse(format!("BEA {method}: unexpected Results: {e}")))
+        // BEA's in-body error text and serde's quoted values come from the response body: scrub
+        // the key from them in case BEA echoes it.
+        let secret = [key.to_owned()];
+        let results = decode_results(body, method).map_err(|e| scrub_error(e, &secret))?;
+        serde_json::from_value(results).map_err(|e| {
+            scrub_error(
+                CrawlError::Parse(format!("BEA {method}: unexpected Results: {e}")),
+                &secret,
+            )
+        })
     }
 
     async fn get_data<R: DeserializeOwned>(
@@ -2713,6 +2721,30 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(e.kind(), "transient", "{e}");
+    }
+
+    #[tokio::test]
+    async fn an_in_body_error_echoing_an_encoded_key_is_scrubbed() {
+        let key = "k+y/1=2&3%4 5";
+        let form: String = url::form_urlencoded::byte_serialize(key.as_bytes()).collect();
+        let mut ctx = test_ctx();
+        ctx.keys.bea = Some(key.to_owned());
+        for echoed in [key.to_owned(), form.clone(), form.to_lowercase()] {
+            let mock = MockSource::start().await;
+            let body = serde_json::json!({"BEAAPI": {"Error": {
+                "APIErrorCode": "3", "APIErrorDescription": format!("Invalid API UserId {echoed}.")}}});
+            mock.mount(&Route::get("/"), Reply::json(body)).await;
+            let e = adapter(&mock)
+                .fetch_series(&ctx, "bea_nipa/T10105.1.Q", None)
+                .await
+                .unwrap_err();
+            let msg = e.to_string();
+            assert_eq!(e.kind(), "auth", "{msg}");
+            assert!(msg.contains("Invalid API UserId REDACTED."), "{msg}");
+            for leaked in [key, form.as_str(), "k%2b", "k+y"] {
+                assert!(!msg.contains(leaked), "{leaked} leaked: {msg}");
+            }
+        }
     }
 
     #[test]
