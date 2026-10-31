@@ -8,6 +8,9 @@
 #   scripts/deploy/check-public-site.sh --host econgraph.com --main-host econgraph.com # apex rollback
 #
 # MAIN_HOST defaults to www.HOST; --main-host overrides the environment.
+# The redirects to MAIN_HOST are permanent (301) when MAIN_HOST is HOST, or when
+# MAIN_HOST_PERMANENT names MAIN_HOST (scripts/deploy/switch-main-host.sh
+# --finalize); otherwise temporary (302). render-public-host.py uses the same rule.
 #
 # What it checks:
 #   - the frontend, and a /graphql search sent with the public Origin;
@@ -16,9 +19,12 @@
 #   - the sign-in page for the web client: Keycloak accepts the public
 #     redirect URI and does not answer "HTTPS required", and refuses a
 #     http://localhost redirect URI (the live realm, not just the rendered one);
-#   - CORS for both public origins and refusal of unrelated origins;
-#   - HTTP on both names and HTTPS on the alternate name redirect by 301
-#     to https://MAIN_HOST with the path and query kept and no port;
+#   - CORS for both public origins, and no CORS for origins the backend must
+#     refuse (the dev server's http://localhost:3000, an unrelated
+#     https://evil.example): the backend's 403 with no Access-Control-Allow-Origin,
+#     so a backend still on an older origin list fails;
+#   - HTTP on both names and HTTPS on the alternate name redirect (301 or 302,
+#     as above) to https://MAIN_HOST with the path and query kept and no port;
 #   - spoofing: X-Forwarded-Proto/-Host/-Port sent by the client change
 #     neither the issuer, the sign-in form, nor the redirect, and plain http
 #     is redirected to https;
@@ -41,6 +47,7 @@ set -euo pipefail
 
 HOST=""
 MAIN_HOST="${MAIN_HOST:-}"
+MAIN_HOST_PERMANENT="${MAIN_HOST_PERMANENT:-}"
 VIA_CLOUDFLARE=false
 LOCAL_INGRESS_IP="${LOCAL_INGRESS_IP:-127.0.0.1}"
 LOCAL_HTTPS_PORT="${LOCAL_HTTPS_PORT:-443}"
@@ -87,7 +94,9 @@ done
     echo "usage: $0 --host HOST [--main-host HOST] [--via-cloudflare]" >&2
     exit 2
 }
+HOST="${HOST,,}"
 MAIN_HOST="${MAIN_HOST:-www.${HOST}}"
+MAIN_HOST="${MAIN_HOST,,}"
 case "$MAIN_HOST" in
     "$HOST") ALTERNATE_HOST="www.${HOST}" ;;
     "www.${HOST}") ALTERNATE_HOST="$HOST" ;;
@@ -100,6 +109,11 @@ for tool in curl python3; do
     }
 done
 
+if [ "$MAIN_HOST" = "$HOST" ] || [ "${MAIN_HOST_PERMANENT,,}" = "$MAIN_HOST" ]; then
+    REDIRECT_STATUS=301
+else
+    REDIRECT_STATUS=302
+fi
 PUBLIC_URL="https://${MAIN_HOST}"
 ISSUER="${PUBLIC_URL}/idp/realms/${REALM}"
 BASE="$PUBLIC_URL"
@@ -234,15 +248,20 @@ for origin in "https://${HOST}" "https://www.${HOST}"; do
         fail "CORS preflight returned ${status}, Access-Control-Allow-Origin '${allowed}', expected ${origin}"
     fi
 done
-for origin in 'https://refused.invalid' 'http://localhost:3000'; do
-    status="$(fetch cors-refused -X OPTIONS -H "Origin: ${origin}" \
+# 5b. Origins the backend must not list get no Access-Control-Allow-Origin.
+for refused_origin in http://localhost:3000 https://evil.example; do
+    status="$(fetch cors-refused -X OPTIONS -H "Origin: ${refused_origin}" \
         -H 'Access-Control-Request-Method: POST' \
         -H 'Access-Control-Request-Headers: content-type, authorization' "${BASE}/graphql")"
     allowed="$(header cors-refused Access-Control-Allow-Origin)"
-    if { [[ "$status" == 2* ]] || [ "$status" = 400 ] || [ "$status" = 403 ]; } && [ -z "$allowed" ]; then
-        pass "CORS preflight from ${origin} refused"
+    # The backend answers a preflight from an origin it doesn't list with a 403; any other
+    # status (none, a 404 or 5xx) means the backend didn't answer, which isn't a refusal.
+    if [ -n "$allowed" ]; then
+        fail "CORS preflight from ${refused_origin} returned ${status} with Access-Control-Allow-Origin '${allowed}'; the backend allows an origin it must not"
+    elif [ "$status" = 403 ]; then
+        pass "CORS preflight from ${refused_origin} refused (403)"
     else
-        fail "CORS preflight from ${origin} returned ${status}, Access-Control-Allow-Origin '${allowed}', expected no allowed origin"
+        fail "CORS preflight from ${refused_origin} returned ${status}, expected the backend's 403"
     fi
 done
 
@@ -252,10 +271,10 @@ REDIRECT_PATH='/series/smoke-check?from=alternate'
 REDIRECT_TARGET="${PUBLIC_URL}${REDIRECT_PATH}"
 status="$(fetch alternate "${ALTERNATE_BASE}${REDIRECT_PATH}")"
 location="$(header alternate Location)"
-if [ "$status" = 301 ] && [ "$location" = "$REDIRECT_TARGET" ]; then
-    pass "${ALTERNATE_HOST} redirects (301) to ${location}"
+if [ "$status" = "$REDIRECT_STATUS" ] && [ "$location" = "$REDIRECT_TARGET" ]; then
+    pass "${ALTERNATE_HOST} redirects (${status}) to ${location}"
 else
-    fail "${ALTERNATE_HOST} redirects (${status}) to '${location}', expected a 301 to ${REDIRECT_TARGET}"
+    fail "${ALTERNATE_HOST} redirects (${status}) to '${location}', expected a ${REDIRECT_STATUS} to ${REDIRECT_TARGET}"
 fi
 
 # 7. Spoofing. A client's X-Forwarded-Proto/-Host/-Port must not reach anything
@@ -277,7 +296,7 @@ else
 fi
 status="$(fetch spoof-alternate "${SPOOF[@]}" "${ALTERNATE_BASE}${REDIRECT_PATH}")"
 location="$(header spoof-alternate Location)"
-if [ "$status" = 301 ] && [ "$location" = "$REDIRECT_TARGET" ]; then
+if [ "$status" = "$REDIRECT_STATUS" ] && [ "$location" = "$REDIRECT_TARGET" ]; then
     pass "spoofed X-Forwarded-* headers leave the alternate redirect on ${PUBLIC_URL}"
 else
     fail "with spoofed X-Forwarded-* headers ${ALTERNATE_HOST} redirects (${status}) to '${location}'"
@@ -287,10 +306,10 @@ fi
 for name in "$HOST" "www.${HOST}"; do
     status="$(fetch plain -H "X-Forwarded-Proto: https" "http://${name}${REDIRECT_PATH}")"
     location="$(header plain Location)"
-    if [ "$status" = 301 ] && [ "$location" = "$REDIRECT_TARGET" ]; then
-        pass "plain http://${name} (even claiming https) redirects (301) to ${location}"
+    if [ "$status" = "$REDIRECT_STATUS" ] && [ "$location" = "$REDIRECT_TARGET" ]; then
+        pass "plain http://${name} (even claiming https) redirects (${status}) to ${location}"
     else
-        fail "plain http://${name} redirects (${status}) to '${location}', expected a 301 to ${REDIRECT_TARGET}"
+        fail "plain http://${name} redirects (${status}) to '${location}', expected a ${REDIRECT_STATUS} to ${REDIRECT_TARGET}"
     fi
 done
 

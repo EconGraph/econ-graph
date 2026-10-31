@@ -3,7 +3,7 @@
 # Put production data back to a btrfs snapshot (docs/deployment/BACKUPS.md,
 # "Restore from a snapshot").
 #
-#   sudo scripts/host/restore-snapshot.sh [--dry-run] [--yes] [--from-pool] <snapshot>
+#   sudo scripts/host/restore-snapshot.sh [--dry-run] [--yes] [--from-pool] [--lock-wait=SECONDS] <snapshot>
 #
 # <snapshot> is a name (or path) in /srv/econgraph/snapshots, e.g.
 # data-plane.20261024T040000Z or app-prod.pre-20261024T044210Z-recrawl.
@@ -43,7 +43,18 @@
 #
 # Nothing is deleted. Safe to re-run with a different snapshot.
 #
-# --dry-run (-n) writes nothing and mounts nothing: it runs the read-only
+# Before its first check it takes the lock the hourly backup-snapshots.sh
+# holds (/run/econgraph-backup-snapshots.lock), and keeps it until it exits,
+# after the swap and remount: no backup run snapshots, sends or prunes
+# meanwhile, and no second restore runs. If the lock is held it stops,
+# changing nothing; --lock-wait=SECONDS (up to 86400) waits up to that long
+# for it first. While it waits at the typed confirmation it still holds the
+# lock, so an hourly backup run that starts then fails and is skipped.
+# The storage node restart that follows (below) is yours to run after the
+# script exits, so the lock does not cover it.
+#
+# --dry-run (-n) writes nothing, mounts nothing and takes no lock (opening
+# the lock file would create it): it runs the read-only
 # checks (the snapshot is a read-only subvolume, no pod uses the subvolume,
 # and, through findmnt on the existing mounts, that the target and the
 # snapshot directory are the expected subvolumes of this filesystem), then
@@ -77,17 +88,25 @@ YES="false"
 FROM_POOL="false"
 POOL_MOUNT="$TEST_ROOT/srv/econgraph-backups"
 POOL_SNAPSHOT_DIR="$POOL_MOUNT/snapshots"
+LOCK_FILE="$TEST_ROOT/run/econgraph-backup-snapshots.lock"
+LOCK_WAIT=0
+usage="usage: $0 [--dry-run] [--yes] [--from-pool] [--lock-wait=SECONDS] <snapshot>"
 snap=""
 for arg in "$@"; do
     case "$arg" in
         --dry-run|-n) DRY_RUN="true" ;;
         --yes|-y) YES="true" ;;
         --from-pool) FROM_POOL="true" ;;
-        -*) echo "usage: $0 [--dry-run] [--yes] [--from-pool] <snapshot>" >&2; exit 2 ;;
+        --lock-wait=*)
+            LOCK_WAIT="${arg#*=}"
+            # At most a day: flock can't set up a timer for some larger values.
+            [[ "$LOCK_WAIT" =~ ^[0-9]{1,5}$ ]] && [ "$((10#$LOCK_WAIT))" -le 86400 ] ||
+                { echo "$usage (SECONDS: 0 to 86400)" >&2; exit 2; } ;;
+        -*) echo "$usage" >&2; exit 2 ;;
         *) snap="$arg" ;;
     esac
 done
-[ -n "$snap" ] || { echo "usage: $0 [--dry-run] [--yes] [--from-pool] <snapshot>" >&2; exit 2; }
+[ -n "$snap" ] || { echo "$usage" >&2; exit 2; }
 
 run() {
     echo "+ $*"
@@ -104,6 +123,26 @@ OWNER="${SUDO_USER:-}"
 if [ -z "$OWNER" ] || [ "$OWNER" = "root" ]; then
     echo "error: run with sudo from the account that runs the kind cluster (SUDO_USER is unset)" >&2
     exit 1
+fi
+
+# The backup lock, held until this script exits (fd 9 stays open).
+if [ "$DRY_RUN" = "false" ]; then
+    exec 9>"$LOCK_FILE"
+    # Computed on its own line: a failed expansion stops the script here
+    # (set -e) instead of skipping flock.
+    lock_wait_seconds=$((10#$LOCK_WAIT))
+    lock_status=0
+    flock -w "$lock_wait_seconds" 9 || lock_status=$?
+    if [ "$lock_status" -ne 0 ] && [ "$lock_status" -ne 1 ]; then
+        echo "error: could not take the lock $LOCK_FILE (flock exited $lock_status); nothing changed" >&2
+        exit 1
+    fi
+    if [ "$lock_status" -eq 1 ]; then
+        echo "error: $LOCK_FILE is held: a backup-snapshots run (econgraph-backup-snapshots.service)" >&2
+        echo "  or another restore is in progress. Nothing changed. Wait for it to finish" >&2
+        echo "  (systemctl status econgraph-backup-snapshots.service), then re-run, or pass --lock-wait=SECONDS." >&2
+        exit 1
+    fi
 fi
 
 snap="$(basename "$snap")"

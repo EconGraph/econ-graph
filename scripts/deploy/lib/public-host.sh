@@ -312,3 +312,25 @@ wait_cloudflared() {
         fi
     fi
 }
+
+# check_public_host_urls HOST: report (never fail) whether https://HOST answers 200 or 302
+# and https://www.HOST answers the gateway's www redirect: a 301 to https://HOST with the
+# path and query kept and no port, the rule scripts/deploy/check-public-site.sh checks.
+# Goes the way a visitor does (DNS, Cloudflare, the tunnel); the certificate is not
+# verified. For restart-k8s-rollout.sh's summary; check-public-site.sh is the full check.
+check_public_host_urls() {
+    local host="$1" status location
+    local www_path="/series/smoke-check?from=www"
+    status="$(curl -s -k --max-time 20 -o /dev/null -w '%{http_code}' "https://${host}/" || true)"
+    case "$status" in
+        200 | 302) echo "  ✅ HTTPS Production: https://${host} - Accessible" ;;
+        *) echo "  ❌ HTTPS Production: https://${host} - Not accessible (HTTP ${status:-000}; the certificate or the tunnel may not be ready)" ;;
+    esac
+    read -r status location < <(curl -s -k --max-time 20 -o /dev/null \
+        -w '%{http_code} %{redirect_url}\n' "https://www.${host}${www_path}" || true) || true
+    if [ "${status:-}" = 301 ] && [ "${location:-}" = "https://${host}${www_path}" ]; then
+        echo "  ✅ HTTPS Production: https://www.${host} - Redirects (301) to https://${host}"
+    else
+        echo "  ❌ HTTPS Production: https://www.${host} - Expected a 301 to https://${host}${www_path}, got HTTP ${status:-000}${location:+ to ${location}}"
+    fi
+}

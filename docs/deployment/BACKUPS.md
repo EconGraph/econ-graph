@@ -392,7 +392,15 @@ is set aside, not deleted.
    The refusal names each pod. It also refuses when the cluster can't be
    asked, and it checks again after the confirmation. Containers started
    outside Kubernetes are not seen, and the check does not stop the writers
-   for you: step 2 still comes first. It then asks you to type the subvolume name (`@econgraph-data-plane` or
+   for you: step 2 still comes first. Before its first check it takes the
+   lock the hourly `backup-snapshots.sh` holds
+   (`/run/econgraph-backup-snapshots.lock`) and keeps it until it exits, so
+   no backup run or second restore overlaps it. If the lock is held, it stops
+   without changing anything; `--lock-wait=SECONDS` (up to 86400) waits up
+   to that long first. A dry run takes no lock. The lock is held while it
+   waits at the typed confirmation too: an hourly backup run that starts
+   meanwhile fails at once (`systemctl status econgraph-backup-snapshots`
+   shows it failed) and that hour's snapshot is skipped. It then asks you to type the subvolume name (`@econgraph-data-plane` or
    `@econgraph-app-prod`), unmounts the subvolume, renames it to
    `@econgraph-<name>.replaced-<stamp>`, puts a writable snapshot of the
    chosen snapshot in its place under the original name, and remounts it.
