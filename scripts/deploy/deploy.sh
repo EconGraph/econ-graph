@@ -466,8 +466,12 @@ fi
 
 # Configure Grafana dashboards
 echo "📋 Configuring Grafana dashboards..."
-# Create ConfigMap with proper JSON embedding to avoid truncation
-cat > /tmp/grafana-dashboards.yaml << 'EOF'
+# Create ConfigMap with proper JSON embedding to avoid truncation. Built in a file of this run's
+# own under TMPDIR, removed on exit, so another deploy on the host (a QA cluster's, say) never
+# shares it.
+dashboards="$(mktemp --suffix=.yaml "${TMPDIR:-/tmp}/grafana-dashboards.XXXXXX")"
+add_exit_cleanup "rm -f -- '${dashboards}'"
+cat > "$dashboards" << 'EOF'
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -480,19 +484,19 @@ data:
 EOF
 
 # Append the full JSON content with proper indentation
-cat grafana-dashboards/econgraph-overview.json | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
+cat grafana-dashboards/econgraph-overview.json | sed 's/^/    /' >> "$dashboards"
 
 # Add the logging dashboard
-cat >> /tmp/grafana-dashboards.yaml << 'EOF'
+cat >> "$dashboards" << 'EOF'
   logging-dashboard.json: |
 EOF
 
 # Extract and append the JSON content from the YAML file
-yq -r '.data."logging-dashboard.json"' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
+yq -r '.data."logging-dashboard.json"' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> "$dashboards"
 
 # Apply the ConfigMap
-kubectl apply -f /tmp/grafana-dashboards.yaml
-rm -f /tmp/grafana-dashboards.yaml
+kubectl apply -f "$dashboards"
+rm -f "$dashboards"
 
 # Wait for monitoring stack to be ready
 echo "⏳ Waiting for monitoring stack to be ready..."
