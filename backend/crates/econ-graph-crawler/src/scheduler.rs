@@ -272,9 +272,11 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
 const DISCOVERY_DUE_SQL: &str = "WITH history AS ( \
          SELECT source, status, COALESCE(finished_at, updated_at) AS finished_at \
          FROM crawl_queue q WHERE kind = 'discover_catalog' AND source = ANY($1) \
-           AND NOT (status = 'completed' AND EXISTS ( \
-                 SELECT 1 FROM discovery_runs r WHERE r.source = q.source \
-                   AND (r.discovery_job_id = q.id OR q.id = ANY(r.deferred_discovery_job_ids)))) \
+           AND NOT (status = 'completed' AND ( \
+                 q.id IN (SELECT r.discovery_job_id FROM discovery_runs r \
+                          WHERE r.discovery_job_id IS NOT NULL) \
+                 OR q.id IN (SELECT unnest(r.deferred_discovery_job_ids) FROM discovery_runs r \
+                             WHERE r.deferred_discovery_job_ids <> '{}'))) \
          UNION ALL \
          SELECT source, CASE state WHEN 'complete' THEN 'completed' WHEN 'failed' THEN 'failed' \
                 ELSE 'processing' END, COALESCE(finished_at, updated_at) \

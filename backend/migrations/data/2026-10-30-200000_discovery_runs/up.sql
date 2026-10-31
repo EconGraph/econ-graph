@@ -108,6 +108,11 @@ CREATE INDEX idx_discovery_runs_source_started
 CREATE INDEX idx_discovery_runs_discovery_job
     ON discovery_runs (discovery_job_id);
 
+-- The few runs with deferred discovery jobs, which the scheduler searches by source.
+CREATE INDEX idx_discovery_runs_deferred_jobs
+    ON discovery_runs (source)
+    WHERE deferred_discovery_job_ids <> '{}';
+
 COMMENT ON TABLE discovery_runs IS
     'One chunked catalog discovery of a source: enumerate, chunk jobs, then one finalize';
 

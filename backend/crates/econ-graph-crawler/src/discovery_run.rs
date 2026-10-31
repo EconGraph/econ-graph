@@ -55,7 +55,8 @@
 //! it. A job whose lease expired and that commits late finds its claim gone and writes nothing.
 //! The worker's maintenance loop also fails runs whose chunk or finalize jobs ended `failed` or
 //! `cancelled` without reaching the worker's failure hook (e.g. `release_stuck` exhausting their
-//! retries), and runs left `enumerating` with no active `discover_catalog` job.
+//! retries), `running` or `finalizing` runs left with no active chunk or finalize job at all,
+//! and runs left `enumerating` with no active `discover_catalog` job.
 //!
 //! **Cleanup.** Finalize deletes the run's chunk rows. Final runs older than the worker's queue
 //! retention are deleted, except the newest complete run of each source, and, for a source with
