@@ -1,0 +1,98 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: econgraph-backends
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+    - econ-graph
+  selector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - econ-graph-backend
+      - econ-graph-data-backend
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: econgraph-postgres
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+    - econ-graph
+  selector:
+    matchExpressions:
+    - key: cnpg.io/cluster
+      operator: In
+      values:
+      - econgraph-app
+      - econgraph-data
+      - econgraph-keycloak
+  podMetricsEndpoints:
+  - port: metrics
+    interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: econgraph-platform
+  namespace: monitoring
+spec:
+  groups:
+  - name: econgraph-platform
+    rules:
+    - alert: EconGraphPostgresInstanceNotReady
+      expr: kube_pod_status_ready{namespace="econ-graph",condition="true",pod=~"econgraph-(app|data|keycloak)-[0-9]+"}
+        == 0
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: A PostgreSQL instance is not ready; inspect failover and archive
+          status
+    - alert: EconGraphBackupHealthCheckStale
+      expr: time() - kube_cronjob_status_last_successful_time{namespace="econ-graph",cronjob="cnpg-backup-health"}
+        > 900 or absent(kube_cronjob_status_last_successful_time{namespace="econ-graph",cronjob="cnpg-backup-health"})
+      for: 10m
+      labels:
+        severity: critical
+      annotations:
+        summary: CNPG backup health checks have not succeeded recently; inspect retained
+          backups and WAL
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: econgraph-crawler
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+    - econ-graph
+  selector:
+    matchLabels:
+      app: crawler-worker
+  podMetricsEndpoints:
+  - port: metrics
+    interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: otel-exported-metrics
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opentelemetry-collector
+  podMetricsEndpoints:
+  - port: prometheus
+    interval: 30s

@@ -1,0 +1,18 @@
+{
+  "helm": {
+    "version": "4.3.1",
+    "linux_amd64": {
+      "url": "https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz",
+      "sha256": "0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b",
+      "archive_member": "linux-amd64/helm"
+    }
+  },
+  "kubectl": {
+    "version": "1.34.0",
+    "kustomize_version": "5.7.1",
+    "linux_amd64": {
+      "url": "https://dl.k8s.io/release/v1.34.0/bin/linux/amd64/kubectl",
+      "sha256": "cfda68cba5848bc3b6c6135ae2f20ba2c78de20059f68789c090166d6abc3e2c"
+    }
+  }
+}

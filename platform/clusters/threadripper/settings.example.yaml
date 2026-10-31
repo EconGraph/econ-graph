@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-settings
+  namespace: flux-system
+data:
+  ENVIRONMENT: production
+  PUBLIC_HOST: localhost
+  PUBLIC_ORIGIN: http://localhost
+  OBJECT_STORE_ENDPOINT: https://objectstore.example.invalid:9000
+  OBJECT_STORE_HOSTPORT: objectstore.example.invalid:9000
+  OBJECT_STORE_CIDR: 192.0.2.1/32
+  OBJECT_STORE_PORT: '9000'
+  LOAD_BALANCER_CIDR: 192.0.2.240/28
+  L2_INTERFACE_REGEX: ^ens3$
+  CONTROL_PLANE_CIDR: 192.0.2.0/24
+  POD_CIDR: 10.244.0.0/16
+  PUBLIC_WS_ORIGIN: ws://localhost
+  BACKEND_IMAGE: ghcr.io/econgraph/econ-graph-backend:feature-build-required
+  FRONTEND_IMAGE: ghcr.io/econgraph/econ-graph-frontend:feature-build-required
+  CRAWLER_IMAGE: ghcr.io/econgraph/econ-graph-crawler-worker:feature-build-required
