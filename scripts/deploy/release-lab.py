@@ -514,8 +514,11 @@ def render_manifests(record):
     lab images, crawler-worker at 0 replicas, identity providers off."""
     images = record['images']
     branch = 'lab-' + record['name']
+    crawler = images['crawler-worker']
+    # Validate the immutable source reference before handing off to the lab's
+    # existing private tags, whose format is part of saved lab records.
     docs = renderer.render(branch, images['backend']['lab_tag'], images['frontend']['lab_tag'],
-                           True, images['crawler-worker']['lab_tag'])
+                           True, crawler['reference'])
     slug, branch_namespace = renderer.identity(branch)
     # The branch rendering's addresses become the lab's port-forward ports on localhost:
     # Keycloak's (its issuer and admin console) and the frontend's (its origin).
@@ -525,7 +528,17 @@ def render_manifests(record):
     text = text.replace(f'http://{slug}.localhost/idp', keycloak)
     text = text.replace(f'http://{slug}.localhost', f'http://localhost:{ports["frontend"]}')
     text = text.replace('http://localhost:18080/idp', keycloak)
-    docs = [d for d in json.loads(text)
+    localized = json.loads(text)
+    # Image repositories are opaque, not namespace/origin fields. A valid source
+    # may contain the branch namespace, and unrelated containers may reuse it.
+    for original, target in zip(docs, localized):
+        if original['kind'] in ('Deployment', 'StatefulSet', 'Job'):
+            before = original['spec']['template']['spec']
+            after = target['spec']['template']['spec']
+            for field in ('initContainers', 'containers'):
+                for source, container in zip(before.get(field, []), after.get(field, [])):
+                    container['image'] = source['image']
+    docs = [d for d in localized
             if d['kind'] not in DROPPED_KINDS
             and not (d['kind'] == 'NetworkPolicy' and d['metadata']['name'] in DROPPED_POLICIES)]
     for d in docs:
@@ -541,6 +554,11 @@ def render_manifests(record):
         if d['kind'] in ('Deployment', 'StatefulSet', 'Job'):
             for c in d['spec']['template']['spec'].get('initContainers', []) + \
                     d['spec']['template']['spec']['containers']:
+                role = (d['kind'], d['metadata']['name'], c['name'])
+                if role in {('Deployment', 'crawler-worker', 'crawler-worker'),
+                            ('Job', 'crawler-migrate', 'crawler-migrate')} and c['image'] == crawler['reference']:
+                    c['image'] = crawler['lab_tag']
+                    c['imagePullPolicy'] = 'Never'
                 if c['image'] in {i['lab_tag'] for i in images.values()}:
                     # Loaded into the node by the lab; never pulled.
                     c['imagePullPolicy'] = 'Never'
