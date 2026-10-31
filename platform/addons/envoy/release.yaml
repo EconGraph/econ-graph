@@ -1,0 +1,45 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: envoy
+  namespace: flux-system
+spec:
+  interval: 15m
+  timeout: 10m
+  releaseName: envoy-gateway
+  targetNamespace: envoy-gateway-system
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: gateway-helm
+      version: v1.9.2
+      sourceRef:
+        kind: HelmRepository
+        name: envoy
+        namespace: flux-system
+      reconcileStrategy: ChartVersion
+  values:
+    deployment:
+      replicas: 2
+      pod:
+        nodeSelector:
+          econgraph.io/storage: postgres
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  control-plane: envoy-gateway
+              topologyKey: kubernetes.io/hostname
+    podDisruptionBudget:
+      minAvailable: 1
+    crds:
+      enabled: true

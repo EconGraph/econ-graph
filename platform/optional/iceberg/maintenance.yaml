@@ -1,0 +1,73 @@
+# Deliberately excluded from the default Flux DAG. No mirror/cutover is enabled.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: timeseries-maintenance-preview
+  namespace: econ-graph
+spec:
+  suspend: true
+  schedule: '0 4 * * *'
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app: timeseries-maintenance
+        spec:
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          containers:
+          - name: preview
+            image: ${CRAWLER_IMAGE}
+            command: [/app/timeseries, maintenance, --max-rows, '100000']
+            env:
+            - name: TIMESERIES_BACKEND
+              value: postgres
+            - name: DATA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: econ-graph-secrets
+                  key: data-database-url
+            envFrom:
+            - secretRef:
+                name: iceberg-maintenance
+            resources:
+              requests: {cpu: 100m, memory: 256Mi}
+              limits: {cpu: '1', memory: 1Gi}
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: {drop: [ALL]}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: timeseries-maintenance-egress
+  namespace: econ-graph
+spec:
+  podSelector:
+    matchLabels: {app: timeseries-maintenance}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: kube-system}
+      podSelector:
+        matchLabels: {k8s-app: kube-dns}
+    ports:
+    - {port: 53, protocol: UDP}
+    - {port: 53, protocol: TCP}
+  - to:
+    - podSelector:
+        matchLabels: {cnpg.io/cluster: econgraph-data}
+    ports:
+    - {port: 5432, protocol: TCP}
+  - to:
+    - ipBlock: {cidr: '${OBJECT_STORE_CIDR}'}
+    ports:
+    - {port: '${OBJECT_STORE_PORT}', protocol: TCP}

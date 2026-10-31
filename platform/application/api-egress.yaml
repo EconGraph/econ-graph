@@ -1,0 +1,38 @@
+# Cilium node identities do not match ordinary CIDR peers by default.
+# Allow only the API-server identity/port, without widening node CIDR matching.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cnpg-api
+spec:
+  endpointSelector:
+    matchExpressions:
+    - key: cnpg.io/cluster
+      operator: In
+      values:
+      - econgraph-app
+      - econgraph-data
+      - econgraph-keycloak
+  egress:
+  - toEntities:
+    - kube-apiserver
+    toPorts:
+    - ports:
+      - port: '6443'
+        protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: backup-health-api
+spec:
+  endpointSelector:
+    matchLabels:
+      app: cnpg-backup-health
+  egress:
+  - toEntities:
+    - kube-apiserver
+    toPorts:
+    - ports:
+      - port: '6443'
+        protocol: TCP

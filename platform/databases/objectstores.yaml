@@ -1,0 +1,95 @@
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: app-backups
+  namespace: econ-graph
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  configuration:
+    destinationPath: s3://econgraph-${ENVIRONMENT}-app-backups
+    endpointURL: ${OBJECT_STORE_ENDPOINT}
+    s3Credentials:
+      accessKeyId:
+        name: app-backup-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: app-backup-s3
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+      jobs: 2
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: data-backups
+  namespace: econ-graph
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  configuration:
+    destinationPath: s3://econgraph-${ENVIRONMENT}-data-backups
+    endpointURL: ${OBJECT_STORE_ENDPOINT}
+    s3Credentials:
+      accessKeyId:
+        name: data-backup-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: data-backup-s3
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+      jobs: 2
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: keycloak-backups
+  namespace: econ-graph
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  configuration:
+    destinationPath: s3://econgraph-${ENVIRONMENT}-keycloak-backups
+    endpointURL: ${OBJECT_STORE_ENDPOINT}
+    s3Credentials:
+      accessKeyId:
+        name: keycloak-backup-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: keycloak-backup-s3
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+      jobs: 2
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi

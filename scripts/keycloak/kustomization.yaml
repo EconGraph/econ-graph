@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []
+configMapGenerator:
+- name: keycloak-realm-scripts
+  files:
+  - render-realm.sh
+  - preserve-catalog-grants.py
+  - independent-data-realm.py
+generatorOptions:
+  disableNameSuffixHash: true
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled

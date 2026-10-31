@@ -1,0 +1,86 @@
+# Train4 platform candidate
+
+This feature-only stack provides a Talos target alongside the existing kind deployment. It does not bootstrap a remote repository, migrate the running databases, change main, or retire kind. Public browser `/graphql` and `/data/graphql` routes retain the combined facade and anonymous catalog behavior. The additional exact `/independent-data/graphql` route requires the signed data audience, forwards Authorization, strips Cookie, and rewrites to the independent service's `/graphql` path.
+
+## Validate without a cluster
+
+Use the official Linux tool downloads and SHA256 values in `toolchain.lock.json`. Helm 4.3.1 and kubectl 1.36.4's Kustomize 5.8.1 were tested. Kubernetes **1.36.4** is the common supported target for Talos 1.14, Flux 2.10, Envoy Gateway 1.9 and CNPG 1.30. Do not bypass chart Kubernetes version constraints.
+
+```sh
+python3 -m pip install -r scripts/platform/requirements.txt
+python3 scripts/platform/test_platform.py
+python3 scripts/platform/validate.py --cache /tmp/train4-platform-cache --fetch --helm /path/to/helm --kubectl /path/to/kubectl --report /tmp/train4-platform-validation.json
+```
+
+`--fetch` downloads public official artifacts recorded in `versions.lock.json`; every package and schema is checked against its SHA256, and OCI pulls also verify the manifest digest. Without `--fetch`, missing artifacts fail. Validation renders all nine real Helm charts with their real values and target Kubernetes version, renders the Kustomize packages, and checks published Kubernetes/CRD structural schemas and preservation policies. Kubernetes IntOrString/Quantity encodings and absent optional null fields are normalized. CEL admission rules and controller behavior still require a server-side acceptance run; structural validation does not prove startup, backup recovery, capacity or availability. No kubeconfig or cluster is used by validation/tests.
+
+## Talos and Flux contract
+
+Talos supplies three control-plane VMs and two workers on the existing LAN bridge, with default pod CIDR `10.244.0.0/16`, service CIDR `10.96.0.0/12`, no default CNI or kube-proxy, and KubePrism at localhost:7445. Cilium uses kube-proxy replacement, its Gateway implementation is disabled, and legacy host routing preserves Talos HostDNS. Envoy owns Gateway API. CNPG instance managers and the backup checker reach only Cilium’s `kube-apiserver` entity on TCP 6443; ordinary node CIDR matching remains disabled. Set real L2 interface/address pool values from the inventory; the example documentation addresses are not deployable settings.
+
+Each storage worker provides a dedicated XFS user volume at `/var/mnt/postgres`, mounted through kubelet, and label `econgraph.io/storage=postgres`. The `econgraph-local` class uses `WaitForFirstConsumer`, local PV node affinity, and `Retain`. Its teardown script refuses recursive deletion. CNPG replicas require different hostnames. All VMs still share one physical host: this tolerates a worker/VM failure, not loss of the host or the host object store. Reserve capacity for every replica, WAL, retained archives, restored copies, logs and monitoring before activation. Volume sizes are initial requests, not a measured capacity claim.
+
+The ordering is CNI bootstrap, Flux install, sources/secrets, storage/cert-manager, Envoy/CNPG/barman, databases, migration, application, monitoring. The bootstrap CNI Helm release identity matches the later Flux HelmRelease: release `cilium`, target namespace `kube-system`, and Helm history/storage namespace `kube-system`. Flux Kustomizations use `prune: false` and `deletionPolicy: Orphan`; removing a namespace/package from Git never implies deleting databases, PVs or archives. This intentionally requires explicit operator cleanup for ordinary removed resources too. Existing branch scripts remain the sole branch environment lifecycle mechanism; these manifests grant no branch cleanup authority over primary resources.
+
+```sh
+# These print plans only. Use a fresh, owned scratch Talos cluster for acceptance.
+python3 scripts/platform/bootstrap.py cni --kubeconfig /private/scratch.kubeconfig --context scratch --owner "$TRAIN4_OWNER" --control-node econgraph-scratch-cp-1 --cache /tmp/train4-platform-cache
+python3 scripts/platform/bootstrap.py flux --kubeconfig /private/scratch.kubeconfig --context scratch --owner "$TRAIN4_OWNER" --control-node econgraph-scratch-cp-1 --cache /tmp/train4-platform-cache
+```
+
+Set `TRAIN4_OWNER` to the exact UUID `owner_id` from the public scratch Talos inventory, not a new human-readable name. Talos `scratch_owner` must match that UUID and is allowed only for a fit cluster. Adding `--execute` is a real mutation. Every existing node must already have the exact `econgraph.io/drill-owner` label from the scratch inventory. The helper refuses existing Cilium/Flux installations instead of upgrading them; later reconciliation owns upgrades. Before any Kubernetes API call the execute path rejects kubectl clients outside the supported one-minor skew from the pinned target; use the verified client in `toolchain.lock.json`. It never selects an ambient context, creates VMs, writes global kubeconfig, pushes Git, or runs `flux bootstrap`. Production activation is a separately reviewed operation after the acceptance gates below.
+
+For `bootstrap.py reconcile`, provide real `--settings FILE`, `--git-ref REVIEWED_FEATURE_BRANCH`, external SOPS/Git authentication Secrets and encrypted inputs first. Scratch reconcile requires `ENVIRONMENT` to be `fit-` or `scratch-` followed by the first 16 owner UUID characters after removing hyphens; this binds backup and log bucket names to the scratch inventory. `fit-replace-me` is an intentional example blocker. Production activation uses a separately reviewed path; this scratch helper cannot write production bucket names. The helper rejects main/master, example addresses, missing encrypted inputs, and product images without explicit SHA256 digests. It renders the secret Kustomization and requires the actual encrypted Secrets to be included, not merely present as local files. Commit/push those ciphertext inputs to the reviewed feature ref and refresh its local origin tracking ref before activation; the helper checks that the local package matches that remote-tracking commit and pins the GitRepository to that reviewed commit. It never uploads local files or pushes Git. `feature-build-required` image values are deliberate blockers, not published releases. Build/push reviewed feature images and supply their actual immutable references before any reconciliation. The source ref in this candidate is a feature branch; set the reviewed integration feature ref at activation.
+
+## Secret inputs
+
+Create the age private key outside the repository on protected storage; keep an offline recovery copy. Never put an age private key in Git, workflow artifacts, command output or this directory. Configure `.sops.yaml` in the deployment input workspace with **your public age recipient** and encrypted_regex `^(data|stringData)$`. Encrypt real Kubernetes Secret YAML with `sops --encrypt` to `platform/secrets/*.sops.yaml` and list those files in its Kustomization. No placeholder ciphertext or invented public key is shipped. Flux's `platform-secrets` Kustomization decrypts with `flux-system/sops-age` (`age.agekey` key). Provision that Secret from the protected file and `platform-git-auth` from a scoped Git deploy credential outside Git; never print their values. Flux namespace should exist after the Flux install phase.
+
+Required encrypted inputs are:
+
+| Namespace | Secret | Required keys/purpose |
+|---|---|---|
+| econ-graph | econ-graph-app-credentials | username=econgraph, password; CNPG bootstrap role |
+| econ-graph | econ-graph-data-credentials | username=econgraph, password; CNPG bootstrap role |
+| econ-graph | econ-graph-keycloak-credentials | username=keycloak, password; CNPG bootstrap role |
+| econ-graph | econ-graph-secrets | app-database-url and data-database-url using the corresponding CNPG `*-rw` endpoint and matching credentials |
+| econ-graph | econ-graph-keycloak | existing admin-username/admin-password/db-password/anonymous-client-secret contract; db-password matches CNPG Keycloak role; optional social client credentials |
+| econ-graph | app-backup-s3, data-backup-s3, keycloak-backup-s3 | ACCESS_KEY_ID, ACCESS_SECRET_KEY; independently scoped backup buckets |
+| econ-graph | crawler-api-keys | existing optional fred-api-key/bls-api-key/bea-api-key/census-api-key |
+| monitoring | grafana-admin | admin-user, admin-password |
+| monitoring | loki-objectstore | AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY; logs/rules/admin buckets only |
+
+Backup credentials must permit required list/read/write and multipart operations on their own prefix but **no DeleteObject** and no bucket lifecycle deletion. Create buckets separately; the cluster does not administer the host object store. Use trusted TLS with endpoint DNS resolving to the configured narrow object-store CIDR. For a private CA, add an encrypted/managed CA Secret and the actual barman `endpointCA` reference to each ObjectStore plus collector/Loki trust before activation; do not disable verification. API/backend Iceberg credentials, when later enabled, must be distinct from backup/log credentials.
+
+The Keycloak realm is rendered from the existing base plus the additive independent-data overlay. Script/realm ConfigMaps disable Flux substitution; runtime shell variables in pods are escaped. Existing social providers, anonymous catalog grants and public browser configuration remain intact. Two Keycloak replicas use the JDBC-ping cache discovery stack against CNPG, with cache traffic allowed only between Keycloak pods.
+
+## Backups, copy migration and acceptance
+
+App/user-authored content, source observations/revisions/history and Keycloak are all durable recovery planes. Each has two CNPG instances, its own ObjectStore and independent base-backup schedule. App and Keycloak request hourly backups, data every six hours; WAL archiving forces a switch at most every 60 seconds under normal operation. These settings are **proposed objectives**, not an achieved or approved RPO. The read-only health CronJob uses the newest completed Barman plugin Backup object’s `status.stoppedAt`, rather than deprecated Cluster timestamps, and fails on stale successful backups, unhealthy WAL archiving, or a failed latest backup; Prometheus alerts when that checker stops succeeding. No CNPG retentionPolicy, backup delete job, S3 expiry or volume recursive cleanup is configured. Metrics have a 30-day retention window; that does not delete database backups.
+
+The drill commands default to dry-run. Execution requires explicit kubeconfig/context, exact owner labels, and the separate annotation `econgraph.io/disposable-drill: "true"` on the scratch namespace and CNPG source Cluster. Operational ownership labels alone never authorize database writes. Every configured WAL ObjectStore must independently carry both markers, even for copy/drain modes; backup/PITR additionally requires the explicitly selected disposable ObjectStore and verifies it is the configured WAL destination. These annotations are intentionally absent from the deployed platform manifests and are not inherited from Talos node ownership: apply them only after reviewing the disposable copies, their namespace, bucket destinations and scoped credentials. It creates a fresh probe table, waits for a real plugin base backup, records a recovery time, commits a later row and waits for a new archived WAL, restores a new cluster to the recorded time, and checks the earlier row survived and the later row did not. The new cluster archives under its own server name; it only reads the source archive prefix. No backup, restored cluster, PV or table is deleted automatically. Keep reports private until sanitized; optional external migration/E2E logs may contain credentials.
+
+```sh
+python3 scripts/platform/cnpg-drill.py backup-restore --kubeconfig /private/scratch.kubeconfig --context scratch --namespace train4-proof --owner "$TRAIN4_OWNER" --source-cluster owned-copy --object-store owned-backups --report /tmp/cnpg-pitr.json
+python3 scripts/platform/cnpg-drill.py migrate-copy --kubeconfig /private/scratch.kubeconfig --context scratch --namespace train4-proof --owner "$TRAIN4_OWNER" --source-cluster owned-empty-copy --archive /private/data.dump --manifest /private/data-manifest.json --migration-argv /private/reviewed-migration-argv.json --report /tmp/cnpg-copy.json
+python3 scripts/platform/cnpg-drill.py drain --kubeconfig /private/scratch.kubeconfig --context scratch --namespace train4-proof --owner "$TRAIN4_OWNER" --source-cluster owned-copy --node owned-worker --e2e-argv /private/release-e2e-argv.json --report /tmp/cnpg-drain.json
+```
+
+`migrate-copy` consumes an **offline** pg_dump custom archive and JSON `{ "archive_sha256": "...", "table_counts": { "public.some_table": 123 } }` produced from the same consistent source snapshot. It never connects to the old/source database, rejects a nonempty target or a database name interpreted as a libpq connection string, verifies archive SHA256, restores in one transaction as the target application role, and checks every recorded count before/after a caller-reviewed migration argv. `--no-comments` skips ownership-sensitive SQL object comments; it preserves row data, including user comments/annotations. Without migration argv the report explicitly says `copy-verified-migration-pending`. Count verification alone is insufficient: add schema-specific hashes, authorship/history/reference checks and actual API/auth E2E for all three copied planes before activation.
+
+`drain` requires a node carrying both the same inventory UUID ownership label and the explicit disposable-drill annotation and executes the existing release-E2E argv concurrently with a bounded drain. It checks cluster readiness and uncordons the same node UID in `finally`. The explicitly disposable node may discard pod emptyDir scratch data (`--delete-emptydir-data`), including CNPG shared-memory/scratch volumes; durable PVCs are retained. No force, PDB bypass or node deletion is used. To report acceptance passed, also provide `--e2e-evidence FILE` written by the real E2E wrapper: JSON `requests` array with UTC `completed_at` timestamps and boolean `success` for each request. All must succeed, with requests completed both before drain begins and after it ends. Without this evidence, status is `drain-completed-coverage-pending`; a zero process exit alone never proves availability.
+
+Current validation is structural plus offline guard tests. **Real Talos boot, CNPG operator/plugin startup, base-backup/WAL/PITR restore, source-to-copy migration integrity, one-node drain with release E2E, alert delivery, resource measurements, private-CA integration and sustained backup history are external release gates.** Missing infrastructure/tools are failures/unavailable, never successful mocked proof. The single-host fault domain and host object-store recovery must be accepted together. Keep kind and old data intact until those gates and explicit cutover/retirement authorization are recorded.
+
+## Observability and optional Iceberg work
+
+Prometheus/Grafana retain local persistent metrics; OTel's DaemonSet reads container stdout/stderr through the filelog preset and forwards logs to host-backed Loki. Loki database-backup deletion is disabled; no external logs endpoint is exposed. OTLP metrics are received; distributed trace persistence is not configured because this stack has no trace backend. Add an approved trace backend before claiming end-to-end tracing. Monitor/dashboards need a real runtime and alert receiver acceptance; no notification Secret is invented here.
+
+The default application retains `TIMESERIES_BACKEND=postgres` and does not enable Iceberg mirroring or cutover. `optional/iceberg` is deliberately absent from the Flux DAG. Its maintenance CronJob is suspended and runs a bounded dry-run preview without `--apply` or expiration options. Enabling it requires reviewed data-plane credentials (`iceberg-maintenance`), warehouse/target configuration, image digest, policy-approved compaction capacity and recovery evidence. Snapshot/object expiration is a separate explicit retention decision; never add it to the default schedule. See the integrated `docs/development/TRAIN4_OBSERVATION_ROLLOUT.md` for the storage runtime contract.
+
+## Official references
+
+- [Flux installation and supported Kubernetes](https://fluxcd.io/flux/installation/) and [SOPS age workflow](https://fluxcd.io/flux/guides/mozilla-sops/).
+- [Cilium Talos prerequisites and HostDNS limitation](https://docs.cilium.io/en/stable/installation/k8s-install-talos-linux/).
+- [CNPG 1.30 support matrix](https://cloudnative-pg.io/docs/devel/release_notes/v1.30/), [barman installation](https://cloudnative-pg.io/plugin-barman-cloud/docs/installation/), [backup/recovery](https://cloudnative-pg.io/plugin-barman-cloud/docs/usage/) and [retention semantics](https://cloudnative-pg.io/plugin-barman-cloud/docs/retention/).
+- [cert-manager official OCI installation](https://cert-manager.io/docs/installation/helm/).

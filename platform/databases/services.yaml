@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-postgres-service
+  namespace: econ-graph
+spec:
+  type: ExternalName
+  externalName: econgraph-app-rw.econ-graph.svc.cluster.local
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-postgres-service
+  namespace: econ-graph
+spec:
+  type: ExternalName
+  externalName: econgraph-data-rw.econ-graph.svc.cluster.local
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-postgres-service
+  namespace: econ-graph
+spec:
+  type: ExternalName
+  externalName: econgraph-keycloak-rw.econ-graph.svc.cluster.local

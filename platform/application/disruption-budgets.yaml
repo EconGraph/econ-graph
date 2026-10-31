@@ -1,0 +1,39 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: econ-graph-backend
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: econ-graph-backend
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: econ-graph-data-backend
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: econ-graph-data-backend
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: econ-graph-frontend
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: econ-graph-frontend
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: keycloak
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: keycloak

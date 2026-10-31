@@ -1,0 +1,42 @@
+# Which client address the gateway believes, and which forwarding headers
+# reach the services. Applied by scripts/deploy/install-gateway.sh, which puts
+# the nodes' pod CIDRs in place of ${POD_CIDR}.
+#
+# Client address: the TCP peer, except when the peer is a pod (the cloudflared
+# tunnel connector, k8s/manifests/cloudflared.yaml): then the rightmost
+# X-Forwarded-For entry that is not a pod address, which is the visitor the
+# Cloudflare edge saw. The GraphQL rate limits count per that address, so they
+# apply per visitor rather than to everyone behind the tunnel. Any pod can
+# claim an address this way, so the addresses of in-cluster callers are not
+# audit-grade; a client outside the cluster cannot.
+#
+# Envoy would append the peer to the X-Forwarded-For it received, so a client's
+# "X-Forwarded-For: 1.2.3.4" would reach the services as "1.2.3.4, <peer>",
+# and Keycloak (KC_PROXY_HEADERS=xforwarded) takes the leftmost entry as the
+# client. Every route therefore sets X-Forwarded-For to the address above
+# (routes/httproutes.yaml). The other forwarding headers a client sends are
+# dropped here, before Envoy adds its own: X-Forwarded-Proto is set by Envoy
+# from the listener; X-Forwarded-Host, X-Forwarded-Port, Forwarded and
+# X-Real-IP are not sent at all.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: econ-graph-client-headers
+  namespace: econ-graph-gateway
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: econ-graph-gateway
+  clientIPDetection:
+    xForwardedFor:
+      trustedCIDRs:
+      - ${POD_CIDR}
+  headers:
+    earlyRequestHeaders:
+      remove:
+      - X-Forwarded-Host
+      - X-Forwarded-Port
+      - X-Forwarded-Proto
+      - Forwarded
+      - X-Real-IP

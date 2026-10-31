@@ -1,0 +1,48 @@
+name: Train 4 Platform
+on:
+  pull_request:
+    paths:
+      - 'platform/**'
+      - 'scripts/platform/**'
+      - 'config/keycloak/**'
+      - 'scripts/keycloak/**'
+      - 'k8s/**'
+      - 'ci/scripts/install-train4-tools.py'
+      - '.github/workflows/train4-platform.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'platform/**'
+      - 'scripts/platform/**'
+      - 'config/keycloak/**'
+      - 'scripts/keycloak/**'
+      - 'k8s/**'
+      - 'ci/scripts/install-train4-tools.py'
+      - '.github/workflows/train4-platform.yml'
+  merge_group:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  platform:
+    name: Platform guards and pinned schemas
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install checksum-locked rendering tools and validators
+        run: |
+          python3 ci/scripts/install-train4-tools.py --bin-dir "$RUNNER_TEMP/train4-tools" --tool helm --tool kubectl
+          echo "$RUNNER_TEMP/train4-tools" >> "$GITHUB_PATH"
+          python3 -m venv "$RUNNER_TEMP/train4-python"
+          "$RUNNER_TEMP/train4-python/bin/python" -m pip install -r scripts/platform/requirements.txt
+          echo "$RUNNER_TEMP/train4-python/bin" >> "$GITHUB_PATH"
+      - name: Exercise bootstrap and recovery ownership guards
+        run: python3 scripts/platform/test_platform.py
+      - name: Validate actual pinned charts and platform resources
+        run: python3 scripts/platform/validate.py --fetch --helm helm --kubectl kubectl --cache "$RUNNER_TEMP/train4-platform-assets"

@@ -1,0 +1,12 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: econgraph-platform
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: ssh://git@github.com/EconGraph/econ-graph.git
+  ref:
+    branch: feat/train4-platform
+  secretRef:
+    name: platform-git-auth
