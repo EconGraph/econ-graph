@@ -428,6 +428,13 @@ jobs:
         shellcheck -x scripts/deploy/check-selection.sh scripts/deploy/test-check-selection.sh
         scripts/deploy/test-check-selection.sh
 
+    # The v4.1 first-deploy measurements (ECO-803): the production guard, read-only psql scripts,
+    # no secrets in output, the BEA rules from bea.toml and the FRED check, against stubs.
+    - name: Check the v4.1 first-deploy measurement script
+      run: |
+        shellcheck -x scripts/deploy/measure-v41-first-deploy.sh scripts/deploy/test-measure-v41-first-deploy.sh
+        scripts/deploy/test-measure-v41-first-deploy.sh
+
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
     runs-on: ubuntu-latest

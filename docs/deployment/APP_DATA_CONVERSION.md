@@ -185,6 +185,25 @@ differs from UUIDv5 of `SOURCE:external_id`; do not change IDs to make it pass.
    Run the tagged crawler's `migrate --dry-run` against the data database to confirm
    nothing is pending.
 
+8. Measure the first-deploy effects of the catalog lifecycle for the release ticket
+   (ECO-803) on the restored copy. Forward the scratch cluster's data database to a local
+   port, then run the read-only report with the database password in `PGPASSWORD`, and
+   `FRED_API_KEY` set for the FRED selection check:
+
+   ```sh
+   KUBECONFIG=<scratch cache>/econgraph/kubeconfig-<name> <scratch cache>/econgraph/bin/kubectl \
+     --context kind-<name> -n econ-graph port-forward svc/data-postgres-service 15432:5432 &
+   PGPASSWORD=<data database password> FRED_API_KEY=<key> \
+     scripts/deploy/measure-v41-first-deploy.sh --database-url postgres://postgres@127.0.0.1:15432/econ_graph
+   ```
+
+   It prints a Markdown report: inactive BEA series by catalog-selection rule, the
+   (series, date) pairs ECO-807 asks about, and the FRED selection against its cap. It
+   refuses production's data database (an in-cluster name, or a `kubectl port-forward` into
+   the production cluster's `econ-graph` namespace) unless given
+   `--i-know-this-is-production`, and runs every statement in a read-only transaction with a
+   statement timeout. Without `FRED_API_KEY` the FRED check is reported as skipped.
+
 The scratch backup root then holds full copies of production records; it has the same
 permissions and handling as below. The synthetic test in CI does not replace this
 rehearsal.
