@@ -34,6 +34,186 @@ use crate::persist;
 use crate::policy::SourcePolicy;
 use crate::testkit::{fast_policy, test_ctx_with, MockSource, Reply, Route};
 
+/// Child processes give each backend phase immutable environment without changing the
+/// process-global environment used by other concurrently running crawler tests.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn iceberg_crawl_publication_and_queue_completion_are_atomic() {
+    use diesel::connection::SimpleConnection;
+    use econ_graph_core::test_utils::ScratchDatabase;
+    if let Ok(phase) = std::env::var("TRAIN4_WORKER_PROOF_PHASE") {
+        iceberg_worker_proof_phase(&phase).await;
+        return;
+    }
+    let db = ScratchDatabase::create("train4_worker_atomic");
+    econ_graph_core::run_migrations(&db.url).await.unwrap();
+    let warehouse = tempfile::tempdir().unwrap();
+    let target = Uuid::new_v4();
+    db.connect().batch_execute(&format!("INSERT INTO timeseries_recovery_state(target_id,target_label) VALUES ('{target}','disposable worker proof')")).unwrap();
+    for phase in ["postgres", "iceberg"] {
+        if phase == "iceberg" {
+            // Only this isolated fixture changes the control row directly. Operator
+            // cutover uses the separately tested checkpoint/evidence recovery workflow.
+            db.connect()
+                .batch_execute("UPDATE timeseries_recovery_state SET backend='iceberg', epoch=1")
+                .unwrap();
+        }
+        let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "worker::tests::iceberg_crawl_publication_and_queue_completion_are_atomic",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("TRAIN4_WORKER_PROOF_PHASE", phase)
+            .env("DATABASE_URL", &db.url)
+            .env("DATA_DATABASE_URL", &db.url)
+            .env("TIMESERIES_BACKEND", phase)
+            .env("TIMESERIES_TARGET_ID", target.to_string())
+            .env("TIMESERIES_ICEBERG_MIRROR", "true")
+            .env("ICEBERG_WAREHOUSE", warehouse.path())
+            .env("TIMESERIES_MIRROR_MAX_ROWS", "1000")
+            .kill_on_drop(true);
+        let status = tokio::time::timeout(Duration::from_secs(120), command.status())
+            .await
+            .expect("bounded worker proof timed out")
+            .expect("spawn worker proof");
+        assert!(status.success(), "{phase} worker proof failed");
+    }
+}
+
+async fn iceberg_worker_proof_phase(phase: &str) {
+    use econ_graph_core::models::{
+        DataPoint, Observation, ObservationRequest, RevisionMode, TimeSeriesStore,
+    };
+    use econ_graph_timeseries::{encoding, IcebergStore, SqlCatalog, StorageConfig};
+    let pool = econ_graph_core::create_pool(&std::env::var("DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    persist::sync_datasets(&pool, &test_catalog())
+        .await
+        .unwrap();
+    let mock = MockSource::start().await;
+    let external = format!("t5_iceberg_{phase}");
+    mock.mount(
+        &Route::get(format!("/series/{external}")),
+        series_json(
+            "Exact worker proof",
+            &[
+                (
+                    "2024-01-01",
+                    Some("123456789012345678901234567890123456789.123456789"),
+                ),
+                ("2024-02-01", None),
+            ],
+        ),
+    )
+    .await;
+    let job = enqueue(&pool, SRC.as_str(), &external, JobKind::FetchSeries, 5).await;
+    let outcome = worker(&pool, &mock).run_once().await.expect("claimed");
+    let JobOutcome::Completed(stats) = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(item(&pool, job).await.status, "completed");
+    let series_id = stats.series_id.unwrap();
+    let mut conn = pool.get().await.unwrap();
+    let dataset = economic_series::table
+        .find(series_id)
+        .select(economic_series::dataset_id)
+        .first::<Uuid>(&mut conn)
+        .await
+        .unwrap();
+    let expected: Vec<Observation> = data_points::table
+        .filter(data_points::series_id.eq(series_id))
+        .order((
+            data_points::date,
+            data_points::revision_date,
+            data_points::id,
+        ))
+        .load::<DataPoint>(&mut conn)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(Observation::from)
+        .collect();
+    let catalog = SqlCatalog::new(pool.clone(), StorageConfig::from_env().unwrap());
+    let before = SqlCatalog::pointer_conn(&mut conn, dataset)
+        .await
+        .unwrap()
+        .unwrap();
+    drop(conn);
+    let selection = econ_graph_core::observation_storage::ObservationStorage::from_env().unwrap();
+    let page = IcebergStore::new(catalog.clone())
+        .read_page(ObservationRequest {
+            series_id,
+            start_date: None,
+            end_date: None,
+            revisions: RevisionMode::All,
+            limit: None,
+            offset: None,
+            context: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        encoding::canonical_rows(&expected).unwrap(),
+        encoding::canonical_rows(&page.points).unwrap()
+    );
+    if phase == "iceberg" {
+        assert_eq!(
+            selection.backend,
+            econ_graph_core::observation_storage::ObservationBackend::Iceberg
+        );
+        assert_eq!(
+            expected.len(),
+            2,
+            "post-cutover accepted writes retain full PostgreSQL rollback rows"
+        );
+    } else {
+        // Fail after all data and pointer writes, at the final queue completion. Both
+        // stores must retain their preceding state and the worker must retry the job.
+        let failed = "t5_iceberg_failed_completion";
+        mock.mount(
+            &Route::get(format!("/series/{failed}")),
+            series_json("Must roll back", &[("2024-01-01", Some("222"))]),
+        )
+        .await;
+        let failed_job = enqueue(&pool, SRC.as_str(), failed, JobKind::FetchSeries, 5).await;
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query(format!("CREATE FUNCTION t5_iceberg_reject_completion() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id='{failed_job}'::uuid AND NEW.status='completed' THEN RAISE EXCEPTION 'proof rejects queue completion'; END IF; RETURN NEW; END $$"))
+            .execute(&mut conn).await.unwrap();
+        diesel::sql_query("CREATE TRIGGER t5_iceberg_reject_completion BEFORE UPDATE ON crawl_queue FOR EACH ROW EXECUTE FUNCTION t5_iceberg_reject_completion()")
+            .execute(&mut conn).await.unwrap();
+        drop(conn);
+        let outcome = worker(&pool, &mock).run_once().await.expect("claimed");
+        assert!(
+            matches!(outcome, JobOutcome::Retrying { .. }),
+            "{outcome:?}"
+        );
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query("DROP TRIGGER t5_iceberg_reject_completion ON crawl_queue")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        let after = SqlCatalog::pointer_conn(&mut conn, dataset)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            before, after,
+            "rolled-back publication cannot become visible"
+        );
+        let missing = economic_series::table
+            .filter(economic_series::external_id.eq(failed))
+            .count()
+            .get_result::<i64>(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(missing, 0, "retained PostgreSQL write must also roll back");
+        assert_eq!(item(&pool, failed_job).await.status, "retrying");
+    }
+}
+
 /// Sources the test adapter is registered under (not FRED/BLS: those have real adapters).
 const SRC: SourceId = SourceId::Bea;
 const OTHER: SourceId = SourceId::Census;
@@ -2211,6 +2391,205 @@ async fn release_stuck_runs_on_start() {
     .await
     .expect("stuck item was not released");
     assert_eq!(item(&db.pool, id).await.status, "completed");
+}
+
+#[test]
+fn only_exact_recovery_guard_error_is_busy() {
+    use diesel::result::{DatabaseErrorKind, Error};
+    let classify = |kind, message: &str| {
+        db_error(AppError::Database(Error::DatabaseError(
+            kind,
+            Box::new(message.to_owned()),
+        )))
+    };
+    assert!(
+        matches!(classify(DatabaseErrorKind::Unknown, RECOVERY_PAUSE_MESSAGE),
+        CrawlError::Busy { retry_after, .. } if retry_after == RECOVERY_PAUSE_RETRY)
+    );
+    assert_eq!(
+        classify(DatabaseErrorKind::Unknown, "lock timeout").kind(),
+        "transient"
+    );
+    assert_eq!(
+        classify(
+            DatabaseErrorKind::Unknown,
+            &format!("query failed: {RECOVERY_PAUSE_MESSAGE}")
+        )
+        .kind(),
+        "transient"
+    );
+    assert_eq!(
+        classify(
+            DatabaseErrorKind::SerializationFailure,
+            RECOVERY_PAUSE_MESSAGE
+        )
+        .kind(),
+        "transient"
+    );
+}
+
+/// A pause beginning while upstream work is in flight must not exhaust the retry budget.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn recovery_pause_retries_without_budget_and_resume_is_lease_fenced() {
+    if std::env::var_os("TRAIN4_WORKER_PAUSE_PROOF").is_none() {
+        use diesel::connection::SimpleConnection;
+        let db = econ_graph_core::test_utils::ScratchDatabase::create("train4_pause");
+        econ_graph_core::run_migrations(&db.url).await.unwrap();
+        let target = Uuid::new_v4();
+        db.connect().batch_execute(&format!("INSERT INTO timeseries_recovery_state(target_id,target_label) VALUES ('{target}','disposable pause proof')")).unwrap();
+        let status = tokio::time::timeout(Duration::from_secs(120),
+            tokio::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "worker::tests::recovery_pause_retries_without_budget_and_resume_is_lease_fenced", "--nocapture", "--test-threads=1"])
+                .env("TRAIN4_WORKER_PAUSE_PROOF", "1")
+                .env("DATABASE_URL", &db.url).env("DATA_DATABASE_URL", &db.url)
+                .env("TIMESERIES_BACKEND", "postgres").env("TIMESERIES_ICEBERG_MIRROR", "false")
+                .env("TIMESERIES_TARGET_ID", target.to_string())
+                .kill_on_drop(true).status()).await.unwrap().unwrap();
+        assert!(status.success());
+        return;
+    }
+    let pool = econ_graph_core::create_pool(&std::env::var("DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    persist::sync_datasets(&pool, &test_catalog())
+        .await
+        .unwrap();
+    let external = "t5_pause";
+    let seed = persist::persist_series(&pool, SRC, external, &lease_response("Before pause", 1))
+        .await
+        .unwrap();
+    let job = enqueue(&pool, SRC.as_str(), external, JobKind::FetchSeries, 5).await;
+    let adapter = LeaseGateAdapter::new(Ok(lease_response("After resume", 2)));
+    let worker = Arc::new(lease_worker(&pool, &adapter, "pause-worker"));
+    let running = {
+        let worker = worker.clone();
+        tokio::spawn(async move { worker.run_once().await.unwrap() })
+    };
+    adapter.entered.wait().await;
+    let initial = item(&pool, job).await;
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query("UPDATE timeseries_recovery_state SET writes_paused=true, pause_token=gen_random_uuid(), epoch=epoch+1")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    drop(conn);
+    adapter.resume.wait().await;
+    let result = running.await.unwrap();
+    assert!(matches!(
+        result,
+        JobOutcome::Retrying {
+            error: CrawlError::Busy { .. },
+            ..
+        }
+    ));
+    // Explicit claims bypass the schedule so this proof does not sleep between retries.
+    for _ in 0..=initial.max_retries {
+        let claim = CrawlQueueItem::claim_by_id(&pool, job, "pause-worker")
+            .await
+            .unwrap()
+            .unwrap();
+        let outcome = worker
+            .finish_result(
+                SRC,
+                &claim,
+                Ok(JobWrite::Series(lease_response("Must roll back", 99))),
+                Duration::ZERO,
+            )
+            .await;
+        assert!(matches!(
+            outcome,
+            JobOutcome::Retrying {
+                error: CrawlError::Busy { .. },
+                ..
+            }
+        ));
+        let queued = item(&pool, job).await;
+        assert_eq!(queued.retry_count, 0);
+        assert_eq!(queued.max_retries, initial.max_retries);
+        assert_eq!(queued.status, "retrying");
+        assert!(queued.claim_token.is_none());
+        assert!(queued.scheduled_for.unwrap() > Utc::now() + chrono::Duration::seconds(25));
+    }
+    let baseline = series_row(&pool, external).await.unwrap();
+    assert_eq!(baseline.2, "Before pause");
+    let mut conn = pool.get().await.unwrap();
+    let values = data_points::table
+        .filter(data_points::series_id.eq(seed.series_id))
+        .select(data_points::value)
+        .load::<Option<BigDecimal>>(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(values, vec![Some(BigDecimal::from(1))]);
+    let attempts = crawl_attempts::table
+        .filter(crawl_attempts::series_id.eq(seed.series_id))
+        .count()
+        .get_result::<i64>(&mut conn)
+        .await
+        .unwrap();
+    assert!(attempts > i64::from(initial.max_retries)); // Busy remains auditable, without budget consumption.
+    drop(conn);
+    let stale = CrawlQueueItem::claim_by_id(&pool, job, "pause-worker")
+        .await
+        .unwrap()
+        .unwrap();
+    expire_lease_jobs(&pool, &[job]).await;
+    let replacement = CrawlQueueItem::claim_by_id(&pool, job, "pause-worker")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(stale.claim_token, replacement.claim_token); // Even the same worker ID cannot reuse an expired lease.
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query(
+        "UPDATE timeseries_recovery_state SET writes_paused=false, pause_token=NULL, epoch=epoch+1",
+    )
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    drop(conn);
+    let outcome = worker
+        .finish_result(
+            SRC,
+            &stale,
+            Ok(JobWrite::Series(lease_response("Stale", 99))),
+            Duration::ZERO,
+        )
+        .await;
+    assert!(matches!(outcome, JobOutcome::LeaseLost { .. }));
+    assert_eq!(item(&pool, job).await.claim_token, replacement.claim_token);
+    let mut conn = pool.get().await.unwrap();
+    assert_eq!(
+        crawl_attempts::table
+            .filter(crawl_attempts::series_id.eq(seed.series_id))
+            .count()
+            .get_result::<i64>(&mut conn)
+            .await
+            .unwrap(),
+        attempts
+    );
+    drop(conn);
+    let outcome = worker
+        .finish_result(
+            SRC,
+            &replacement,
+            Ok(JobWrite::Series(lease_response("After resume", 2))),
+            Duration::ZERO,
+        )
+        .await;
+    assert!(matches!(outcome, JobOutcome::Completed(_)));
+    let completed = item(&pool, job).await;
+    assert_eq!(completed.status, "completed");
+    assert_eq!(completed.retry_count, 1); // Only actual lease expiry consumed an attempt.
+    assert_eq!(series_row(&pool, external).await.unwrap().2, "After resume");
+    let mut conn = pool.get().await.unwrap();
+    assert_eq!(
+        data_points::table
+            .filter(data_points::series_id.eq(seed.series_id))
+            .select(data_points::value)
+            .load::<Option<BigDecimal>>(&mut conn)
+            .await
+            .unwrap(),
+        vec![Some(BigDecimal::from(2))]
+    );
 }
 
 #[test]

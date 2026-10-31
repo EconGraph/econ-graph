@@ -45,15 +45,15 @@ pub enum CrawlError {
     /// Any other 4xx, or a logic/configuration error. Not retried.
     #[error("permanent error: {0}")]
     Permanent(String),
-    /// Local work contention: another crawl in this process is already doing the same shared
-    /// work (for example, downloading a source's one shared file). Not an upstream rate limit,
-    /// so it doesn't trip the per-source breaker; like `RateLimited`, it doesn't count as a
-    /// failed attempt. Retry after `retry_after`, an adapter-computed backoff with jitter.
+    /// Local work contention or an operator recovery pause. This does not trip the
+    /// per-source breaker or consume the failed-attempt budget. Retries have no attempt
+    /// limit: an operator must resume/repair a paused recovery. Adapters supply jittered
+    /// contention delays; the worker supplies a fixed delay for the recovery guard.
     #[error("busy: {message} (retry after {}s)", retry_after.as_secs())]
     Busy {
-        /// Adapter-computed delay before retrying, already including jitter.
+        /// Delay before retrying (adapter contention backoff or worker recovery delay).
         retry_after: Duration,
-        /// What is contended, e.g. the shared URL.
+        /// What is contended or why observation writes are paused.
         message: String,
     },
 }
