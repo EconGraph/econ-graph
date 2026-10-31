@@ -80,12 +80,12 @@ echo "Tunnel: keep both existing host routes and their gateway origin; no change
 if [ "$DRY_RUN" = true ]; then
     echo "[dry-run] verify marked-production context, --confirm-production UID prefix and matching realm ConfigMap"
     if [ "$FINALIZE" = true ]; then
-        echo "[dry-run] verify the switch to ${MAIN_HOST} has completed: Keycloak hostname, realm frontendUrl, backend issuer and rollout, deploy config, served routes, and check-public-site.sh with the temporary redirects"
+        echo "[dry-run] verify the switch to ${MAIN_HOST} has completed: no pending sign-out marker, Keycloak hostname, realm frontendUrl, backend issuer and rollout, deploy config, served routes, and check-public-site.sh with the temporary redirects"
         echo "[dry-run] atomically retain other settings and write MAIN_HOST_PERMANENT=${MAIN_HOST} in ${CONFIG_FILE}"
         echo "[dry-run] apply gateway routes with permanent (301) redirects to ${MAIN_HOST}"
     else
         echo "[dry-run] atomically retain other settings and write PUBLIC_HOST/MAIN_HOST in ${CONFIG_FILE}; drop a MAIN_HOST_PERMANENT naming another host"
-        echo "[dry-run] if issuer changes: mark deployment/keycloak so the sign-out below survives a rerun"
+        echo "[dry-run] if issuer changes: mark deployment/keycloak so the sign-out below survives a rerun; if not, clear a marker naming another host without signing out"
         echo "[dry-run] patch Keycloak hostname/client origins and wait for its rollout; preserve release images"
         echo "[dry-run] rerun the catalog-preserving realm import, moving the realm frontendUrl to ${MAIN_HOST}"
         echo "[dry-run] if marked: sign out every realm session once, then clear the mark"
@@ -208,6 +208,9 @@ if [ "$FINALIZE" = true ]; then
     # routes are all on MAIN_HOST, and the public site passes with its temporary
     # redirects, before anything is written.
     finalize_refuse() { die "$1: run the switch to ${MAIN_HOST} first (or rerun it); nothing was changed"; }
+    # A sign-out marker means a switch stopped before its sign-out; the rerun finishes it.
+    [ -z "$logout_pending" ] ||
+        finalize_refuse "a sign-out for ${logout_pending} is still pending (${LOGOUT_ANNOTATION} on deployment/keycloak)"
     [ "$current_hostname" = "https://${MAIN_HOST}/idp" ] ||
         finalize_refuse "Keycloak's hostname is ${current_hostname}, not https://${MAIN_HOST}/idp"
     [ "$current_frontend_url" = "https://${MAIN_HOST}/idp" ] ||
@@ -253,12 +256,18 @@ fi
 # realm session is then signed out once the import has moved the issuer, so sessions
 # begun during the Keycloak rollout or the import go too. A marker on the Keycloak
 # Deployment, set before the first change and cleared after the sign-out, makes a rerun
-# after an interruption still sign out.
+# after an interruption still sign out. A marker for another host, left by a switch that
+# stopped before Keycloak issued anything for that host, is cleared without signing out
+# when the issuer stays: no session was issued by the marked issuer.
 if [ "$current_hostname" != "https://${MAIN_HOST}/idp" ] ||
     { [ -n "$current_frontend_url" ] && [ "$current_frontend_url" != "https://${MAIN_HOST}/idp" ]; }; then
     echo "Issuer is changing: realm sessions will be signed out after the realm import; users must sign in again."
     kc -n econ-graph annotate deployment/keycloak --overwrite "${LOGOUT_ANNOTATION}=https://${MAIN_HOST}/idp" >/dev/null
     logout_pending="https://${MAIN_HOST}/idp"
+elif [ -n "$logout_pending" ] && [ "$logout_pending" != "https://${MAIN_HOST}/idp" ]; then
+    echo "Clearing the sign-out marker for ${logout_pending}: the issuer stays https://${MAIN_HOST}/idp, so nobody is signed out."
+    kc -n econ-graph annotate deployment/keycloak "${LOGOUT_ANNOTATION}-" >/dev/null
+    logout_pending=""
 fi
 # 1. Keycloak's issuer. set env patches existing Deployments: applying repo manifests
 # would reset release images. The realm's frontendUrl overrides KC_HOSTNAME, so

@@ -368,7 +368,9 @@ HTTP Host Header* empty, so that cloudflared sends the visitor's host (`econgrap
 `www.econgraph.com`), which is what the public routes match on.
 
 **Checks.** `scripts/deploy/check-public-site.sh --host econgraph.com` runs against the local
-gateway without DNS or the tunnel, connecting over https as cloudflared does. It checks:
+gateway without DNS or the tunnel, connecting over https as cloudflared does. It checks the main
+host the deploy config names for that domain (`MAIN_HOST`, else `www.econgraph.com`), so it
+needs no flag before or after a switch; `--main-host` or `MAIN_HOST` overrides it. It checks:
 
 - the frontend and a `/graphql` search;
 - the Keycloak discovery document (issuer `https://<MAIN_HOST>/idp/realms/econ-graph`) and the sign-in page;

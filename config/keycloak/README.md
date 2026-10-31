@@ -206,13 +206,15 @@ k -n econ-graph rollout status deployment/keycloak --timeout=600s
 k -n econ-graph delete job keycloak-realm-import --ignore-not-found
 # On the production cluster, rendered for its public host and the main host Keycloak
 # serves now (from its KC_HOSTNAME, which the issuer follows; render-public-host.py
-# refuses without MAIN_HOST); elsewhere apply the file as it is.
+# refuses without MAIN_HOST); elsewhere apply the file as it is. Rendered first, so a
+# refused render stops here instead of leaving the wait below with no Job.
 kc_hostname="$(k -n econ-graph get deployment keycloak \
     -o 'jsonpath={.spec.template.spec.containers[?(@.name=="keycloak")].env[?(@.name=="KC_HOSTNAME")].value}')"
 main_host="${kc_hostname#https://}"
-MAIN_HOST="${main_host%/idp}" \
-    scripts/deploy/render-public-host.py econgraph.com k8s/manifests/keycloak/realm-import-job.yaml | k apply -f -
-k -n econ-graph wait --for=condition=complete job/keycloak-realm-import --timeout=600s
+realm_import="$(MAIN_HOST="${main_host%/idp}" \
+    scripts/deploy/render-public-host.py econgraph.com k8s/manifests/keycloak/realm-import-job.yaml)" &&
+    k apply -f - <<<"$realm_import" &&
+    k -n econ-graph wait --for=condition=complete job/keycloak-realm-import --timeout=600s
 ```
 
 Use this on a cluster whose Secret holds either key. Without both keys the realm

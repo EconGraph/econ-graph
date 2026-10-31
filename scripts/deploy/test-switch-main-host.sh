@@ -10,8 +10,11 @@
 #     issue (the kubectl stub fails the run otherwise), forward and on rollback;
 #   - the app rolls through lib/app-config.sh's hash, once per config change;
 #   - forward, rerun, rollback, legacy frontendUrl, interrupted-run recovery;
-#   - --finalize makes the redirects permanent only after a completed switch, idempotently,
-#     and a switch to another main host drops it again.
+#   - a sign-out marker for another host is cleared without signing out when the issuer
+#     stays;
+#   - --finalize makes the redirects permanent only after a completed switch with no
+#     pending sign-out marker, idempotently, and a switch to another main host drops it
+#     again.
 #
 # Usage: scripts/deploy/test-switch-main-host.sh
 set -euo pipefail
@@ -312,6 +315,29 @@ else:
     assert result.returncode == 0 and json.loads(state.read_text())['logouts'] == 1, result.stdout
     assert 'logout_pending' not in json.loads(state.read_text())
     print('ok failed rollout stops before the edge switch; a rerun signs out exactly once, after the import')
+    # A switch to www that stopped after setting its marker but before Keycloak's hostname
+    # changed (marker for www, issuer still the apex); rolling back to the apex keeps the
+    # issuer, so the marker is cleared and nobody is signed out.
+    reset(fail_rollout='deployment/keycloak')
+    assert run().returncode != 0
+    current = json.loads(state.read_text())
+    assert current['logout_pending'] == 'https://www.econgraph.com/idp'
+    current['fail_rollout'] = None
+    current['hostname'] = 'https://econgraph.com/idp'
+    state.write_text(json.dumps(current))
+    calls.write_text('')
+    result = run('--main-host', 'econgraph.com')
+    current = json.loads(state.read_text())
+    assert result.returncode == 0 and 'logouts' not in current and 'logout_pending' not in current, result.stdout
+    assert 'Clearing the sign-out marker for https://www.econgraph.com/idp' in result.stdout, result.stdout
+    assert not any(c[-4:] == ['create', 'logout-all', '-r', 'econ-graph'] for c in logged())
+    # A marker naming the target host itself still signs out on the rerun (covered above);
+    # one naming another host while the issuer changes is replaced and signs out once.
+    reset(logout_pending='https://elsewhere.invalid/idp')
+    result = run()
+    current = json.loads(state.read_text())
+    assert result.returncode == 0 and current['logouts'] == 1 and 'logout_pending' not in current, result.stdout
+    print('ok a stale marker for another host is cleared without signing out when the issuer stays')
     # --finalize: only after a completed switch; persists and applies permanent redirects.
     reset()
     result = run('--finalize')
@@ -328,7 +354,8 @@ else:
                             ({'issuer': 'https://econgraph.com/idp/realms/econ-graph'}, "backend expects the issuer"),
                             ({'routes': 'econgraph.com'}, 'the gateway serves econgraph.com'),
                             ({'fail_rollout': 'deployment/econ-graph-backend'}, "rollout has not completed"),
-                            ({'site_fails': True}, 'does not pass check-public-site.sh')]:
+                            ({'site_fails': True}, 'does not pass check-public-site.sh'),
+                            ({'logout_pending': 'https://www.econgraph.com/idp'}, 'a sign-out for https://www.econgraph.com/idp is still pending')]:
         reset(www_config, **{**done, **broken})
         before = json.loads(state.read_text())
         result = run('--finalize')
