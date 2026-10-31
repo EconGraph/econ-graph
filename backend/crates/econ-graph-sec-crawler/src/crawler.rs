@@ -8,7 +8,7 @@ use uuid::Uuid;
 #[cfg(feature = "xbrl-parser")]
 use crate::models::DtsReference;
 use crate::models::{CrawlConfig, CrawlResult, FilingInfo, SecCompany};
-use crate::storage::{XbrlFileTooLarge, XbrlStorage, XbrlStorageConfig};
+use crate::storage::{FilingIdentityConflict, XbrlFileTooLarge, XbrlStorage, XbrlStorageConfig};
 use crate::submissions::EdgarSubmissions;
 use crate::utils::{
     get_fiscal_quarter, pad_cik, parse_accession_number, parse_sec_date, unpad_cik,
@@ -127,10 +127,11 @@ fn db_error(context: &str, e: impl std::fmt::Display) -> CrawlError {
     CrawlError::Transient(format!("SEC: {context}: {e}"))
 }
 
-/// Maps a failure to store a filing's XBRL file: a file over the size limit is permanent (a retry
-/// would download the same file), anything else is a database error and retryable.
+/// Size and identity conflicts are permanent per-filing failures; database failures are retryable.
 fn storage_error(e: anyhow::Error) -> CrawlError {
-    if e.downcast_ref::<XbrlFileTooLarge>().is_some() {
+    if e.downcast_ref::<XbrlFileTooLarge>().is_some()
+        || e.downcast_ref::<FilingIdentityConflict>().is_some()
+    {
         CrawlError::Permanent(format!("SEC: {e}"))
     } else {
         db_error("storing XBRL file", format!("{e:#}"))
@@ -898,6 +899,22 @@ mod tests {
                 "{bad:?} should be rejected"
             );
         }
+    }
+
+    #[test]
+    fn immutable_filing_conflicts_are_permanent_so_later_filings_can_continue() {
+        for kind in ["metadata", "content"] {
+            let error = storage_error(
+                FilingIdentityConflict {
+                    accession_number: "0000320193-24-000001".into(),
+                    kind,
+                }
+                .into(),
+            );
+            assert!(matches!(error, CrawlError::Permanent(_)));
+            assert!(!error.is_retryable());
+        }
+        assert!(storage_error(anyhow::anyhow!("connection lost")).is_retryable());
     }
 
     #[test]
