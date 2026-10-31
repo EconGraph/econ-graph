@@ -43,9 +43,12 @@ pub struct RatioBenchmark {
 }
 
 /// **Ratio Interpretations Configuration**
+///
+/// A transparent map keeps the flat JSON shape without Serde's flatten buffering,
+/// which treats exact JSON number tokens (such as 0.20) as maps.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct RatioInterpretationsConfig {
-    #[serde(flatten)]
     pub interpretations: HashMap<String, RatioInterpretation>,
 }
 
@@ -246,6 +249,27 @@ impl FinancialAnalysisConfig {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn ratio_config_loads_with_exact_json_numbers() {
+        let config_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("config");
+        let config = FinancialAnalysisConfig::load_from_dir(&config_dir).unwrap();
+        assert_eq!(
+            config.ratio_interpretations.interpretations["return_on_equity"]
+                .excellent
+                .threshold,
+            0.20
+        );
+        let wire = serde_json::to_value(&config.ratio_interpretations).unwrap();
+        assert!(wire.get("return_on_equity").is_some());
+        assert!(wire.get("interpretations").is_none());
+        crate::FinancialRatioCalculator::new().unwrap();
+        crate::FinancialRatioCalculator::with_config_dir(
+            config_dir,
+            crate::RatioCalculationConfig::default(),
+        )
+        .unwrap();
+    }
 
     #[test]
     fn test_config_loading() {
