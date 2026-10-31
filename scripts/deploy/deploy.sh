@@ -345,17 +345,19 @@ echo ""
 
 start_pod_monitor
 
-# Wait for backend deployment
+# Wait for each rollout to finish, not just for the Deployment to be available: old pods
+# keep a RollingUpdate Deployment available, so a new image or a config roll
+# (roll_app_on_config_change) would otherwise still be under way when deploy.sh ends.
 echo "Waiting for backend deployment..."
-kubectl wait --for=condition=available --timeout=300s deployment/econ-graph-backend -n econ-graph
+kubectl rollout status deployment/econ-graph-backend -n econ-graph --timeout=300s
 
 # Wait for crawler worker (the crawler-migrate Job above applied the data migrations)
 echo "Waiting for crawler-worker deployment..."
-kubectl wait --for=condition=available --timeout=300s deployment/crawler-worker -n econ-graph
+kubectl rollout status deployment/crawler-worker -n econ-graph --timeout=300s
 
 # Wait for frontend deployment
 echo "Waiting for frontend deployment..."
-kubectl wait --for=condition=available --timeout=300s deployment/econ-graph-frontend -n econ-graph
+kubectl rollout status deployment/econ-graph-frontend -n econ-graph --timeout=300s
 
 # Admin frontend deployment: not waited on here (ECO-242).
 

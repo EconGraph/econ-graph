@@ -219,12 +219,14 @@ for refused_origin in http://localhost:3000 https://evil.example; do
         -H 'Access-Control-Request-Method: POST' \
         -H 'Access-Control-Request-Headers: content-type, authorization' "${BASE}/graphql")"
     allowed="$(header cors-refused Access-Control-Allow-Origin)"
-    if [ "$status" = 000 ]; then
-        fail "CORS preflight from ${refused_origin} got no response"
-    elif [ -z "$allowed" ]; then
-        pass "CORS preflight from ${refused_origin} refused (${status})"
-    else
+    # The backend answers a preflight from an origin it doesn't list with a 403; any other
+    # status (none, a 404 or 5xx) means the backend didn't answer, which isn't a refusal.
+    if [ -n "$allowed" ]; then
         fail "CORS preflight from ${refused_origin} returned ${status} with Access-Control-Allow-Origin '${allowed}'; the backend allows an origin it must not"
+    elif [ "$status" = 403 ]; then
+        pass "CORS preflight from ${refused_origin} refused (403)"
+    else
+        fail "CORS preflight from ${refused_origin} returned ${status}, expected the backend's 403"
     fi
 done
 

@@ -15,7 +15,8 @@
 #   - plain http's redirect must name https://econgraph.com/ with no port;
 #   - the sign-in page must refuse a http://localhost redirect URI;
 #   - a CORS preflight from http://localhost:3000 or https://evil.example must get no
-#     Access-Control-Allow-Origin (the stub allows the origins in STUB_CORS_ALLOW).
+#     Access-Control-Allow-Origin and must get the backend's 403 (the stub allows the
+#     origins in STUB_CORS_ALLOW); a 502 without the header is not a refusal.
 #
 # Usage: scripts/deploy/test-check-public-site.sh
 set -euo pipefail
@@ -33,7 +34,8 @@ cat >"$W/bin/curl" <<'STUB'
 # and STUB_SPOOF_LOCATION instead, where set, when the request spoofs
 # X-Forwarded-Port), http://econgraph.com with STUB_PLAIN_STATUS and
 # STUB_PLAIN_LOCATION, an OPTIONS to /graphql with 204 and Access-Control-Allow-Origin
-# when its Origin is in the comma-separated STUB_CORS_ALLOW (else 403), and everything
+# when its Origin is in the comma-separated STUB_CORS_ALLOW (else STUB_CORS_REFUSED_STATUS,
+# default 403, with no CORS header), and everything
 # else with 404.
 out=/dev/null hdr=/dev/null url="" spoof=false method=GET origin=
 while [ $# -gt 0 ]; do
@@ -58,8 +60,8 @@ case "$method $url" in
             status=204
             printf 'HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: %s\r\n\r\n' "$origin" >"$hdr"
         else
-            status=403
-            printf 'HTTP/1.1 403 Forbidden\r\n\r\n' >"$hdr"
+            status="${STUB_CORS_REFUSED_STATUS:-403}"
+            printf 'HTTP/1.1 %s Refused\r\n\r\n' "$status" >"$hdr"
         fi ;;
     *" https://www.econgraph.com/"*)
         status="$STUB_WWW_STATUS"
@@ -182,6 +184,9 @@ expect cors-old FAIL "$CORS_LINE http://localhost:3000 returned 204 with Access-
 expect cors-old ok "$CORS_LINE https://evil.example refused" "while evil.example is still refused"
 STUB_CORS_ALLOW='https://econgraph.com,https://evil.example' run cors-evil 301 "$TARGET"
 expect cors-evil FAIL "$CORS_LINE https://evil.example returned 204" "a backend allowing an unrelated origin fails"
+STUB_CORS_ALLOW='https://econgraph.com' STUB_CORS_REFUSED_STATUS=502 run cors-down 301 "$TARGET"
+expect cors-down FAIL "$CORS_LINE http://localhost:3000 returned 502, expected the backend's 403" \
+    "a 502 without the header (the backend not answering) is not a refusal"
 
 if [ "$failures" -eq 0 ]; then
     echo "all passed"

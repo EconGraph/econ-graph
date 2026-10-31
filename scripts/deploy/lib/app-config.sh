@@ -9,15 +9,20 @@
 # up a new CORS_ORIGIN) does not. So each Deployment's pod template carries the annotation
 # APP_CONFIG_ANNOTATION, a hash of the ConfigMap's data: patching in a different hash
 # rolls the Deployment, the same hash changes nothing. The hash stays on the template
-# (kubectl apply of the manifests, which don't name it, leaves it alone), so it always
-# says which data the pods started with, even after a deploy that stopped between applying
-# the ConfigMap and the Deployments.
+# (kubectl apply of the manifests, which don't name it, leaves it alone), so it records
+# the data the last deploy rolled the pods for, even after a deploy that stopped between
+# applying the ConfigMap and the Deployments. deploy.sh then waits for each rollout.
+#
+# A deploy that changes the image and the data together rolls twice in quick succession
+# (apply, then patch), and the first deploy with this step rolls each Deployment once
+# without a data change, since the annotation is new. Both are harmless. Only a change
+# made through deploy.sh is rolled: a ConfigMap edited by hand is not.
 #
 # Uses: kubectl (deploy.sh's, on its pinned context), sha256sum, DRY_RUN (true: only say
 # what would run).
 
 APP_CONFIG_DEPLOYMENTS=(econ-graph-backend crawler-worker econ-graph-frontend)
-APP_CONFIG_ANNOTATION="econgraph.com/app-config-hash"
+APP_CONFIG_ANNOTATION="econgraph.io/app-config-hash"
 
 # The hash of econ-graph-config's data (kubectl prints it as JSON with sorted keys), or
 # nothing when the ConfigMap can't be read.
