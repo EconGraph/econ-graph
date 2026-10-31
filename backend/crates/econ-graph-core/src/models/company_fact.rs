@@ -65,6 +65,24 @@ fn urn_token(value: &str) -> String {
     encoded
 }
 
+fn decode_urn_token(value: &str) -> Result<String, CompanyFactError> {
+    let mut decoded = Vec::new();
+    let mut bytes = value.bytes();
+    while let Some(byte) = bytes.next() {
+        if byte == b'%' {
+            let high = bytes.next().and_then(|b| char::from(b).to_digit(16));
+            let low = bytes.next().and_then(|b| char::from(b).to_digit(16));
+            match (high, low) {
+                (Some(high), Some(low)) => decoded.push((high * 16 + low) as u8),
+                _ => return Err(CompanyFactError("malformed companyfacts source URN")),
+            }
+        } else {
+            decoded.push(byte);
+        }
+    }
+    String::from_utf8(decoded).map_err(|_| CompanyFactError("source URN is not UTF-8"))
+}
+
 impl CompanyFactSubject {
     pub fn validate(&self) -> Result<(), CompanyFactError> {
         SubjectRef::Company {
@@ -110,6 +128,38 @@ impl CompanyFactSubject {
             ),
             dimensions: BTreeMap::new(),
         })
+    }
+
+    /// Resolve only canonical companyfacts anchors. A raw-parser subject with an
+    /// authoritative XBRL namespace or any dimension never aliases these facts.
+    pub fn from_reference(reference: &FactSubject) -> Result<Self, CompanyFactError> {
+        reference
+            .validate()
+            .map_err(|_| CompanyFactError("invalid research fact reference"))?;
+        if !reference.dimensions.is_empty() {
+            return Err(CompanyFactError(
+                "companyfacts does not expose dimensioned contexts",
+            ));
+        }
+        let taxonomy = reference
+            .concept_namespace
+            .strip_prefix("urn:econgraph:sec-companyfacts:taxonomy:")
+            .ok_or(CompanyFactError("reference is not a companyfacts taxonomy"))?;
+        let unit = reference
+            .unit
+            .strip_prefix("urn:econgraph:sec-companyfacts:unit:")
+            .ok_or(CompanyFactError("reference is not a companyfacts unit"))?;
+        let subject = Self {
+            cik: reference.cik.clone(),
+            taxonomy: decode_urn_token(taxonomy)?,
+            concept: reference.concept.clone(),
+            period: reference.period.clone(),
+            unit: decode_urn_token(unit)?,
+        };
+        if subject.reference()? != *reference {
+            return Err(CompanyFactError("companyfacts reference is not canonical"));
+        }
+        Ok(subject)
     }
 }
 
@@ -280,6 +330,22 @@ mod tests {
             .unwrap()
             .unit
             .ends_with("USD%2Fshares"));
+        let mut literal_escape = per_share.clone();
+        literal_escape.unit = "USD%2Fshares".into();
+        assert_ne!(
+            per_share.reference().unwrap().unit,
+            literal_escape.reference().unwrap().unit
+        );
+        for taxonomy in ["custom/taxonomy", "custom%2Ftaxonomy", "custom:taxonomy"] {
+            let source = CompanyFactSubject {
+                taxonomy: taxonomy.into(),
+                ..per_share.clone()
+            };
+            assert_eq!(
+                source,
+                CompanyFactSubject::from_reference(&source.reference().unwrap()).unwrap()
+            );
+        }
     }
 
     #[test]
@@ -299,5 +365,30 @@ mod tests {
             original.form
         )
         .is_ok());
+    }
+
+    #[test]
+    fn reference_resolution_rejects_aliases_and_dimensioned_parser_facts() {
+        let mut subject = fact().subject;
+        subject.unit = "USD/shares".into();
+        let reference = subject.reference().unwrap();
+        assert_eq!(
+            CompanyFactSubject::from_reference(&reference).unwrap(),
+            subject
+        );
+        let mut noncanonical = reference.clone();
+        noncanonical.unit = noncanonical.unit.replace("%2F", "%2f");
+        assert!(CompanyFactSubject::from_reference(&noncanonical).is_err());
+        let mut parser = reference.clone();
+        parser.concept_namespace = "http://fasb.org/us-gaap/2024".into();
+        assert!(CompanyFactSubject::from_reference(&parser).is_err());
+        let mut dimensional = reference.clone();
+        dimensional
+            .dimensions
+            .insert("axis".into(), "member".into());
+        assert!(CompanyFactSubject::from_reference(&dimensional).is_err());
+        let mut broken = reference;
+        broken.unit.push('%');
+        assert!(CompanyFactSubject::from_reference(&broken).is_err());
     }
 }
