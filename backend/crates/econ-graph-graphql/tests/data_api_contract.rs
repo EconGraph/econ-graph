@@ -511,6 +511,61 @@ async fn synthetic_vintages_cannot_hide_an_earlier_real_release() {
             .await
             .total_count,
             0
+);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn observation_attributes_follow_selected_vintages_and_remain_nullable_in_public_reads() {
+    for split in [true, false] {
+        let f = Fixture::new(split).await;
+        let original = json!({"source":"BLS","footnotes":[{"code":"P","text":"literal\n\"雪\"","extension":{"future":null}}],"preliminary":true,"estimated":null});
+        let latest = json!({"source":"BLS","footnotes":[],"preliminary":false});
+        {
+            use diesel_async::RunQueryDsl;
+            let mut conn = f.data.get().await.unwrap();
+            for (id, attributes) in [
+                ("8933cde1-0db6-454c-8675-805b4386f311", original.clone()),
+                ("8933cde1-0db6-454c-8675-805b4386f312", latest.clone()),
+                ("8933cde1-0db6-454c-8675-805b4386f315", latest.clone()),
+            ] {
+                diesel::sql_query("UPDATE data_points SET attributes=$1 WHERE id=$2")
+                    .bind::<diesel::sql_types::Jsonb, _>(attributes)
+                    .bind::<diesel::sql_types::Uuid, _>(Uuid::parse_str(id).unwrap())
+                    .execute(&mut conn)
+                    .await
+                    .unwrap();
+            }
+        }
+        for (filter, expected) in [
+            ("", original.clone()),
+            (",filter:{latestRevisionOnly:true}", latest.clone()),
+            (",filter:{asOf:\"2024-01-20\"}", original.clone()),
+            (",filter:{originalOnly:true}", original.clone()),
+        ] {
+            let query = format!("{{seriesData(seriesId:\"{SERIES}\"{filter}){{nodes{{id attributes}}}} series(id:\"{SERIES}\"){{latestObservation{{attributes}}}}}}");
+            let response = f
+                .schema()
+                .execute(Request::new(query).data(anonymous(&[Role::CatalogFredRead])))
+                .await;
+            assert!(response.errors.is_empty(), "{:?}", response.errors);
+            let data = response.data.into_json().unwrap();
+            assert_eq!(data["seriesData"]["nodes"][0]["attributes"], expected);
+            assert_eq!(data["series"]["latestObservation"]["attributes"], latest);
+        }
+        let response = f
+            .schema()
+            .execute(
+                Request::new(format!(
+                    "{{seriesData(seriesId:\"{SERIES}\"){{nodes{{attributes}}}}}}"
+                ))
+                .data(anonymous(&[Role::CatalogFredRead])),
+            )
+            .await;
+        assert!(response.errors.is_empty());
+        assert_eq!(
+            response.data.into_json().unwrap()["seriesData"]["nodes"][2]["attributes"],
+            Value::Null
         );
     }
 }

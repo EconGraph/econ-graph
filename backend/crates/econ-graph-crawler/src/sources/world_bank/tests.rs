@@ -1847,6 +1847,7 @@ fn wdi_usa(revision_date: NaiveDate, points: &[(NaiveDate, &str)]) -> FetchedSer
         points: points
             .iter()
             .map(|(date, value)| FetchedPoint {
+                attributes: None,
                 date: *date,
                 value: Some(BigDecimal::from_str(value).unwrap()),
                 revision_date,

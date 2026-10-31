@@ -334,6 +334,8 @@ struct LatestObservationRow {
     value: Option<BigDecimal>,
     #[diesel(sql_type = diesel::sql_types::Date)]
     revision_date: NaiveDate,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Jsonb>)]
+    attributes: Option<serde_json::Value>,
 }
 
 /// DataLoader batcher for each series' newest observation (latest date, newest revision)
@@ -368,10 +370,10 @@ impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
             // (date, revision_date) group, at most two rows sorted to put the revision first;
             // DISTINCT ON would read and sort every row of every requested series.
             let rows = match diesel::sql_query(format!(
-                "SELECT k.id AS series_id, dp.date, dp.value, dp.revision_date \
+                "SELECT k.id AS series_id, dp.date, dp.value, dp.revision_date, dp.attributes \
                  FROM unnest($1::uuid[]) AS k(id) \
                  CROSS JOIN LATERAL ( \
-                     SELECT date, value, revision_date FROM data_points \
+                     SELECT date, value, revision_date, attributes FROM data_points \
                      WHERE series_id = k.id AND NOT {} \
                      ORDER BY date DESC, revision_date DESC, is_original_release ASC \
                      LIMIT 1 \
@@ -402,6 +404,7 @@ impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
                         date: row.date,
                         value: row.value,
                         revision_date: row.revision_date,
+                        attributes: row.attributes.map(async_graphql::Json),
                     }),
                 );
             }

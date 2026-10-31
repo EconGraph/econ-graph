@@ -207,6 +207,7 @@ impl SourceAdapter for TestAdapter {
             .points
             .into_iter()
             .map(|(date, v)| FetchedPoint {
+                attributes: None,
                 date,
                 value: v.map(|v| BigDecimal::from_str(&v).unwrap()),
                 revision_date: NaiveDate::from_ymd_opt(2024, 6, 1).unwrap(),
@@ -556,6 +557,7 @@ async fn refetching_unchanged_points_writes_nothing() {
 /// A fetched point for `date` with `value`, published on `revision`.
 fn revision(date: &str, value: &str, revision: &str, original: bool) -> FetchedPoint {
     FetchedPoint {
+        attributes: None,
         date: d(date),
         value: Some(BigDecimal::from_str(value).unwrap()),
         revision_date: d(revision),
@@ -2364,6 +2366,7 @@ impl BatchAdapter {
                 ..Default::default()
             }),
             points: vec![FetchedPoint {
+                attributes: None,
                 date,
                 value: Some(
                     self.values
@@ -3072,6 +3075,7 @@ fn lease_response(title: &str, value: i32) -> FetchedSeries {
         }),
         // Identical upsert keys make an older response overwrite the same observation.
         points: vec![FetchedPoint {
+            attributes: None,
             date: d("2024-01-01"),
             value: Some(BigDecimal::from(value)),
             revision_date: d("2024-06-01"),
@@ -3571,6 +3575,7 @@ async fn fetch_without_metadata_takes_the_discovered_title_units_and_frequency()
         .await
         .unwrap();
     let point = FetchedPoint {
+        attributes: None,
         date: NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(),
         value: Some(BigDecimal::from(7)),
         revision_date: NaiveDate::from_ymd_opt(2022, 1, 1).unwrap(),
@@ -3732,6 +3737,7 @@ impl SourceAdapter for ConditionalAdapter {
                         .points
                         .into_iter()
                         .map(|(date, v)| FetchedPoint {
+                            attributes: None,
                             date,
                             value: v.map(|v| BigDecimal::from_str(&v).unwrap()),
                             revision_date: date,
@@ -5034,4 +5040,70 @@ async fn fetch_locks_the_source_before_rows_so_discovery_cannot_deadlock() {
     drop(discovery);
     drop(probe);
     db.drop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn observation_attributes_update_without_value_changes_and_share_transaction_fencing() {
+    let Some(db) = db().await else { return };
+    let mut fetched = empty_fetch();
+    fetched
+        .points
+        .push(revision("2024-01-01", "123.4500", "2024-02-01", true));
+    let first = persist::persist_series(&db.pool, SRC, "t5_attributes", &fetched)
+        .await
+        .unwrap();
+    let read = || async {
+        let mut conn = db.pool.get().await.unwrap();
+        data_points::table
+            .filter(data_points::series_id.eq(first.series_id))
+            .select((data_points::attributes, data_points::updated_at))
+            .first::<(Option<serde_json::Value>, chrono::DateTime<Utc>)>(&mut conn)
+            .await
+            .unwrap()
+    };
+    assert_eq!(read().await.0, None);
+    let attrs = serde_json::json!({"source":"recorded-fixture","footnotes":[{"code":"P","text":"literal\n\"雪\"","unknown":null}],"preliminary":true,"estimated":null});
+    fetched.points[0].attributes = Some(attrs.clone());
+    let written = persist::persist_series(&db.pool, SRC, "t5_attributes", &fetched)
+        .await
+        .unwrap();
+    assert_eq!((written.points_upserted, written.points_new), (1, 0));
+    let captured = read().await;
+    assert_eq!(captured.0, Some(attrs.clone()));
+    let unchanged = persist::persist_series(&db.pool, SRC, "t5_attributes", &fetched)
+        .await
+        .unwrap();
+    assert_eq!(unchanged.points_upserted, 0);
+    assert_eq!(read().await, captured);
+    // Metadata-unaware adapters cannot erase known attributes for an unchanged value.
+    fetched.points[0].attributes = None;
+    assert_eq!(
+        persist::persist_series(&db.pool, SRC, "t5_attributes", &fetched)
+            .await
+            .unwrap()
+            .points_upserted,
+        0
+    );
+    assert_eq!(read().await.0, Some(attrs.clone()));
+    fetched.points[0].attributes = Some(serde_json::json!({"source":"rolled-back"}));
+    let mut conn = db.pool.get().await.unwrap();
+    use diesel_async::AsyncConnection;
+    let aborted = conn
+        .transaction::<(), econ_graph_core::AppError, _>(async |conn| {
+            persist::persist_series_conn(conn, SRC, "t5_attributes", &fetched).await?;
+            Err(econ_graph_core::AppError::BadRequest(
+                "fixture transaction abort".into(),
+            ))
+        })
+        .await;
+    assert!(aborted.is_err());
+    drop(conn);
+    assert_eq!(read().await.0, Some(attrs));
+    // A changed value with no captured metadata must not inherit the old value's flags.
+    fetched.points[0].value = Some(BigDecimal::from(999));
+    fetched.points[0].attributes = None;
+    persist::persist_series(&db.pool, SRC, "t5_attributes", &fetched)
+        .await
+        .unwrap();
+    assert_eq!(read().await.0, None);
 }

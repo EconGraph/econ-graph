@@ -1551,6 +1551,7 @@ fn to_points(mut rows: Vec<VintageRow>) -> Vec<FetchedPoint> {
             continue;
         }
         points.push(FetchedPoint {
+            attributes: None,
             date: r.date,
             value: r.value,
             revision_date: r.realtime_start,
@@ -2106,6 +2107,7 @@ mod tests {
 
     fn point(date: &str, value: Option<&str>, revision: &str, original: bool) -> FetchedPoint {
         FetchedPoint {
+            attributes: None,
             date: d(date),
             value: value.map(|v| BigDecimal::from_str(v).unwrap()),
             revision_date: d(revision),

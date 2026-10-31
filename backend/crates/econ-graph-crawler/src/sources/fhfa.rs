@@ -259,6 +259,7 @@ impl HpiSeries {
                 .points
                 .iter()
                 .map(|(date, value)| FetchedPoint {
+                    attributes: None,
                     date: *date,
                     value: Some(value.clone()),
                     revision_date: *date,

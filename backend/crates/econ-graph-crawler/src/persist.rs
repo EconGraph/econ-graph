@@ -72,8 +72,8 @@ pub struct SeriesWrite {
     pub series_id: Uuid,
     /// Whether the `economic_series` row was created by this call.
     pub series_created: bool,
-    /// Data points inserted, or updated because their value changed (after de-duplicating the
-    /// input). Points whose stored value is already identical are not rewritten or counted.
+    /// Data points inserted, or updated because their value or captured attributes changed
+    /// (after de-duplicating the input). Unchanged rows are not rewritten or counted.
     pub points_upserted: usize,
     /// Data points that did not exist before (`points_upserted` minus revisions of existing rows).
     pub points_new: usize,
@@ -900,6 +900,8 @@ struct PriorPoint {
     revision_date: NaiveDate,
     #[diesel(sql_type = Nullable<Numeric>)]
     stored_value: Option<BigDecimal>,
+    #[diesel(sql_type = Nullable<Jsonb>)]
+    stored_attributes: Option<serde_json::Value>,
     #[diesel(sql_type = Date)]
     stored_revision_date: NaiveDate,
     #[diesel(sql_type = Bool)]
@@ -921,8 +923,9 @@ struct PriorPoint {
 ///   original-release rows for one date.
 /// - A row at the same `revision_date` (the same vintage read again): the point keeps that row's
 ///   `is_original_release`, so the upsert updates the row in place if the value differs.
-/// - An older row with the same value: nothing is written; reads at or after the new vintage
-///   still get the value from that row.
+/// - An older row with the same value and no changed captured attributes: nothing is written;
+///   reads at or after the new vintage still get that row. Changed captured attributes append
+///   a revision even when the numeric value did not change.
 /// - An older row with a different value: the point is appended as a revision
 ///   (`is_original_release = false`).
 ///
@@ -947,12 +950,12 @@ async fn keep_changed_points(
     let mut kept = BTreeMap::new();
     for chunk in points.chunks(INSERT_CHUNK) {
         let prior: Vec<PriorPoint> = diesel::sql_query(
-            "SELECT t.date, t.revision_date, s.value AS stored_value, \
+            "SELECT t.date, t.revision_date, s.value AS stored_value, s.attributes AS stored_attributes, \
                  s.revision_date AS stored_revision_date, \
                  s.is_original_release AS stored_is_original_release \
              FROM UNNEST($2::date[], $3::date[]) AS t(date, revision_date) \
              CROSS JOIN LATERAL ( \
-                 SELECT dp.value, dp.revision_date, dp.is_original_release \
+                 SELECT dp.value, dp.attributes, dp.revision_date, dp.is_original_release \
                  FROM data_points dp \
                  WHERE dp.series_id = $1 AND dp.date = t.date \
                      AND dp.revision_date <= t.revision_date \
@@ -974,7 +977,13 @@ async fn keep_changed_points(
                 Some(s) if s.stored_revision_date == point.revision_date => {
                     s.stored_is_original_release
                 }
-                Some(s) if s.stored_value == point.value => continue,
+                Some(s)
+                    if s.stored_value == point.value
+                        && (point.attributes.is_none()
+                            || s.stored_attributes == point.attributes) =>
+                {
+                    continue
+                }
                 Some(_) => false,
             };
             kept.insert(
@@ -991,7 +1000,9 @@ async fn keep_changed_points(
 
 /// Upserts one chunk of points for `series_id` and returns one row per point actually written.
 ///
-/// A conflicting row is only rewritten when its value changed, so re-crawling unchanged data
+/// A conflicting row is rewritten only when its value or captured attributes changed. A
+/// metadata-unaware fetch does not erase known metadata for an unchanged value; when the
+/// value changes without metadata, the new value's attributes are unknown. Unchanged data
 /// creates no dead tuples. PostgreSQL 18's `RETURNING old.*` tells inserts from revisions in the
 /// same statement.
 async fn upsert_points(
@@ -1000,25 +1011,26 @@ async fn upsert_points(
     points: &[&FetchedPoint],
 ) -> QueryResult<Vec<WrittenPoint>> {
     diesel::sql_query(
-        "INSERT INTO data_points (series_id, date, value, revision_date, is_original_release) \
-         SELECT $1, t.date, t.value, t.revision_date, t.is_original_release \
-         FROM UNNEST($2::date[], $3::numeric[], $4::date[], $5::bool[]) \
-             AS t(date, value, revision_date, is_original_release) \
+        "INSERT INTO data_points (series_id, date, value, revision_date, is_original_release, attributes) \
+         SELECT $1, t.date, t.value, t.revision_date, t.is_original_release, t.attributes \
+         FROM UNNEST($2::date[], $3::numeric[], $4::date[], $5::bool[], $6::jsonb[]) \
+             AS t(date, value, revision_date, is_original_release, attributes) \
          ON CONFLICT (series_id, date, revision_date, is_original_release) DO UPDATE \
-             SET value = EXCLUDED.value, updated_at = NOW() \
+             SET value = EXCLUDED.value, updated_at = NOW(), \
+                 attributes = CASE WHEN EXCLUDED.attributes IS NOT NULL \
+                     OR data_points.value IS DISTINCT FROM EXCLUDED.value \
+                     THEN EXCLUDED.attributes ELSE data_points.attributes END \
              WHERE data_points.value IS DISTINCT FROM EXCLUDED.value \
+                 OR (EXCLUDED.attributes IS NOT NULL \
+                     AND data_points.attributes IS DISTINCT FROM EXCLUDED.attributes) \
          RETURNING (old.id IS NULL) AS inserted",
     )
     .bind::<SqlUuid, _>(series_id)
     .bind::<Array<Date>, _>(points.iter().map(|p| p.date).collect::<Vec<_>>())
     .bind::<Array<Nullable<Numeric>>, _>(points.iter().map(|p| p.value.clone()).collect::<Vec<_>>())
     .bind::<Array<Date>, _>(points.iter().map(|p| p.revision_date).collect::<Vec<_>>())
-    .bind::<Array<Bool>, _>(
-        points
-            .iter()
-            .map(|p| p.is_original_release)
-            .collect::<Vec<_>>(),
-    )
+    .bind::<Array<Bool>, _>(points.iter().map(|p| p.is_original_release).collect::<Vec<_>>())
+    .bind::<Array<Nullable<Jsonb>>, _>(points.iter().map(|p| p.attributes.clone()).collect::<Vec<_>>())
     .load(conn)
     .await
 }

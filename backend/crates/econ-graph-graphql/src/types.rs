@@ -498,6 +498,8 @@ pub struct DataPointType {
     pub revised_from_original: Option<bool>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Null means provider attributes were not captured for this stored observation.
+    pub attributes: Option<async_graphql::Json<serde_json::Value>>,
 }
 
 impl DataPointType {
@@ -523,6 +525,7 @@ impl From<DataPoint> for DataPointType {
             revised_from_original: None,
             created_at: data_point.created_at,
             updated_at: data_point.updated_at,
+            attributes: data_point.attributes.map(async_graphql::Json),
         }
     }
 }
@@ -537,6 +540,8 @@ pub struct LatestObservationType {
     pub value: Option<BigDecimal>,
     /// Publication date of the revision the value comes from
     pub revision_date: NaiveDate,
+    /// Captured provider metadata for this exact observation revision, or null when unknown.
+    pub attributes: Option<async_graphql::Json<serde_json::Value>>,
 }
 
 /// GraphQL representation of a data source
