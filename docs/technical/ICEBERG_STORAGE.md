@@ -94,11 +94,30 @@ implement Debug, and URL credentials/query strings are rejected rather than prin
 DATA_DATABASE_URL=postgres://... cargo test --manifest-path backend/Cargo.toml \
   -p econ-graph-timeseries --test iceberg_contract -- --include-ignored
 
-# Genuine table usable by independent PyIceberg/DuckDB checks. --migrate is explicit.
-DATA_DATABASE_URL=postgres://... ICEBERG_WAREHOUSE=/tmp/disposable-warehouse \
+# Provision an empty database named eg_smoke_<this UUID without dashes> on the test server.
+smoke_target="$(uuidgen)"
+smoke_database="eg_smoke_${smoke_target//-/}"
+DATA_DATABASE_URL="postgres://.../$smoke_database" \
+  TIMESERIES_TARGET_ID="$smoke_target" ICEBERG_WAREHOUSE=/tmp/disposable-warehouse \
   cargo run --manifest-path backend/Cargo.toml -p econ-graph-timeseries \
-  --bin timeseries -- smoke --migrate --output /tmp/iceberg-smoke.json
+  --bin timeseries -- smoke --disposable-target "$smoke_target" --migrate \
+  --output /tmp/iceberg-smoke.json
 ```
+
+The smoke command requires `--disposable-target <UUID>` before any database migration/write.
+It must match explicit `TIMESERIES_TARGET_ID`, the PostgreSQL URL path and actual SQL database
+name `eg_smoke_<UUID without dashes>`. There is no `DATABASE_URL` fallback. A fresh empty target
+requires `--migrate`; initialized targets refuse pending migrations. A disposable recovery label
+binds repeated runs to the same target, and the object warehouse gains the same UUID-scoped
+subdirectory. Normal application environments and production-labelled recovery targets are
+insufficient to run this fixture writer.
+
+Target validation and the durable recovery fence precede metadata writes. The shared recovery
+lock remains held during initial empty-database migration/bootstrap. Metadata inserts, table
+initialization, object preparation and catalog publication use one caller-owned READ COMMITTED
+transaction under `assert_write_allowed_conn`; paused or mismatched targets fail before pending
+migrations, and a publication failure rolls metadata back. Only unreferenced scoped objects may
+remain after a failed writer.
 
 The smoke command also accepts `SMOKE_OUTPUT_JSON` when `--output` is omitted. Every run creates
 its own dataset/series scope. It reports the actual metadata location, catalog commit and row hash;
@@ -166,3 +185,9 @@ Concurrent writers still publish through pointer CAS, so a losing writer restage
 new identity set. Value/attribute corrections retain their identity and advance only their
 physical commit generation. Lossy sub-microsecond audit timestamps and invalid attribute shapes
 are rejected before staging; their content hashes cannot acknowledge truncated storage.
+
+The `smoke_safety` integration target provisions and drops only its owned UUID-named scratch
+database. It verifies that missing disposable intent, generic database fallback, name/target
+mismatches and paused or production-labelled targets cause no fixture writes; that pause refusal
+precedes pending migration work; and that an injected final receipt failure rolls back source,
+dataset, series and catalog metadata together.
