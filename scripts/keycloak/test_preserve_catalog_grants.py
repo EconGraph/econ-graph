@@ -415,7 +415,13 @@ class CatalogPolicyTests(unittest.TestCase):
         self.assertEqual(self.scope_entries(self.merge_with_warnings(realm)[0])[("client", "temp-x")],
                          ["catalog.imf:read"])
         self.state[self.prefix]["attributes"][state + "1"] = "not json"
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn(state, str(raised.exception))
+
+    def test_scope_mapping_entries_without_a_target_fail_the_deploy(self):
+        self.realm["clientScopeMappings"]["econ-graph-api"].append({"roles": ["api:mcp"]})
+        with self.assertRaises(RuntimeError):
             self.merge()
 
     def test_duplicate_scope_mapping_entries_fail_the_deploy(self):

@@ -135,11 +135,15 @@ def clients_config_cli_deletes(realm, attributes):
     """Client ids config-cli created and the realm file no longer declares."""
     chunks = sorted((int(key[len(CONFIG_CLI_CLIENTS):]), value) for key, value in attributes.items()
                     if key.startswith(CONFIG_CLI_CLIENTS) and key[len(CONFIG_CLI_CLIENTS):].isdigit())
-    if not chunks:
-        return set()
-    managed = json.loads("".join(value for _, value in chunks))
+    if not chunks or "clients" not in realm:
+        return set()  # Without a clients list config-cli manages, and deletes, no client.
+    try:
+        managed = json.loads("".join(value for _, value in chunks))
+    except ValueError:
+        managed = None
     if not isinstance(managed, list) or not all(isinstance(c, str) for c in managed):
-        raise RuntimeError("Unreadable keycloak-config-cli client state")
+        raise RuntimeError("Unreadable keycloak-config-cli client state (realm attributes %s*)"
+                           % CONFIG_CLI_CLIENTS)
     return set(managed) - {client["clientId"] for client in realm.get("clients", [])}
 
 
@@ -167,6 +171,8 @@ def preserve_scope_mappings(realm, get, prefix, api_id, attributes, seed_default
     seen = set()
     for entry in entries:
         key = next(((kind, entry[kind]) for kind in ("client", "clientScope") if kind in entry), None)
+        if key is None:
+            raise RuntimeError("A realm file %s scope mapping names no client or client scope" % API_CLIENT)
         if key in seen:
             raise RuntimeError("The realm file declares %s scope mappings twice for %s %s"
                                % (API_CLIENT, key[0], key[1]))
@@ -195,7 +201,7 @@ def preserve_scope_mappings(realm, get, prefix, api_id, attributes, seed_default
         # gets no catalog read from the file.
         for entry in entries:
             for kind in ("client", "clientScope"):
-                if kind in entry and (kind, entry[kind]) not in live_targets and entry[kind] != ANONYMOUS_CLIENT:
+                if kind in entry and (kind, entry[kind]) not in live_targets and (kind, entry[kind]) != ("client", ANONYMOUS_CLIENT):
                     entry["roles"] = [r for r in entry.get("roles", []) if not catalog_read(r)]
 
 

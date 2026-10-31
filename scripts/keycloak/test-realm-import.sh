@@ -44,7 +44,7 @@ KC="$ID-kc"
 # Every image: line, exactly; a pinned digest or another tag there means updating this script.
 check_images() { # MANIFEST IMAGE
     local found
-    found="$(sed -n 's/^ *image: *//p' "$REPO/$1" | grep -F "${2%%:*}" | sort -u)"
+    found="$(sed -n 's/^ *image: *//p' "$REPO/$1" | { grep -F "${2%%:*}" || true; } | sort -u)"
     [ "$found" = "$2" ] || { echo "$1 runs '${found:-nothing}', not $2; update this script" >&2; exit 1; }
 }
 check_images k8s/manifests/keycloak/deployment.yaml "$KC_TAG"
