@@ -146,18 +146,6 @@ pub fn select_page(
         .filter(|p| p.is_original_release && p.revision_date != p.date)
         .map(|p| p.date)
         .collect();
-    // Revision flags use the same frozen snapshot as the selected page. A synthetic
-    // original is ignored whenever a real original exists, even beyond an AsOf cutoff.
-    let mut originals = BTreeMap::new();
-    for point in rows.iter().filter(|point| {
-        point.is_original_release
-            && !(point.revision_date == point.date && real_original_dates.contains(&point.date))
-    }) {
-        let original = originals.entry(point.date).or_insert(point);
-        if (point.revision_date, point.id) < (original.revision_date, original.id) {
-            *original = point;
-        }
-    }
     let mut candidates: Vec<_> = rows
         .iter()
         .filter(|p| {
@@ -209,19 +197,7 @@ pub fn select_page(
     } else {
         vec![]
     };
-    let revised = points
-        .iter()
-        .filter_map(|point| {
-            let original = originals.get(&point.date)?;
-            if original.id == point.id {
-                Some((point.id, false))
-            } else if original.revision_date > point.revision_date {
-                None
-            } else {
-                Some((point.id, point.value != original.value))
-            }
-        })
-        .collect();
+    let revised = revised_flags(&rows, &points);
     ObservationPage {
         series_id: req.series_id,
         dataset_id: Some(dataset_id),
@@ -231,4 +207,39 @@ pub fn select_page(
         total_count,
         offset,
     }
+}
+
+/// Compare returned observations with their earliest real original in one frozen population.
+/// Originals published after a point leave its flag unknown; numeric scale is not a revision.
+pub fn revised_flags(rows: &[Observation], points: &[Observation]) -> HashMap<Uuid, bool> {
+    let real_original_dates: HashSet<_> = rows
+        .iter()
+        .filter(|p| p.is_original_release && p.revision_date != p.date)
+        .map(|p| (p.series_id, p.date))
+        .collect();
+    let mut originals = BTreeMap::new();
+    for point in rows.iter().filter(|p| {
+        p.is_original_release
+            && !(p.revision_date == p.date && real_original_dates.contains(&(p.series_id, p.date)))
+    }) {
+        let original = originals
+            .entry((point.series_id, point.date))
+            .or_insert(point);
+        if (point.revision_date, point.id) < (original.revision_date, original.id) {
+            *original = point;
+        }
+    }
+    points
+        .iter()
+        .filter_map(|point| {
+            let original = originals.get(&(point.series_id, point.date))?;
+            if original.id == point.id {
+                Some((point.id, false))
+            } else if original.revision_date > point.revision_date {
+                None
+            } else {
+                Some((point.id, point.value != original.value))
+            }
+        })
+        .collect()
 }

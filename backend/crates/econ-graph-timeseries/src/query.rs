@@ -138,12 +138,11 @@ pub async fn latest_at_config(
     // Compute synthetic-original evidence before the vintage cutoff. A window
     // avoids a correlated subquery over the commit-dedup window (unsupported by
     // DataFusion's common-subexpression optimizer).
-    let (synthetic_cte, source) = if as_of.is_some() {
-        (", vintage_evidence AS (SELECT *, MAX(CASE WHEN is_original_release AND revision_date<>date THEN 1 ELSE 0 END) OVER(PARTITION BY series_id,date) AS has_real_original FROM logical)", "vintage_evidence")
-    } else {
-        ("", "logical")
-    };
-    let mut eligible = String::from("1=1");
+    let synthetic_cte=", vintage_evidence AS (SELECT *, MAX(CASE WHEN is_original_release AND revision_date<>date THEN 1 ELSE 0 END) OVER(PARTITION BY series_id,date) AS has_real_original FROM logical)";
+    let source = "vintage_evidence";
+    let mut eligible = String::from(
+        "NOT (p.is_original_release AND p.revision_date=p.date AND p.has_real_original=1)",
+    );
     if let Some(day) = on_date {
         eligible.push_str(&format!(" AND p.date=DATE '{day}'"));
     }
