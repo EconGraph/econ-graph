@@ -2,8 +2,10 @@
 """The release lab's restore against a real PostgreSQL 18, with synthetic dumps only.
 
 Starts one uniquely named postgres:18 container (removed afterwards) on the Docker daemon
-DOCKER_HOST names (the rootless one in an operator's shell; the default socket in CI),
-publishing its port on 127.0.0.1 only. It builds synthetic data, app and Keycloak
+DOCKER_HOST names (the rootless one in an operator's shell), publishing its port on
+127.0.0.1 only. Without DOCKER_HOST it refuses to run, except in CI (CI=true), where the
+runner's default socket is used: on the production host that socket is the rootful
+daemon beside the production cluster. It builds synthetic data, app and Keycloak
 databases, dumps them with pg_dump -Fc, and runs release-lab.py's own restore,
 Keycloak clean-up and row counts through a stand-in kubectl that turns
 `kubectl exec POD -c C -- CMD` into `docker exec CONTAINER CMD`. It never reads a real
@@ -31,7 +33,8 @@ HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location('release_lab', HERE / 'release-lab.py')
 lab = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(lab)
-DOCKER_HOST = os.environ.get('DOCKER_HOST') or 'unix:///var/run/docker.sock'
+DOCKER_HOST = os.environ.get('DOCKER_HOST') or ('unix:///var/run/docker.sock' if os.environ.get('CI') == 'true'
+                                                 else None)
 DOCKER = ['docker', f'--host={DOCKER_HOST}']
 
 SOURCES = {
@@ -70,10 +73,44 @@ SOURCES = {
         INSERT INTO offline_user_session VALUES ('s1', 'u1');
         INSERT INTO offline_client_session VALUES ('s1', 'x');
         INSERT INTO realm_smtp_config VALUES ('econ-graph', 'smtp.example.invalid', 'host');
+        CREATE TABLE component (id text PRIMARY KEY, name text, provider_type text, realm_id text REFERENCES realm);
+        CREATE TABLE component_config (id text PRIMARY KEY, component_id text REFERENCES component,
+                                       name text, value text);
+        INSERT INTO component VALUES ('k1', 'rsa-generated', 'org.keycloak.keys.KeyProvider', 'econ-graph'),
+                                     ('k2', 'hmac-generated', 'org.keycloak.keys.KeyProvider', 'econ-graph'),
+                                     ('l1', 'ldap', 'org.keycloak.storage.UserStorageProvider', 'econ-graph'),
+                                     ('p1', 'declarative-user-profile', 'org.keycloak.userprofile.UserProfileProvider',
+                                      'econ-graph');
+        INSERT INTO component_config VALUES ('c1', 'k1', 'privateKey', 'synthetic-private-key'),
+                                            ('c2', 'k2', 'secret', 'synthetic-hmac-secret'),
+                                            ('c3', 'l1', 'bindCredential', 'synthetic-bind-password'),
+                                            ('c4', 'l1', 'connectionUrl', 'ldap://ldap.example.invalid'),
+                                            ('c5', 'p1', 'kc.user.profile.config', '{}');
+        CREATE TABLE client (id text PRIMARY KEY, client_id text, secret text, public_client boolean);
+        INSERT INTO client VALUES ('a', 'econ-graph-api', 'synthetic-api-secret', false),
+                                  ('b', 'econ-graph-web', NULL, true),
+                                  ('c', 'econgraph-anonymous', 'synthetic-anonymous-secret', false);
+        CREATE TABLE client_attributes (client_id text REFERENCES client, name text, value text);
+        INSERT INTO client_attributes VALUES ('a', 'client.secret.rotated', 'synthetic-old-secret'),
+                                             ('a', 'access.token.lifespan', '300');
+        CREATE TABLE authenticator_config_entry (authenticator_id text, value text, name text);
+        INSERT INTO authenticator_config_entry VALUES ('r', 'synthetic-recaptcha-secret', 'secret'),
+                                                      ('r', '3', 'max.attempts');
+        CREATE TABLE revoked_token (id text PRIMARY KEY, expire bigint);
+        INSERT INTO revoked_token VALUES ('t1', 0);
+        CREATE TABLE event_entity (id text PRIMARY KEY, ip_address text);
+        INSERT INTO event_entity VALUES ('e1', '192.0.2.1');
+        CREATE TABLE admin_event_entity (id text PRIMARY KEY, representation text);
+        INSERT INTO admin_event_entity VALUES ('a1', '{}');
+        CREATE TABLE credential (id text PRIMARY KEY, user_id text REFERENCES user_entity, secret_data text);
+        INSERT INTO credential VALUES ('cr1', 'u1', 'synthetic-password-hash');
+        CREATE TABLE user_attribute (user_id text REFERENCES user_entity, name text, value text);
+        INSERT INTO user_attribute VALUES ('u1', 'country', 'synthetic');
     '''),
 }
 CLEARED = ['idp_mapper_config', 'identity_provider_mapper', 'identity_provider_config', 'federated_identity',
-           'identity_provider', 'offline_client_session', 'offline_user_session', 'realm_smtp_config']
+           'identity_provider', 'offline_client_session', 'offline_user_session', 'realm_smtp_config',
+           'revoked_token', 'event_entity', 'admin_event_entity']
 
 KUBECTL = textwrap.dedent('''\
     #!/usr/bin/env python3
@@ -101,6 +138,9 @@ def scratch_parent():
 class RestoreRehearsal(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if DOCKER_HOST is None:
+            raise RuntimeError('set DOCKER_HOST to the Docker daemon for the scratch PostgreSQL container (the '
+                               'rootless one here); without it this test runs only in CI (CI=true)')
         cls.root = Path(tempfile.mkdtemp(prefix='release-lab-restore-', dir=scratch_parent()))
         cls.container = 'econgraph-release-lab-test-' + uuid.uuid4().hex[:12]
         subprocess.run(DOCKER + ['run', '-d', '--name', cls.container, '--publish', '127.0.0.1::5432',
@@ -187,6 +227,32 @@ class RestoreRehearsal(unittest.TestCase):
         for table in CLEARED:
             self.assertEqual(self.sql('keycloak', f'select count(*) from {table}'), '0', table)
         self.assertEqual(self.sql('src_keycloak', 'select count(*) from identity_provider'), '1')
+
+    def test_2b_keycloak_copy_has_no_production_keys_or_secrets(self):
+        self.assertEqual(self.sql('keycloak', "select count(*) from component "
+                                              "where provider_type = 'org.keycloak.keys.KeyProvider'"), '0')
+        self.assertEqual(self.sql('keycloak', 'select id from component order by id').split(), ['l1', 'p1'])
+        self.assertEqual(self.sql('keycloak', 'select id, value from component_config order by id').split('\n'),
+                         ['c3|', 'c4|ldap://ldap.example.invalid', 'c5|{}'])
+        secrets = dict(line.split('|') for line in
+                       self.sql('keycloak', 'select client_id, coalesce(secret, \'\') from client').split('\n'))
+        self.assertEqual(secrets['econ-graph-web'], '')
+        for client in ('econ-graph-api', 'econgraph-anonymous'):
+            self.assertRegex(secrets[client], r'^[0-9a-f]{64}$', client)
+        self.assertNotEqual(secrets['econ-graph-api'], secrets['econgraph-anonymous'])
+        self.assertEqual(self.sql('keycloak', 'select name from client_attributes'), 'access.token.lifespan')
+        self.assertEqual(self.sql('keycloak', 'select name, value from authenticator_config_entry order by name')
+                         .split('\n'), ['max.attempts|3', 'secret|'])
+        # The source (what the dump holds) still has them; the copy has none.
+        everything = "select string_agg(t::text, ' ') from {} t"
+        for table in ('client', 'component_config', 'client_attributes', 'authenticator_config_entry'):
+            source = self.sql('src_keycloak', everything.format(table))
+            copy_ = self.sql('keycloak', everything.format(table))
+            self.assertIn('synthetic-', source, table)
+            self.assertNotIn('synthetic-', copy_, table)
+        # Kept on purpose: accounts and their credentials, for realistic sign-in tests.
+        self.assertEqual(self.sql('keycloak', 'select secret_data from credential'), 'synthetic-password-hash')
+        self.assertEqual(self.sql('keycloak', 'select value from user_attribute'), 'synthetic')
 
     def test_3_refuses_a_database_that_is_not_empty(self):
         before = self.sql('econ_graph', 'select count(*) from data_points')

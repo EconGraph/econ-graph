@@ -9,6 +9,6 @@
 #   scripts/deploy/release-lab.sh status|port-forward --lab NAME
 #   scripts/deploy/release-lab.sh measure [--lab NAME]
 #   scripts/deploy/release-lab.sh list
-#   scripts/deploy/release-lab.sh teardown --lab NAME [--yes] [--remove-storage] [--dry-run]
+#   scripts/deploy/release-lab.sh teardown --lab NAME [--yes] [--keep-storage] [--dry-run]
 set -euo pipefail
 exec python3 "$(dirname "${BASH_SOURCE[0]}")/release-lab.py" "$@"

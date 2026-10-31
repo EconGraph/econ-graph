@@ -27,8 +27,8 @@
 
 CLUSTER_ROLE_NAMESPACE="kube-system"
 CLUSTER_ROLE_CONFIGMAP="econgraph-cluster-role"
-# The ownership marker of a release lab (scripts/deploy/release-lab.py). A cluster that
-# carries it is never production, whatever its role marker says.
+# The ownership marker of a release lab (scripts/deploy/release-lab.py). A lab never
+# carries a production marker: a cluster with both is reported as unknown (2).
 CLUSTER_ROLE_LAB_CONFIGMAP="econgraph-lab-owner"
 # Never taken from the environment: a stray CLUSTER_ROLE_DRY_RUN=true would make
 # kc print instead of run while child scripts run for real, and make every
@@ -262,7 +262,8 @@ cluster_role_marker_text() {
 # marker made on this very cluster. Anything else, including a failure to ask
 # the cluster, is "not production" (fail closed); CLUSTER_ROLE_REASON then says
 # why. Returns 1 when the cluster answered and is not production, 2 when it
-# could not be asked.
+# could not be asked or carries conflicting markers (a valid production marker
+# and the release lab marker): unknown, which callers refuse on.
 # shellcheck disable=SC2034 # CLUSTER_ROLE_REASON is read by the callers.
 cluster_is_marked_production() {
     local uid
@@ -302,11 +303,14 @@ cluster_is_marked_production() {
     cluster_role_is_lab || lab=$?
     case "$lab" in
         0)
-            CLUSTER_ROLE_REASON="context ${CLUSTER_ROLE_CONTEXT} is a release lab (ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_LAB_CONFIGMAP}); a lab is never production, whatever its marker says"
-            return 1
+            # Both markers: one of them is wrong, and which is unknown. Not "not
+            # production" (1): callers that skip their production safeguards on 1
+            # (teardown.sh's UID-prefix confirmation, say) must refuse instead.
+            CLUSTER_ROLE_REASON="context ${CLUSTER_ROLE_CONTEXT} carries both a production marker and the release lab marker ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_LAB_CONFIGMAP}; conflicting markers, so whether it is production is unknown. Find out which marker is wrong before going on"
+            return 2
             ;;
         2)
-            CLUSTER_ROLE_REASON="could not check context ${CLUSTER_ROLE_CONTEXT} for ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_LAB_CONFIGMAP}, so it is treated as not production"
+            CLUSTER_ROLE_REASON="could not check context ${CLUSTER_ROLE_CONTEXT} for ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_LAB_CONFIGMAP}, so whether it is production is unknown"
             return 2
             ;;
     esac

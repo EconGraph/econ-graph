@@ -409,8 +409,10 @@ elsewhere keeps the UID, the marker and the token, so run `--unmark` on such a c
 starting its workloads, or don't restore it while production runs.
 
 A release lab ([docs/deployment/RELEASE_LAB.md](../docs/deployment/RELEASE_LAB.md)) carries
-the ConfigMap `kube-system/econgraph-lab-owner`. A cluster with it is never production,
-whatever its role marker says, and `mark-production-cluster.sh` refuses to mark it.
+the ConfigMap `kube-system/econgraph-lab-owner`, and `mark-production-cluster.sh` refuses
+to mark it. A cluster carrying both that ConfigMap and a valid production marker has
+conflicting markers: `cluster_is_marked_production` reports it as unknown (status 2), as
+when the cluster can't be asked, and the scripts refuse to act on it.
 
 Scripts that delete a cluster (`recreate-kind-cluster.sh`, `migrate-to-host-storage.sh`)
 read the marker more broadly, so a damaged one still protects: any ConfigMap

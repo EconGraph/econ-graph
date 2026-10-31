@@ -36,7 +36,9 @@ scripts/deploy/release-lab.sh create --lab NAME \
 - The three dumps must differ: the same file given twice is refused.
 
 Running `create` again for a lab that is ready does nothing. A lab whose creation failed
-is kept for inspection: tear it down before creating it again.
+is kept for inspection: tear it down before creating it again. Once a lab is torn down
+with its storage removed, `create` can use its name again; the old directory is kept as
+`.NAME.torn-down-<time>/` in the lab root.
 
 What `create` does, in order:
 
@@ -61,8 +63,7 @@ What `create` does, in order:
    crawler-migrate Job, with lab-generated passwords. ClusterIP Services only; no gateway,
    no cloudflared, no tunnel token, no API keys (`crawler-api-keys` is not created).
 7. Restores each dump into its empty database in one transaction (a database that is not
-   empty is refused), then in the Keycloak copy deletes the identity providers and their
-   mappers and links, the offline sessions and the SMTP settings.
+   empty is refused), then cleans the Keycloak copy (below).
 8. Runs the data migrations (crawler-migrate), starts Keycloak, the backend and the
    frontend, adds a lab-only Keycloak admin (`kc.sh bootstrap-admin`; the restored
    database's own admins keep production's passwords, which the lab does not have),
@@ -97,14 +98,14 @@ Scaling it up is a deliberate step, and the lab has no API keys unless you add
 ## Tear a lab down
 
 ```bash
-scripts/deploy/release-lab.sh teardown --lab NAME [--remove-storage]
+scripts/deploy/release-lab.sh teardown --lab NAME [--keep-storage]
 ```
 
 It takes the cluster, context and network from `lab.json`, never from an argument, and
 refuses unless all of these hold:
 
-- the record names `econ-graph-lab-NAME` (never `econ-graph` or the QA cluster
-  `econgraph-train1-qa`);
+- the record names `econ-graph-lab-NAME` (never a cluster without the `econ-graph-lab-`
+  prefix);
 - the cluster carries `kube-system/econgraph-lab-owner` with the record's lab id and name
   and its own kube-system UID, which must also be the UID recorded at creation;
 - the cluster carries no `kube-system/econgraph-cluster-role` marker.
@@ -112,17 +113,38 @@ refuses unless all of these hold:
 It asks for the lab name at a terminal (or takes `--yes`), checks the marker again, runs
 `kind delete cluster --name econ-graph-lab-NAME`, removes the Docker network if no
 container uses it, and untags the lab-only image names (an image keeps its other
-names). `--remove-storage` also empties `NAME/node-storage/` through a
-container that mounts only that directory. The dumps are never touched, and `lab.json`
+names). Then it empties `NAME/node-storage/`, the lab's full copy of the data, through a
+container that mounts only that directory. `--keep-storage` keeps that copy and warns; a
+later `teardown` of the same lab removes it. The dumps are never touched, and `lab.json`
 stays as the record of the lab. `--dry-run` shows what it would delete.
+
+## The Keycloak copy
+
+Before Keycloak starts, the lab removes from its copy, in one transaction:
+
+- the identity providers, their mappers, configuration and account links: no sign-in
+  through Google or Facebook, and none of their client secrets;
+- the realms' key providers (RSA, HMAC and AES private keys). Keycloak makes new keys,
+  so tokens production signed are not valid in the lab, and the lab's are not valid in
+  production;
+- every confidential client's secret, replaced by a random one (the realm import then
+  sets the clients it manages from the lab's Secret), and rotated client secrets;
+- offline sessions, revoked tokens, login events, admin events and SMTP settings;
+- secret-looking values (names containing secret, password, credential, token or key)
+  in the remaining components' and authenticators' configuration.
+
+Kept on purpose, so sign-in can be tested with realistic accounts: users, their password
+hashes and other credentials, attributes, groups, roles and consents. The restored
+production admins keep their passwords; the lab adds its own admin.
 
 ## Never production
 
 - The lab writes no `econgraph-cluster-role` marker, and refuses a cluster that has one.
-- `scripts/deploy/lib/cluster-role.sh` counts a cluster with `econgraph-lab-owner` as not
-  production, whatever its role marker says, so no deploy script runs cloudflared or
-  restores the tunnel token there; `scripts/deploy/mark-production-cluster.sh` refuses to
-  mark it.
+- `scripts/deploy/mark-production-cluster.sh` refuses to mark a cluster with
+  `econgraph-lab-owner`. If one ever carried a valid production marker too,
+  `scripts/deploy/lib/cluster-role.sh` reports conflicting markers: whether it is
+  production is unknown, and the scripts refuse to act on it, as when the cluster can't be
+  asked.
 - No credential from the operator's environment (variables named like a token, secret,
   password or API key) reaches kind, docker or kubectl.
 

@@ -71,7 +71,9 @@ STUB = textwrap.dedent(r'''
         elif args[:2] == ['get', 'kubeconfig']: out('apiVersion: v1\nkind: Config\n')
         elif args[:2] == ['get', 'nodes']: out(args[args.index('--name') + 1] + '-control-plane\n')
         elif args[:2] == ['create', 'cluster']:
-            s['clusters'].append(args[args.index('--name') + 1]); save(s)
+            # A new cluster: nothing applied, no marker yet.
+            s['clusters'].append(args[args.index('--name') + 1])
+            s.update(applied=[], secrets=[], owner=None, owner_reads=0); save(s)
         elif args[:2] == ['delete', 'cluster']:
             s['clusters'] = [c for c in s['clusters'] if c != args[args.index('--name') + 1]]
             s['owner'] = None; save(s)
@@ -107,6 +109,10 @@ STUB = textwrap.dedent(r'''
         save(s); sys.exit(0)
     if 'get namespace kube-system' in joined: out(s.get('uid', 'uid-lab')); sys.exit(0)
     if 'get configmap econgraph-lab-owner' in joined:
+        s['owner_reads'] = s.get('owner_reads', 0) + 1
+        if s.get('forge_owner_after') is not None and s['owner_reads'] > s['forge_owner_after'] and s.get('owner'):
+            s['owner']['data']['lab-id'] = 'f' * 32
+        save(s)
         if s.get('owner'): out(json.dumps(s['owner']))
         sys.exit(0)
     if 'get configmap econgraph-cluster-role' in joined:
@@ -384,7 +390,9 @@ class CreateTests(Stubbed):
         self.assertEqual(sorted(c['stdin'] for c in restored),
                          sorted('sha256:' + self.before[r][0] for r in self.dumps))
         self.assert_inputs_unchanged()
-        result = self.lab_cli('teardown', '--lab', 'one', '--yes', '--remove-storage')
+        # Something in the lab's storage, as the databases leave there.
+        (self.scratch / 'labs/one/node-storage/pvc-data').mkdir()
+        result = self.lab_cli('teardown', '--lab', 'one', '--yes')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assert_inputs_unchanged()
         removal = [c for c in self.calls('docker') if c['args'][:1] == ['run']]
@@ -545,7 +553,51 @@ class TeardownTests(Stubbed):
         result = self.teardown('--dry-run')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('kind delete cluster --name econ-graph-lab-one', result.stdout)
+        self.assertIn('copy of the data', result.stdout)
         self.assertEqual(self.deletes(), [])
+        self.assertFalse(any(c['args'][:1] == ['run'] for c in self.calls('docker')))
+
+    def test_rechecks_ownership_right_before_the_delete(self):
+        # The marker changes after the first check (between it and the delete): refused.
+        self.state(forge_owner_after=self.state().get('owner_reads', 0) + 1)
+        result = self.teardown('--yes')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('not this lab', result.stderr)
+        self.assertEqual(self.deletes(), [])
+        self.assertIn('econ-graph-lab-one', self.state()['clusters'])
+
+    def test_removes_the_data_copy_by_default_and_keeps_it_only_when_asked(self):
+        storage = self.scratch / 'labs/one/node-storage'
+        (storage / 'pvc-data').mkdir()
+        kept = self.teardown('--yes', '--keep-storage')
+        self.assertEqual(kept.returncode, 0, kept.stderr)
+        self.assertIn('WARNING', kept.stderr)
+        self.assertIn('full copy of the data', kept.stderr)
+        self.assertFalse(any(c['args'][:1] == ['run'] for c in self.calls('docker')))
+        self.assertEqual(json.loads(self.record_path().read_text())['storage'], 'kept')
+        # The name can't be reused while the copy is kept.
+        blocked = self.create(expect_ok=False)
+        self.assertIn('--keep-storage', blocked.stderr)
+        again = self.teardown('--yes')
+        self.assertEqual(again.returncode, 0, again.stderr)
+        removal = [c['args'] for c in self.calls('docker') if c['args'][:1] == ['run']]
+        self.assertEqual(len(removal), 1)
+        self.assertIn(f'{storage}:/lab-storage', removal[0])
+        self.assertEqual(json.loads(self.record_path().read_text())['storage'], 'removed')
+
+    def test_name_can_be_created_again_after_teardown(self):
+        self.assertEqual(self.teardown('--yes').returncode, 0)
+        first = json.loads(self.record_path().read_text())
+        self.create()
+        second = json.loads(self.record_path().read_text())
+        self.assertEqual(second['status'], 'ready')
+        self.assertNotEqual(second['lab_id'], first['lab_id'])
+        retired = [p for p in (self.scratch / 'labs').iterdir() if p.name.startswith('.one.torn-down-')]
+        self.assertEqual(len(retired), 1)
+        self.assertEqual(json.loads((retired[0] / 'lab.json').read_text())['lab_id'], first['lab_id'])
+        listed = self.lab_cli('list')
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertNotIn('unreadable', listed.stdout)
 
     def test_is_safe_to_run_again(self):
         self.assertEqual(self.teardown('--yes').returncode, 0)
@@ -696,12 +748,16 @@ class ClusterRoleTests(unittest.TestCase):
         return self.run_bash(f'source {HERE}/lib/cluster-role.sh; cluster_is_marked_production; rc=$?; '
                              'echo "rc=$rc $CLUSTER_ROLE_REASON"', lab_state)
 
-    def test_a_lab_is_never_production_even_with_a_valid_marker(self):
+    def test_conflicting_markers_are_unknown_not_production_and_not_safe(self):
+        # A valid production marker and the lab marker together: status 2 (unknown), so
+        # callers that relax their production safeguards on 1 refuse instead.
         self.assertIn('rc=0', self.check('0').stdout)
-        lab_result = self.check('1').stdout
-        self.assertIn('rc=1', lab_result)
-        self.assertIn('release lab', lab_result)
-        self.assertIn('rc=2', self.check('fails').stdout)
+        conflict = self.check('1').stdout
+        self.assertIn('rc=2', conflict)
+        self.assertIn('conflicting markers', conflict)
+        failed = self.check('fails').stdout
+        self.assertIn('rc=2', failed)
+        self.assertIn('unknown', failed)
 
     def test_mark_production_refuses_a_lab(self):
         result = self.run_bash(f'{HERE}/mark-production-cluster.sh', '1')

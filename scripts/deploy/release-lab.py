@@ -11,7 +11,7 @@ Usage:
   scripts/deploy/release-lab.sh port-forward --lab NAME
   scripts/deploy/release-lab.sh measure [--lab NAME]
   scripts/deploy/release-lab.sh list
-  scripts/deploy/release-lab.sh teardown --lab NAME [--yes] [--remove-storage] [--dry-run]
+  scripts/deploy/release-lab.sh teardown --lab NAME [--yes] [--keep-storage] [--dry-run]
 
 NAME is 1 to 32 lowercase letters, digits and inner hyphens. The lab is the kind cluster
 econ-graph-lab-NAME (context kind-econ-graph-lab-NAME) on the rootful Docker daemon, on
@@ -36,7 +36,8 @@ create:
      ClusterIP Services only, no gateway, no cloudflared, no tunnel token, no API keys,
      lab-generated passwords, crawler-worker at 0 replicas.
   5. Restores each dump into its own empty database (one transaction each), removes
-     Keycloak's identity providers, their links, sessions and SMTP settings, runs the data
+     the Keycloak copy's identity providers, signing keys, client secrets, sessions,
+     events and SMTP settings (docs/deployment/RELEASE_LAB.md), runs the data
      migrations, starts Keycloak (which migrates an older copy), the backend and the
      frontend, adds a lab-only Keycloak admin (kc.sh bootstrap-admin) and restarts
      Keycloak, then applies the realm without identity providers.
@@ -54,13 +55,16 @@ production-style tag.
 images) and prints the plan; it creates, pulls and loads nothing.
 
 teardown: deletes the lab's own kind cluster, and nothing else, after checking that the
-record names a lab cluster (never econ-graph or the QA cluster econgraph-train1-qa), that
-the cluster carries the ownership marker with the record's lab id and the cluster's own
+record names a lab cluster (never a cluster without the econ-graph-lab- prefix), that the
+cluster carries the ownership marker with the record's lab id and the cluster's own
 kube-system UID, and that it carries no production marker. Then removes the lab's Docker
-network if nothing else uses it, and untags the lab-only image names. --remove-storage
-also empties node-storage/ (owned by the containers' users, so it is removed through
-Docker). The dumps are never touched, and lab.json is kept. Asks for the lab name at a
+network if nothing else uses it, untags the lab-only image names, and empties
+node-storage/, the lab's copy of the data (owned by the containers' users, so it is
+removed through Docker). --keep-storage keeps that copy, with a warning; a later teardown
+removes it. The dumps are never touched, and lab.json is kept. Asks for the lab name at a
 terminal, or --yes. --dry-run makes the same checks and shows what it would delete.
+Once torn down, with its storage removed, the lab name can be created again; the old
+directory is kept as .NAME.torn-down-<time>/ in the lab root.
 
 port-forward: forwards the frontend, backend and Keycloak to 127.0.0.1 only, on the ports
 in the record. measure: memory, CPU, and disk of each lab (docs/deployment/RELEASE_LAB.md).
@@ -116,16 +120,50 @@ DATABASES = {
                  'database': 'keycloak', 'counts': ['realm', 'user_entity']},
 }
 
-# Run on the restored Keycloak database before Keycloak starts: no sign-in through the
-# production identity providers, no production sessions, no mail through production's
-# SMTP server. One transaction; tables a Keycloak version lacks are skipped.
+# Run on the restored Keycloak database before Keycloak starts, in one transaction.
+# Removed, so no production secret or sign-in path survives in the lab:
+#   - identity providers, their mappers, configuration and account links (no sign-in
+#     through Google or Facebook, and none of their client secrets);
+#   - the realms' key providers (RSA, HMAC and AES private keys): Keycloak makes new
+#     ones, so nothing production signed or encrypted is valid in the lab, and nothing
+#     the lab signs is valid in production;
+#   - every confidential client's secret, replaced by a random one (the realm import
+#     then sets the clients it manages from the lab's Secret), and rotated secrets;
+#   - offline sessions, revoked tokens, login and admin events, SMTP settings;
+#   - secret-looking values (secret, password, credential, token, key) in the remaining
+#     components' and authenticators' configuration, such as a federation bind password.
+# Kept on purpose, for realistic sign-in tests: users, their password hashes and other
+# credentials, attributes, groups, roles and consents. Tables a Keycloak version lacks
+# are skipped.
 KEYCLOAK_SANITIZE_SQL = """
 DO $$
 DECLARE t text;
 BEGIN
+  IF to_regclass('public.component') IS NOT NULL THEN
+    IF to_regclass('public.component_config') IS NOT NULL THEN
+      DELETE FROM public.component_config WHERE component_id IN
+        (SELECT id FROM public.component WHERE provider_type = 'org.keycloak.keys.KeyProvider');
+      UPDATE public.component_config SET value = ''
+        WHERE name ~* '(secret|password|credential|token|key)';
+    END IF;
+    DELETE FROM public.component WHERE provider_type = 'org.keycloak.keys.KeyProvider';
+  END IF;
+  IF to_regclass('public.client') IS NOT NULL THEN
+    UPDATE public.client SET secret = replace(gen_random_uuid()::text, '-', '')
+                                      || replace(gen_random_uuid()::text, '-', '')
+      WHERE NOT public_client AND secret IS NOT NULL;
+  END IF;
+  IF to_regclass('public.client_attributes') IS NOT NULL THEN
+    DELETE FROM public.client_attributes WHERE name LIKE 'client.secret.rotated%';
+  END IF;
+  IF to_regclass('public.authenticator_config_entry') IS NOT NULL THEN
+    UPDATE public.authenticator_config_entry SET value = ''
+      WHERE name ~* '(secret|password|credential|token|key)';
+  END IF;
   FOREACH t IN ARRAY ARRAY['idp_mapper_config', 'identity_provider_mapper', 'identity_provider_config',
                            'federated_identity', 'identity_provider', 'offline_client_session',
-                           'offline_user_session', 'realm_smtp_config'] LOOP
+                           'offline_user_session', 'realm_smtp_config', 'revoked_token',
+                           'event_entity', 'admin_event_entity'] LOOP
     IF to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE format('DELETE FROM public.%I', t);
     END IF;
@@ -685,6 +723,19 @@ def load_images(tools, record):
         tools.kind('load', 'docker-image', tag, '--name', record['cluster'], capture=False)
 
 
+def retire_lab_dir(name, root, directory):
+    """Move a torn-down lab's directory aside (kept, renamed) so the name can be used
+    again. Refused while it still holds a kept copy of the data."""
+    storage = directory / 'node-storage'
+    with lab_lock(directory):
+        if storage.is_dir() and any(storage.iterdir()):
+            raise LabError(f'{storage} still holds the data copy kept with --keep-storage; run '
+                           f'scripts/deploy/release-lab.sh teardown --lab {name} again to remove it first')
+        retired = root / f'.{name}.torn-down-{now().replace(":", "")}'
+        os.rename(directory, retired)
+    log(f'Lab {name} was torn down; its old directory is kept as {retired}')
+
+
 def create(args):
     environ = os.environ
     name = check_name(args.lab)
@@ -697,8 +748,11 @@ def create(args):
             log(f'Lab {name} exists and is ready ({cluster}); nothing to do. scripts/deploy/release-lab.sh status '
                 f'--lab {name} shows it; teardown removes it.')
             return
-        raise LabError(f'lab {name} exists with status {record.get("status")!r}; tear it down '
-                       f'(scripts/deploy/release-lab.sh teardown --lab {name}) and create it again')
+        if record.get('status') != 'torn-down':
+            raise LabError(f'lab {name} exists with status {record.get("status")!r}; tear it down '
+                           f'(scripts/deploy/release-lab.sh teardown --lab {name}) and create it again')
+        if not args.dry_run:
+            retire_lab_dir(name, root, directory)
     if args.release and not re.fullmatch(r'v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?', args.release):
         raise LabError(f'--release {args.release}: use a release tag such as v4.0.1')
     record = {'format': RECORD_FORMAT, 'name': name, 'cluster': cluster, 'context': 'kind-' + cluster,
@@ -793,7 +847,7 @@ def build_lab(tools, record, directory, config, docs):
         wait_postgres_settled(tools, spec)
         restore_dump(tools, spec, record['inputs'][role]['path'])
         if role == 'keycloak':
-            log('Removing identity providers, their links, sessions and SMTP settings from the Keycloak copy')
+            log('Removing identity providers, keys, client secrets, sessions and events from the Keycloak copy')
             psql(tools, spec, KEYCLOAK_SANITIZE_SQL)
         counts[role] = row_counts(tools, spec)
     record['restored_counts'] = counts
@@ -870,7 +924,8 @@ def port_forward(args):
 
 def measure(args):
     names = [check_name(args.lab)] if args.lab else sorted(
-        p.name for p in lab_root().iterdir() if (p / 'lab.json').is_file()) if lab_root().is_dir() else []
+        p.name for p in lab_root().iterdir() if (p / 'lab.json').is_file() and not p.name.startswith('.')) \
+        if lab_root().is_dir() else []
     for name in names:
         record, directory, tools = open_lab(name)
         node = record['cluster'] + '-control-plane'
@@ -892,7 +947,7 @@ def list_labs(args):
         print(f'no labs ({root} does not exist)')
         return
     for path in sorted(root.iterdir()):
-        if (path / 'lab.json').is_file():
+        if (path / 'lab.json').is_file() and not path.name.startswith('.'):
             try:
                 record = read_record(path.name)
                 print(f'{record["name"]:20} {record.get("status"):10} {record["cluster"]}  '
@@ -923,8 +978,8 @@ def teardown(args):
             if exists:
                 print(f'+ kind delete cluster --name {cluster}')
             print(f'+ docker network rm {record["network"]} (only if no container uses it)')
-            if args.remove_storage:
-                print(f'+ remove {directory / "node-storage"} through Docker')
+            if not args.keep_storage:
+                print(f'+ empty {directory / "node-storage"} (the lab\'s copy of the data) through Docker')
             return
         if not args.yes:
             if not sys.stdin.isatty():
@@ -937,8 +992,14 @@ def teardown(args):
             tools.kind('delete', 'cluster', '--name', cluster, '--kubeconfig', tools.kubeconfig, capture=False)
         remove_network(tools, record)
         remove_lab_tags(tools, record)
-        if args.remove_storage:
+        if args.keep_storage:
+            print(f'WARNING: {directory / "node-storage"} still holds the lab\'s full copy of the data '
+                  '(--keep-storage). Remove it with: scripts/deploy/release-lab.sh teardown --lab '
+                  f'{name}', file=sys.stderr)
+            record['storage'] = 'kept'
+        else:
             remove_storage(tools, record, directory)
+            record['storage'] = 'removed'
         record['status'] = 'torn-down'
         record['torn_down_at'] = now()
         write_record(directory, record)
@@ -974,6 +1035,8 @@ def remove_storage(tools, record, directory):
         raise LabError(f'{storage} is not the lab\'s storage directory; not removing it')
     if record['cluster'] in tools.clusters():
         raise LabError(f'{record["cluster"]} still exists; not removing its storage')
+    if not any(storage.iterdir()):
+        return
     image = kind_tools.kind_node_image()
     tools.docker('run', '--rm', '--network', 'none', '--entrypoint', '/usr/bin/find',
                  '-v', f'{storage}:/lab-storage', image, '/lab-storage', '-xdev', '-mindepth', '1', '-delete')
@@ -997,7 +1060,8 @@ def main(argv=None):
     t = sub.add_parser('teardown')
     t.add_argument('--lab', required=True)
     t.add_argument('--yes', action='store_true')
-    t.add_argument('--remove-storage', action='store_true')
+    t.add_argument('--keep-storage', action='store_true',
+                   help="keep node-storage/, the lab's copy of the data (removed by default)")
     t.add_argument('--dry-run', action='store_true')
     args = p.parse_args(argv)
     {'create': create, 'status': status, 'port-forward': port_forward, 'measure': measure,
