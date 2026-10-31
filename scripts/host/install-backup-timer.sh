@@ -11,8 +11,8 @@
 # the operator account can change; re-run this installer after merging changes
 # to backup-snapshots.sh (restore-snapshot.sh, delete-snapshots.sh and
 # snapshot-now.sh refuse to run while the installed copy takes an older
-# lock). It stops the timer, and refuses to replace the script while a
-# backup run is in progress (starting the timer again).
+# lock). It stops the timer (and starts it again however it ends), and
+# refuses to replace the script while a backup run is in progress.
 # Safe to re-run. Nothing it installs deletes anything.
 #
 # --run-now also starts one run immediately instead of waiting for the timer.
@@ -84,13 +84,18 @@ else
     # so it starts none, then go on only if no run is in progress (a oneshot
     # run is "activating" until it ends, never "active"); the timer is
     # started again below, or now if this stops.
-    run systemctl stop "$UNIT.timer"
+    if [ "$(systemctl show -p LoadState --value "$UNIT.timer")" = loaded ]; then
+        run systemctl stop "$UNIT.timer"
+        # Whatever stops this script from here on, the timer runs again.
+        if [ "$DRY_RUN" = "false" ]; then
+            trap 'systemctl start "$UNIT.timer" || echo "error: could not start $UNIT.timer again; start it by hand" >&2' EXIT
+        fi
+    fi
     state="$(systemctl show -p ActiveState --value "$UNIT.service")" || state="unknown"
     case "$state" in
         inactive | failed) ;;
         *)
             echo "error: $UNIT.service is $state (a backup run may be in progress); re-run this when it has finished" >&2
-            run systemctl start "$UNIT.timer" || true
             exit 1
             ;;
     esac
@@ -123,6 +128,7 @@ WantedBy=timers.target" "$UNIT_DIR/$UNIT.timer" 0644
 
 run systemctl daemon-reload
 run systemctl enable --now "$UNIT.timer"
+trap - EXIT
 if [ "$RUN_NOW" = "true" ]; then
     run systemctl start "$UNIT.service"
 fi
