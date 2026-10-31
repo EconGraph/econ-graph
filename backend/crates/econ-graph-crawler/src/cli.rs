@@ -1030,7 +1030,7 @@ async fn fetch_one(
         .await
     {
         // As the worker does: hide it, and cancel any pending review of its restriction.
-        Err(CrawlError::Restricted(message)) if adapter.tracks_catalog_lifecycle() => {
+        Err(CrawlError::Restricted(message)) => {
             crate::lifecycle::record_restricted(&pool, source, external_id).await?;
             return Err(CrawlError::Restricted(message).into());
         }

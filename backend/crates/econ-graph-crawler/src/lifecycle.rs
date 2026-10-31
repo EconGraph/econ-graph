@@ -1223,7 +1223,9 @@ pub async fn request_restriction_review(
 /// it before `claimed_at`, the time this fetch's job was claimed (so the fetch read upstream
 /// after the review). Its stored state then applies again: `superseded` with a confirmed
 /// successor, `missing_from_catalog` after three catalog absences, `active` otherwise; the
-/// next catalog sets any other. Its rows become visible as any listed or fetched series is.
+/// next catalog sets any other (a `retired` or `discontinued` series among them). `since`
+/// becomes the lift time: the restriction already replaced the earlier date. Its rows become
+/// visible as any listed or fetched series is.
 /// Returns the new status. Run in the fetch's commit, after its upsert.
 pub(crate) async fn lift_reviewed_restriction_conn(
     conn: &mut AsyncPgConnection,
