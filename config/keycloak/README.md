@@ -217,8 +217,13 @@ A later deploy keeps the provider disabled while the keys are absent.
 ## Catalog access, including anonymous visitors
 
 Each supported catalog has an `econ-graph-api` read role, such as `catalog.fred:read`,
-`catalog.bea:read`, or `catalog.bls:read`. Unknown source names are denied. The backend maps
-canonical data-source names to these capabilities; adding a source requires its role and mapping.
+`catalog.bea:read`, or `catalog.bank_of_canada:read`. Unknown source names are denied. The
+backend maps canonical data-source names to these capabilities; adding a source requires its
+role and mapping. A new catalog role spells the source out (`catalog.bank_of_canada:read`, not
+an acronym). The crawler's `catalog_roles` test fails when a source's name has no role, a
+catalog role is missing from `catalog-public`, or a role in `catalog-public` is missing from the
+`econgraph-anonymous` scope mapping, apart from the exceptions it lists.
+
 Search, suggestions, lists, counts, metadata, observations and cross-sections enforce these grants.
 So do annotations: `annotationsForSeries` is empty, and `commentsForAnnotation`, `addComment` and
 `updateAnnotation` answer "Annotation not found", for an annotation on a series in a catalog the
@@ -228,7 +233,7 @@ missing series, so none of them reveals what an unreadable catalog contains.
 MCP tools use the authenticated caller's catalog roles as well as `api:mcp`.
 
 The `catalog-public` realm composite grants the initial catalog reads: in the realm file,
-BLS, BEA, Census, FHFA, World Bank and Bank of Canada. FRED's `catalog.fred:read` is on
+BLS, BEA, Census, FHFA and World Bank. FRED's `catalog.fred:read` is on
 the `admin` composite instead (`super_admin` includes `admin`), so only admins read FRED. The
 IMF, ECB, OECD, Bank of England, Bank of Japan, RBA, SNB, UN Statistics and ILO reads are
 granted to nobody by default. The `user` composite and
@@ -242,12 +247,14 @@ Explicit grants to other groups or users still apply. To restrict just anonymous
 `catalog-public` from the anonymous service account and assign its permitted catalog roles
 individually instead. Use group/composite grants for signed-in exceptions as usual.
 
-The WTO catalog is restricted by default: `catalog.world_trade_organization:read` (World Trade
-Organization) is defined but is in neither `catalog-public` nor the anonymous client's scope, so
-only users or groups granted it can read WTO series. To open it up, grant the role to a user or
-group, or add it to `catalog-public` (and the anonymous scope) to make it public.
+The WTO and Bank of Canada catalogs are restricted by default:
+`catalog.world_trade_organization:read` (World Trade Organization) and
+`catalog.bank_of_canada:read` (Bank of Canada) are defined but are in neither `catalog-public`
+nor the anonymous client's scope, so only users or groups granted them can read those series.
+To open one up, grant its role to a user or group, or add it to `catalog-public` (and the
+anonymous scope) to make it public.
 `backend/crates/econ-graph-auth/tests/restricted_catalog_roles.rs` checks that the realm file
-keeps it that way.
+keeps them that way.
 
 Visitors receive no token and no service-account identity. The backend obtains a client-credentials
 token, verifies its signature, issuer and audience, and uses only its catalog-read roles for

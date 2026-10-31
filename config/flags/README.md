@@ -135,8 +135,8 @@ run `node scripts/flags-merge`, and remove the code paths for its other value.
   the issue that gates `/mcp` behind the flag) compiles `/mcp` out of release
   builds.
 - `static_catalogs` (build, off in release, on in dev, `remove_by: unscheduled`,
-  owner ECO-142) registers `econ-graph-crawler`'s nine hardcoded dev-only source
-  catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS). Like
+  owner ECO-142) registers `econ-graph-crawler`'s eight hardcoded dev-only source
+  catalogs (BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS). Like
   `build_canary`, it is permanent: these catalogs are a development convenience,
   so there is no release deadline for removing the flag.
 

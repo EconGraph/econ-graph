@@ -299,8 +299,8 @@ pub struct SourceSelection {
     /// Comma-separated sources, e.g. FRED,WORLD_BANK.
     #[arg(long, value_delimiter = ',', num_args = 1..)]
     pub source: Vec<SourceId>,
-    /// Every source the refresh scheduler refreshes (FRED, BLS, BEA, Census, World Bank, FHFA
-    /// in a release build).
+    /// Every source the refresh scheduler refreshes (FRED, BLS, BEA, Census, World Bank, FHFA,
+    /// WTO and the Bank of Canada in a release build).
     #[arg(long)]
     pub all: bool,
 }
@@ -1475,6 +1475,7 @@ mod tests {
             SourceId::Census,
             SourceId::WorldBank,
             SourceId::Fhfa,
+            SourceId::Boc,
         ] {
             assert!(resolved.contains(&s), "{s}");
         }

@@ -12,7 +12,10 @@ use serde_json::Value;
 const API_CLIENT: &str = "econ-graph-api";
 
 /// Catalog read roles granted to nobody by default.
-const RESTRICTED_BY_DEFAULT: &[Role] = &[Role::CatalogWorldTradeOrganizationRead];
+const RESTRICTED_BY_DEFAULT: &[Role] = &[
+    Role::CatalogWorldTradeOrganizationRead,
+    Role::CatalogBankOfCanadaRead,
+];
 
 fn realm() -> Value {
     serde_json::from_str(include_str!(
@@ -63,26 +66,31 @@ fn anonymous_scope(realm: &Value) -> BTreeSet<String> {
 }
 
 #[test]
-fn world_trade_organization_catalog_is_restricted_by_default() {
+fn new_catalogs_are_restricted_by_default() {
     let realm = realm();
     let (defined, public, anonymous) = (
         defined(&realm),
         catalog_public(&realm),
         anonymous_scope(&realm),
     );
-    let wto = Role::CatalogWorldTradeOrganizationRead.as_str();
-    assert!(
-        defined.contains(wto),
-        "{wto} must stay defined so it can be granted"
-    );
-    assert!(!public.contains(wto), "{wto} must not be in catalog-public");
-    assert!(
-        !anonymous.contains(wto),
-        "{wto} must not be mapped to anonymous visitors"
-    );
+    for role in RESTRICTED_BY_DEFAULT {
+        let role = role.as_str();
+        assert!(
+            defined.contains(role),
+            "{role} must stay defined so it can be granted"
+        );
+        assert!(
+            !public.contains(role),
+            "{role} must not be in catalog-public"
+        );
+        assert!(
+            !anonymous.contains(role),
+            "{role} must not be mapped to anonymous visitors"
+        );
+    }
 }
 
-/// Restricting the WTO leaves the public defaults alone: the realm file's catalog-public set and
+/// Restricting catalogs leaves the public defaults alone: the realm file's catalog-public set and
 /// the anonymous scope hold the same catalog reads, none restricted, and the restriction did not
 /// take others with it (BEA and BLS stay public).
 #[test]

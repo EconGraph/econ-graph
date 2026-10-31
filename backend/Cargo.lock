@@ -1427,6 +1427,7 @@ dependencies = [
  "csv",
  "diesel",
  "diesel-async",
+ "econ-graph-auth",
  "econ-graph-core",
  "econ-graph-flags-build",
  "econ-graph-metrics",

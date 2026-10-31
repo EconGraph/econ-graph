@@ -897,6 +897,7 @@ mod tests {
             SourceId::Census,
             SourceId::Fhfa,
             SourceId::WorldBank,
+            SourceId::Boc,
         ] {
             assert!(supports_fetch(s), "{s}");
         }
@@ -921,6 +922,7 @@ mod tests {
                 SourceId::Bea,
                 SourceId::Census,
                 SourceId::WorldBank,
+                SourceId::Boc,
                 SourceId::Wto,
                 SourceId::Fhfa
             ]

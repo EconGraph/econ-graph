@@ -14,7 +14,7 @@ the defaults; adapters can override them.
 and concurrency limit for each source within one process. Separate worker processes do not
 share these limits.
 
-The [production registry](../../backend/crates/econ-graph-crawler/src/sources/mod.rs) has seven
+The [production registry](../../backend/crates/econ-graph-crawler/src/sources/mod.rs) has eight
 live adapters. Their effective policies are:
 
 | Source | Sustained request rate | Burst | Maximum concurrent requests |
@@ -26,11 +26,12 @@ live adapters. Their effective policies are:
 | World Bank | 1 request/second | 1 | 2 |
 | FHFA | 1 request/second | 1 | 2 |
 | WTO | 1 request/second | 1 | 1 |
+| Bank of Canada | 1 request/second | 1 | 1 |
 
 The FRED, BLS, Census, and BEA rates were inherited from the legacy scheduler, as recorded in
 `policy.rs`. World Bank and FHFA use the general default. WTO follows the provider's published limit
-(below). The BLS, World Bank, and FHFA
-adapter overrides change batching without changing these request rates. These values govern
+(below). The Bank of Canada uses the default rate with one request in flight. The BLS, World
+Bank, and FHFA adapter overrides change batching without changing these request rates. These values govern
 HTTP attempts, including retries; they do not count series or enforce daily or data-volume
 quotas. A sustained rate and burst capacity do not guarantee compliance with a provider's
 quota window or account-wide limits.
@@ -120,18 +121,34 @@ The dataset page does not state a numerical download quota. The crawler's 1 requ
 policy is an application default; the source-row API URL and rate metadata do not control
 these file requests.
 
+### Bank of Canada
+
+The Bank of Canada's [terms of use](https://www.bankofcanada.ca/terms/), which govern the
+Valet API, forbid circumventing the Bank's limits on the number or frequency of requests,
+naming retrieval through Valet, and access that could overburden the site. Neither the terms,
+the [Valet documentation](https://www.bankofcanada.ca/valet/docs) nor the
+[Valet how-to guide](https://www.bankofcanada.ca/valet-api-how-to/) states a numerical limit.
+The guide asks clients to start slowly, wait before retrying a failed request, and cache data
+that changes once a day.
+
+The [Bank of Canada adapter](../../backend/crates/econ-graph-crawler/src/sources/boc.rs)
+makes one request per curated series for discovery and one per series per refresh. The
+crawler's 1 request/second with one request in flight is an application choice, not a
+provider-approved rate. See the [Bank of Canada guide](../data-sources/boc.md#request-rate).
+
 ## Source-row metadata and catalog entries
 
 [`data_source.rs`](../../backend/crates/econ-graph-core/src/models/data_source.rs) defines
-`rate_limit_per_minute` metadata defaults: FRED 120, BLS and Census 500, WTO 60, and BEA,
-FHFA, World Bank, IMF, ECB, OECD, Bank of England, Bank of Japan, Reserve Bank of Australia,
-Bank of Canada, Swiss National Bank, UN Statistics Division, and ILO 1000. These defaults
-are neither the main crawler's enforced HTTP policies nor evidence of provider quotas;
-existing database rows can also differ from model defaults.
+`rate_limit_per_minute` metadata defaults: FRED 120, BLS and Census 500, WTO and Bank of
+Canada 60, and BEA, FHFA, World Bank, IMF, ECB, OECD, Bank of England, Bank of Japan, Reserve
+Bank of Australia, Swiss National Bank, UN Statistics Division, and ILO 1000. These defaults
+are not the main crawler's enforced HTTP policies (FRED's, WTO's and the Bank of Canada's equal
+their policies' rates), and none is evidence of a provider quota. Existing database rows can
+also differ from model defaults.
 
 The main crawler provides development-only
 [static catalogs](../../backend/crates/econ-graph-crawler/src/sources/static_catalogs.rs) for
-ECB, OECD, Bank of England, Bank of Japan, Reserve Bank of Australia, Bank of Canada,
+ECB, OECD, Bank of England, Bank of Japan, Reserve Bank of Australia,
 Swiss National Bank, UN Statistics Division, and ILO when `flag_static_catalogs` is enabled.
 They do not make live provider requests. IMF has no adapter in the registry. A model row or
 a default `SourcePolicy` for one of these sources does not imply HTTP traffic to that provider.

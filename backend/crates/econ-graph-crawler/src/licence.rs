@@ -6,7 +6,9 @@
 //!
 //! A source is gated when its terms restrict our use and the maintainer has not decided to
 //! download it. FRED and WTO have restrictive terms but are downloaded and stored, with their
-//! catalogs hidden through Keycloak catalog roles, so they are not gated. IMF is gated because
+//! catalogs hidden through Keycloak catalog roles, so they are not gated. The Bank of Canada is
+//! downloaded and stored the same way, its catalog hidden until its terms' conditions are met
+//! (ECO-762), so it is not gated either. IMF is gated because
 //! the decision is not to download it; SNB, BOJ and UN_STATS have no adapter and no decision.
 //!
 //! Each entry of [`LICENCE_GATES`] names a source, the restriction in its terms, the Linear

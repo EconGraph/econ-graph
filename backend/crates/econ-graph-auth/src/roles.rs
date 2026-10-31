@@ -90,8 +90,8 @@ role_catalog! {
     CatalogBojRead => "catalog.boj:read",
     /// Read the Reserve Bank of Australia (RBA) catalog.
     CatalogRbaRead => "catalog.rba:read",
-    /// Read the Bank of Canada (BoC) catalog.
-    CatalogBocRead => "catalog.boc:read",
+    /// Read the Bank of Canada catalog.
+    CatalogBankOfCanadaRead => "catalog.bank_of_canada:read",
     /// Read the Swiss National Bank (SNB) catalog.
     CatalogSnbRead => "catalog.snb:read",
     /// Read the UN Statistics Division catalog.
@@ -167,7 +167,7 @@ impl Role {
             "World Trade Organization (WTO)" => Some(Self::CatalogWorldTradeOrganizationRead),
             "Bank of Japan (BoJ)" => Some(Self::CatalogBojRead),
             "Reserve Bank of Australia (RBA)" => Some(Self::CatalogRbaRead),
-            "Bank of Canada (BoC)" => Some(Self::CatalogBocRead),
+            "Bank of Canada (BoC)" => Some(Self::CatalogBankOfCanadaRead),
             "Swiss National Bank (SNB)" => Some(Self::CatalogSnbRead),
             "UN Statistics Division" => Some(Self::CatalogUnstatsRead),
             "International Labour Organization (ILO)" => Some(Self::CatalogIloRead),

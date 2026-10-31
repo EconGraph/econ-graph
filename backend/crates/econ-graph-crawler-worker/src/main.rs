@@ -154,7 +154,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     // Reference data adapters read at runtime ($CRAWLER_DATA_DIR): fail at startup rather than on
     // their first job. Catalog selection rules are validated before any discovery is enqueued.
+    // BLS reads `bls_series`; the Bank of Canada reads `boc_series`.
     let bls_series = econ_graph_crawler::reference::bls_series()?;
+    let boc_series = econ_graph_crawler::reference::boc_series()?;
     econ_graph_crawler::sources::fred::validate_catalog_rules()?;
     let bea_rules = econ_graph_crawler::catalog_selection::bea_rules()?;
     // Alerts on rule matches join on the rules this worker loaded, so an edited rule's
@@ -174,6 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!(
         data_dir = %econ_graph_crawler::reference::data_dir().display(),
         bls_series = bls_series.len(),
+        boc_series = boc_series.len(),
         "reference data loaded"
     );
     // Shared reference data ($REFERENCE_DATA_DIR), e.g. the country table.

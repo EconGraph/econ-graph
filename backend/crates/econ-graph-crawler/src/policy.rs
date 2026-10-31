@@ -50,7 +50,10 @@ impl SourcePolicy {
     ///
     /// Rates for FRED (120/min), BLS (25/min), BEA (30/min) and Census (40/min) come from the
     /// legacy `enhanced_crawler_scheduler`; SEC uses 8/s (under SEC's 10/s fair-access limit,
-    /// matching the SEC crawler default); every other source gets 1 req/s with concurrency 2.
+    /// matching the SEC crawler default); the Bank of Canada gets 1 req/s with one request in
+    /// flight (Valet publishes no numeric limit, but its terms of use forbid circumventing the
+    /// Bank's request limits or overburdening the site, and its how-to guide asks clients to
+    /// start slow and wait before retrying); every other source gets 1 req/s with concurrency 2.
     /// Revision lookback: FRED 730 days, BLS 5 years (BLS revises seasonal factors for five
     /// years), everything else 365 days. Every source starts with `max_batch` 1; an adapter that
     /// implements batching raises it for its source: BEA fetches up to 64 series (a NIPA table's
@@ -107,6 +110,10 @@ impl SourcePolicy {
                 requests_per_second: 8.0,
                 burst: 8,
                 max_concurrency: 4,
+                ..base
+            },
+            SourceId::Boc => SourcePolicy {
+                max_concurrency: 1,
                 ..base
             },
             SourceId::Wto => SourcePolicy {
@@ -171,6 +178,16 @@ mod tests {
         let p = SourcePolicy::default_for(SourceId::Sec);
         assert_eq!(p.requests_per_second, 8.0);
         assert!(!p.needs_api_key);
+    }
+
+    #[test]
+    fn boc_is_one_per_second_one_at_a_time() {
+        let p = SourcePolicy::default_for(SourceId::Boc);
+        assert_eq!(p.requests_per_second, 1.0);
+        assert_eq!(p.burst, 1);
+        assert_eq!(p.max_concurrency, 1);
+        assert!(!p.needs_api_key);
+        assert_eq!(p.revision_lookback, DAY * 365);
     }
 
     #[test]

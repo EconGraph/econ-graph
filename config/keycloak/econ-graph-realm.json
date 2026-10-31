@@ -119,8 +119,7 @@
               "catalog.census:read",
               "catalog.world_bank:read",
               "catalog.bea:read",
-              "catalog.fhfa:read",
-              "catalog.boc:read"
+              "catalog.fhfa:read"
             ]
           }
         }
@@ -241,8 +240,8 @@
           "description": "Read the Reserve Bank of Australia (RBA) catalog"
         },
         {
-          "name": "catalog.boc:read",
-          "description": "Read the Bank of Canada (BoC) catalog"
+          "name": "catalog.bank_of_canada:read",
+          "description": "Read the Bank of Canada catalog"
         },
         {
           "name": "catalog.snb:read",
@@ -434,8 +433,7 @@
           "catalog.census:read",
           "catalog.world_bank:read",
           "catalog.bea:read",
-          "catalog.fhfa:read",
-          "catalog.boc:read"
+          "catalog.fhfa:read"
         ]
       }
     ]

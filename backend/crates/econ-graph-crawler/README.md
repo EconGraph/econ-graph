@@ -87,7 +87,8 @@ progress reporting, see the [re-fetch guide](../../../docs/technical/OBSERVATION
 The [licence gate](src/licence.rs) keeps the crawler from downloading a source that the
 maintainer has not decided to download. Sources whose terms restrict them are not all gated:
 FRED and WTO are downloaded and stored, and their catalogs are hidden from users through
-Keycloak catalog roles instead. The gate covers IMF, which the maintainer decided not to
+Keycloak catalog roles instead. The Bank of Canada, whose terms allow reuse with conditions, is
+downloaded and hidden the same way until those conditions are met, so it is not gated either. The gate covers IMF, which the maintainer decided not to
 download, and SNB, BOJ and UN_STATS, which have restrictive or unclear terms, no adapter and no
 decision to download them. Each gated source has a `crawl_<source>` build flag in
 [`flags.flagd.json`](../../../config/flags/flags.flagd.json), off in both the `release` and
@@ -126,7 +127,7 @@ change takes effect on the next build.
 
 ## Development-only static catalogs
 
-Nine hardcoded catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS) register behind
+Eight hardcoded catalogs (BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS) register behind
 the `static_catalogs` build flag; see [feature flags](../../../config/flags/README.md).
 They are on in the `dev` flag profile used by local Cargo builds and tests, and off in the
 `release` flag profile used by the Dockerfile and deployments. Cargo's `--release` option
