@@ -17,6 +17,14 @@ use econ_graph_core::database::DatabasePool;
 use econ_graph_core::enums::{CompressionType, ProcessingStatus};
 use econ_graph_core::models::{Company, FinancialStatement};
 
+/// An immutable accession cannot be silently reused for conflicting metadata or bytes.
+#[derive(Debug, thiserror::Error)]
+#[error("filing {kind} changed for accession {accession_number}; preserve the original filing identity and ingest a distinct amendment instead")]
+pub struct FilingIdentityConflict {
+    pub accession_number: String,
+    pub kind: &'static str,
+}
+
 /// Configuration for XBRL file storage
 #[derive(Debug, Clone)]
 pub struct XbrlStorageConfig {
@@ -183,60 +191,68 @@ impl XbrlStorage {
 
         // Serialize completion of an existing metadata-only row with competing crawls.
         // The accession and original row identity remain immutable.
-        let stored = conn.transaction::<FinancialStatement, anyhow::Error, _>(async move |conn| {
-            diesel::insert_into(financial_statements)
-                .values(&new_statement)
-                .on_conflict((company_id, accession_number))
-                .do_nothing()
-                .execute(conn)
-                .await
-                .context("Failed to insert financial statement")?;
-            let stored = financial_statements
-                .filter(company_id.eq(comp_id))
-                .filter(accession_number.eq(acc_num))
-                .for_update()
-                .select(FinancialStatement::as_select())
-                .first::<FinancialStatement>(conn)
-                .await
-                .context("Failed to read stored filing identity")?;
-            anyhow::ensure!(
-                stored.filing_date == filing_dt.date_naive()
-                    && stored.period_end_date == period_end_dt.date_naive()
-                    && stored.fiscal_year == fiscal_yr
-                    && stored.fiscal_quarter == fiscal_qtr
-                    && stored.form_type == form_typ.unwrap_or("10-K"),
-                "filing metadata changed for accession {acc_num}; preserve the original filing identity"
-            );
-            if stored.xbrl_file_hash.is_none()
-                && stored.xbrl_file_content.is_none()
-                && stored.xbrl_file_oid.is_none()
-            {
-                return diesel::update(financial_statements.find(stored.id))
-                    .set((
-                        xbrl_file_content.eq(new_statement.xbrl_file_content),
-                        xbrl_file_size_bytes.eq(new_statement.xbrl_file_size_bytes),
-                        xbrl_file_compressed.eq(new_statement.xbrl_file_compressed),
-                        xbrl_file_compression_type.eq(new_statement.xbrl_file_compression_type),
-                        xbrl_file_hash.eq(new_statement.xbrl_file_hash),
-                        document_url.eq(new_statement.document_url),
-                        xbrl_processing_status.eq(ProcessingStatus::Pending),
-                        xbrl_processing_error.eq(None::<String>),
-                        xbrl_processing_started_at.eq(None::<DateTime<Utc>>),
-                        xbrl_processing_completed_at.eq(None::<DateTime<Utc>>),
-                        updated_at.eq(Utc::now()),
-                    ))
-                    .returning(FinancialStatement::as_returning())
-                    .get_result(conn)
+        let stored = conn
+            .transaction::<FinancialStatement, anyhow::Error, _>(async move |conn| {
+                diesel::insert_into(financial_statements)
+                    .values(&new_statement)
+                    .on_conflict((company_id, accession_number))
+                    .do_nothing()
+                    .execute(conn)
                     .await
-                    .context("Failed to complete metadata-only filing");
-            }
-            anyhow::ensure!(
-                stored.xbrl_file_hash.as_deref() == Some(file_hash)
-                    && (stored.xbrl_file_content.is_some() || stored.xbrl_file_oid.is_some()),
-                "filing content changed for accession {acc_num}; preserve the original target and ingest a distinct amendment instead"
-            );
-            Ok(stored)
-        }).await?;
+                    .context("Failed to insert financial statement")?;
+                let stored = financial_statements
+                    .filter(company_id.eq(comp_id))
+                    .filter(accession_number.eq(acc_num))
+                    .for_update()
+                    .select(FinancialStatement::as_select())
+                    .first::<FinancialStatement>(conn)
+                    .await
+                    .context("Failed to read stored filing identity")?;
+                anyhow::ensure!(
+                    stored.filing_date == filing_dt.date_naive()
+                        && stored.period_end_date == period_end_dt.date_naive()
+                        && stored.fiscal_year == fiscal_yr
+                        && stored.fiscal_quarter == fiscal_qtr
+                        && stored.form_type == form_typ.unwrap_or("10-K"),
+                    FilingIdentityConflict {
+                        accession_number: acc_num.to_owned(),
+                        kind: "metadata"
+                    }
+                );
+                if stored.xbrl_file_hash.is_none()
+                    && stored.xbrl_file_content.is_none()
+                    && stored.xbrl_file_oid.is_none()
+                {
+                    return diesel::update(financial_statements.find(stored.id))
+                        .set((
+                            xbrl_file_content.eq(new_statement.xbrl_file_content),
+                            xbrl_file_size_bytes.eq(new_statement.xbrl_file_size_bytes),
+                            xbrl_file_compressed.eq(new_statement.xbrl_file_compressed),
+                            xbrl_file_compression_type.eq(new_statement.xbrl_file_compression_type),
+                            xbrl_file_hash.eq(new_statement.xbrl_file_hash),
+                            document_url.eq(new_statement.document_url),
+                            xbrl_processing_status.eq(ProcessingStatus::Pending),
+                            xbrl_processing_error.eq(None::<String>),
+                            xbrl_processing_started_at.eq(None::<DateTime<Utc>>),
+                            xbrl_processing_completed_at.eq(None::<DateTime<Utc>>),
+                            updated_at.eq(Utc::now()),
+                        ))
+                        .returning(FinancialStatement::as_returning())
+                        .get_result(conn)
+                        .await
+                        .context("Failed to complete metadata-only filing");
+                }
+                anyhow::ensure!(
+                    stored.xbrl_file_hash.as_deref() == Some(file_hash)
+                        && (stored.xbrl_file_content.is_some() || stored.xbrl_file_oid.is_some()),
+                    FilingIdentityConflict {
+                        accession_number: acc_num.to_owned(),
+                        kind: "content"
+                    }
+                );
+                Ok(stored)
+            })
+            .await?;
 
         Ok(StoredXbrlDocument {
             id: stored.id,
@@ -424,7 +440,8 @@ impl XbrlStorage {
                 .for_update()
                 .select(financial_statements::id)
                 .first::<Uuid>(conn)
-                .await?;
+                .await
+                .context("DTS target filing not found")?;
             let exists = refs::table
                 .filter(refs::statement_id.eq(statement_id))
                 .filter(refs::reference_type.eq(&reference.reference_type))
@@ -707,7 +724,7 @@ mod tests {
             let storage = XbrlStorage::new(pool.clone(), XbrlStorageConfig::default());
             let reference = reference();
 
-            // No statement exists for this ID: only the second insert should fail.
+            // A missing parent is rejected before any taxonomy writes.
             let error = storage
                 .store_taxonomy_component(
                     &reference,
@@ -717,15 +734,59 @@ mod tests {
                 )
                 .await
                 .unwrap_err();
+            assert!(error.to_string().contains("DTS target filing not found"));
+            assert!(matches!(
+                error.downcast_ref::<diesel::result::Error>(),
+                Some(diesel::result::Error::NotFound)
+            ));
+
+            let company = Uuid::new_v4();
+            let mut conn = pool.get().await.unwrap();
+            diesel::insert_into(companies::table)
+                .values((
+                    companies::id.eq(company),
+                    companies::cik.eq("0009999901"),
+                    companies::name.eq("Rollback fixture"),
+                ))
+                .execute(&mut conn)
+                .await
+                .unwrap();
+            drop(conn);
+            let now = Utc::now();
+            let filing = storage
+                .store_xbrl_file(
+                    "0009999901-24-000001",
+                    b"original",
+                    company,
+                    now,
+                    now,
+                    2024,
+                    None,
+                    Some("10-K"),
+                    None,
+                )
+                .await
+                .unwrap();
+            // The parent and taxonomy insert succeed; an overlong reference type fails
+            // the subsequent DTS insert and must roll back the taxonomy row as well.
+            let invalid_reference = crate::models::DtsReference {
+                reference_type: "x".repeat(21),
+                ..reference.clone()
+            };
+            let error = storage
+                .store_taxonomy_component(
+                    &invalid_reference,
+                    b"<schema/>",
+                    &reference.reference_href,
+                    &filing.id,
+                )
+                .await
+                .unwrap_err();
             assert!(error.to_string().contains("Failed to insert DTS reference"));
             assert!(matches!(
                 error.downcast_ref::<diesel::result::Error>(),
-                Some(diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::ForeignKeyViolation,
-                    _
-                ))
+                Some(diesel::result::Error::DatabaseError(_, _))
             ));
-
             let mut conn = pool.get().await.unwrap();
             let schemas: i64 = xbrl_taxonomy_schemas::table
                 .count()

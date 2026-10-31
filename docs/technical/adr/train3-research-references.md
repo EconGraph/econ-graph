@@ -36,7 +36,7 @@ adds a canonical statement key within one filing. Existing financial notes lack
 portable period/namespace/context metadata, so their adapter preserves the exact
 statement and optional line-item UUID in `LegacyFinancial`. It must resolve by
 stored UUID, never by choosing the newest filing or guessing a matching concept.
-The chart adapter preserves its stored series UUID, chart association, date and exact nullable decimal position.
+The chart adapter preserves its stored series UUID, chart association, date and exact nullable decimal position. On the wire, `observation_value` is a decimal string or null (an omitted field also means null). Numeric JSON is rejected to prevent precision loss before validation.
 No shared-annotation table migration or cross-plane foreign key is required.
 
 SEC bytea ingestion now treats a repeated company/accession as idempotent only
