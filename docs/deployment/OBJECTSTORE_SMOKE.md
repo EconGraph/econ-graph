@@ -158,3 +158,7 @@ capacity gates. This smoke report alone does not authorize replacing production 
 - [Garage configuration, fsync and optional metadata snapshots](https://garagehq.deuxfleurs.fr/documentation/reference-manual/configuration/)
 
 - [Rust object_store S3 conditional-put behavior](https://docs.rs/object_store/latest/object_store/aws/enum.S3ConditionalPut.html)
+
+Persistent host candidates and the acceptance-gated installer are documented in
+[Host object-store setup](OBJECTSTORE_HOST.md). Both forms remain explicit choices; rendering
+those files never installs or starts a service.
