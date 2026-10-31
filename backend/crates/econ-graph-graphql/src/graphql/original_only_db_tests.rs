@@ -14,7 +14,6 @@ use chrono::NaiveDate;
 use econ_graph_core::models::{
     DataPoint, DataQueryParams, EconomicSeries, NewDataPoint, NewDataSource, NewEconomicSeries,
 };
-use serde_json::Value;
 use std::str::FromStr;
 
 async fn db() -> Option<DatabasePool> {
@@ -198,9 +197,8 @@ async fn a_synthetic_legacy_row_does_not_hide_a_real_original_published_before_i
                 ("2019-01-01", "2018-12-01"),
             ]),
         ),
-        // originalOnly, latest: the newest real original of each date. Before ECO-805 the
-        // 2019-01-01 date disappeared here: its synthetic row hid the real original, and was then
-        // excluded itself.
+        // originalOnly, latest: the newest real original of each date. On 2019-01-01 that is
+        // the original before the date, which the synthetic row must not hide.
         (
             "originalOnly: true, latestRevisionOnly: true",
             true,
@@ -208,9 +206,8 @@ async fn a_synthetic_legacy_row_does_not_hide_a_real_original_published_before_i
             None,
             expect(&[("2018-01-01", "2019-05-01"), ("2019-01-01", "2018-12-01")]),
         ),
-        // originalOnly as of a day before the later releases: the original known then. Before
-        // ECO-805 both dates disappeared here: the synthetic row hid the real original, and was
-        // then excluded itself.
+        // originalOnly as of a day before the later releases: the original known then, on both
+        // dates, though each date's synthetic row is newer than it.
         (
             r#"originalOnly: true, asOf: "2019-03-01""#,
             true,

@@ -353,7 +353,8 @@ pub fn revision_filter(
 ///
 /// Without this, an original release published before its observation date (a projection,
 /// say) loses to the synthetic row for that date, which is newer; the synthetic row is then
-/// excluded too, and the date disappears from `originalOnly` and `asOf` reads.
+/// excluded too, and the date disappears from `originalOnly` reads with `asOf` or
+/// `latestRevisionOnly`, and from `asOf` reads.
 pub fn revision_filter_excluding_synthetic(
     as_of: Option<NaiveDate>,
     original_only: bool,
