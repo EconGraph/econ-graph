@@ -151,12 +151,9 @@ def add_public_targets(doc):
                 names.add(public)
 
 
-def add_cors_origin(doc, host):
-    # Production keeps both public names during canonical-host changes and the
-    # same-origin localhost listener, without a localhost development-server port.
-    doc.setdefault("data", {})["CORS_ORIGIN"] = (
-        f"https://{host},https://www.{host},http://localhost"
-    )
+def set_cors_origin(doc, host):
+    origins = [f"https://{host}", f"https://www.{host}", "http://localhost"]
+    doc.setdefault("data", {})["CORS_ORIGIN"] = ",".join(origins)
 
 
 def render(doc, host, main_host, present=()):
@@ -183,7 +180,7 @@ def render(doc, host, main_host, present=()):
     elif kind in ("Deployment", "StatefulSet", "Job"):
         set_env(doc, main_host)
     elif kind == "ConfigMap" and meta.get("name") == "econ-graph-config":
-        add_cors_origin(doc, host)
+        set_cors_origin(doc, host)
     return [doc]
 
 

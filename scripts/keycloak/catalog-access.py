@@ -184,8 +184,8 @@ def plan_and_apply(kc, role_name, mode, dry_run, out):
         # Until the change is made only the client scopes are known for certain.
         warn_leaks(leaks(False), "currently ")
         if mode != "public" and anonymous and holds(scope_path) and holds(scope_path + "/composite"):
-            out("note: whether anything but the direct mapping admits %s on the %s scope shows only "
-                "after the change; the real run checks it" % (role_name, ANONYMOUS_CLIENT))
+            out("note: the real run also checks the %s scope for other mappings that admit %s"
+                % (ANONYMOUS_CLIENT, role_name))
         return len(steps)
     # Read back every grant the change set.
     wrong = []

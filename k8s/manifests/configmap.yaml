@@ -17,7 +17,8 @@ data:
   RUST_LOG: "info"
   # Browsers send Origin on same-origin POSTs too, and the backend refuses any origin not
   # listed, so the origin the app is served from (http://localhost on the kind ingress) must
-  # be here. deploy.sh prepends https://<PUBLIC_HOST> when one is set.
+  # be here. With a public host, deploy.sh replaces this list with the public origin, its www
+  # name and http://localhost (scripts/deploy/render-public-host.py).
   CORS_ORIGIN: "http://localhost,http://localhost:3000"
 
   # Chart API Service configuration

@@ -1455,6 +1455,7 @@ mod empty_series_tests {
                 dataset_id,
                 dimensions: Default::default(),
                 default_measure: None,
+                units_source: None,
             },
         )
         .await
@@ -1481,6 +1482,7 @@ mod empty_series_tests {
                 dataset_id,
                 dimensions: Default::default(),
                 default_measure: None,
+                units_source: None,
             },
         )
         .await
@@ -1590,6 +1592,7 @@ mod empty_series_tests {
                     dataset_id,
                     dimensions: Default::default(),
                     default_measure: None,
+                    units_source: None,
                 },
             )
             .await
@@ -1702,6 +1705,7 @@ mod empty_series_tests {
                 dataset_id,
                 dimensions: Default::default(),
                 default_measure: None,
+                units_source: None,
             },
         )
         .await

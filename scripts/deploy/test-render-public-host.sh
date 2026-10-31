@@ -6,7 +6,8 @@
 # hostname and the backend's issuer agree on https://<host>/idp/realms/econ-graph, the
 # JWKS stays in-cluster, the realm import allows the public origin only (the committed
 # manifests keep localhost), CORS
-# gains the origin once, and bad host names are refused.
+# allows the public and www origins and http://localhost but not :3000 (the committed ConfigMap
+# keeps both localhost origins), and bad host names are refused.
 #
 # Needs python3 with PyYAML. Usage: scripts/deploy/test-render-public-host.sh
 set -euo pipefail
@@ -93,10 +94,17 @@ check "the realm import resets its frontend URL to the canonical IdP" \
   "env('Job', 'keycloak-realm-import', 'render-realm', 'KC_REALM_FRONTEND_URL') == 'https://www.econgraph.com/idp'"
 check "the realm import allows the public origin only" \
   "env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_BASE_URL') == 'https://www.econgraph.com' and env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_E2E_BASE_URL') == 'https://www.econgraph.com'"
-check "CORS allows the public origin first and keeps the local one" \
+check "CORS allows both public origins and on-host localhost, without :3000" \
   "docs[('ConfigMap', 'econ-graph-config')]['data']['CORS_ORIGIN'] == 'https://econgraph.com,https://www.econgraph.com,http://localhost'"
 check "cloudflared is untouched (0 replicas, as committed)" \
   "docs[('Deployment', 'cloudflared')]['spec']['replicas'] == 0"
+
+# Without a public host (the committed ConfigMap: local clusters), CORS keeps localhost.
+python3 -c '
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d["metadata"]["name"] == "econ-graph-config"]
+sys.exit(0 if docs[0]["data"]["CORS_ORIGIN"] == "http://localhost,http://localhost:3000" else 1)
+' "$manifests/configmap.yaml" || fail "the committed CORS_ORIGIN lost localhost"
 
 # Rendering twice changes nothing more (deploy.sh may be re-run on rendered output).
 twice="$("$render" econgraph.com - <<<"$rendered")"
