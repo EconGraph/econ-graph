@@ -31,7 +31,9 @@ request; an include override needs one `/series` request. So a chunk makes at mo
 requests, under FRED's rate limit, which it shares with fetch jobs. One finalize job commits
 the whole catalog. The run's catalog scope is the selection rules' fingerprint, the same one a
 single walk reports, computed from `fred.toml` without a walk; if the rules can't be read the
-discovery is refused and nothing changes.
+discovery is refused and nothing changes. Setting `CRAWLER_SINGLE_JOB_DISCOVERY_SOURCES=FRED` on
+the worker discovers FRED with a single job instead; see the
+[crawler deployment guide](../technical/CRAWLER_DEPLOYMENT_GUIDE.md#run-the-worker).
 The default scope is GDP release series plus headline overrides, including the NBER
 recession indicator (`USREC`) and probes for two previously curated retired ids. `expected_missing` explicitly exempts those known retired
 probes from the unexpected-missing warning, while keeping their lifecycle evidence. An

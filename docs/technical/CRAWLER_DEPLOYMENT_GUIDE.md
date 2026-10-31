@@ -80,6 +80,18 @@ Configuration (flags or environment):
 | `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY`, `WTO_API_KEY` | unset | from Secret `crawler-api-keys`; the worker starts without them, but FRED, BEA and Census jobs fail with an auth error when their key is missing. Without `WTO_API_KEY` the worker leaves the WTO source out entirely (no discovery, refreshes or coverage gauges) and logs a warning at startup |
 | `CRAWLER_SCHEDULER` | true | enqueue due refreshes and catalog discovery in the background (see below); `false` disables it, leaving `triggerCrawl` / the CLI as the only way to enqueue work |
 | `CRAWLER_SCHEDULER_INTERVAL_SECS` | 300 | seconds between scheduler ticks |
+| `CRAWLER_SINGLE_JOB_DISCOVERY_SOURCES` | unset | comma-separated sources to discover with a single `discover_catalog` job even though their adapter discovers in chunks (today only FRED does); see below |
+
+To switch a source between chunked and single-job catalog discovery, set or clear
+`CRAWLER_SINGLE_JOB_DISCOVERY_SOURCES` on the `crawler-worker` Deployment and let it restart,
+for example `kubectl -n econ-graph set env deployment/crawler-worker
+CRAWLER_SINGLE_JOB_DISCOVERY_SOURCES=FRED` to discover FRED by single job, and
+`kubectl -n econ-graph set env deployment/crawler-worker CRAWLER_SINGLE_JOB_DISCOVERY_SOURCES-`
+to return it to chunks. Switching is safe at any time. With the source listed, a chunk or
+finalize job of a run already in progress fails that run, and the source's next discovery
+supersedes any run still in progress before it walks, so a run never commits after a single-job
+discovery. With the source no longer listed, its next discovery starts a run. Either way each
+discovery commits once, from one catalog; `crawler status` shows the source's newest run.
 
 The crawler reads its selection files and dataset definitions from `CRAWLER_DATA_DIR`,
 which defaults to `backend/crates/econ-graph-crawler/data/` in a source checkout.

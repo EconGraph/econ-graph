@@ -48,11 +48,16 @@ fn gdp_ids() -> Vec<String> {
 /// Mounts the release catalog (the GDP rows, a copyright-restricted GDP row and an unrelated
 /// row) and the include overrides' `/series` answers.
 async fn mount_fred(mock: &MockSource, gdp: &[String]) {
+    mount_fred_titled(mock, gdp, "").await;
+}
+
+/// [`mount_fred`], with `suffix` appended to every GDP row's title (a catalog that changed).
+async fn mount_fred_titled(mock: &MockSource, gdp: &[String], suffix: &str) {
     let mut rows: Vec<serde_json::Value> = gdp
         .iter()
         .map(|id| {
             serde_json::json!({
-                "id": id, "title": format!("Gross Domestic Product {id}"),
+                "id": id, "title": format!("Gross Domestic Product {id}{suffix}"),
                 "frequency": "Quarterly", "units": "Billions of Dollars",
                 "notes": "BEA account."
             })
@@ -420,7 +425,18 @@ async fn outcome(pool: &DatabasePool) -> Outcome {
 }
 
 /// Two discoveries, the second after `T756GDP07` left the release, on one path.
-async fn two_discoveries(pool: &DatabasePool, chunked: bool) -> Outcome {
+/// How a test worker discovers FRED.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// An adapter that can't chunk: single-job discovery, as before chunking existed.
+    SingleJobAdapter,
+    /// FRED's own chunked discovery.
+    Chunked,
+    /// FRED's adapter, with the worker's switch set to single-job discovery for FRED.
+    SwitchedOff,
+}
+
+async fn two_discoveries(pool: &DatabasePool, mode: Mode) -> Outcome {
     reset(pool).await;
     let mock = MockSource::start().await;
     let mut gdp = gdp_ids();
@@ -428,12 +444,15 @@ async fn two_discoveries(pool: &DatabasePool, chunked: bool) -> Outcome {
     let fred = FredAdapter::new(mock.base_url())
         .with_catalog_rules_text(RULES)
         .with_units_per_chunk(4);
-    let adapter: Arc<dyn SourceAdapter> = if chunked {
-        Arc::new(fred)
-    } else {
+    let adapter: Arc<dyn SourceAdapter> = if mode == Mode::SingleJobAdapter {
         Arc::new(SingleJob(fred))
+    } else {
+        Arc::new(fred)
     };
-    let w = worker(pool, adapter);
+    let mut w = worker(pool, adapter);
+    if mode == Mode::SwitchedOff {
+        w = w.with_single_job_discovery(vec![SourceId::Fred]);
+    }
     sync(pool, &w).await;
     enqueue_discovery(pool).await;
     drain(&w).await;
@@ -452,8 +471,8 @@ async fn two_discoveries(pool: &DatabasePool, chunked: bool) -> Outcome {
 async fn chunked_fred_discovery_matches_single_job_discovery() {
     let Some(db) = db().await else { return };
     let p = &db.pool;
-    let single = two_discoveries(p, false).await;
-    let chunked = two_discoveries(p, true).await;
+    let single = two_discoveries(p, Mode::SingleJobAdapter).await;
+    let chunked = two_discoveries(p, Mode::Chunked).await;
     assert_eq!(chunked, single);
 
     let (metadata, lifecycle, scope) = chunked;
@@ -767,4 +786,131 @@ async fn chunk_requests_obey_freds_rate_limit() {
         "{:?}",
         started.elapsed()
     );
+}
+
+// ---------------------------------------------------------------------------
+// The single-job switch
+// ---------------------------------------------------------------------------
+
+/// With the switch set for FRED, discovery is single-job, exactly as an adapter that can't
+/// chunk: no run, and the same metadata, lifecycle and scope.
+#[tokio::test]
+async fn the_switch_set_discovers_fred_by_single_job_unchanged() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    let single = two_discoveries(p, Mode::SingleJobAdapter).await;
+    let switched = two_discoveries(p, Mode::SwitchedOff).await;
+    assert_eq!(switched, single);
+    assert!(runs(p).await.is_empty(), "no discovery run");
+}
+
+/// Title of the series `T756GDP01` as stored.
+async fn title_of_gdp01(pool: &DatabasePool) -> String {
+    metadata(pool)
+        .await
+        .into_iter()
+        .find(|m| m.external_id == "T756GDP01")
+        .map(|m| m.title)
+        .unwrap_or_default()
+}
+
+/// A run started in chunks, the switch set for FRED mid-run, a single-job discovery, then the
+/// switch cleared again with the run's jobs still around: the run is superseded and never
+/// commits, so the catalog is the single-job discovery's alone (the run had read the catalog
+/// before it changed, which would show as an older title). Covers a run still `running` and one
+/// already `finalizing`.
+#[tokio::test]
+async fn switching_to_single_job_mid_run_never_commits_the_run() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    for finalizing in [false, true] {
+        reset(p).await;
+        let mock = MockSource::start().await;
+        mount_fred(&mock, &gdp_ids()).await;
+        let fred = || {
+            FredAdapter::new(mock.base_url())
+                .with_catalog_rules_text(RULES)
+                .with_units_per_chunk(4)
+        };
+        let chunked = worker(p, Arc::new(fred()));
+        sync(p, &chunked).await;
+        enqueue_discovery(p).await;
+        // Enumerate, then two chunks, or every chunk.
+        let jobs = if finalizing { 1 + 6 } else { 1 + 2 };
+        for _ in 0..jobs {
+            assert!(matches!(
+                chunked.run_once().await,
+                Some(JobOutcome::Completed(_))
+            ));
+        }
+        let expected = if finalizing { "finalizing" } else { "running" };
+        assert_eq!(runs(p).await[0].0, expected);
+
+        // The catalog changes; the switch is set; a single-job discovery runs first.
+        mock.reset().await;
+        mount_fred_titled(&mock, &gdp_ids(), " (revised)").await;
+        let single = worker(p, Arc::new(fred())).with_single_job_discovery(vec![SourceId::Fred]);
+        CrawlQueueItem::enqueue(
+            p,
+            &NewCrawlQueueItem {
+                source: "FRED".into(),
+                series_id: "catalog".into(),
+                priority: 9,
+                max_retries: 3,
+                scheduled_for: None,
+                kind: JobKind::DiscoverCatalog.as_str().to_string(),
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(matches!(
+            single.run_once().await,
+            Some(JobOutcome::Completed(_))
+        ));
+        let fresh = title_of_gdp01(p).await;
+        assert!(fresh.ends_with("(revised)"), "{fresh}");
+
+        // The switch is cleared again: whatever is left of the run must not commit.
+        drain(&chunked).await;
+        assert_eq!(title_of_gdp01(p).await, fresh, "finalizing={finalizing}");
+        assert_eq!(runs(p).await[0].0, "superseded", "finalizing={finalizing}");
+        assert_eq!(runs(p).await.len(), 1);
+    }
+}
+
+/// The other direction. A run in progress whose chunk is claimed by a worker with the switch
+/// set fails cleanly and commits nothing; with the switch cleared, the next discovery runs in
+/// chunks and commits once.
+#[tokio::test]
+async fn switching_back_to_chunks_runs_the_next_discovery_in_chunks() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    let mock = MockSource::start().await;
+    mount_fred(&mock, &gdp_ids()).await;
+    let fred = || {
+        FredAdapter::new(mock.base_url())
+            .with_catalog_rules_text(RULES)
+            .with_units_per_chunk(4)
+    };
+    let chunked = worker(p, Arc::new(fred()));
+    let single = worker(p, Arc::new(fred())).with_single_job_discovery(vec![SourceId::Fred]);
+    sync(p, &chunked).await;
+    enqueue_discovery(p).await;
+    chunked.run_once().await.unwrap();
+    assert!(matches!(
+        single.run_once().await,
+        Some(JobOutcome::Failed { .. })
+    ));
+    drain(&single).await;
+    assert_eq!(runs(p).await[0].0, "failed");
+    assert_eq!(accepted_scope(p).await, None, "nothing reconciled");
+    assert!(metadata(p).await.is_empty(), "nothing committed");
+
+    enqueue_discovery(p).await;
+    drain(&chunked).await;
+    let all = runs(p).await;
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[1].0, "complete");
+    assert_eq!(accepted_scope(p).await, Some((rules_scope(), false)));
 }

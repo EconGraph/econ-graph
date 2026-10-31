@@ -703,11 +703,7 @@ impl FredAdapter {
                 Err(error) => return Err(error),
             }
         }
-        if selected.is_empty() {
-            return Err(CrawlError::Transient(
-                "FRED catalog selection is empty; refusing to infer removals".into(),
-            ));
-        }
+        crate::lifecycle::refuse_empty_selection(SourceId::Fred, selected.len())?;
         facts.unselected_ids = walked
             .into_iter()
             .filter(|id| !selected.contains_key(id))
@@ -1202,11 +1198,7 @@ impl SourceAdapter for FredAdapter {
                 ));
             }
         }
-        if units.is_empty() {
-            return Err(CrawlError::Transient(
-                "FRED catalog selection is empty; refusing to infer removals".into(),
-            ));
-        }
+        crate::lifecycle::refuse_empty_selection(SourceId::Fred, units.len())?;
         let lifecycle = CatalogLifecycle {
             unselected_ids: walked
                 .into_iter()

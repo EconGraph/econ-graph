@@ -82,9 +82,30 @@ impl Worker {
         &self,
         source: SourceId,
     ) -> Option<(Arc<dyn SourceAdapter>, ChunkedDiscovery)> {
+        if self.single_job_discovery.contains(&source) {
+            return None;
+        }
         let adapter = self.registry.get(source)?;
         let settings = adapter.chunked_discovery()?;
         Some((adapter, settings))
+    }
+
+    /// Before a single-job discovery of a source this worker discovers by single job though
+    /// its adapter could chunk: supersedes any run of it still in progress (one started before
+    /// the switch), so that run never commits on top of this discovery. Nothing for any other
+    /// source.
+    pub(super) async fn supersede_runs_for_single_job(&self, source: SourceId) -> Fetched {
+        if self.single_job_discovery.contains(&source) {
+            let superseded = discovery_run::supersede_active_runs(&self.ctx.pool, source)
+                .await
+                .map_err(db_error)?;
+            if superseded > 0 {
+                discovery_run::publish(source, &RunEvent::Superseded(superseded));
+                tracing::info!(%source, superseded,
+                    "single-job discovery superseded discovery runs in progress");
+            }
+        }
+        Ok(JobWrite::DiscoveryUnchanged)
     }
 
     fn max_retries(&self, source: SourceId) -> i32 {
@@ -286,6 +307,10 @@ impl Worker {
         let catalog = discovery_run::assemble(&self.ctx.pool, &run)
             .await
             .map_err(db_error)?;
+        // An empty catalog is refused as a single walk refuses it: it reconciles nothing.
+        if adapter.tracks_catalog_lifecycle() {
+            crate::lifecycle::refuse_empty_selection(source, catalog.found.len())?;
+        }
         let validator = run.validator().map_err(db_error)?;
         // The run's own facts, never the adapter's in-memory ones: this worker may not have
         // walked anything, and the run's chunks may have been discovered on several workers.
