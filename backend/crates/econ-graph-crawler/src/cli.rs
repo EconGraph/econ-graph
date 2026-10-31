@@ -51,6 +51,7 @@ use crate::adapter::{AdapterRegistry, ApiKeys, CrawlCtx, SourceAdapter};
 use crate::coverage::{covered_sources, crawl_coverage, SourceCoverage};
 use crate::dataset::DatasetCatalog;
 use crate::http::{HttpConfig, HttpFetcher};
+use crate::licence;
 use crate::persist;
 use crate::policy::SourcePolicy;
 use crate::reference_file;
@@ -227,6 +228,28 @@ pub enum Command {
     },
 }
 
+impl Command {
+    /// The sources whose upstream this command crawls, or queues a crawl of. `refetch --all`
+    /// leaves gated sources out in [`SourceSelection::resolve`].
+    fn upstream_sources(&self) -> Vec<SourceId> {
+        match self {
+            Command::Enqueue { source, .. }
+            | Command::Discover { source, .. }
+            | Command::Fetch { source, .. }
+            | Command::RecordReferenceSeeds { source, .. } => vec![*source],
+            Command::Refetch { sources, .. } => sources.source.clone(),
+            // Read-only, or stored data only with no upstream request: nothing to gate.
+            Command::AcceptGuardedCatalog { .. }
+            | Command::ConfirmSuccessor { .. }
+            | Command::RefetchStatus { .. }
+            | Command::Status { .. }
+            | Command::Coverage { .. }
+            | Command::Sources
+            | Command::Migrate { .. } => Vec::new(),
+        }
+    }
+}
+
 /// The sources a `refetch` / `refetch-status` command covers.
 #[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
 #[group(required = true, multiple = false)]
@@ -244,13 +267,17 @@ impl SourceSelection {
     /// The selected sources, sorted and de-duplicated. A named source must be one the refresh
     /// scheduler refreshes (it has an adapter that fetches series).
     pub fn resolve(&self, registry: &AdapterRegistry) -> anyhow::Result<Vec<SourceId>> {
-        let fetchable = covered_sources(&registry.ids());
+        let mut fetchable = covered_sources(&registry.ids());
+        fetchable.retain(|&s| licence::allows(s));
         if self.all {
             return Ok(fetchable);
         }
         let mut out = self.source.clone();
         out.sort_unstable();
         out.dedup();
+        for &source in &out {
+            licence::check(source)?;
+        }
         if let Some(bad) = out.iter().find(|s| !fetchable.contains(s)) {
             bail!("{bad} has no adapter that fetches series; refetchable sources: {fetchable:?}");
         }
@@ -311,7 +338,13 @@ pub fn new_job(
 }
 
 /// Enqueues `jobs`; returns how many were inserted (jobs with an active duplicate are skipped).
+/// Refuses, inserting nothing, if any job is for a [licence-gated](crate::licence) source.
 pub async fn enqueue_all(pool: &DatabasePool, jobs: &[NewCrawlQueueItem]) -> anyhow::Result<usize> {
+    for job in jobs {
+        if let Ok(source) = job.source.parse::<SourceId>() {
+            licence::check(source)?;
+        }
+    }
     let mut inserted = 0;
     for job in jobs {
         match CrawlQueueItem::enqueue(pool, job).await? {
@@ -350,6 +383,9 @@ impl Cli {
     pub async fn execute(self) -> anyhow::Result<String> {
         if self.command == Command::Sources {
             return Ok(format_sources(&default_registry(), &ApiKeys::from_env()));
+        }
+        for source in self.command.upstream_sources() {
+            licence::check(source)?;
         }
         if let Command::RecordReferenceSeeds {
             source,
@@ -838,9 +874,16 @@ pub fn format_status(s: &CrawlerStatusSnapshot) -> String {
             "SOURCE", "PENDING", "PROCESSING", "RETRYING", "FAILED/24H"
         );
         for p in &s.per_source {
+            // A licence-gated source's queued jobs are never claimed, so say why they wait.
+            let gated = p
+                .source
+                .parse::<SourceId>()
+                .ok()
+                .and_then(licence::blocking)
+                .map_or_else(String::new, |g| format!("  ({}; not claimed)", g.label()));
             let _ = writeln!(
                 out,
-                "{:<12} {:>8} {:>10} {:>9} {:>10}  {}",
+                "{:<12} {:>8} {:>10} {:>9} {:>10}  {}{gated}",
                 p.source,
                 p.pending,
                 p.processing,
@@ -939,13 +982,14 @@ pub fn format_coverage(rows: &[SourceCoverage]) -> String {
     out
 }
 
-/// Text rendering of every [`SourceId`] with its policy, adapter and API key state.
+/// Text rendering of every [`SourceId`] with its policy, adapter, whether this build may crawl it
+/// (`disabled: licence (<ticket>)` for a [licence-gated](crate::licence) source) and API key state.
 pub fn format_sources(registry: &AdapterRegistry, keys: &ApiKeys) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "{:<12} {:>8} {:>6} {:>5} {:>8}  {:<8} API KEY",
-        "SOURCE", "REQ/MIN", "BURST", "CONC", "RETRIES", "ADAPTER"
+        "{:<12} {:>8} {:>6} {:>5} {:>8}  {:<8} {:<28} API KEY",
+        "SOURCE", "REQ/MIN", "BURST", "CONC", "RETRIES", "ADAPTER", "CRAWL"
     );
     for id in SourceId::ALL {
         let adapter = registry.get(id);
@@ -969,15 +1013,17 @@ pub fn format_sources(registry: &AdapterRegistry, keys: &ApiKeys) -> String {
             None if policy.needs_api_key => "required (no env var)".to_string(),
             None => "-".to_string(),
         };
+        let crawl = licence::blocking(id).map_or_else(|| "enabled".to_string(), |g| g.label());
         let _ = writeln!(
             out,
-            "{:<12} {:>8.1} {:>6} {:>5} {:>8}  {:<8} {}",
+            "{:<12} {:>8.1} {:>6} {:>5} {:>8}  {:<8} {:<28} {}",
             id.as_str(),
             policy.requests_per_second * 60.0,
             policy.burst,
             policy.max_concurrency,
             policy.max_retries,
             if adapter.is_some() { "yes" } else { "no" },
+            crawl,
             key
         );
     }
