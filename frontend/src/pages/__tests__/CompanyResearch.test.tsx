@@ -2,6 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import CompanyResearch from '../CompanyResearch';
+import { downloadCsv } from '../../utils/seriesCsv';
 const state = vi.hoisted(() => ({
   cik: '0000320193' as string | undefined,
   mode: 'LATEST',
@@ -9,6 +10,13 @@ const state = vi.hoisted(() => ({
   lines: [] as unknown[],
   unclassified: [] as unknown[],
   unavailable: [] as unknown[],
+  nextUnclassified: [] as any[],
+  otherHasNext: false,
+  otherAfter: null as string | null,
+  historyAfter: null as string | null,
+  historyHasNext: false,
+  historyNodes: [] as any[],
+  nextHistory: [] as any[],
 }));
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ cik: state.cik }),
@@ -57,8 +65,52 @@ vi.mock('../../graphql/companyResearch', () => ({
       data: {
         kind: 'INCOME_STATEMENT',
         lines: state.lines,
-        unclassifiedFacts: state.unclassified,
+        periods: [...state.lines, ...state.unclassified, ...state.nextUnclassified].map(
+          (item: any) => ({
+            start: item.periodStart,
+            end: item.periodEnd,
+            kind: item.periodStart ? 'duration' : 'instant',
+          })
+        ),
         unavailableDerivations: state.unavailable,
+      },
+    };
+  },
+  useCompanyOtherFacts: (
+    _cik: any,
+    _revision: any,
+    _start: any,
+    _end: any,
+    after: string | null
+  ) => {
+    state.otherAfter = after;
+    return {
+      isPending: false,
+      isError: false,
+      data: {
+        unclassifiedFacts: after ? state.nextUnclassified : state.unclassified,
+        unclassifiedHasNextPage: !after && state.otherHasNext,
+        unclassifiedEndCursor: !after && state.otherHasNext ? '100' : null,
+      },
+    };
+  },
+  useCompanyFactHistory: (_cik: any, line: any, _revision: any, after: string | null) => {
+    state.historyAfter = after;
+    return {
+      isPending: false,
+      isError: false,
+      data: {
+        nodes: after
+          ? state.nextHistory
+          : state.historyNodes.length
+            ? state.historyNodes
+            : state.unclassified.map((item: any) => ({
+                ...item,
+                accession: item.provenance[0].accession,
+                filed: item.provenance[0].filed,
+              })),
+        hasNextPage: !after && state.historyHasNext,
+        endCursor: !after && state.historyHasNext ? '100' : null,
       },
     };
   },
@@ -113,6 +165,13 @@ beforeEach(() => {
   state.statementError = false;
   state.lines = [line];
   state.unclassified = [];
+  state.nextUnclassified = [];
+  state.otherHasNext = false;
+  state.otherAfter = null;
+  state.historyAfter = null;
+  state.historyHasNext = false;
+  state.historyNodes = [];
+  state.nextHistory = [];
   state.unavailable = [];
 });
 describe('company research page', () => {
@@ -198,6 +257,67 @@ describe('company research page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Chart Revenue' }));
     expect(screen.getByText(/This note target is unavailable/)).toBeInTheDocument();
     expect(screen.queryByTestId('company-notes')).not.toBeInTheDocument();
+  });
+  it('pages other facts without hiding later values or changing the economic period', () => {
+    const first = {
+      ...line,
+      key: 'other-a',
+      concept: 'OtherA',
+      label: 'Other A',
+      value: '123.456789',
+    };
+    const next = {
+      ...line,
+      key: 'other-b',
+      concept: 'OtherB',
+      label: 'Other B',
+      value: '987.654321',
+    };
+    state.unclassified = [first];
+    state.nextUnclassified = [next];
+    state.otherHasNext = true;
+    render(<CompanyResearch />);
+    expect(screen.getByRole('button', { name: 'Chart Other A' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next other facts' }));
+    expect(state.otherAfter).toBe('100');
+    expect(screen.queryByRole('button', { name: 'Chart Other A' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chart Other B' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Period' })).toHaveTextContent(
+      '2024-01-01 – 2024-12-31'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Previous other facts' }));
+    expect(state.otherAfter).toBeNull();
+    expect(screen.getByRole('button', { name: 'Chart Other A' })).toBeInTheDocument();
+  });
+  it('pages unclassified source history and preserves page-specific exact CSV evidence', () => {
+    state.unclassified = [{ ...line, key: 'other', concept: 'OtherFact', label: 'Other fact' }];
+    state.historyNodes = [{ ...fact, concept: 'OtherFact', value: '123456789.123456789' }];
+    state.nextHistory = [
+      {
+        ...fact,
+        concept: 'OtherFact',
+        value: '987654321.987654321',
+        accession: '0000320193-24-000001',
+        periodStart: '2023-01-01',
+        periodEnd: '2023-12-31',
+      },
+    ];
+    state.historyHasNext = true;
+    render(<CompanyResearch />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chart Other fact' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next history page' }));
+    expect(state.historyAfter).toBe('100');
+    expect(screen.getByRole('img', { name: 'Other fact line chart' })).toHaveTextContent(
+      '987654321.987654321'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Download line CSV' }));
+    const calls = vi.mocked(downloadCsv).mock.calls;
+    const csv = calls[calls.length - 1][1];
+    expect(csv).toContain('987654321.987654321');
+    expect(csv).toContain('0000320193-24-000001');
+    expect(csv).not.toContain('123456789.123456789');
+    fireEvent.click(screen.getByRole('button', { name: 'Previous history page' }));
+    expect(state.historyAfter).toBeNull();
   });
   it('offers all three statements and explicit revision selection', () => {
     render(<CompanyResearch />);

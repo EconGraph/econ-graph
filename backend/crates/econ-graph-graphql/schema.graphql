@@ -410,6 +410,8 @@ type CompanyResearchCompanyConnection {
 }
 
 type CompanyResearchStatement {
+	unclassifiedHasNextPage: Boolean!
+	unclassifiedEndCursor: String
 	notice: String!
 	unclassifiedFacts: [CompanyStatementLine!]!
 	unavailableDerivations: [CompanyDerivationUnavailable!]!
@@ -1005,7 +1007,7 @@ type Query {
 	"""
 	Normalized companyfacts statements; original filing layouts ship separately.
 	"""
-	financialStatement(cik: String!, kind: CompanyStatementKind!, revision: CompanyRevisionInput, periodStart: NaiveDate, periodEnd: NaiveDate): CompanyResearchStatement!
+	financialStatement(cik: String!, kind: CompanyStatementKind!, revision: CompanyRevisionInput, periodStart: NaiveDate, periodEnd: NaiveDate, instantOnly: Boolean! = false, unclassifiedFirst: Int, unclassifiedAfter: String): CompanyResearchStatement!
 	companyRatios(cik: String!, periodStart: NaiveDate, periodEnd: NaiveDate!, revision: CompanyRevisionInput): [CompanyFinancialRatio!]!
 	companyPeers(cik: String!, periodStart: NaiveDate, periodEnd: NaiveDate!, revision: CompanyRevisionInput, first: Int): [CompanyPeerComparison!]!
 	"""

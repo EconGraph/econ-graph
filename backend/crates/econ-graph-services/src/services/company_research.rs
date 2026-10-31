@@ -4,7 +4,7 @@ use bigdecimal::BigDecimal;
 use chrono::NaiveDate;
 use diesel::{
     prelude::*,
-    sql_types::{BigInt, Bool, Date, Integer, Nullable, Numeric, Text, Uuid as SqlUuid},
+    sql_types::{Array, BigInt, Bool, Date, Integer, Nullable, Numeric, Text, Uuid as SqlUuid},
 };
 use diesel_async::RunQueryDsl;
 use econ_graph_core::{
@@ -237,6 +237,56 @@ pub async fn calculation_facts(pool: &DatabasePool, cik: &str) -> AppResult<Vec<
     if rows.len() > 100_000 {
         return Err(AppError::Validation(
             "Company exceeds calculation evidence limit".into(),
+        ));
+    }
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// Maximum retained source revisions used for one issuer's ratio request.
+/// Twenty peers therefore consume at most 100,000 operands, never two million
+/// unrelated company rows. Overflow is an explicit error, not truncated input.
+pub const MAX_RATIO_FACTS: usize = 5_000;
+
+/// Read only mapped ratio operands and a conservative economic-period window.
+/// All supported taxonomy/unit alternatives and source revisions are preserved:
+/// pruning currencies, aliases or revisions could hide ambiguity/restatements.
+/// The extra 380 days retain cumulative operands for a Q4 at the start of TTM.
+pub async fn ratio_facts(
+    pool: &DatabasePool,
+    cik: &str,
+    period: &ResearchPeriod,
+) -> AppResult<Vec<CompanyFact>> {
+    use econ_graph_core::models::company_financials::{ratio_input_concepts, STANDARD_TAXONOMIES};
+    let cik = canonical_cik(cik)?;
+    let (instant, from, end) = match *period {
+        ResearchPeriod::Instant { date } => (true, date, date),
+        ResearchPeriod::Duration { start, end } => {
+            if start > end {
+                return Err(AppError::Validation("Period starts after its end".into()));
+            }
+            (
+                false,
+                start
+                    .checked_sub_signed(chrono::Duration::days(380))
+                    .unwrap_or(NaiveDate::MIN),
+                end,
+            )
+        }
+    };
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| AppError::DatabasePool(e.to_string()))?;
+    let rows=diesel::sql_query("SELECT id,cik,taxonomy,concept,period_start,period_end,unit,accession,filed,value,form,fiscal_year,fiscal_period,frame,label,description FROM company_facts
+        WHERE cik=$1 AND taxonomy=ANY($2) AND concept=ANY($3)
+          AND (($4 AND period_start IS NULL AND period_end=$6)
+            OR (NOT $4 AND period_start IS NOT NULL AND period_start<=$6 AND period_end BETWEEN $5 AND $6))
+        ORDER BY period_end,taxonomy,concept,unit,period_start,filed,accession,id LIMIT $7")
+      .bind::<Text,_>(cik).bind::<Array<Text>,_>(STANDARD_TAXONOMIES).bind::<Array<Text>,_>(ratio_input_concepts(period))
+      .bind::<Bool,_>(instant).bind::<Date,_>(from).bind::<Date,_>(end).bind::<BigInt,_>((MAX_RATIO_FACTS+1) as i64).load::<FactRow>(&mut conn).await?;
+    if rows.len() > MAX_RATIO_FACTS {
+        return Err(AppError::Validation(
+            "Company exceeds ratio operand limit; no partial ratio was calculated".into(),
         ));
     }
     Ok(rows.into_iter().map(Into::into).collect())

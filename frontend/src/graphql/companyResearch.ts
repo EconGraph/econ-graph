@@ -48,7 +48,7 @@ export interface CompanyStatementLine {
 export interface CompanyResearchStatement {
   kind: CompanyStatementKind;
   lines: CompanyStatementLine[];
-  unclassifiedFacts: CompanyStatementLine[];
+  periods: { start: string | null; end: string; kind: string }[];
   notice: string;
   unavailableDerivations: {
     taxonomy: string;
@@ -71,8 +71,8 @@ export const GET_RESEARCH_COMPANY = `query GetResearchCompany($cik: String!) {
   company(cik: $cik) { id cik name ticker sicCode sicDescription fiscalYearEnd updatedAt }
 }`;
 export const GET_COMPANY_STATEMENT = `query GetCompanyResearchStatement($cik: String!, $kind: CompanyStatementKind!, $revision: CompanyRevisionInput) {
-  financialStatement(cik: $cik, kind: $kind, revision: $revision) {
-    kind notice unclassifiedFacts { key label taxonomy concept periodStart periodEnd unit value derivation restated anchor subjectAnchor provenance { factId anchor filingAnchor accession filed taxonomy concept unit periodStart periodEnd value } } unavailableDerivations { taxonomy concept unit periodStart periodEnd derivation reason } lines { key label taxonomy concept periodStart periodEnd unit value derivation restated anchor subjectAnchor provenance { factId anchor filingAnchor accession filed taxonomy concept unit periodStart periodEnd value } }
+  financialStatement(cik: $cik, kind: $kind, revision: $revision, unclassifiedFirst: 0) {
+    kind notice periods {start end kind} unavailableDerivations { taxonomy concept unit periodStart periodEnd derivation reason } lines { key label taxonomy concept periodStart periodEnd unit value derivation restated anchor subjectAnchor provenance { factId anchor filingAnchor accession filed taxonomy concept unit periodStart periodEnd value } }
   }
 }`;
 
@@ -173,6 +173,106 @@ export function useCompanyComparisons(
       });
       if (!result.data) throw new Error('Company ratios returned no response.');
       return result.data;
+    },
+    enabled,
+  });
+}
+
+export interface CompanyOtherFactsPage {
+  unclassifiedFacts: CompanyStatementLine[];
+  unclassifiedHasNextPage: boolean;
+  unclassifiedEndCursor: string | null;
+}
+export const GET_COMPANY_OTHER_FACTS = `query GetCompanyOtherFacts($cik: String!, $revision: CompanyRevisionInput, $periodStart: NaiveDate, $periodEnd: NaiveDate!, $instantOnly: Boolean!, $after: String) {
+  financialStatement(cik: $cik, kind: INCOME_STATEMENT, revision: $revision, periodStart: $periodStart, periodEnd: $periodEnd, instantOnly: $instantOnly, unclassifiedFirst: 100, unclassifiedAfter: $after) {
+    unclassifiedHasNextPage unclassifiedEndCursor
+    unclassifiedFacts { key label taxonomy concept periodStart periodEnd unit value derivation restated anchor subjectAnchor provenance { factId anchor filingAnchor accession filed taxonomy concept unit periodStart periodEnd value } }
+  }
+}`;
+/** Other facts are requested once for the selected economic period, independent of statement kind. */
+export function useCompanyOtherFacts(
+  cik: string,
+  revision: CompanyRevisionInput,
+  periodStart: string | null,
+  periodEnd: string,
+  after: string | null,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: ['companyOtherFacts', cik, revision, periodStart, periodEnd, after],
+    staleTime: 60_000,
+    queryFn: async () => {
+      const result = await executeGraphQL<{ financialStatement: CompanyOtherFactsPage }>({
+        query: GET_COMPANY_OTHER_FACTS,
+        variables: {
+          cik,
+          revision,
+          periodStart,
+          periodEnd,
+          instantOnly: periodStart === null,
+          after,
+        },
+        operationName: 'GetCompanyOtherFacts',
+      });
+      if (!result.data?.financialStatement)
+        throw new Error('Other reported facts returned no response.');
+      return result.data.financialStatement;
+    },
+    enabled,
+  });
+}
+export interface CompanyHistoryFact {
+  taxonomy: string;
+  concept: string;
+  label: string | null;
+  unit: string;
+  value: string;
+  periodStart: string | null;
+  periodEnd: string;
+  accession: string;
+  filed: string;
+}
+export interface CompanyFactHistoryPage {
+  nodes: CompanyHistoryFact[];
+  hasNextPage: boolean;
+  endCursor: string | null;
+}
+export const GET_COMPANY_FACT_HISTORY = `query GetCompanyFactHistory($cik: String!, $filter: CompanyFactFilterInput, $after: String) {
+  companyFacts(cik: $cik, filter: $filter, first: 100, after: $after) {
+    hasNextPage endCursor nodes { taxonomy concept label unit value periodStart periodEnd accession filed }
+  }
+}`;
+/** Chart source history remains bounded and explicitly paginated, with exact decimal values. */
+export function useCompanyFactHistory(
+  cik: string,
+  line: CompanyStatementLine | undefined,
+  revision: CompanyRevisionInput,
+  after: string | null,
+  enabled: boolean
+) {
+  return useQuery({
+    staleTime: 60_000,
+    queryKey: [
+      'companyFactHistory',
+      cik,
+      line?.taxonomy,
+      line?.concept,
+      line?.unit,
+      revision,
+      after,
+    ],
+    queryFn: async () => {
+      const result = await executeGraphQL<{ companyFacts: CompanyFactHistoryPage }>({
+        query: GET_COMPANY_FACT_HISTORY,
+        variables: {
+          cik,
+          filter: { taxonomy: line?.taxonomy, concept: line?.concept, unit: line?.unit, revision },
+          after,
+        },
+        operationName: 'GetCompanyFactHistory',
+      });
+      if (!result.data?.companyFacts) throw new Error('Fact history returned no response.');
+      return result.data.companyFacts;
     },
     enabled,
   });
