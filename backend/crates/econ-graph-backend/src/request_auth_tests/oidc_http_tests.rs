@@ -96,7 +96,7 @@ fn invalid((status, body): (u16, Value)) {
 
 /// Reproduce ECO-512 over the production HTTP filter, including the default throttle.
 /// All tokens and RSA keys are prepared before the first request starts the window.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unknown_kids_stay_401_within_and_after_refresh_throttle() {
     let issuer = TestIssuer::start().await;
     let claims = issuer.claims(Uuid::new_v4(), &["annotation:create"]);
@@ -145,7 +145,7 @@ async fn unknown_kids_stay_401_within_and_after_refresh_throttle() {
 
 /// With real app rows, check valid sign-in and rotation as well as the anonymous outage
 /// fallback's read/write boundaries. ScratchDatabase keeps existing databases untouched.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial_test::serial]
 async fn rotation_and_provider_outage_preserve_annotation_boundaries() {
     let Some((_db, pool)) = database().await else {

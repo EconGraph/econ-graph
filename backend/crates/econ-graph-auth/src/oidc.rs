@@ -252,6 +252,11 @@ impl std::fmt::Debug for OidcVerifier {
 }
 
 impl OidcVerifier {
+    /// Audience verified at this service entry point.
+    pub fn audience(&self) -> &str {
+        &self.config.audience
+    }
+
     /// A verifier for `config` with its own HTTP client. Makes no request until a token needs
     /// checking.
     pub fn new(config: OidcConfig) -> Self {

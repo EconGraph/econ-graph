@@ -902,6 +902,18 @@ jobs:
         done
       working-directory: backend
 
+    - name: Run independent data authorization and proxy contracts (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        : "${DATABASE_URL:?DATABASE_URL is required for independent data contracts}"
+        cargo test -p econ-graph-backend --bin econ-graph-backend independent_data_tests:: -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/independent-data.log"
+        grep -Eq '^test result: ok\. 2 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/independent-data.log"
+        cargo test -p econ-graph-backend --bin econ-graph-backend data_access::tests:: -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/data-boundary.log"
+        grep -Eq '^test result: ok\. 2 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/data-boundary.log"
+        python3 ../scripts/data-access/test_independent_access.py
+      working-directory: backend
+
     - name: Run catalog and anonymous permission regressions (required)
       run: |
         set -euo pipefail

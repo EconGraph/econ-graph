@@ -27,12 +27,16 @@ use econ_graph_core::{
 use econ_graph_graphql::graphql::schema::create_schema_with_data;
 use econ_graph_services::services::series_check::DataPlaneClient;
 
+mod data_access;
 #[cfg(test)]
 mod databases_tests;
+#[cfg(test)]
+mod independent_data_tests;
 mod integration_tests;
 #[cfg(flag_mcp)]
 mod mcp_routes;
 mod metrics;
+use data_access::ServicePlane;
 
 #[cfg(flag_mcp)]
 use mcp_routes::mcp_filter;
@@ -612,6 +616,10 @@ enum GraphqlRefusal {
     Suspended,
     /// The caller's account could not be loaded: 500.
     AccountUnavailable,
+    /// This independent service requires a capability the caller lacks.
+    Forbidden,
+    /// The issuer could not validate this request; independent services never downgrade it.
+    IdentityUnavailable,
 }
 
 impl GraphqlRefusal {
@@ -630,6 +638,16 @@ impl GraphqlRefusal {
                 "ACCOUNT_SUSPENDED",
                 "This account is suspended",
             ),
+            Self::Forbidden => (
+                StatusCode::FORBIDDEN,
+                "FORBIDDEN",
+                "Insufficient data service permissions",
+            ),
+            Self::IdentityUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "IDENTITY_UNAVAILABLE",
+                "Identity provider unavailable",
+            ),
             Self::AccountUnavailable => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_SERVER_ERROR",
@@ -647,6 +665,46 @@ impl GraphqlRefusal {
         } else {
             reply
         }
+    }
+}
+
+/// Independent services require verified credentials for their own audience and never
+/// downgrade a failed verification to public/anonymous access.
+async fn graphql_caller_for_plane(
+    plane: ServicePlane,
+    pool: &AppPool,
+    verifier: Option<&OidcVerifier>,
+    authorization: Option<&str>,
+    client: &ClientInfo,
+) -> Result<Option<Caller>, GraphqlRefusal> {
+    if plane == ServicePlane::Combined {
+        return graphql_caller(pool, verifier, authorization, client).await;
+    }
+    let expected = if plane == ServicePlane::Data {
+        data_access::DATA_AUDIENCE
+    } else {
+        data_access::APP_AUDIENCE
+    };
+    let verifier = verifier
+        .filter(|verifier| verifier.audience() == expected)
+        .ok_or(GraphqlRefusal::InvalidToken)?;
+    match authenticate(pool, Some(verifier), authorization).await {
+        Ok(Some(caller))
+            if plane != ServicePlane::Data
+                || caller.principal.roles.iter().copied().any(Role::is_catalog) =>
+        {
+            Ok(Some(caller))
+        }
+        Ok(Some(_)) => Err(GraphqlRefusal::Forbidden),
+        Ok(None) | Err(BearerError::InvalidToken(_)) => Err(GraphqlRefusal::InvalidToken),
+        Err(BearerError::Unavailable(_)) => Err(GraphqlRefusal::IdentityUnavailable),
+        Err(BearerError::Inactive(id)) => {
+            NewSecurityEvent::suspended_account(id, "/graphql", client)
+                .record(pool)
+                .await;
+            Err(GraphqlRefusal::Suspended)
+        }
+        Err(BearerError::Database(_)) => Err(GraphqlRefusal::AccountUnavailable),
     }
 }
 
@@ -809,6 +867,7 @@ async fn graphql_body_too_large(
 ///
 /// `data_plane` is where `createAnnotation` checks series when there is no data database
 /// (see [`data_plane_for_series_check`]).
+#[cfg(test)]
 fn build_routes(
     databases: Databases,
     data_plane: Option<Arc<DataPlaneClient>>,
@@ -821,6 +880,30 @@ fn build_routes(
     cors_origins: &[String],
     playground_enabled: bool,
 ) -> impl Filter<Extract = (impl warp::Reply + use<>,), Error = warp::Rejection> + Clone + use<> {
+    build_routes_for_plane(
+        databases,
+        data_plane,
+        schema,
+        verifier,
+        cors_origins,
+        playground_enabled,
+        ServicePlane::Combined,
+    )
+}
+
+fn build_routes_for_plane(
+    databases: Databases,
+    data_plane: Option<Arc<DataPlaneClient>>,
+    schema: async_graphql::Schema<
+        econ_graph_graphql::graphql::query::Query,
+        econ_graph_graphql::graphql::mutation::Mutation,
+        async_graphql::EmptySubscription,
+    >,
+    verifier: Option<Arc<OidcVerifier>>,
+    cors_origins: &[String],
+    playground_enabled: bool,
+    service_plane: ServicePlane,
+) -> impl Filter<Extract = (impl warp::Reply + use<>,), Error = warp::Rejection> + Clone + use<> {
     let cors = cors_filter(cors_origins);
 
     // GraphQL endpoint: anonymous without a token, the token's caller with a valid one.
@@ -828,13 +911,14 @@ fn build_routes(
     let data_plane_for_graphql = data_plane;
     let verifier_for_graphql = verifier.clone();
     let graphql_filter = warp::path("graphql")
+        .and(warp::path::end())
         .and(warp::header::headers_cloned())
         .and(warp::ext::optional::<PeerAddr>())
         .and(graphql_request(schema))
         .and_then(
             move |headers: warp::http::HeaderMap<warp::http::HeaderValue>,
                   peer: Option<PeerAddr>,
-                  (_schema, request): (
+                  (_schema, mut request): (
                 async_graphql::Schema<
                     econ_graph_graphql::graphql::query::Query,
                     econ_graph_graphql::graphql::mutation::Mutation,
@@ -847,7 +931,8 @@ fn build_routes(
                 let verifier = verifier_for_graphql.clone();
                 async move {
                     let client = client_info(peer, &headers);
-                    let caller = match graphql_caller(
+                    let caller = match graphql_caller_for_plane(
+                        service_plane,
                         &databases.app,
                         verifier.as_deref(),
                         authorization_header(&headers),
@@ -858,6 +943,13 @@ fn build_routes(
                         Ok(caller) => caller,
                         Err(refusal) => return Ok::<_, Infallible>(refusal.into_response()),
                     };
+
+                    if service_plane == ServicePlane::Data {
+                        if let Err(message) = data_access::check_data_operation(&mut request) {
+                            let body = warp::reply::json(&json!({"data":null,"errors":[{"message":message,"extensions":{"code":"DATA_READ_ONLY"}}]}));
+                            return Ok(warp::reply::with_status(body, warp::http::StatusCode::FORBIDDEN).into_response());
+                        }
+                    }
 
                     let data_plane = data_plane.map(|client| {
                         Arc::new(client.for_caller(
@@ -931,7 +1023,13 @@ fn build_routes(
     // MCP route, compiled in only with the `mcp` build flag (see mcp_routes.rs). It requires
     // a signed-in user's bearer token holding `api:mcp`; MCP OAuth (auth roadmap phase 6)
     // will replace this.
-    let mcp_filter = mcp_filter(databases, verifier);
+    let mcp_filter = if service_plane == ServicePlane::Data {
+        warp::any()
+            .and_then(|| async { Err::<warp::reply::Response, _>(warp::reject::not_found()) })
+            .boxed()
+    } else {
+        mcp_filter(databases, verifier)
+    };
 
     root_filter
         .or(graphql_filter)
@@ -1028,6 +1126,15 @@ async fn main() -> AppResult<()> {
         eprintln!("❌ {}", e);
         error
     })?;
+    let service_plane = ServicePlane::parse(std::env::var("GRAPHQL_SERVICE_PLANE").ok().as_deref())
+        .map_err(AppError::ConfigError)?;
+    service_plane
+        .validate(
+            oidc.as_ref(),
+            std::env::var("DATA_DATABASE_URL").is_ok_and(|v| !v.trim().is_empty()),
+        )
+        .map_err(AppError::ConfigError)?;
+    info!("GraphQL service plane: {service_plane:?}");
     match &oidc {
         Some(oidc) => info!(
             "🔐 Sign-in: tokens from {} for audience {}",
@@ -1035,8 +1142,11 @@ async fn main() -> AppResult<()> {
         ),
         None => info!("🔓 Sign-in disabled (OIDC_ISSUER unset): every caller is anonymous"),
     }
-    let anonymous =
-        econ_graph_auth::anonymous::AnonymousConfig::from_env().map_err(AppError::ConfigError)?;
+    let anonymous = if service_plane == ServicePlane::Combined {
+        econ_graph_auth::anonymous::AnonymousConfig::from_env().map_err(AppError::ConfigError)?
+    } else {
+        None
+    };
     if anonymous.is_some() && oidc.is_none() {
         return Err(AppError::ConfigError(
             "Anonymous catalog grants require OIDC_ISSUER".into(),
@@ -1140,13 +1250,14 @@ async fn main() -> AppResult<()> {
 
     // GraphQL Playground: off unless ENABLE_GRAPHQL_PLAYGROUND=true (local development).
     let playground_enabled = playground_enabled(std::env::var("ENABLE_GRAPHQL_PLAYGROUND").ok());
-    let routes = build_routes(
+    let routes = build_routes_for_plane(
         databases.clone(),
         data_plane,
         schema.clone(),
         verifier.clone(),
         &cors_origins,
         playground_enabled,
+        service_plane,
     );
 
     // Initialize metrics
@@ -1616,7 +1727,7 @@ mod request_auth_tests {
     }
 
     /// With sign-in disabled, GraphQL ignores any token and serves the request anonymously.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn graphql_is_anonymous_when_sign_in_is_disabled() {
         let issuer = TestIssuer::start().await;
         let token = issuer.mint_token(Uuid::new_v4(), &["admin.users:read"]);
@@ -1634,7 +1745,7 @@ mod request_auth_tests {
 
     /// With sign-in on, a request without a token is anonymous and never contacts the
     /// identity provider, so an outage cannot block browsing.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn graphql_without_a_token_is_anonymous_and_needs_no_provider() {
         let verifier = unreachable_verifier();
         let pool = unreachable_pool();
@@ -1646,7 +1757,7 @@ mod request_auth_tests {
     }
 
     /// A token that cannot be checked because the provider is down runs anonymously.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn graphql_drops_a_token_it_cannot_check() {
         let issuer = TestIssuer::start().await;
         let token = issuer.mint_token(Uuid::new_v4(), &["annotation:create"]);
@@ -1661,7 +1772,7 @@ mod request_auth_tests {
     }
 
     /// Bad tokens get a 401 with an RFC 6750 challenge, never an anonymous response.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn graphql_refuses_invalid_tokens_with_401() {
         let issuer = TestIssuer::start().await;
         let verifier = issuer.verifier();
@@ -1704,7 +1815,7 @@ mod request_auth_tests {
     /// A valid token signs the caller in with the token's roles, creating their `users` row
     /// on first sight in a new app database (one with only the app set); a suspended account is
     /// refused with 403.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[serial_test::serial]
     async fn graphql_signs_in_a_valid_token_and_refuses_a_suspended_account() {
         let Some((_db, pool)) = database().await else {
@@ -1782,7 +1893,7 @@ mod request_auth_tests {
 
     /// The `users` row for a new subject: created once, with the token's email only when it
     /// is verified and free, and the same row for concurrent first requests.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[serial_test::serial]
     async fn the_users_row_is_created_on_first_sight() {
         use econ_graph_core::models::User;
