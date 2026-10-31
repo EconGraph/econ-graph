@@ -18,7 +18,7 @@ die() { echo "error: $*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
     case "$1" in
         --context|--host|--main-host)
-            [ $# -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"
+            if [ $# -lt 2 ] || [ -z "$2" ]; then die "$1 needs a value"; fi
             case "$1" in --context) CONTEXT="$2" ;; --host) HOST="$2" ;; --main-host) MAIN="$2" ;; esac
             shift ;;
         --dry-run) DRY_RUN=true ;;
@@ -27,7 +27,7 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-[ -n "$CONTEXT" ] && [ -n "$HOST" ] || { usage >&2; exit 2; }
+if [ -z "$CONTEXT" ] || [ -z "$HOST" ]; then usage >&2; exit 2; fi
 MAIN="${MAIN:-www.${HOST}}"
 [ "$MAIN" = "$HOST" ] || [ "$MAIN" = "www.${HOST}" ] || die "main host must be BASE or www.BASE"
 export PUBLIC_HOST="$HOST" MAIN_HOST="$MAIN"

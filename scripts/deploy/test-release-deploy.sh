@@ -1186,7 +1186,7 @@ echo "PUBLIC_HOST=econgraph.com" >"$CONFIG"
 
 # --- GATEWAY_TLS_ISSUER ---------------------------------------------------------------------
 issuer_case() { # NAME EXPECTED PLAN: the last run deployed with GATEWAY_TLS_ISSUER EXPECTED, showing PLAN
-    if [ "$rc" -eq 0 ] && grep -qE "^deploy .* ISSUER=$2\$" "$LOGS/steps.log" && has "$3"; then
+    if [ "$rc" -eq 0 ] && grep -qE "^deploy .* ISSUER=$2 MAIN_HOST=" "$LOGS/steps.log" && has "$3"; then
         echo "ok   $1"
     else
         fail "$1: exit $rc, $(grep '^deploy ' "$LOGS/steps.log" || true), $(grep 'TLS issuer' <<<"$out" || true)"
