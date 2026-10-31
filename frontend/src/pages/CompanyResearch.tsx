@@ -128,6 +128,7 @@ function CompanyDetail({ cik }: { cik: string }) {
   const [revisionDetail, setRevisionDetail] = useState('');
   const [period, setPeriod] = useState('');
   const [selected, setSelected] = useState('');
+  const [noteTarget, setNoteTarget] = useState('company');
   const validRevision =
     revisionMode === 'AS_OF'
       ? /^\d{4}-\d{2}-\d{2}$/.test(revisionDetail)
@@ -169,6 +170,38 @@ function CompanyDetail({ cik }: { cik: string }) {
   }
   if (selectedLine) historyByPeriod.set(periodKey(selectedLine), selectedLine);
   const chartHistory = [...historyByPeriod.values()];
+  const noteTargets: { id: string; label: string; anchor?: string }[] = [
+    { id: 'company', label: 'Company' },
+    ...(selectedLine
+      ? [
+          {
+            id: 'line',
+            label: `Statement line / chart: ${selectedLine.label}`,
+            anchor: selectedLine.subjectAnchor ?? undefined,
+          },
+        ]
+      : []),
+    ...(selectedLine?.provenance.map(fact => ({
+      id: `fact/${fact.factId}`,
+      label: `Reported fact: ${fact.concept}, ${fact.accession}`,
+      anchor: fact.anchor ?? undefined,
+    })) ?? []),
+    ...[
+      ...new Map(
+        (selectedLine?.provenance ?? []).map(fact => [
+          fact.accession,
+          {
+            id: `filing/${fact.accession}`,
+            label: `Filing: ${fact.accession}`,
+            anchor: fact.filingAnchor ?? undefined,
+          },
+        ])
+      ).values(),
+    ],
+  ];
+  const selectedNoteTarget = noteTargets.find(target => target.id === noteTarget);
+  const noteTargetAvailable =
+    !!selectedNoteTarget && (selectedNoteTarget.id === 'company' || !!selectedNoteTarget.anchor);
   const [periodStart, periodEnd] = currentPeriod.split('/');
   const comparisons = useCompanyComparisons(
     cik,
@@ -343,7 +376,10 @@ function CompanyDetail({ cik }: { cik: string }) {
                     <TableRow selected={line === selectedLine}>
                       <TableCell>
                         <Button
-                          onClick={() => setSelected(lineId(line))}
+                          onClick={() => {
+                            setSelected(lineId(line));
+                            setNoteTarget('line');
+                          }}
                           aria-label={`Chart ${line.label}`}
                         >
                           {line.label}
@@ -437,11 +473,38 @@ function CompanyDetail({ cik }: { cik: string }) {
           )}
         </Box>
       )}
-      <CompanyNotes
-        cik={profile.cik}
-        anchor={selectedLine?.anchor ?? undefined}
-        targetLabel={selectedLine?.anchor ? selectedLine.label : profile.name}
-      />
+      <Box component='section' aria-label='Research note target'>
+        <FormControl fullWidth sx={{ mb: 1 }}>
+          <InputLabel id='company-note-target-label'>Note target</InputLabel>
+          <Select
+            labelId='company-note-target-label'
+            label='Note target'
+            value={selectedNoteTarget ? noteTarget : ''}
+            onChange={event => setNoteTarget(event.target.value)}
+          >
+            {noteTargets.map(target => (
+              <MenuItem key={target.id} value={target.id}>
+                {target.label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <Typography variant='body2'>
+          Line and chart notes follow the economic subject. Reported-fact and filing notes stay
+          attached to that specific filing.
+        </Typography>
+        {noteTargetAvailable ? (
+          <CompanyNotes
+            cik={profile.cik}
+            anchor={selectedNoteTarget?.anchor}
+            targetLabel={selectedNoteTarget?.label}
+          />
+        ) : (
+          <Alert severity='info'>
+            This note target is unavailable. Choose an available target to keep a note.
+          </Alert>
+        )}
+      </Box>
       <Typography variant='body2'>
         Source:{' '}
         <Link

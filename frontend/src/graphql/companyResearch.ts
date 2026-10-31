@@ -19,6 +19,8 @@ export interface CompanyResearchCompany {
 }
 export interface CompanyFactEvidence {
   factId: string;
+  anchor: string | null;
+  filingAnchor: string | null;
   accession: string;
   filed: string;
   taxonomy: string;
@@ -41,6 +43,7 @@ export interface CompanyStatementLine {
   derivation: string | null;
   restated: boolean;
   anchor: string | null;
+  subjectAnchor: string | null;
 }
 export interface CompanyResearchStatement {
   kind: CompanyStatementKind;
@@ -69,7 +72,7 @@ export const GET_RESEARCH_COMPANY = `query GetResearchCompany($cik: String!) {
 }`;
 export const GET_COMPANY_STATEMENT = `query GetCompanyResearchStatement($cik: String!, $kind: CompanyStatementKind!, $revision: CompanyRevisionInput) {
   financialStatement(cik: $cik, kind: $kind, revision: $revision) {
-    kind notice unclassifiedFacts { key label taxonomy concept periodStart periodEnd unit value derivation restated anchor provenance { factId accession filed taxonomy concept unit periodStart periodEnd value } } unavailableDerivations { taxonomy concept unit periodStart periodEnd derivation reason } lines { key label taxonomy concept periodStart periodEnd unit value derivation restated anchor provenance { factId accession filed taxonomy concept unit periodStart periodEnd value } }
+    kind notice unclassifiedFacts { key label taxonomy concept periodStart periodEnd unit value derivation restated anchor subjectAnchor provenance { factId anchor filingAnchor accession filed taxonomy concept unit periodStart periodEnd value } } unavailableDerivations { taxonomy concept unit periodStart periodEnd derivation reason } lines { key label taxonomy concept periodStart periodEnd unit value derivation restated anchor subjectAnchor provenance { factId anchor filingAnchor accession filed taxonomy concept unit periodStart periodEnd value } }
   }
 }`;
 
@@ -143,11 +146,11 @@ export interface CompanyPeerComparison {
 }
 export const GET_COMPANY_COMPARISONS = `query GetCompanyResearchComparisons($cik: String!, $periodStart: Date, $periodEnd: Date!, $revision: CompanyRevisionInput) {
   companyRatios(cik: $cik, periodStart: $periodStart, periodEnd: $periodEnd, revision: $revision) {
-    name value unit unavailableReason provenance { factId accession filed taxonomy concept unit periodStart periodEnd value }
+    name value unit unavailableReason provenance { factId anchor filingAnchor accession filed taxonomy concept unit periodStart periodEnd value }
   }
   companyPeers(cik: $cik, periodStart: $periodStart, periodEnd: $periodEnd, revision: $revision, first: 10) {
     company { id cik name ticker sicCode sicDescription fiscalYearEnd updatedAt }
-    ratios { name value unit unavailableReason provenance { factId accession filed taxonomy concept unit periodStart periodEnd value } }
+    ratios { name value unit unavailableReason provenance { factId anchor filingAnchor accession filed taxonomy concept unit periodStart periodEnd value } }
   }
 }`;
 export function useCompanyComparisons(

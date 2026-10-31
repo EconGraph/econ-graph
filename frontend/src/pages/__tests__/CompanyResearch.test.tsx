@@ -81,6 +81,8 @@ vi.mock('../../graphql/companyResearch', () => ({
 }));
 const fact = {
   factId: 'fact1',
+  anchor: 'filed-anchor',
+  filingAnchor: 'filing-anchor',
   accession: '0000320193-25-000010',
   filed: '2025-02-01',
   taxonomy: 'us-gaap',
@@ -103,6 +105,7 @@ const line = {
   restated: true,
   derivation: null,
   anchor: 'filed-anchor',
+  subjectAnchor: 'economic-anchor',
 };
 beforeEach(() => {
   state.cik = '0000320193';
@@ -145,7 +148,7 @@ describe('company research page', () => {
     render(<CompanyResearch />);
     fireEvent.click(screen.getByRole('button', { name: 'Chart Revenue' }));
     expect(screen.getByRole('img', { name: 'Revenue line chart' })).toBeInTheDocument();
-    expect(screen.getByTestId('company-notes')).toHaveAttribute('data-anchor', 'filed-anchor');
+    expect(screen.getByTestId('company-notes')).toHaveAttribute('data-anchor', 'economic-anchor');
     expect(
       screen.getByRole('img', { name: 'Revenue line chart' }).querySelectorAll('circle')
     ).toHaveLength(2);
@@ -176,6 +179,25 @@ describe('company research page', () => {
     expect(screen.getByText(/Per-share data is not additive/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Chart Other fact' }));
     expect(screen.getByRole('img', { name: 'Other fact line chart' })).toBeInTheDocument();
+  });
+  it('lets the researcher choose filed fact and filing targets explicitly', () => {
+    render(<CompanyResearch />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chart Revenue' }));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Note target' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Filing: 0000320193-25-000010' }));
+    expect(screen.getByTestId('company-notes')).toHaveAttribute('data-anchor', 'filing-anchor');
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Note target' }));
+    fireEvent.click(
+      screen.getByRole('option', { name: 'Reported fact: Revenue, 0000320193-25-000010' })
+    );
+    expect(screen.getByTestId('company-notes')).toHaveAttribute('data-anchor', 'filed-anchor');
+  });
+  it('never silently changes an unsupported derived target to company notes', () => {
+    state.lines = [{ ...line, subjectAnchor: null, anchor: null, derivation: 'fourth_quarter' }];
+    render(<CompanyResearch />);
+    fireEvent.click(screen.getByRole('button', { name: 'Chart Revenue' }));
+    expect(screen.getByText(/This note target is unavailable/)).toBeInTheDocument();
+    expect(screen.queryByTestId('company-notes')).not.toBeInTheDocument();
   });
   it('offers all three statements and explicit revision selection', () => {
     render(<CompanyResearch />);

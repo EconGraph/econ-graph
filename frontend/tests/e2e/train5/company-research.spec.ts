@@ -112,6 +112,22 @@ test('company research workflow', async ({ page }) => {
     .last();
   await saved.getByRole('button', { name: 'Delete note', exact: true }).click();
   await expect(notes.getByText(changed, { exact: true })).toHaveCount(0);
+  // Each research scope uses an explicit authorized anchor, with no company fallback.
+  for (const target of [/^Reported fact:/, /^Filing:/, /^Company$/]) {
+    await page.getByRole('combobox', { name: 'Note target', exact: true }).click();
+    await page.getByRole('option', { name: target }).first().click();
+    const scoped = `${original} ${target.source}`;
+    await notes.getByRole('textbox', { name: 'New private note', exact: true }).fill(scoped);
+    await notes.getByRole('button', { name: 'Save note', exact: true }).click();
+    await expect(notes.getByText(scoped, { exact: true })).toBeVisible();
+    const scopedNote = notes
+      .locator('div')
+      .filter({ has: page.getByText(scoped, { exact: true }) })
+      .filter({ has: page.getByRole('button', { name: 'Delete note', exact: true }) })
+      .last();
+    await scopedNote.getByRole('button', { name: 'Delete note', exact: true }).click();
+    await expect(notes.getByText(scoped, { exact: true })).toHaveCount(0);
+  }
 });
 
 /** RFC 4180 parser for checking exact data cells, including quoted source labels. */
