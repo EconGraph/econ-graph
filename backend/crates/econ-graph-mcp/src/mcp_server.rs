@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 use async_graphql::{Request, Variables};
+use econ_graph_services::services::series_service::MAX_SERIES_DATA_PAGE;
 use futures::future;
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -60,6 +61,12 @@ impl EconGraphMcpServer {
             http_client,
             frontend_chart_api_url,
         }
+    }
+
+    /// Send chart requests to this chart API instead of `CHART_API_SERVICE_URL`'s.
+    pub fn with_chart_api_url(mut self, url: impl Into<String>) -> Self {
+        self.frontend_chart_api_url = url.into();
+        self
     }
 
     /// Bind data tools to the authenticated HTTP caller's catalog grants.
@@ -158,7 +165,9 @@ impl EconGraphMcpServer {
                         "limit": {
                             "type": "integer",
                             "description": "Maximum number of data points to return: the latest ones",
-                            "default": 100
+                            "default": 100,
+                            "minimum": 0,
+                            "maximum": 10000
                         }
                     },
                     "required": ["series_id"]
@@ -288,10 +297,12 @@ impl EconGraphMcpServer {
 
         let start_date = arguments.get("start_date").and_then(|v| v.as_str());
         let end_date = arguments.get("end_date").and_then(|v| v.as_str());
-        let limit = arguments
-            .get("limit")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(100) as i32;
+        let limit = match arguments.get("limit").and_then(|v| v.as_i64()) {
+            None => 100,
+            Some(limit) if limit < 0 => anyhow::bail!("limit must not be negative"),
+            // A page holds at most this many points (seriesData's cap).
+            Some(limit) => limit.min(MAX_SERIES_DATA_PAGE) as i32,
+        };
 
         let series = self
             .get_series_payload(series_id, start_date, end_date, limit)
@@ -390,9 +401,10 @@ impl EconGraphMcpServer {
                         "content": [{
                             "type": "text",
                             "text": format!(
-                                "✅ Chart visualization generated successfully using private frontend API!\n\n📊 Chart Configuration:\n{}\n\n📈 Metadata:\n{}\n\n📜 Source notices:\n{}",
+                                "✅ Chart visualization generated successfully using private frontend API!\n\n📊 Chart Configuration:\n{}\n\n📈 Metadata:\n{}\n\n📏 Coverage:\n{}\n\n📜 Source notices:\n{}",
                                 serde_json::to_string_pretty(chart_config).unwrap_or_else(|_| "Failed to format chart config".to_string()),
                                 serde_json::to_string_pretty(chart_response.get("metadata").unwrap_or(&json!(null))).unwrap_or_else(|_| "No metadata available".to_string()),
+                                serde_json::to_string_pretty(&series_coverage(&series_data)).unwrap_or_default(),
                                 serde_json::to_string_pretty(&source_notices(&series_data)).unwrap_or_default()
                             )
                         }],
@@ -555,27 +567,50 @@ impl EconGraphMcpServer {
             }
         "#
         );
+        // A page holds at most seriesData's cap.
+        let limit = limit.clamp(0, MAX_SERIES_DATA_PAGE as i32);
         let filter =
             json!({"startDate": start_date, "endDate": end_date, "latestRevisionOnly": true});
-        let mut variables = json!({"seriesId": series_id, "limit": limit, "filter": filter});
-        let mut response = self
+        let variables = json!({"seriesId": series_id, "limit": limit, "filter": filter});
+        let response = self
             .execute_graphql_query(query, Some(variables.clone()))
             .await?;
         let mut series = response["data"]["series"].clone();
         if !series.is_object() {
             anyhow::bail!("Series not found: {series_id}");
         }
+        let mut page = response["data"]["seriesData"].clone();
+        let mut total = page["totalCount"].as_i64().unwrap_or(0);
         // Points come oldest first, and a cursor is the number of points before the next page:
-        // when more match than the limit, read the page that ends at the newest.
-        let total = response["data"]["seriesData"]["totalCount"]
-            .as_i64()
-            .unwrap_or(0);
-        let truncated = total > i64::from(limit.max(0));
-        if truncated {
-            variables["after"] = json!((total - i64::from(limit.max(0))).to_string());
-            response = self.execute_graphql_query(query, Some(variables)).await?;
+        // when more match than the limit, read the page that ends at the newest. A crawl writing
+        // between the reads changes the count; read again at the new count, once.
+        for _ in 0..2 {
+            if total <= i64::from(limit) {
+                break;
+            }
+            let read_total = total;
+            let mut tail = variables.clone();
+            tail["after"] = json!((total - i64::from(limit)).to_string());
+            page = self
+                .execute_graphql_query(SERIES_DATA_PAGE, Some(tail))
+                .await?["data"]["seriesData"]
+                .clone();
+            total = page["totalCount"].as_i64().unwrap_or(0);
+            if total == read_total {
+                break;
+            }
+            if total <= i64::from(limit) {
+                // Fewer now than the limit: every point fits on the first page.
+                page = self
+                    .execute_graphql_query(SERIES_DATA_PAGE, Some(variables.clone()))
+                    .await?["data"]["seriesData"]
+                    .clone();
+                total = page["totalCount"].as_i64().unwrap_or(0);
+                break;
+            }
         }
-        series["dataPoints"] = response["data"]["seriesData"]["nodes"].clone();
+        let truncated = total > i64::from(limit);
+        series["dataPoints"] = page["nodes"].clone();
         series["totalCount"] = json!(total);
         series["truncated"] = json!(truncated);
         Ok(series)
@@ -591,6 +626,24 @@ impl EconGraphMcpServer {
         self.get_series_payload(series_id, start_date, end_date, 1000)
             .await
     }
+}
+
+/// How much of each charted series the chart holds: its points, how many dates matched, and
+/// whether the chart was cut short to the latest of them.
+fn series_coverage(series_data: &[Value]) -> Value {
+    Value::Array(
+        series_data
+            .iter()
+            .map(|s| {
+                json!({
+                    "series": s["name"],
+                    "dataPoints": s["dataPoints"].as_array().map_or(0, Vec::len),
+                    "totalCount": s["totalCount"],
+                    "truncated": s["truncated"],
+                })
+            })
+            .collect(),
+    )
 }
 
 /// Each charted series' source, with the notice its terms require and when the series was last
@@ -610,6 +663,16 @@ fn source_notices(series_data: &[Value]) -> Value {
             .collect(),
     )
 }
+
+/// One page of a series' observations, for reading past the first page.
+const SERIES_DATA_PAGE: &str = r#"
+    query SeriesDataPage($seriesId: ID!, $limit: Int!, $after: String, $filter: DataFilter) {
+        seriesData(seriesId: $seriesId, first: $limit, after: $after, filter: $filter) {
+            totalCount
+            nodes { date value }
+        }
+    }
+"#;
 
 /// MCP Server HTTP handler
 pub async fn mcp_handler(
