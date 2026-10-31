@@ -433,6 +433,26 @@ impl Query {
         })
     }
 
+    /// Persistent queue history, most recently updated first (requires admin.system:read).
+    async fn crawler_jobs(
+        &self,
+        ctx: &Context<'_>,
+        limit: Option<i32>,
+        offset: Option<i32>,
+        source: Option<String>,
+        status: Option<String>,
+    ) -> Result<Vec<super::crawler_admin::CrawlerJob>> {
+        super::crawler_admin::jobs(ctx, limit, offset, source, status).await
+    }
+
+    /// Registered adapters and their real scheduler configuration (requires admin.system:read).
+    async fn crawler_sources(
+        &self,
+        ctx: &Context<'_>,
+    ) -> Result<Vec<super::crawler_admin::CrawlerSource>> {
+        super::crawler_admin::sources(ctx).await
+    }
+
     /// Crawler status, derived from the crawl queue (workers keep no other state; requires
     /// `admin.system:read`).
     async fn crawler_status(&self, ctx: &Context<'_>) -> Result<CrawlerStatusType> {

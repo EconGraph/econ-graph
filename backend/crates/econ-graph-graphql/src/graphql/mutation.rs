@@ -81,6 +81,51 @@ impl Mutation {
         Ok(status)
     }
 
+    /// Enable or disable future automatic scheduling for one registered source. Existing jobs
+    /// and in-flight work are unaffected; explicit triggerCrawl remains an operator override.
+    async fn set_crawler_source_enabled(
+        &self,
+        ctx: &Context<'_>,
+        source: String,
+        enabled: bool,
+    ) -> Result<bool> {
+        require_role(ctx, Role::AdminCrawlersManage)?;
+        let details = serde_json::json!({"source": source, "enabled": enabled});
+        let audit = audit::Attempt::new(
+            ctx,
+            "set_crawler_source_enabled",
+            "data_sources",
+            None,
+            details.clone(),
+        );
+        let attempt = async {
+            use diesel::prelude::*;
+            use diesel_async::RunQueryDsl;
+            use econ_graph_core::schema::data_sources;
+            let source = super::crawler_admin::adapter(&source).or_outcome(Outcome::Invalid)?;
+            let name = econ_graph_crawler::persist::data_source_template(source).name;
+            let pool = data_pool(ctx).or_outcome(Outcome::Unavailable)?;
+            let mut conn = pool
+                .get()
+                .await
+                .map_err(|error| fail(Outcome::Error, format!("database connection: {error}")))?;
+            let changed = diesel::update(data_sources::table.filter(data_sources::name.eq(name)))
+                .set(data_sources::is_enabled.eq(enabled))
+                .execute(&mut conn)
+                .await
+                .or_outcome(Outcome::Error)?;
+            if changed == 0 {
+                return Err(fail(
+                    Outcome::NotFound,
+                    "Source configuration is not initialized; run crawler migrate/startup first",
+                ));
+            }
+            Ok(enabled)
+        }
+        .await;
+        audit.finish(details, attempt).await
+    }
+
     /// Create a new chart annotation
     async fn create_annotation(
         &self,
