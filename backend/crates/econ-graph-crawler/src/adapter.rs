@@ -268,6 +268,10 @@ pub trait SourceAdapter: Send + Sync {
     /// are never deleted. Defaults to `false`, for discoveries that return a sample (FRED by
     /// popularity, World Bank by topic) or tolerate partial failure. A
     /// [`Discovery::Unchanged`] result retires nothing: the last changed discovery already did.
+    ///
+    /// It must not depend on what a walk found: for an adapter that
+    /// [discovers in chunks](Self::chunked_discovery), the worker calls it at finalize, which may
+    /// run on a worker that walked nothing.
     fn discovery_is_complete(&self) -> bool {
         false
     }

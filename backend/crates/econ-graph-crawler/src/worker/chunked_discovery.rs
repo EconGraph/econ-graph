@@ -57,6 +57,25 @@ pub(super) enum RunWrite {
     Skipped,
 }
 
+/// Fails, for good, a chunked discovery of a lifecycle-tracking adapter that has no catalog
+/// scope. Without one, its finalize would commit through plain retirement
+/// ([`retire_unlisted_conn`](crate::persist::retire_unlisted_conn)) instead of lifecycle
+/// reconciliation: every series the catalog doesn't list deactivated at once, or the whole
+/// source with no retirement prefix, with no misses counted and no guard.
+fn refuse_unscoped_lifecycle(
+    source: SourceId,
+    adapter: &dyn SourceAdapter,
+    catalog_scope: Option<&str>,
+) -> Result<(), CrawlError> {
+    if adapter.tracks_catalog_lifecycle() && catalog_scope.is_none() {
+        return Err(CrawlError::Permanent(format!(
+            "{source} tracks publication lifecycle but its chunked discovery reports no catalog \
+             scope; refusing to discover it in chunks"
+        )));
+    }
+    Ok(())
+}
+
 impl Worker {
     /// The adapter for `source` and its chunked discovery settings, if it discovers in chunks.
     pub(super) fn chunked_discovery(
@@ -81,6 +100,10 @@ impl Worker {
         settings: ChunkedDiscovery,
         item: &CrawlQueueItem,
     ) -> Fetched {
+        // A lifecycle-tracking adapter with no scope would commit through plain retirement:
+        // every series it doesn't list deactivated at once, with no misses counted and no
+        // mass-disappearance guard. Refuse before a run or any chunk exists.
+        refuse_unscoped_lifecycle(source, adapter.as_ref(), settings.catalog_scope.as_deref())?;
         // As in single-job discovery: the walk's observation time, and whether reference data
         // refreshed (a discovery that couldn't refresh it is never a complete catalog). Both are
         // stored on the run, since its finalize may run on another worker.
@@ -252,6 +275,7 @@ impl Worker {
                 "{source} no longer discovers in chunks; not finalizing run {run_id}"
             )));
         };
+        refuse_unscoped_lifecycle(source, adapter.as_ref(), run.catalog_scope.as_deref())?;
         if settings.catalog_scope != run.catalog_scope {
             return Err(CrawlError::Permanent(format!(
                 "{source} catalog selection changed since discovery run {run_id} started; not \

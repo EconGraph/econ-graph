@@ -27,8 +27,14 @@
 //! - A normal fetch and a forced refetch of the same series may both answer NotFound and so
 //!   record two consecutive misses for one upstream state. That can retire a series one
 //!   attempt early; a later successful fetch reactivates it.
-//! - `observed_at` is the worker's clock when the walk finished. A worker whose clock runs
-//!   behind can have its snapshot ignored as older than one already applied.
+//! - `observed_at` is the worker's clock as the walk starts (for a chunked discovery, as its
+//!   run starts). A worker whose clock runs behind can have its snapshot ignored as older than
+//!   one already applied.
+//! - A chunked discovery's run can take hours, and its snapshot is reconciled at finalize from
+//!   chunks discovered over that whole time. A series listed by an early chunk counts as
+//!   listed even if fetches later in the run retired it on consecutive NotFound results, so
+//!   finalize can reactivate it wrongly. The reverse can't happen: a chunk only adds positive
+//!   evidence, so no series is wrongly retired.
 
 use std::collections::{BTreeMap, BTreeSet};
 

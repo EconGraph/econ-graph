@@ -1362,11 +1362,13 @@ async fn purge_keeps_the_runs_alerts_need() {
 const SCOPE: &str = "t745-rules-v1";
 
 /// An adapter that tracks publication lifecycle under [`SCOPE`], on both paths.
+/// Two units per chunk, so losing one chunk of [`LIFECYCLE_IDS`] stays well under the
+/// mass-disappearance guard's 20%: the tests below see misses counted, not a guarded snapshot.
 fn lifecycle_adapter(ids: &[&str], chunked: bool) -> Arc<ChunkedAdapter> {
-    let adapter = ChunkedAdapter::new(ids, 3);
+    let adapter = ChunkedAdapter::new(ids, 2);
     *adapter.scope.lock().unwrap() = Some(SCOPE.into());
     *adapter.chunked.lock().unwrap() = chunked.then(|| ChunkedDiscovery {
-        units_per_chunk: 3,
+        units_per_chunk: 2,
         catalog_scope: Some(SCOPE.into()),
     });
     adapter.tracks_lifecycle.store(true, Ordering::SeqCst);
@@ -1452,7 +1454,7 @@ async fn reset_lifecycle(pool: &DatabasePool) {
     .await;
 }
 
-const LIFECYCLE_IDS: [&str; 8] = [
+const LIFECYCLE_IDS: [&str; 21] = [
     "t745_a",
     "t745_b",
     "t745_c",
@@ -1460,6 +1462,19 @@ const LIFECYCLE_IDS: [&str; 8] = [
     "t745_e",
     "t745_f",
     "t745_g",
+    "t745_h",
+    "t745_i",
+    "t745_j",
+    "t745_k",
+    "t745_l",
+    "t745_m",
+    "t745_n",
+    "t745_o",
+    "t745_p",
+    "t745_q",
+    "t745_r",
+    "t745_s",
+    "t745_t",
     "t745_restricted_x",
 ];
 
@@ -1540,7 +1555,8 @@ async fn a_chunked_run_reconciles_at_its_own_observation_time() {
 
 /// A run with a chunk that failed for good never counts as a complete catalog: a series the
 /// catalog stopped listing gains no miss, nothing is retired, and the accepted scope is not
-/// refreshed.
+/// refreshed. The lost chunk is under the 20% guard, and the same discovery without the failure
+/// does count the miss, so the run's failure is what keeps the lifecycle unchanged.
 #[tokio::test]
 async fn a_partial_run_never_advances_misses_or_retires() {
     let Some(db) = db().await else { return };
@@ -1557,68 +1573,155 @@ async fn a_partial_run_never_advances_misses_or_retires() {
     adapter.fail_unit("t745_a", vec![CrawlError::Permanent("gone".into())]);
     enqueue_discovery(p, 5).await;
     drain(&w).await;
-    assert_eq!(runs(p).await.pop().unwrap().state, "failed");
     assert_eq!(lifecycle_rows(p).await, baseline, "no miss counted");
     assert_eq!(accepted_scope(p).await, scope, "scope not refreshed");
     assert_eq!(is_active(p, "t745_g").await, Some(true));
+    assert_eq!(runs(p).await.pop().unwrap().state, "failed");
+
+    // The same catalog, nothing failing: the miss is counted.
+    enqueue_discovery(p, 5).await;
+    drain(&w).await;
+    let g = lifecycle_rows(p)
+        .await
+        .into_iter()
+        .find(|r| r.external_id == "t745_g")
+        .unwrap();
+    assert_eq!(g.missing_refreshes, 1);
+    assert!(
+        !accepted_scope(p).await.unwrap().2,
+        "not a guarded snapshot"
+    );
 }
 
-/// The partial-catalog guard in finalize itself: a run that reached `finalizing` without one of
-/// its chunks stored (forced here; the chunk commits never allow it) fails at finalize and
-/// reconciles nothing. Removing the chunk-count check from `discovery_run::assemble` makes this
-/// test fail: the missing chunk's series are then counted as absent.
+/// The partial-catalog guard in finalize itself. A run is forced to `finalizing` without chunk
+/// 0 stored, which the chunk commits never allow: its row is deleted, or left `failed`. The
+/// finalize must fail and reconcile nothing; chunk 0 holds 2 of 21 series, under the 20% guard,
+/// so a finalize that went ahead would count their misses, which the lifecycle assertions catch.
+/// Removing the chunk-count check from `discovery_run::assemble` breaks the deleted case, and
+/// assembling chunks that aren't done breaks the failed case.
 #[tokio::test]
 async fn finalize_refuses_a_run_missing_a_chunk() {
     let Some(db) = db().await else { return };
     let p = &db.pool;
+    for lost in ["deleted", "failed"] {
+        reset_lifecycle(p).await;
+        let adapter = lifecycle_adapter(&LIFECYCLE_IDS, true);
+        let w = worker(p, &adapter, "t745-w1");
+        enqueue_discovery(p, 5).await;
+        drain(&w).await;
+        let baseline = lifecycle_rows(p).await;
+        let scope = accepted_scope(p).await;
+
+        // A second run: enumerate, store every chunk but 0 for real, then finalize anyway.
+        enqueue_discovery(p, 5).await;
+        w.run_once().await.unwrap();
+        let run = runs(p).await.pop().unwrap();
+        exec(
+            p,
+            &format!("DELETE FROM crawl_queue WHERE series_id = '{}/0'", run.id),
+        )
+        .await;
+        for _ in 1..run.chunks_total {
+            assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
+        }
+        let lose = if lost == "deleted" {
+            "DELETE FROM discovery_run_chunks WHERE run_id = '{id}' AND chunk_index = 0"
+        } else {
+            "UPDATE discovery_run_chunks SET state = 'failed', finished_at = NOW() \
+             WHERE run_id = '{id}' AND chunk_index = 0"
+        };
+        for sql in [
+            lose.replace("{id}", &run.id.to_string()),
+            format!(
+                "UPDATE discovery_runs SET state = 'finalizing', chunks_done = chunks_total \
+                 WHERE id = '{}'",
+                run.id
+            ),
+            format!(
+                "INSERT INTO crawl_queue (source, series_id, kind) \
+                 VALUES ('{}', '{}', 'finalize_discovery')",
+                SRC.as_str(),
+                run.id
+            ),
+        ] {
+            exec(p, &sql).await;
+        }
+        let outcome = w.run_once().await;
+        assert_eq!(
+            lifecycle_rows(p).await,
+            baseline,
+            "{lost}: nothing counted absent"
+        );
+        assert_eq!(
+            accepted_scope(p).await,
+            scope,
+            "{lost}: scope not refreshed"
+        );
+        assert_eq!(is_active(p, "t745_a").await, Some(true), "{lost}");
+        assert!(matches!(outcome, Some(JobOutcome::Failed { .. })), "{lost}");
+        assert_eq!(runs(p).await.pop().unwrap().state, "failed", "{lost}");
+    }
+}
+
+/// A lifecycle-tracking adapter with no catalog scope never starts a chunked run: its
+/// finalize would deactivate every unlisted series at once through plain retirement. The
+/// discovery job fails for good, with no run, no chunk and no change to any series.
+#[tokio::test]
+async fn a_lifecycle_adapter_without_a_scope_never_starts_a_run() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
     reset_lifecycle(p).await;
-    let adapter = lifecycle_adapter(&LIFECYCLE_IDS, true);
+    seed_stale(p).await;
+    let adapter = ChunkedAdapter::new(&IDS, 3);
+    adapter.tracks_lifecycle.store(true, Ordering::SeqCst);
     let w = worker(p, &adapter, "t745-w1");
     enqueue_discovery(p, 5).await;
-    drain(&w).await;
-    let baseline = lifecycle_rows(p).await;
-    let scope = accepted_scope(p).await;
-
-    // A second run: enumerate, store the chunks, then lose chunk 0 and finalize anyway.
-    enqueue_discovery(p, 5).await;
-    w.run_once().await.unwrap();
-    let run = runs(p).await.pop().unwrap();
-    let chunk_zero = format!("{}/0", run.id);
-    exec(
-        p,
-        &format!("DELETE FROM crawl_queue WHERE series_id = '{chunk_zero}'"),
-    )
-    .await;
-    // Chunks 1 and 2 are discovered and stored for real.
-    for _ in 0..2 {
-        assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
-    }
-    for sql in [
-        format!(
-            "DELETE FROM discovery_run_chunks WHERE run_id = '{}' AND chunk_index = 0",
-            run.id
-        ),
-        format!(
-            "UPDATE discovery_runs SET state = 'finalizing', chunks_done = chunks_total \
-             WHERE id = '{}'",
-            run.id
-        ),
-        format!(
-            "INSERT INTO crawl_queue (source, series_id, kind) \
-             VALUES ('{}', '{}', 'finalize_discovery')",
-            SRC.as_str(),
-            run.id
-        ),
-    ] {
-        exec(p, &sql).await;
-    }
     assert!(matches!(
         w.run_once().await,
         Some(JobOutcome::Failed { .. })
     ));
+    assert!(runs(p).await.is_empty(), "no run started");
+    assert_eq!(
+        count(
+            p,
+            "SELECT count(*) AS n FROM crawl_queue WHERE kind = 'discover_chunk'"
+        )
+        .await,
+        0
+    );
+    drain(&w).await;
+    assert_eq!(is_active(p, "t745_stale").await, Some(true));
+    assert_eq!(metadata(p).await.len(), 1, "nothing discovered");
+    assert!(lifecycle_rows(p).await.is_empty());
+    assert!(adapter.calls.lock().unwrap().is_empty());
+}
+
+/// The same refusal at finalize, for a run that started without a scope before its adapter
+/// tracked lifecycle (forced here by switching the adapter mid-run): the finalize fails the run
+/// and nothing is retired.
+#[tokio::test]
+async fn a_finalize_without_a_scope_for_a_lifecycle_adapter_refuses() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    reset_lifecycle(p).await;
+    seed_stale(p).await;
+    let adapter = ChunkedAdapter::new(&IDS, 3);
+    let w = worker(p, &adapter, "t745-w1");
+    enqueue_discovery(p, 5).await;
+    while runs(p).await.pop().is_none_or(|r| r.state != "finalizing") {
+        assert!(matches!(w.run_once().await, Some(JobOutcome::Completed(_))));
+    }
+    adapter.tracks_lifecycle.store(true, Ordering::SeqCst);
+    let outcome = w.run_once().await;
+    assert_eq!(
+        is_active(p, "t745_stale").await,
+        Some(true),
+        "nothing retired"
+    );
+    assert_eq!(metadata(p).await.len(), 1, "nothing written");
+    assert!(lifecycle_rows(p).await.is_empty());
+    assert!(matches!(outcome, Some(JobOutcome::Failed { .. })));
     assert_eq!(runs(p).await.pop().unwrap().state, "failed");
-    assert_eq!(lifecycle_rows(p).await, baseline, "nothing counted absent");
-    assert_eq!(accepted_scope(p).await, scope);
 }
 
 /// A run whose reference-data refresh failed is not a complete catalog, as for single-job

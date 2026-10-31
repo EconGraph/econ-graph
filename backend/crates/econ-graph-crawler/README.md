@@ -122,7 +122,10 @@ as nothing.
 The run's catalog scope is the adapter's `catalog_scope()`, reported by `chunked_discovery()`
 without a walk. It is recorded when a run starts, finalize reconciles under it, and a chunk or
 finalize job fails the run if the adapter's scope differs from the run's, so no chunk
-discovered under other rules is ever committed.
+discovered under other rules is ever committed. An adapter that tracks publication lifecycle
+must report a scope: without one its finalize would retire through plain `retire_unlisted`,
+deactivating every unlisted series at once, so its discovery job, and any finalize of such a
+run, fails for good instead.
 
 `crawler status` lists each source's newest run, its state and its chunk progress. Final runs
 are deleted after the worker's queue retention, except each source's newest complete run and,
