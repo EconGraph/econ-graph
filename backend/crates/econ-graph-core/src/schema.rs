@@ -742,6 +742,31 @@ diesel::table! {
 }
 
 diesel::table! {
+    timeseries_recovery_state (singleton) {
+        singleton -> Bool,
+        target_id -> Uuid,
+        target_label -> Text,
+        backend -> Text,
+        epoch -> Int8,
+        writes_paused -> Bool,
+        pause_token -> Nullable<Uuid>,
+        checkpoint -> Nullable<Jsonb>,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    timeseries_recovery_transitions (id) {
+        id -> Uuid,
+        target_id -> Uuid,
+        epoch -> Int8,
+        action -> Text,
+        evidence -> Jsonb,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     trade_relationships (id) {
         id -> Uuid,
         exporter_country_id -> Uuid,
@@ -1018,6 +1043,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     security_events,
     series_fetch_validators,
     series_metadata,
+    timeseries_recovery_state,
+    timeseries_recovery_transitions,
     trade_relationships,
     user_data_source_preferences,
     user_sessions,
