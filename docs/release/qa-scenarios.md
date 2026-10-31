@@ -38,14 +38,26 @@ anonymous reader's roles). After `QA_TIMEOUT_GRACE_SECONDS` (default 60), whatev
 killed. Stopping the runner with SIGTERM or Ctrl-C does the same to the running scenario, and
 the runner then starts no further scenario and exits 1. A scenario's own waits during cleanup
 use at most half the grace period, and a command it starts during cleanup with `qa.run` gets
-only what is left of the grace period, less a margin, so it ends before the scenario is killed.
+only what is left of the grace period, less a margin (a fifth of it, at most 5 seconds), so it
+ends before the scenario is killed; with nothing left, it isn't started.
 
 `qa.run` starts each command in its own session, outside the scenario's process group, and a
-command can leave it with `setsid`. So when a scenario ends, however it ends, the runner also
-finds every process still carrying the scenario's `QA_RUN_MARKER` environment variable and kills
-it. The scenario then fails, and its reason names each one (`left running, now killed: psql
-(4242)`). A process that clears its environment can't be found this way, and neither can
-anything on macOS, which has no `/proc`.
+command can leave it with `setsid`. So once a scenario has ended, however it ends, the runner
+also kills every process still carrying the scenario's `QA_RUN_MARKER` environment variable,
+after giving them a second to end on their own. The scenario then fails, and its reason names
+each one (`left running, now killed: psql (4242)`) after the scenario's own reason. A process
+the runner can't see this way is neither killed nor reported:
+
+- anything on macOS, which has no `/proc`;
+- a process that clears or rewrites its environment: `env -i`, `sudo` with its default
+  environment reset, and programs that rewrite their process title, such as browsers,
+  PostgreSQL and nginx;
+- a process the runner's user can't read: setuid or non-dumpable ones, such as `ssh-agent`.
+
+Killing a local `kubectl exec` or `docker exec` client doesn't stop the command it started
+remotely. So a scenario, and any command it runs through a hook such as `QA_REDEPLOY_COMMAND`,
+must not leave anything running, including helpers that persist on purpose: an ssh
+ControlMaster (ControlPersist), `kubectl port-forward` or a gpg-agent.
 
 ## Profiles
 
