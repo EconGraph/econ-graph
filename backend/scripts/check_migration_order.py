@@ -20,7 +20,9 @@ Exit codes:
     1: Migration order issues found
 """
 
-import os
+import argparse
+import json
+import subprocess
 import re
 import sys
 from datetime import datetime
@@ -90,7 +92,7 @@ def parse_migration_filename(filename: str) -> Optional[Tuple[datetime, str]]:
 
 def get_migration_files(migrations_dir: str) -> Tuple[List[Tuple[datetime, str, str]], bool]:
     """
-    Get all migration files sorted by timestamp.
+    Get all migration files sorted by their exact Diesel version.
 
     Every directory counts: Diesel runs any directory with an up.sql, whatever its name, so a
     directory this script cannot parse, or one without an up.sql, is an error rather than
@@ -120,7 +122,7 @@ def get_migration_files(migrations_dir: str) -> Tuple[List[Tuple[datetime, str, 
                 timestamp, name = parsed
                 migrations.append((timestamp, name, str(item)))
 
-    return sorted(migrations, key=lambda x: x[0]), ok
+    return sorted(migrations, key=lambda x: diesel_version(Path(x[2]).name)), ok
 
 
 def check_migration_order(migrations: List[Tuple[datetime, str, str]]) -> bool:
@@ -140,7 +142,7 @@ def check_migration_order(migrations: List[Tuple[datetime, str, str]]) -> bool:
         prev_timestamp, prev_name, prev_path = migrations[i-1]
         curr_timestamp, curr_name, curr_path = migrations[i]
 
-        if curr_timestamp <= prev_timestamp:
+        if diesel_version(Path(curr_path).name) <= diesel_version(Path(prev_path).name):
             print(f"❌ Migration order issue found:")
             print(f"   Previous: {prev_timestamp.strftime('%Y-%m-%d %H:%M:%S')} - {prev_name}")
             print(f"   Current:  {curr_timestamp.strftime('%Y-%m-%d %H:%M:%S')} - {curr_name}")
@@ -160,7 +162,7 @@ def check_for_duplicate_timestamps(migrations: List[Tuple[datetime, str, str]]) 
 
     timestamp_counts = {}
     for timestamp, name, path in migrations:
-        timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+        timestamp_str = diesel_version(Path(path).name)
         if timestamp_str not in timestamp_counts:
             timestamp_counts[timestamp_str] = []
         timestamp_counts[timestamp_str].append((name, path))
@@ -271,8 +273,157 @@ def check_versions_across_sets(sets: Dict[str, List[Tuple[datetime, str, str]]])
     return ok
 
 
+# The setup and split baselines cannot participate in release squashing.
+PERMANENT_VERSIONS = {SHARED_VERSION, "20261021000100", "20261021000200"}
+FINAL_RELEASE = re.compile(r"v\d+\.\d+\.\d+$")
+SEED_NAME = re.compile(r"\d[\d-]*_seed_([a-z0-9_]+)_reference_codes$")
+
+
+def git(repo: Path, *args: str) -> str:
+    """Run read-only Git commands; missing refs/history are validation failures."""
+    result = subprocess.run(["git", "-C", str(repo), *args], text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    return result.stdout
+
+
+def migration_tree(repo: Path, ref: str) -> Dict[str, Dict[str, str]]:
+    """Migration directories and all their tracked blob identities at an exact commit."""
+    tree: Dict[str, Dict[str, str]] = {}
+    for record in git(repo, "ls-tree", "-rz", ref, "--", "backend/migrations").split("\0"):
+        if not record:
+            continue
+        metadata, path = record.split("\t", 1)
+        parts = Path(path).parts
+        if len(parts) >= 5 and parts[2] in MIGRATION_SETS and not parts[3].startswith("."):
+            directory = "/".join(parts[:4])
+            tree.setdefault(directory, {})["/".join(parts[4:])] = metadata
+    return tree
+
+
+def working_migration_tree(repo: Path) -> Dict[str, Dict[str, str]]:
+    tree: Dict[str, Dict[str, str]] = {}
+    for plane in MIGRATION_SETS:
+        root = repo / "backend/migrations" / plane
+        if not root.is_dir():
+            continue
+        for directory in root.iterdir():
+            if not directory.is_dir() or directory.name.startswith("."):
+                continue
+            files = {}
+            for path in directory.rglob("*"):
+                if path.is_file():
+                    # hash-object reads without writing the object database. Include mode so
+                    # replacing SQL with a symlink cannot evade immutability checks.
+                    mode = "120000" if path.is_symlink() else ("100755" if path.stat().st_mode & 0o111 else "100644")
+                    oid = git(repo, "hash-object", "--", str(path)).strip()
+                    files[str(path.relative_to(directory))] = f"{mode} blob {oid}"
+            tree[str(directory.relative_to(repo))] = files
+    return tree
+
+
+def published_migrations(repo: Path) -> set:
+    """Final product tags protect their versions; RC and train tags never enable squashing."""
+    published = set()
+    for tag in git(repo, "tag", "--list", "v*").splitlines():
+        if FINAL_RELEASE.fullmatch(tag):
+            for directory in migration_tree(repo, f"refs/tags/{tag}"):
+                published.add(diesel_version(Path(directory).name))
+            # Older final releases may predate the app/data split.
+            for name in git(repo, "ls-tree", "--name-only", f"refs/tags/{tag}:backend/migrations").splitlines():
+                if parse_migration_filename(name):
+                    published.add(diesel_version(name))
+    return published
+
+
+def release_squash_paths(target: Dict, current: Dict, published: set) -> set:
+    """Recognize only a complete unshipped app suffix folded into its final version.
+
+    SQL equivalence and the required fresh/upgrade guards are still reviewed and checked
+    with compare_migrations.sh; this exception only controls migration-history eligibility.
+    """
+    app = sorted((p for p in target if Path(p).parts[2] == "app"),
+                 key=lambda p: diesel_version(Path(p).name))
+    changed = [p for p in app if current.get(p) != target[p]]
+    if len(changed) < 2:
+        return set()
+    first = app.index(changed[0])
+    suffix = app[first:]
+    if changed != suffix:
+        return set()
+    versions = [diesel_version(Path(p).name) for p in suffix]
+    newest_shipped = max((diesel_version(Path(p).name) for p in app
+                          if diesel_version(Path(p).name) in published), default="")
+    if any(v in published or v in PERMANENT_VERSIONS or v <= newest_shipped for v in versions):
+        return set()
+    replacements = [p for p in current if Path(p).parts[2] == "app"
+                    and diesel_version(Path(p).name) in versions]
+    if len(replacements) != 1 or diesel_version(Path(replacements[0]).name) != versions[-1]:
+        return set()
+    return set(suffix + replacements)
+
+
+def check_against_target(repo: Path, base_ref: str) -> bool:
+    """Compare against target *tip*, not merge-base: concurrent additions are already run."""
+    base = git(repo, "rev-parse", "--verify", "--end-of-options", f"{base_ref}^{{commit}}").strip()
+    target = migration_tree(repo, base)
+    current = working_migration_tree(repo)
+    if not target:
+        raise ValueError(f"Merge target {base_ref} has no migration sets; refusing unchecked history")
+    published = published_migrations(repo)
+    squash = release_squash_paths(target, current, published)
+    high_water = max(diesel_version(Path(p).name) for p in target)
+    ok = True
+    if squash:
+        print("⚠️  Eligible app release squash: also run compare_migrations.sh against the pre-squash commit")
+    for directory, files in target.items():
+        if current.get(directory) == files or directory in squash:
+            continue
+        # Recording reference seeds replaces, never edits, a source's previous version.
+        match = SEED_NAME.fullmatch(Path(directory).name)
+        seed_replacement = (Path(directory).parts[2] == "data" and directory not in current and match
+                            and any(Path(p).parts[2] == "data" and p not in target
+                                    and (m := SEED_NAME.fullmatch(Path(p).name))
+                                    and m.group(1) == match.group(1)
+                                    and diesel_version(Path(p).name) > high_water for p in current))
+        if seed_replacement:
+            continue
+        print(f"❌ Protected merged migration was edited or removed: {directory}")
+        print("   Add a new forward migration; only eligible app release squashes and newer same-source seed replacements are exempt.")
+        ok = False
+    for directory in current.keys() - target.keys() - squash:
+        version = diesel_version(Path(directory).name)
+        if version <= high_water:
+            print(f"❌ New migration {directory} does not sort after target {base_ref} ({high_water})")
+            print("   Rebase onto the target and renumber only your unmerged migration after both sets.")
+            ok = False
+    return ok
+
+
+def event_base_ref(event_path: Optional[str], event_name: Optional[str]) -> Optional[str]:
+    """Use event target SHA (including merge-queue base), never the PR's fork-point."""
+    if not event_path:
+        return None
+    event = json.loads(Path(event_path).read_text())
+    if event_name == "pull_request":
+        return event["pull_request"]["base"]["sha"]
+    if event_name == "merge_group":
+        return event["merge_group"]["base_sha"]
+    # Feature pushes can legitimately edit or renumber their unmerged migrations.
+    # Only serialized integration branches establish merged-history protection.
+    ref = event.get("ref", "")
+    integration_push = ref in {"refs/heads/main", "refs/heads/develop"} or ref.startswith("refs/heads/release/")
+    if event_name == "push" and integration_push and event.get("before") and set(event["before"]) != {"0"}:
+        return event["before"]
+    return None
+
+
 def main():
     """Main function to run migration validation."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base-ref", help="Exact merge-target commit/ref; local default: origin/main")
+    parser.add_argument("--event-path", help="GitHub event JSON; target is selected by event type")
+    parser.add_argument("--event-name", help="GitHub event name")
+    args = parser.parse_args()
     print("🚀 Starting database migration order validation...")
 
     script_dir = Path(__file__).parent
@@ -315,6 +466,15 @@ def main():
     if not check_versions_across_sets(sets):
         all_checks_passed = False
     print()
+
+    try:
+        base_ref = args.base_ref or event_base_ref(args.event_path, args.event_name) or "origin/main"
+        repo = backend_dir.parent.resolve()
+        if not check_against_target(repo, base_ref):
+            all_checks_passed = False
+    except (subprocess.CalledProcessError, ValueError, KeyError, OSError) as error:
+        print(f"❌ Cannot validate target migration history: {error}")
+        all_checks_passed = False
 
     if all_checks_passed:
         print("✅ All migration validation checks passed!")
