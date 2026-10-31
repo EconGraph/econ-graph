@@ -500,9 +500,12 @@ def run_bounded(command: list[str], env: dict[str, str], timeout: float,
     marker = env.get(RUN_MARKER)
     leftovers = stop_leftovers(marker, proc.pid) if marker else []
     # The pipe closes once the last process holding it has gone; something the sweep can't see
-    # may still hold it, so don't wait for ever. Closing it ends the reader either way.
+    # (docs/release/qa-scenarios.md) may still hold it, so don't wait for ever. Closing the
+    # stream while the reader is blocked in it would block too, so then leave both to the
+    # daemon thread: one file descriptor until that process exits.
     reader.join(timeout=10)
-    proc.stdout.close()
+    if not reader.is_alive():
+        proc.stdout.close()
     return code, b''.join(chunks), timed_out, leftovers
 
 

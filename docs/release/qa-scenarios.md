@@ -54,6 +54,9 @@ the runner can't see this way is neither killed nor reported:
   PostgreSQL and nginx;
 - a process the runner's user can't read: setuid or non-dumpable ones, such as `ssh-agent`.
 
+If such a process still holds the scenario's output open, the runner stops waiting for the
+output 10 seconds after the scenario ends and reports what it has.
+
 Killing a local `kubectl exec` or `docker exec` client doesn't stop the command it started
 remotely. So a scenario, and any command it runs through a hook such as `QA_REDEPLOY_COMMAND`,
 must not leave anything running, including helpers that persist on purpose: an ssh

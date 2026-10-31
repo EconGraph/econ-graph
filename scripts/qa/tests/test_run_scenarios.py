@@ -522,6 +522,23 @@ finally:
         self.assertEqual(result['status'], 'fail')
         self.assertRegex(result['reason'], r'^nothing to do; left running, now killed: sleep \(\d+\)$')
 
+    @unittest.skipUnless(shutil.which('setsid') and shutil.which('env'), 'needs setsid')
+    def test_a_holder_the_sweep_cant_see_doesnt_hold_up_the_runner(self):
+        # env -i drops the run's marker, so the sweep can't find it, and it keeps the output open
+        # for 25s; the runner stops waiting for the output after 10s.
+        pid_file = self.dir / 'hidden.pid'
+        self.scenario('hidden-holder', mutates='no',
+                      body=f'echo hi; setsid env -i sleep 25 & echo $! > "{pid_file}"; echo bye')
+        started = time.monotonic()
+        code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
+        try:
+            self.assertLess(time.monotonic() - started, 20)
+            self.assertEqual((code, report['scenarios'][0]['status']), (0, 'pass'))
+            self.assertEqual(report['scenarios'][0]['output_tail'], ['hi', 'bye'])
+        finally:
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(pid_file.read_text()), signal.SIGKILL)
+
     @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
     def test_a_cleanup_command_whose_child_holds_its_output_still_returns(self):
         # A grandchild that left the command's group keeps its output pipe open; the cleanup
