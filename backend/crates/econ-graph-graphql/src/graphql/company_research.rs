@@ -940,7 +940,7 @@ mod tests {
         assert_eq!(index.len(), 4_000);
         assert_eq!(index.values().map(Vec::len).sum::<usize>(), facts.len());
         assert!(index.values().all(|bucket| bucket.len() == 3));
-        for facts in facts.chunks_exact(3) {
+        for facts in facts.as_chunks::<3>().0 {
             assert!(!earlier_changed_value(&facts[0], &index).unwrap());
             assert!(!earlier_changed_value(&facts[1], &index).unwrap());
             assert!(earlier_changed_value(&facts[2], &index).unwrap());
