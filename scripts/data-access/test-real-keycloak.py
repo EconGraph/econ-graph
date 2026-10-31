@@ -16,6 +16,7 @@ import re
 import secrets
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -28,6 +29,10 @@ ROOT = Path(__file__).resolve().parents[2]
 # https://www.keycloak.org/2026/10/keycloak-2681-released
 KC_IMAGE = "quay.io/keycloak/keycloak:26.8.1@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b"
 OWNER_LABEL = "econgraph.independent-access.owner"
+
+
+class DockerFailure(RuntimeError):
+    """Deliberately contains no command, daemon output, or credentials."""
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -130,11 +135,18 @@ class Lab:
             self.env.pop(name, None)
 
     def docker(self, *args):
-        return subprocess.check_output(
-            ["docker", "--host=unix:///var/run/docker.sock", *args],
-            env=self.env,
-            text=True,
-        ).strip()
+        try:
+            return subprocess.check_output(
+                ["docker", "--host=unix:///var/run/docker.sock", *args],
+                env=self.env,
+                text=True,
+                stderr=subprocess.PIPE,
+                timeout=180,
+            ).strip()
+        except (subprocess.SubprocessError, OSError):
+            # CalledProcessError includes argv (including generated passwords), and
+            # daemon output may echo credentials. Neither may escape this boundary.
+            raise DockerFailure("Disposable Docker operation failed") from None
 
     def create_network(self):
         self.network = self.docker(
@@ -149,8 +161,7 @@ class Lab:
 
     def run(self, name, image, *args, command=()):
         container = self.docker(
-            "run",
-            "--detach",
+            "create",
             "--name",
             f"{self.owner}-{name}",
             "--label",
@@ -166,6 +177,8 @@ class Lab:
             *command,
         )
         self.containers.append(container)
+        # Record the immutable ID before startup: a failed start still needs removal.
+        self.docker("start", container)
         return container
 
     def port(self, container, port):
@@ -244,34 +257,53 @@ class Lab:
         return base
 
     def cleanup(self):
+        failures = 0
         for process in reversed(self.processes):
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
+            try:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+            except (OSError, subprocess.SubprocessError):
+                failures += 1
         for log in self.files:
-            log.close()
+            try:
+                log.close()
+            except OSError:
+                failures += 1
         for container in reversed(self.containers):
-            labels = json.loads(
-                self.docker("inspect", "--format", "{{json .Config.Labels}}", container)
-            )
-            assert (
-                labels.get(OWNER_LABEL) == self.owner
-            ), "refusing to clean another owner's container"
-            self.docker("rm", "--force", container)
-        if self.network:
-            labels = json.loads(
-                self.docker(
-                    "network", "inspect", "--format", "{{json .Labels}}", self.network
+            try:
+                labels = json.loads(
+                    self.docker(
+                        "inspect", "--format", "{{json .Config.Labels}}", container
+                    )
                 )
-            )
-            assert (
-                labels.get(OWNER_LABEL) == self.owner
-            ), "refusing to clean another owner's network"
-            self.docker("network", "rm", self.network)
+                if labels.get(OWNER_LABEL) != self.owner:
+                    raise DockerFailure("Container ownership check failed")
+                self.docker("rm", "--force", container)
+            except (DockerFailure, ValueError, TypeError):
+                # One missing/unremovable resource must not strand the rest.
+                failures += 1
+        if self.network:
+            try:
+                labels = json.loads(
+                    self.docker(
+                        "network",
+                        "inspect",
+                        "--format",
+                        "{{json .Labels}}",
+                        self.network,
+                    )
+                )
+                if labels.get(OWNER_LABEL) != self.owner:
+                    raise DockerFailure("Network ownership check failed")
+                self.docker("network", "rm", self.network)
+            except (DockerFailure, ValueError, TypeError):
+                failures += 1
+        return failures
 
 
 def wait_http(url, *, process=None):
@@ -521,7 +553,7 @@ def main():
                 try:
                     lab.docker("exec", pg, "pg_isready", "--quiet", "-U", "postgres")
                     break
-                except subprocess.CalledProcessError:
+                except DockerFailure:
                     time.sleep(0.5)
             else:
                 raise TimeoutError("disposable PostgreSQL startup failed")
@@ -654,19 +686,35 @@ def main():
                     flush=True,
                 )
             for container in lab.containers:
-                print(
-                    lab.docker(
-                        "inspect",
-                        "--format",
-                        "{{json .State}} {{json .HostConfig.PortBindings}} {{json .NetworkSettings.Ports}}",
-                        container,
-                    ),
-                    flush=True,
-                )
-                print(lab.docker("logs", "--tail", "25", container), flush=True)
+                try:
+                    print(
+                        lab.docker(
+                            "inspect",
+                            "--format",
+                            "{{json .State}} {{json .HostConfig.PortBindings}} {{json .NetworkSettings.Ports}}",
+                            container,
+                        ),
+                        flush=True,
+                    )
+                    print(lab.docker("logs", "--tail", "25", container), flush=True)
+                except DockerFailure:
+                    print(
+                        "Disposable container diagnostics unavailable", file=sys.stderr
+                    )
+
             raise
         finally:
-            lab.cleanup()
+            cleanup_failures = lab.cleanup()
+            if cleanup_failures:
+                # Preserve the original assertion/startup failure if one is active.
+                print(
+                    f"Disposable cleanup encountered {cleanup_failures} resource errors",
+                    file=sys.stderr,
+                )
+                if sys.exc_info()[0] is None:
+                    raise RuntimeError(
+                        "Disposable resource cleanup incomplete"
+                    ) from None
 
 
 if __name__ == "__main__":

@@ -186,6 +186,7 @@ CARGO_BUILD_JOBS=4 CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 \
 npm --prefix admin-frontend ci
 (cd admin-frontend && npx playwright install chromium)
 docker pull postgres:18
+python3 scripts/data-access/test_real_keycloak_harness.py
 python3 scripts/data-access/test-real-keycloak.py \
   --evidence /tmp/independent-data-keycloak-evidence.json
 ```
