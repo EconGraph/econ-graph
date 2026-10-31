@@ -17,6 +17,9 @@ pub mod financial_ratios;
 pub mod financial_statement;
 pub mod global_analysis;
 pub mod search;
+
+// Durable annotation identities shared across research consumers.
+pub mod research_reference;
 pub mod series_metadata;
 pub mod user;
 pub mod xbrl_taxonomy_schema;
@@ -43,6 +46,8 @@ pub use financial_ratios::*;
 pub use financial_statement::*;
 pub use global_analysis::*;
 pub use search::*;
+
+pub use research_reference::*;
 pub use series_metadata::*;
 pub use user::{AnnotationComment, ChartAnnotation, ChartCollaborator, NewUser, User};
 pub use xbrl_taxonomy_schema::*;
