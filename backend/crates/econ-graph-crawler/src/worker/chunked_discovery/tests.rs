@@ -1663,6 +1663,32 @@ async fn finalize_refuses_a_run_missing_a_chunk() {
     }
 }
 
+/// A run whose chunks found no series at all is refused at finalize, for any adapter that
+/// tracks lifecycle, the way a single walk refuses an empty selection
+/// (`lifecycle::refuse_empty_selection`): it reconciles nothing, holds no guarded snapshot, and
+/// the run fails once the finalize job's retries are spent.
+#[tokio::test]
+async fn finalize_refuses_an_empty_catalog() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    reset_lifecycle(p).await;
+    let adapter = lifecycle_adapter(&LIFECYCLE_IDS, true);
+    let w = worker(p, &adapter, "t745-w1");
+    enqueue_discovery(p, 5).await;
+    drain(&w).await;
+    let baseline = lifecycle_rows(p).await;
+    let scope = accepted_scope(p).await;
+
+    // Every unit is now a curated entry the source no longer lists: no series found.
+    *adapter.catalog.lock().unwrap() = vec!["t745_missing_a".into(), "t745_missing_b".into()];
+    enqueue_discovery(p, 5).await;
+    drain(&w).await;
+    assert_eq!(lifecycle_rows(p).await, baseline, "nothing reconciled");
+    assert_eq!(accepted_scope(p).await, scope, "no guarded snapshot either");
+    assert_eq!(is_active(p, "t745_a").await, Some(true));
+    assert_eq!(runs(p).await.pop().unwrap().state, "failed");
+}
+
 /// A lifecycle-tracking adapter with no catalog scope never starts a chunked run: its
 /// finalize would deactivate every unlisted series at once through plain retirement. The
 /// discovery job fails for good, with no run, no chunk and no change to any series.

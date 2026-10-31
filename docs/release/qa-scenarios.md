@@ -62,6 +62,54 @@ remotely. So a scenario, and any command it runs through a hook such as `QA_REDE
 must not leave anything running, including helpers that persist on purpose: an ssh
 ControlMaster (ControlPersist), `kubectl port-forward` or a gpg-agent.
 
+## A QA environment for a release candidate
+
+`scripts/qa/deploy-rc-to-qa.sh` stands up a scratch kind cluster running a release
+candidate's published images on a copy of production's data, for the lab profile and
+manual QA:
+
+```bash
+scripts/qa/deploy-rc-to-qa.sh --tag vX.Y.Z-rc.N --dump-dir ~/econgraph-backups/<timestamp>
+```
+
+It works from any checkout: it runs the candidate's own deploy scripts from a worktree of
+the tag (from v4.1). The dump directory is a verified backup (`counts.env`, the dumps and
+`secrets/`), read and never written. Everything else is in `~/econgraph-qa/NAME/`
+(`ECONGRAPH_QA_ROOT` overrides the root; never under `/tmp`), and the cluster `NAME`
+(default `qa-<tag without dots>`) is created by the script and marked as its own. It
+refuses the production cluster names, a cluster with a production marker or one it did not
+create, and a dump inside the QA root.
+
+The site is at `http://localhost:PORT`, on 127.0.0.1 only, with sign-in, the backend's issuer
+and CORS moved to that address: a deliberate difference from the candidate's own
+configuration, since `http://localhost` on port 80 is production's gateway on its host. The
+copy holds none of production's secrets that would let it act as production:
+- the Keycloak database loses its identity providers, realm keys, client secrets, sessions,
+  revoked tokens, events and JGroups CA (`scripts/deploy/lib/keycloak_sanitize.py`, as the
+  release lab does);
+- Secret `econ-graph-keycloak` keeps only `db-password`, with a new anonymous client secret
+  and a QA bootstrap admin (`qa-keycloak-admin`), and no identity provider keys;
+- `crawler-api-keys`, `grafana-admin` and `monitoring-auth` are deleted (the deploy generates
+  a new Grafana admin password), and crawler-worker runs at 0 replicas from the first deploy.
+
+It keeps the database passwords the restored data needs (the restored Secrets
+`econ-graph-secrets`, `econ-graph-postgres` and `econ-graph-app-postgres`), and the users'
+password hashes in the Keycloak copy, for realistic sign-in tests.
+
+The QA accounts `qa-a`, `qa-b` and `qa-admin` (realm role `admin`) get random passwords in
+`~/econgraph-qa/NAME/accounts.env` and `accounts/<user>.password` (mode 600), for
+`QA_USERNAME` and `QA_PASSWORD_FILE`; the QA Keycloak admin's are there too, as
+`QA_KEYCLOAK_ADMIN_USERNAME` and `QA_KEYCLOAK_ADMIN_PASSWORD_FILE`. The script prints a runner
+command that clears the side inputs other runs may have left in the shell (`QA_KUBE_CONTEXT`,
+`QA_KEYCLOAK_URL` and the redeploy and backup hooks), so none of them points at production. The script
+prints the URL, the accounts file and `TARGET_URL` and `TARGET_HOST` for the QA prompt; run the
+scenarios with `QA_LAB_TARGET_OK=localhost:PORT --target http://localhost:PORT --profile lab`.
+
+Rerun it to finish an environment that stopped part-way, or to redeploy the candidate on it;
+the restore and the secret removal run once. `--teardown` deletes the cluster and its
+directory, never the dump; `--dry-run` only checks and prints the plan. The script's usage
+header is the full reference.
+
 ## Profiles
 
 Each scenario declares in its header whether it changes state (`qa-mutates: yes` or `no`) and
@@ -70,14 +118,20 @@ unclear counts as changing state.
 
 | Profile | Runs | Targets |
 |---|---|---|
-| `lab` | every scenario | only hosts named in `QA_LAB_TARGET_OK`, never `econgraph.com`, `www.econgraph.com`, or a host in `QA_PRODUCTION_HOSTS` |
+| `lab` | every scenario | only targets named in `QA_LAB_TARGET_OK`, never `econgraph.com`, `www.econgraph.com`, a host in `QA_PRODUCTION_HOSTS`, or `localhost`, `127.0.0.1` or `::1` on port 80 or 443 |
 | `ci` | every scenario except the lab-only ones | the same |
 | `production` | the scenarios that change nothing, plus `annotation-round-trip` as a dedicated QA account | any |
 
 The lab and ci profiles run state-changing scenarios, so their target must be named: on the
 production host, `http://localhost` or the host's own address reaches production as surely as
-its public name. `QA_LAB_TARGET_OK` is a comma-separated list of host names; the release e2e
-stack's spec sets it to its own host.
+its public name. `QA_LAB_TARGET_OK` is a comma-separated list of hosts, each allowing any port,
+or `host:port` (`[v6]:port`), allowing only that port; the release e2e stack's spec sets it to its
+own `localhost:PORT`. Whatever it names, the lab and ci profiles refuse `localhost`, `127.0.0.1`
+and `::1` on ports 80 and 443 (given or by default): on the production host, that is
+production's gateway. The URLs scenarios read beside the target (`QA_OIDC_ISSUER`,
+`QA_KEYCLOAK_URL`, `QA_MCP_URL`, `QA_OIDC_REDIRECT_URI`) get the same production-host and
+port 80/443 refusals in those profiles; other side inputs, such as `QA_KUBE_CONTEXT` and the
+redeploy hooks, are the operator's to set for the run.
 
 The production exception is fixed in the runner (`PRODUCTION_MUTATING_EXCEPTIONS` in
 `scripts/qa/run_scenarios.py`): the name `annotation-round-trip` and the one file that may carry

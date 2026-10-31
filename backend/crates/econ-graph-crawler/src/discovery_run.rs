@@ -630,6 +630,44 @@ pub(crate) async fn start_run(
     .await
 }
 
+/// Supersedes every run of `source` that is not final (finalizing included) and cancels its
+/// queued jobs: a single-job discovery is about to commit the source's catalog, so no run may
+/// commit after it. Returns how many runs were superseded.
+pub(crate) async fn supersede_active_runs(
+    pool: &DatabasePool,
+    source: SourceId,
+) -> AppResult<usize> {
+    let mut conn = pool.get().await.map_err(conn_err)?;
+    let source = source.as_str();
+    conn.transaction::<_, AppError, _>(async move |conn| {
+        diesel::sql_query(
+            "SELECT pg_advisory_xact_lock(hashtextextended('discovery_runs:' || $1, 0))",
+        )
+        .bind::<Text, _>(source)
+        .execute(conn)
+        .await?;
+        let superseded: Vec<IdRow> = diesel::sql_query(
+            "UPDATE discovery_runs SET state = 'superseded', finished_at = NOW(), \
+                 updated_at = NOW(), error_message = 'superseded by a single-job discovery' \
+             WHERE source = $1 AND state IN ('enumerating', 'running', 'finalizing') \
+             RETURNING id",
+        )
+        .bind::<Text, _>(source)
+        .load(conn)
+        .await?;
+        let superseded: Vec<Uuid> = superseded.into_iter().map(|r| r.id).collect();
+        cancel_jobs_conn(
+            conn,
+            source,
+            &superseded,
+            "superseded by a single-job discovery",
+        )
+        .await?;
+        Ok(superseded.len())
+    })
+    .await
+}
+
 /// Fails a run that isn't final yet (enumeration failed). Outside any result transaction: a
 /// retried `discover_catalog` job starts a new run anyway. Returns whether the run was failed.
 pub(crate) async fn fail_enumerating_run(

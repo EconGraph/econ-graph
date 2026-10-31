@@ -59,6 +59,12 @@ corresponding PR into `main`.
 
 ## Tagging
 
+Train 3 is a development milestone, not a product release. Use the separate
+[Train 3 milestone procedure](TRAIN_3_MILESTONE.md) after acceptance on main.
+It creates only an annotated `train-3` marker; the product-release instructions
+below, including version/changelog changes and migration squashing, do not apply
+to that milestone.
+
 Before tagging, squash the release's eligible app plane migrations in
 `backend/migrations/app` into one migration. A migration is eligible if it has not shipped in
 a final release tag and sorts after the newest app plane migration that has shipped. Release

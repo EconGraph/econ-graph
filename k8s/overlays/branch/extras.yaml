@@ -129,12 +129,12 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: backend-to-data-gateway
+  name: proxy-to-data-gateway
   namespace: econ-graph-br-example-50d858e098
 spec:
   podSelector:
     matchLabels:
-      app: econ-graph-backend
+      app: branch-data-proxy
   policyTypes:
   - Egress
   egress:
@@ -150,3 +150,98 @@ spec:
     ports:
     - port: 10080
       protocol: TCP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: branch-data-proxy
+  namespace: econ-graph-br-example-50d858e098
+data:
+  nginx.conf: "pid /tmp/nginx.pid;\nevents { worker_connections 128; }\nhttp {\n \
+    \ client_body_temp_path /tmp/client_temp;\n  proxy_temp_path /tmp/proxy_temp;\n\
+    \  fastcgi_temp_path /tmp/fastcgi_temp;\n  uwsgi_temp_path /tmp/uwsgi_temp;\n\
+    \  scgi_temp_path /tmp/scgi_temp;\n  access_log /dev/stdout;\n  error_log /dev/stderr;\n\
+    \  server {\n    listen 8080;\n    client_max_body_size 1m;\n    location = /health\
+    \ { return 200 'ok'; }\n    location = /data/graphql {\n      proxy_pass http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql;\n\
+    \      proxy_set_header Host example-50d858e098.localhost;\n      proxy_set_header\
+    \ Authorization \"\";\n      proxy_set_header Cookie \"\";\n      proxy_set_header\
+    \ Forwarded \"\";\n      proxy_set_header X-Forwarded-Host \"\";\n      proxy_set_header\
+    \ X-Forwarded-For \"\";\n      proxy_connect_timeout 5s;\n      proxy_read_timeout\
+    \ 30s;\n    }\n    location / { return 403; }\n  }\n}\n"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: branch-data-proxy
+  namespace: econ-graph-br-example-50d858e098
+spec:
+  type: ClusterIP
+  selector:
+    app: branch-data-proxy
+  ports:
+  - port: 8080
+    targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: branch-data-proxy
+  namespace: econ-graph-br-example-50d858e098
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: branch-data-proxy
+  template:
+    metadata:
+      labels:
+        app: branch-data-proxy
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 101
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: proxy
+        image: econ-graph-frontend:branch-example
+        imagePullPolicy: IfNotPresent
+        command:
+        - nginx
+        - -c
+        - /branch/nginx.conf
+        - -g
+        - daemon off;
+        ports:
+        - containerPort: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+        volumeMounts:
+        - name: config
+          mountPath: /branch
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: config
+        configMap:
+          name: branch-data-proxy
+      - name: tmp
+        emptyDir:
+          sizeLimit: 64Mi

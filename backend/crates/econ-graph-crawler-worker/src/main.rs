@@ -66,6 +66,17 @@ struct Args {
     #[arg(long, env = "CRAWLER_SOURCES", value_delimiter = ',')]
     sources: Option<Vec<SourceId>>,
 
+    /// Discover these sources with a single discover_catalog job each, even though their
+    /// adapter discovers in chunks (comma-separated, e.g. FRED). Default: none, so every adapter
+    /// that can discover in chunks does. A run already in progress for a listed source fails or
+    /// is superseded, and commits nothing.
+    #[arg(
+        long,
+        env = "CRAWLER_SINGLE_JOB_DISCOVERY_SOURCES",
+        value_delimiter = ','
+    )]
+    single_job_discovery_sources: Vec<SourceId>,
+
     /// Seconds to sleep when no job is due.
     #[arg(long, env = "CRAWLER_POLL_INTERVAL_SECS", default_value_t = 5)]
     poll_interval_secs: u64,
@@ -299,15 +310,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!(addr = %bound, "metrics server listening (/metrics, /healthz)");
         background.push(tokio::spawn(server));
         // Run gauges (and their alert) cover the sources that discover in chunks today.
-        let chunked_sources: Vec<SourceId> = registry
-            .ids()
-            .into_iter()
-            .filter(|&id| {
-                registry
-                    .get(id)
-                    .is_some_and(|a| a.chunked_discovery().is_some())
-            })
-            .collect();
+        let chunked_sources =
+            metrics::chunked_run_sources(&registry, &args.single_job_discovery_sources);
         background.push(tokio::spawn(metrics::queue_gauge_loop(
             ctx.pool.clone(),
             chunked_sources,
@@ -325,7 +329,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("metrics server disabled");
     }
 
+    if !args.single_job_discovery_sources.is_empty() {
+        tracing::info!(sources = ?args.single_job_discovery_sources,
+            "discovering these sources with single discover_catalog jobs");
+    }
     let worker = Worker::new(ctx, registry, config)
+        .with_single_job_discovery(args.single_job_discovery_sources)
         .with_datasets(datasets)
         .with_handler(
             SourceId::Sec,
