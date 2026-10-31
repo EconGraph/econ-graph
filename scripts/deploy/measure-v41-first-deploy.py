@@ -20,6 +20,13 @@ Prints a Markdown report to paste into ECO-803:
   ECO-807. The (series, date) pairs whose only two rows are one original release published
      before the date and one synthetic legacy row (the SQL of synthetic_legacy_row in
      backend/crates/econ-graph-core/src/models/data_point.rs), by source.
+  ECO-738. The data migration 2026-11-01-000100_world_bank_first_release: the World Bank rows
+     it would relabel (later real originals of a (series, date), ranked as the migration ranks
+     them) and the revision twins that would make it refuse, with its estimated run time
+     (about 25 s per million rows relabelled) and WAL (about 0.9 KB per row) against the
+     crawler-migrate Job's activeDeadlineSeconds (k8s/manifests/crawler-migrate-job.yaml),
+     which every pending data migration shares. Once the migration is applied the report
+     says so instead: measure a copy restored before the release is deployed.
 
 --database-url is required and names the data database to measure: the rehearsal copy or a
 restored dump. Give the password in PGPASSWORD (or PGPASSFILE) rather than in the URL, where
@@ -71,6 +78,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 BEA_RULES = ROOT / 'backend/crates/econ-graph-crawler/data/catalog_selection/bea.toml'
 DATA_POINT_RS = ROOT / 'backend/crates/econ-graph-core/src/models/data_point.rs'
+MIGRATE_JOB = ROOT / 'k8s/manifests/crawler-migrate-job.yaml'
 DEFAULT_CRAWLER = (f'cargo run -q --manifest-path {ROOT}/backend/Cargo.toml '
                    '-p econ-graph-crawler --bin crawler --')
 # The kind cluster and namespace that hold production's data database.
@@ -437,6 +445,76 @@ def render_eco_807(results) -> list[str]:
     return lines
 
 
+# --- ECO-738 -----------------------------------------------------------------------------------
+
+# The crawler's World Bank data source (data_sources has no source code column).
+WORLD_BANK_SOURCE = 'World Bank Open Data'
+FIRST_RELEASE_VERSION = '20261101000100'
+# Measured on a copy with 3.6M relabels: 91 s and about 0.9 KB of WAL per row (each relabelled
+# row is rewritten; the updated_at trigger fires), rounded up for the estimate.
+SECONDS_PER_MILLION_RELABELS = 25
+WAL_KB_PER_RELABEL = 0.9
+
+# The rows 2026-11-01-000100_world_bank_first_release/up.sql relabels: every real original of
+# a World Bank (series, date) after its earliest (by revision_date, then id), synthetic legacy
+# rows left out; and of those, the ones with a revision twin, which make it refuse.
+ECO_738 = f"""
+WITH world_bank AS (SELECT id FROM data_sources WHERE name = {literal(WORLD_BANK_SOURCE)}),
+later AS (
+  SELECT ranked.series_id, ranked.date, ranked.revision_date
+  FROM (
+    SELECT dp.series_id, dp.date, dp.revision_date,
+      ROW_NUMBER() OVER (PARTITION BY dp.series_id, dp.date ORDER BY dp.revision_date, dp.id)
+        AS release_number
+    FROM data_points dp
+    JOIN economic_series es ON es.id = dp.series_id
+    WHERE es.source_id IN (SELECT id FROM world_bank)
+      AND dp.is_original_release
+      AND NOT {synthetic_legacy_row('dp', 'other_original')}
+  ) ranked
+  WHERE ranked.release_number > 1
+)
+SELECT (SELECT count(*) FROM __diesel_schema_migrations
+        WHERE version = {literal(FIRST_RELEASE_VERSION)}),
+       (SELECT count(*) FROM world_bank),
+       (SELECT count(*) FROM later),
+       (SELECT count(*) FROM later l WHERE EXISTS (
+          SELECT 1 FROM data_points r WHERE r.series_id = l.series_id AND r.date = l.date
+          AND r.revision_date = l.revision_date AND NOT r.is_original_release))"""
+
+
+def migrate_deadline() -> int:
+    """activeDeadlineSeconds of the crawler-migrate Job."""
+    match = re.search(r'^\s*activeDeadlineSeconds:\s*(\d+)\s*$', MIGRATE_JOB.read_text(), re.M)
+    if not match:
+        raise ValueError(f'no activeDeadlineSeconds in {MIGRATE_JOB.relative_to(ROOT)}')
+    return int(match.group(1))
+
+
+def render_eco_738(results) -> list[str]:
+    applied, sources, relabel, twins = (int(v) for v in results['eco_738'][0])
+    if applied:
+        return [f'- Already applied here ({FIRST_RELEASE_VERSION} in __diesel_schema_migrations): '
+                f'nothing is left to relabel. Measure a copy restored before the release is '
+                f'deployed.']
+    if sources != 1:
+        raise ValueError(f'expected one data_sources row named {WORLD_BANK_SOURCE}, found '
+                         f'{sources}; the migration refuses this database')
+    seconds = relabel / 1_000_000 * SECONDS_PER_MILLION_RELABELS
+    wal_gb = relabel * WAL_KB_PER_RELABEL / 1024 / 1024
+    deadline = migrate_deadline()
+    lines = [f'- World Bank rows to relabel as revisions: **{relabel}**',
+             f'- Revision twins (the migration refuses while any exist): **{twins}**',
+             f'- Estimated run time: about {seconds:.0f} s at {SECONDS_PER_MILLION_RELABELS} s per '
+             f'million rows; the crawler-migrate Job allows {deadline} s for every pending data '
+             f'migration ({"within" if seconds <= deadline else "OVER"} it)',
+             f'- Estimated WAL: about {wal_gb:.1f} GB ({WAL_KB_PER_RELABEL} KB per row), and '
+             f'{relabel} dead tuples for autovacuum']
+    if twins:
+        lines.append('- The migration refuses this database until the twins are resolved')
+    return lines
+
+
 # --- 2. FRED selection -------------------------------------------------------------------------
 
 
@@ -542,7 +620,10 @@ def main(argv=None) -> int:
         sections.append(('### 1. Inactive BEA series by rule', [], error))
     sections.append(('### ECO-807: projection-only dates with a synthetic row', ['eco_807'],
                      render_eco_807))
-    queries = [('version', 'SHOW server_version')] + bea + [('eco_807', ECO_807)]
+    sections.append(('### ECO-738: World Bank first-release relabel', ['eco_738'],
+                     render_eco_738))
+    queries = [('version', 'SHOW server_version')] + bea + [('eco_807', ECO_807),
+                                                             ('eco_738', ECO_738)]
     results, failed_query, error = db.run(queries)
     if 'version' not in results:
         print(f'cannot query {redacted(args.database_url)}: {error}', file=sys.stderr)
