@@ -36,6 +36,8 @@ export const DATA_OPERATIONS: ReadonlySet<string> = new Set([
   'GetResearchCompany',
   'GetCompanyResearchStatement',
   'GetCompanyResearchComparisons',
+  'GetCompanyOtherFacts',
+  'GetCompanyFactHistory',
   // Shipped in the release build.
   'GetSeriesDetail',
   'GetSeriesData',
