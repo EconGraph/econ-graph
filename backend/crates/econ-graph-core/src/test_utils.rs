@@ -249,9 +249,7 @@ impl TestContainer {
             .await?;
 
         // Run migrations after cleaning to ensure database is ready
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
-        crate::database::run_migrations(&database_url).await?;
+        crate::database::run_migrations(&self.database_url).await?;
 
         Ok(())
     }
@@ -334,7 +332,8 @@ pub async fn insert_series_without_observations(
     .id
 }
 
-/// The test database every test shares: its server, and container, start once.
+/// The test database every test shares: its URL (and, in this crate's own tests, its container)
+/// is resolved once.
 static TEST_DB: OnceCell<Arc<TestContainer>> = OnceCell::const_new();
 
 /// The shared test database, with a connection pool of the caller's own.
