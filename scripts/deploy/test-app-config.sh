@@ -8,6 +8,9 @@
 #     ConfigMap's hash (which rolls it); one with the same hash is left alone;
 #   - changing the ConfigMap's data changes the hash, so a same-tag redeploy rolls the
 #     app; re-running with nothing changed patches nothing;
+#   - a repeat deploy (apply the manifests, which don't name the annotation, then the step)
+#     with unchanged data rolls nothing: apply leaves the patched annotation alone;
+#   - a Deployment that doesn't exist fails the step before anything is patched;
 #   - a ConfigMap that can't be read fails the step and patches nothing;
 #   - under DRY_RUN nothing is read or patched;
 #   - deploy.sh runs the step after it applies the Deployments.
@@ -23,8 +26,10 @@ mkdir -p "$W/bin" "$W/state"
 cat >"$W/bin/kubectl" <<'STUB'
 #!/usr/bin/env bash
 # Stub kubectl: get configmap prints $STATE/configmap (fails when it is missing); get
-# deployment/D prints $STATE/D.hash; patch deployment/D records the patched hash in
-# $STATE/D.hash and the call in $STATE/patches.
+# deployment/D prints $STATE/D.hash, or fails like kubectl when $STATE/D.absent exists;
+# patch deployment/D records the patched hash in $STATE/D.hash and the call in
+# $STATE/patches; apply -f records the call in $STATE/applies and, as client-side apply
+# does for a template annotation it never set, leaves $STATE/D.hash alone.
 args=" $* "
 case "$args" in
     *" get configmap econ-graph-config "*)
@@ -32,7 +37,13 @@ case "$args" in
         cat "$STATE/configmap" ;;
     *" get deployment/"*)
         d="${args#* get deployment/}"; d="${d%% *}"
+        if [ -f "$STATE/$d.absent" ]; then
+            echo "Error from server (NotFound): deployments.apps \"$d\" not found" >&2
+            exit 1
+        fi
         cat "$STATE/$d.hash" 2>/dev/null || true ;;
+    *" apply -f "*)
+        echo "$*" >>"$STATE/applies" ;;
     *" patch deployment/"*)
         d="${args#* patch deployment/}"; d="${d%% *}"
         hash="$(printf '%s' "$args" | sed -n 's/.*app-config-hash\\*":\\*"\([0-9a-f]*\).*/\1/p')"
@@ -84,6 +95,26 @@ grep -q "deployment/econ-graph-backend: econ-graph-config [0-9a-f]* (was ${first
 printf 'stale' >"$W/state/econ-graph-frontend.hash"
 step && [ "$(patched)" = "econ-graph-frontend" ] &&
     ok "only a Deployment on another hash is rolled" || bad "patched '$(patched)'"
+
+# A repeat deploy: deploy.sh applies the Deployment manifests, then runs the step.
+repeat_deploy() {
+    (
+        export STATE="$W/state" PATH="$W/bin:$PATH"
+        for m in backend-deployment crawler-worker frontend-deployment; do
+            kubectl apply -f "k8s/manifests/$m.yaml"
+        done
+    )
+    step
+}
+repeat_deploy && [ -z "$(patched)" ] && [ "$(wc -l <"$W/state/applies")" = 3 ] &&
+    ok "apply, then the step, with unchanged data rolls nothing" || bad "repeat deploy patched '$(patched)'"
+repeat_deploy && [ -z "$(patched)" ] && ok "and again" || bad "second repeat patched '$(patched)'"
+
+touch "$W/state/crawler-worker.absent"
+if step; then bad "a missing Deployment passed"; else ok "a missing Deployment fails the step"; fi
+grep -q "crawler-worker" "$W/state/patches" && bad "the missing Deployment was patched" ||
+    ok "and it is never patched"
+rm "$W/state/crawler-worker.absent"
 
 rm "$W/state/configmap"
 if step; then bad "an unreadable ConfigMap passed"; else ok "an unreadable ConfigMap fails the step"; fi
