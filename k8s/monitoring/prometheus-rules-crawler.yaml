@@ -367,8 +367,9 @@ data:
             summary: '{{ $value | humanize }} tracked {{ $labels.source }} series no longer match the selection rules'
             description: The last complete {{ $labels.source }} catalog still lists these series upstream, so they keep their publication state and are still fetched. The worker log's catalog warning counts them; review whether the rules in data/catalog_selection/ should follow the upstream change.
 
-        # Enabled sources whose adapter discovers in chunks today only: the worker drops the gauge
-        # of a source that stops opting in or is disabled, which clears the alert. Discovery is
+        # Enabled sources the worker discovers in chunks only: the worker drops the gauge of a
+        # source that stops opting in, is disabled or is switched to single-job discovery
+        # (CRAWLER_SINGLE_JOB_DISCOVERY_SOURCES), which clears the alert. Discovery is
         # scheduled every 7 days, so a source with no complete run for twice that has missed at
         # least one: runs keep failing (a chunk failed for good) or never finish. The gauge is
         # polled from discovery_runs, so it survives worker restarts; a source that never

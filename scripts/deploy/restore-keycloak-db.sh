@@ -109,10 +109,13 @@ if [ "$dump_uid" != "$live_uid" ]; then
     fi
     echo "${KDB_SCRIPT}: WARNING: ${DUMP_DIR} WAS TAKEN ON ANOTHER CLUSTER (kube-system UID ${dump_uid:-not recorded}, this one is ${live_uid}); restoring it here because of --allow-other-cluster" >&2
 fi
-cluster_role="a cluster not marked production"
-if cluster_is_marked_production; then
-    cluster_role="a cluster marked PRODUCTION"
-fi
+role_status=0
+cluster_is_marked_production || role_status=$?
+case "$role_status" in
+    0) cluster_role="a cluster marked PRODUCTION" ;;
+    1) cluster_role="a cluster not marked production" ;;
+    *) cluster_role="a cluster whose production status is unknown (${CLUSTER_ROLE_REASON})" ;;
+esac
 replicas="$(kdb_keycloak_replicas)"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 stamp="${stamp,,}"
