@@ -1,0 +1,80 @@
+name: Train 5 company research
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/train5.yml'
+      - 'scripts/train5/**'
+      - 'backend/**/company*'
+      - 'backend/**/company*/**'
+      - 'backend/**/Cargo.toml'
+      - 'backend/Cargo.lock'
+      - 'backend/crates/econ-graph-graphql/src/graphql/query.rs'
+      - 'backend/crates/econ-graph-graphql/src/graphql/mutation.rs'
+      - 'backend/crates/econ-graph-auth/src/roles.rs'
+      - 'backend/crates/econ-graph-crawler/src/http.rs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: train5-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  company-contracts:
+    name: Company research contracts and enabled APIs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: 4
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_INCREMENTAL: '0'
+      DATABASE_URL: postgres://postgres:password@localhost:5432/train5_test
+      DATA_DATABASE_URL: postgres://postgres:password@localhost:5432/train5_test
+      APP_DATABASE_URL: postgres://postgres:password@localhost:5432/train5_test
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: train5_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: backend
+          prefix-key: train5-contracts
+      - name: Verify release evidence rejection and exact arithmetic
+        run: python3 -m unittest discover -s scripts/train5 -p 'test_*.py'
+      - name: Verify company fact and calculation contracts
+        working-directory: backend
+        run: |
+          cargo test --locked -p econ-graph-core --lib company_fact
+          cargo test --locked -p econ-graph-core --lib company_financials
+          cargo test --locked -p econ-graph-core --test company_fact_migration_test
+          cargo test --locked -p econ-graph-services --lib company_notes -- --test-threads=1
+      - name: Verify ingestion and recovery
+        working-directory: backend
+        run: cargo test --locked -p econ-graph-sec-crawler --lib companyfacts -- --test-threads=1
+      - name: Verify enabled company APIs and notes
+        working-directory: backend
+        # Exercise the actual enabled compiler configuration without changing release flags.
+        env:
+          RUSTFLAGS: --cfg flag_financial_components
+          FLAGS_PROFILE: release
+        run: |
+          cargo test --locked -p econ-graph-graphql --lib company_research -- --test-threads=1
+          cargo test --locked -p econ-graph-graphql --lib company_notes -- --test-threads=1
