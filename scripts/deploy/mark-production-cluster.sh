@@ -18,6 +18,9 @@
 #              is no marker), then remove the marker (kept if scaling fails),
 #              then offer to delete the tunnel token (Secret cloudflare-tunnel)
 #
+# It refuses a release lab (a cluster with ConfigMap kube-system/econgraph-lab-owner,
+# scripts/deploy/release-lab.py): a lab is never production.
+#
 # Before a change it shows the cluster's identity (this host's name, the
 # nodes, the API server and the kube-system UID) and asks, at a terminal, for
 # the first 8 characters of that UID: context names such as kind-econ-graph are
@@ -188,6 +191,13 @@ if [[ "$UNMARK" == true ]]; then
     exit 0
 fi
 
+# A release lab (scripts/deploy/release-lab.py) is never production.
+lab=0
+cluster_role_is_lab || lab=$?
+case "$lab" in
+    0) die "context $context is a release lab (ConfigMap $CLUSTER_ROLE_NAMESPACE/$CLUSTER_ROLE_LAB_CONFIGMAP); a lab is never production. Nothing was changed" ;;
+    2) die "could not check context $context for ConfigMap $CLUSTER_ROLE_NAMESPACE/$CLUSTER_ROLE_LAB_CONFIGMAP; nothing was changed" ;;
+esac
 if cluster_is_marked_production; then
     log "context $context (kube-system UID $uid) is already marked production; nothing to do"
     exit 0

@@ -87,6 +87,8 @@ set -- "${args[@]}"
 case "$*" in
   "version --request-timeout=15s") ;;
   "get namespace kube-system "*) printf 'uid-this-cluster' ;;
+  # Not a release lab (lib/cluster-role.sh, cluster_role_is_lab).
+  "get configmap econgraph-lab-owner "*) ;;
   # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
   "get configmap econgraph-cluster-role "*)
     [ "${STUB_MARKER:-none}" = production ] || exit 0

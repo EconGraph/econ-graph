@@ -57,6 +57,8 @@ case " \$* " in
     *" config current-context"*) echo "\${FAKE_CURRENT_CONTEXT:-kind-econ-graph}"; exit 0 ;;
     *" config view "*) echo "https://127.0.0.1:6443"; exit 0 ;;
     *" get namespace kube-system "*) echo "$CLUSTER_UID"; exit 0 ;;
+    # Not a release lab (lib/cluster-role.sh, cluster_role_is_lab).
+    *" get configmap econgraph-lab-owner "*) exit 0 ;;
     *" get configmap econgraph-cluster-role "*)
         # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
         [ "\${FAKE_PRODUCTION:-false}" = true ] || exit 0

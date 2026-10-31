@@ -27,6 +27,9 @@
 
 CLUSTER_ROLE_NAMESPACE="kube-system"
 CLUSTER_ROLE_CONFIGMAP="econgraph-cluster-role"
+# The ownership marker of a release lab (scripts/deploy/release-lab.py). A cluster that
+# carries it is never production, whatever its role marker says.
+CLUSTER_ROLE_LAB_CONFIGMAP="econgraph-lab-owner"
 # Never taken from the environment: a stray CLUSTER_ROLE_DRY_RUN=true would make
 # kc print instead of run while child scripts run for real, and make every
 # cluster look production. Only deploy.sh --dry-run sets it, after sourcing.
@@ -295,6 +298,28 @@ cluster_is_marked_production() {
         CLUSTER_ROLE_REASON="the production marker on context ${CLUSTER_ROLE_CONTEXT} was made on another cluster (${CLUSTER_ROLE_NAMESPACE} UID $(printf '%q' "${CLUSTER_ROLE_MARKER_UID:-missing}"), this cluster's is ${uid}); a copied or restored marker does not count"
         return 1
     fi
+    local lab=0
+    cluster_role_is_lab || lab=$?
+    case "$lab" in
+        0)
+            CLUSTER_ROLE_REASON="context ${CLUSTER_ROLE_CONTEXT} is a release lab (ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_LAB_CONFIGMAP}); a lab is never production, whatever its marker says"
+            return 1
+            ;;
+        2)
+            CLUSTER_ROLE_REASON="could not check context ${CLUSTER_ROLE_CONTEXT} for ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_LAB_CONFIGMAP}, so it is treated as not production"
+            return 2
+            ;;
+    esac
+}
+
+# Whether the cluster on the pinned context is a release lab: 0 when it carries the
+# lab ownership marker (ConfigMap kube-system/econgraph-lab-owner), 1 when it answers
+# without one, 2 when it could not be asked.
+cluster_role_is_lab() {
+    local found
+    found="$(kc -n "$CLUSTER_ROLE_NAMESPACE" get configmap "$CLUSTER_ROLE_LAB_CONFIGMAP" \
+        --ignore-not-found -o name)" || return 2
+    [ -n "$found" ]
 }
 
 # cluster_role_marker_guards_delete EXISTS ROLE UID: for a script about to
