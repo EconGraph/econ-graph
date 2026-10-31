@@ -184,7 +184,7 @@ async fn smoke_refuses_unbound_paused_or_mismatched_targets_and_rolls_back_metad
     // Leave a pending migration marker to prove the pause failure takes precedence over
     // migration work. Re-running that ALTER first would report a duplicate column instead.
     let mut conn = db.connect()?;
-    conn.batch_execute("DELETE FROM __diesel_schema_migrations WHERE version='20261031010000'")?;
+    conn.batch_execute("DELETE FROM __diesel_schema_migrations WHERE version='20261101000110'")?;
     conn.batch_execute(&format!(
         "UPDATE timeseries_recovery_state SET writes_paused=true,pause_token='{}'",
         Uuid::new_v4()
@@ -192,7 +192,7 @@ async fn smoke_refuses_unbound_paused_or_mismatched_targets_and_rolls_back_metad
     failed(db.command().arg("--migrate").output()?, "paused");
     assert_eq!(
         db.count(
-            "SELECT count(*) AS n FROM __diesel_schema_migrations WHERE version='20261031010000'"
+            "SELECT count(*) AS n FROM __diesel_schema_migrations WHERE version='20261101000110'"
         )?,
         0
     );
@@ -200,7 +200,7 @@ async fn smoke_refuses_unbound_paused_or_mismatched_targets_and_rolls_back_metad
         db.count("SELECT count(*) AS n FROM data_sources WHERE name LIKE 'Iceberg smoke %'")?,
         1
     );
-    conn.batch_execute("UPDATE timeseries_recovery_state SET writes_paused=false,pause_token=NULL; INSERT INTO __diesel_schema_migrations(version) VALUES('20261031010000')")?;
+    conn.batch_execute("UPDATE timeseries_recovery_state SET writes_paused=false,pause_token=NULL; INSERT INTO __diesel_schema_migrations(version) VALUES('20261101000110')")?;
     // A same-name database with another durable target is still rejected before migrations.
     conn.batch_execute(&format!("DELETE FROM timeseries_recovery_transitions; UPDATE timeseries_recovery_state SET target_id='{}'",Uuid::new_v4()))?;
     failed(

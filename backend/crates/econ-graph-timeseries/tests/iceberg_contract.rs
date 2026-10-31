@@ -404,7 +404,7 @@ async fn real_iceberg_roundtrip_parity_upserts_conflicts_and_atomicity() -> Resu
     let mut down_conn = pool.get().await?;
     assert!(down_conn
         .batch_execute(include_str!(
-            "../../../migrations/data/2026-10-31-020000_iceberg_sql_catalog/down.sql"
+            "../../../migrations/data/2026-11-01-000120_iceberg_sql_catalog/down.sql"
         ))
         .await
         .is_err());
