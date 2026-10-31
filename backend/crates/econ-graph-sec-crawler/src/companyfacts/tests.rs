@@ -326,7 +326,7 @@ fn active_load_grace_requires_a_fresh_verified_success() {
         assert!(store::check_freshness(&[empty], now).is_err());
     }
     // Publication is now 26h old but was fresh when this verified snapshot completed.
-    store::check_freshness(&[successful.clone()], now).unwrap();
+    store::check_freshness(std::slice::from_ref(&successful), now).unwrap();
     let mut running = successful.clone();
     running.id = uuid::Uuid::new_v4();
     running.status = "running".into();

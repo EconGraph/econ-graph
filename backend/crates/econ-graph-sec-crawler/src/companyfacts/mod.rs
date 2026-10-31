@@ -193,10 +193,10 @@ async fn ingest_inner(
             };
             let mut unique = BTreeMap::new();
             for filing in parsed_subs.filings.drain(..) {
-                if let Some(old) = unique.insert(filing.accession.clone(), filing.clone()) {
-                    if serde_json::to_value(old)? != serde_json::to_value(&filing)? {
-                        bail!("conflicting duplicate filing metadata");
-                    }
+                if let Some(old) = unique.insert(filing.accession.clone(), filing.clone())
+                    && serde_json::to_value(old)? != serde_json::to_value(&filing)?
+                {
+                    bail!("conflicting duplicate filing metadata");
                 }
             }
             parsed_subs.filings = unique.into_values().collect();
