@@ -13,28 +13,38 @@ can also be run on its own against any two libpq services.
 
 ## Prerequisites
 
-- **`APP_DATABASE=shared` until the removal, `APP_DATABASE=separate` from the removal on.**
-  Every run of a script that calls `create-secrets.sh` (`deploy.sh`,
-  `restart-k8s-rollout.sh`, `set-crawler-keys.sh`, `restore-kind-databases.sh`) sets it
-  while the cluster's `econ-graph-secrets` has no `app-database-url`, which is the case
-  on a cluster deployed from a release before the app database existed: such a Secret
-  is refused without an explicit `APP_DATABASE`. Once the key is written, leaving
-  `APP_DATABASE` unset keeps it, and so does a value equal to it. Only a cluster without
+- **Set `APP_DATABASE` only while `app-database-url` is missing, or to change it.** A
+  cluster deployed from a release before the app database existed has no
+  `app-database-url` in `econ-graph-secrets`, and every script that runs
+  `create-secrets.sh` (`deploy.sh`, `release-deploy.sh`, `restart-k8s-rollout.sh`,
+  `set-crawler-keys.sh`, `restore-kind-databases.sh`) refuses it until
+  `APP_DATABASE=shared` is given. Once the key is written, leave `APP_DATABASE` unset: the
+  key is kept (a value equal to it counts as kept). Only a cluster without
   `econ-graph-secrets` at all gets `separate` by default.
+- **The Secret records where the app tables are.** The wrapper rewrites only
+  `app-database-url`, to `econ_graph_app` as soon as a removal commits and back to
+  `econ_graph` after a rollback, with `create-secrets.sh --app-database-only`. That mode
+  runs the same decision and checks, builds the URL from the passwords already in the
+  cluster and writes nothing else; with `--dry-run` it only checks, which is what
+  `release-deploy.sh` does before its first step.
 - **`create-secrets.sh` refuses a setting that points at the database without the
   accounts** (`scripts/deploy/lib/app-database-guard.sh`), before it writes anything:
-  `shared` on every run of an existing cluster, kept or not, once the removal has left the
-  app tables only in `econ_graph_app` (the backend would create empty app tables in
-  `econ_graph`); `separate`, when it changes, while `econ_graph` still holds
-  `public.users`; and `separate` on a Secret without `app-database-url` unless
-  `econ_graph` is running and answers that it holds no app tables. If a refusal says a
-  database could not be checked, wait until `postgresql-0` and `app-postgres-0` accept
-  connections and rerun.
-- **The Secret records where the app tables are.** The wrapper rewrites
-  `app-database-url` to `econ_graph_app` as soon as a removal commits, and back to
-  `econ_graph` after a rollback, through `create-secrets.sh` with `APP_DATABASE` set and an
-  environment cut down to the basics. After either, a deploy with `APP_DATABASE` unset
-  keeps the right setting.
+  - `shared`, on every run of an existing cluster, kept or not, once the removal has left
+    the app tables only in `econ_graph_app` (the backend would create empty app tables in
+    `econ_graph`);
+  - `separate`, when it changes, while `econ_graph` still holds `public.users`, and on a
+    Secret without `app-database-url` unless `econ_graph` is running and answers that it
+    holds no app tables;
+  - a kept `separate` while `econ_graph` holds `public.users` again, as after a rollback
+    that stopped before pointing the key back; the message gives the
+    `--app-database-only` command.
+
+  A database that can't be asked (its pod down, a query failing or not answering within
+  60 seconds) refuses a change, with one exception: a kept `shared` passes when
+  `econ_graph_app` answers that it holds no app tables, or does not exist, since the
+  tables can't then be only there. To go ahead without the check, for example to redeploy
+  while repairing a database, set `ALLOW_UNCHECKED_APP_DATABASE=1`; a database that
+  positively holds the tables elsewhere is refused even then.
 - **Every deploy names its cluster**: `KIND_CLUSTER=<name> ... scripts/deploy/deploy.sh`.
   `deploy.sh` runs `create-secrets.sh` on the context `kind-<name>`, so a rehearsal
   cannot write a setting into production.

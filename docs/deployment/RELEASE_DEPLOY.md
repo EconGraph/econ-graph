@@ -168,12 +168,15 @@ production host it holds `econgraph.com`; a test cluster's host has no file, or
 ## APP_DATABASE
 
 `APP_DATABASE` (`shared` or `separate`) is passed to `deploy.sh`, whose `create-secrets.sh`
-decides which database `app-database-url` names. On a cluster whose `econ-graph-secrets` has
-no `app-database-url` (deployed before the app database existed, its app records still in
-the data database), set `APP_DATABASE=shared` until
-[the app/data conversion](APP_DATA_CONVERSION.md) has moved them; before any step,
-`release-deploy.sh` refuses such a cluster without `APP_DATABASE`, and any value other than
-`shared` or `separate`. Once the key is written, leave it unset.
+decides which database `app-database-url` names. Set it only while the cluster's
+`econ-graph-secrets` has no `app-database-url` (deployed before the app database existed,
+its app records still in the data database: `APP_DATABASE=shared` until
+[the app/data conversion](APP_DATA_CONVERSION.md) has moved them), or to change it; once the
+key is written, leave it unset. Before any step, `release-deploy.sh` runs
+`create-secrets.sh --app-database-only --dry-run` on the cluster's context, the same
+decision and read-only checks of which database holds the app tables, and stops on any
+refusal: a missing key without `APP_DATABASE`, or a setting that would point the backend at
+a database without the accounts. A value other than `shared` or `separate` is refused too.
 
 ## GATEWAY_TLS_ISSUER
 

@@ -583,8 +583,12 @@ resolve_app_database() {
 # moving the app tables; release-deploy.sh runs it with --dry-run before any step.
 if [[ "$APP_DATABASE_ONLY" == true ]]; then
     resolve_app_database
-    [[ "$secrets_present" == true ]] ||
-        die "econ-graph-secrets does not exist; run create-secrets.sh without --app-database-only first"
+    if [[ "$secrets_present" != true ]]; then
+        [[ "$DRY_RUN" == true ]] ||
+            die "econ-graph-secrets does not exist; run create-secrets.sh without --app-database-only first"
+        log "app-database-url: $app_database ($app_database_how; econ-graph-secrets does not exist yet) (dry run: not written)"
+        exit 0
+    fi
     if [[ "$app_database" == separate ]]; then
         app_db_secret=econ-graph-app-postgres app_db_host="$APP_DB_HOST" app_db_name="$APP_DB_NAME"
     else

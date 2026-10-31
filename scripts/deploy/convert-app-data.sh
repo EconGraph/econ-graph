@@ -45,8 +45,8 @@
 #      app database first gets the app schema as the backend's role econgraph, in the
 #      same transaction), then, with --drop-source-app, the removal; or the rollback
 #      with --restore-source-app. After a removal commits, app-database-url is rewritten to
-#      the app database (APP_DATABASE=separate through create-secrets.sh, with a cut-down
-#      environment), and back to the data database after a rollback, so the Secret records
+#      the app database (APP_DATABASE=separate create-secrets.sh --app-database-only), and
+#      back to the data database after a rollback, so the Secret records
 #      where the app tables are and a plain deploy starts the backend on the right one.
 #
 # The run holds database locks for the length of each step; writers are stopped first.
@@ -203,14 +203,14 @@ if [ "$DRY" = true ]; then
     echo "  no removal or rollback succeeded; otherwise it stays at 0 until its database setting changes."
     if [ -n "$RESTORE" ]; then
         echo "+ split-app-data.py ${ARGS[*]}"
-        echo "+ APP_DATABASE=shared scripts/deploy/create-secrets.sh --context=${CONTEXT}   (app-database-url back to econ_graph)"
+        echo "+ APP_DATABASE=shared scripts/deploy/create-secrets.sh --app-database-only --context=${CONTEXT}   (app-database-url back to econ_graph)"
         echo "  (the backend stays at 0 afterwards; deploy.sh starts it)"
     else
         echo "+ split-app-data.py ${ARGS[*]} --dry-run   (locks both databases while it hashes them)"
         echo "+ split-app-data.py ${ARGS[*]} --writers-stopped   (new verified backup, then the copy)"
         if [ "$DROP" = true ]; then
             echo "+ split-app-data.py ${ARGS[*]} --writers-stopped --drop-source-app   (asks for the typed phrase)"
-            echo "+ APP_DATABASE=separate scripts/deploy/create-secrets.sh --context=${CONTEXT}   (app-database-url to econ_graph_app)"
+            echo "+ APP_DATABASE=separate scripts/deploy/create-secrets.sh --app-database-only --context=${CONTEXT}   (app-database-url to econ_graph_app)"
             echo "  (the backend stays at 0 afterwards; deploy.sh starts it)"
         fi
     fi
@@ -374,11 +374,16 @@ export PATH="$WORK/bin:$PATH"
 # --- 5. the conversion ----------------------------------------------------------------
 
 SPLIT=("$PYTHON" "${PROJECT_ROOT}/scripts/deploy/split-app-data.py")
+# The command to run by hand if the switch fails: the same narrow mode, same kubectl and context.
+switch_command() {
+    echo "APP_DATABASE=$1 KUBECTL=$(command -v kubectl) KUBECONFIG=${KUBECONFIG} scripts/deploy/create-secrets.sh --app-database-only --context=${CONTEXT}"
+}
 
-# switch_app_database_url separate|shared: rewrite app-database-url through create-secrets.sh,
-# whose guard checks the direction against the databases, so the Secret records where the app
-# tables are. Its environment is cut down to the basics (as set-crawler-keys.sh does), so no
-# credential exported in the operator's shell is written; it never prints values.
+# switch_app_database_url separate|shared: rewrite only app-database-url, with
+# create-secrets.sh --app-database-only, whose guard checks the direction against the
+# databases, so the Secret records where the app tables are. The URL is built from the
+# passwords already in the cluster; the environment is cut down to the basics anyway (as
+# set-crawler-keys.sh does), and no value is printed.
 switch_app_database_url() {
     (
         keep=" PATH HOME USER LOGNAME LANG LC_ALL TERM TMPDIR KUBECONFIG "
@@ -390,7 +395,7 @@ switch_app_database_url() {
         done < <(compgen -e)
         KUBECTL="$(command -v kubectl)"
         export APP_DATABASE="$1" NAMESPACE KUBECTL
-        exec "${PROJECT_ROOT}/scripts/deploy/create-secrets.sh" --context="${CONTEXT}"
+        exec "${PROJECT_ROOT}/scripts/deploy/create-secrets.sh" --app-database-only --context="${CONTEXT}"
     )
 }
 NEXT_STEP=""
@@ -400,7 +405,7 @@ if [ -n "$RESTORE" ]; then
     log "Restoring the app tables into the combined database from $RESTORE"
     "${SPLIT[@]}" "${ARGS[@]}"
     KEEP_BACKEND_STOPPED=true
-    NEXT_STEP="the app tables are back in econ_graph, but app-database-url could not be pointed at it; run KIND_CLUSTER=${KIND_CLUSTER} APP_DATABASE=shared scripts/deploy/create-secrets.sh --context=${CONTEXT}, then start the backend with KIND_CLUSTER=${KIND_CLUSTER} ${PUBLIC_HINT}scripts/deploy/deploy.sh"
+    NEXT_STEP="the app tables are back in econ_graph, but app-database-url could not be pointed at it; run $(switch_command shared), then start the backend with KIND_CLUSTER=${KIND_CLUSTER} ${PUBLIC_HINT}scripts/deploy/deploy.sh"
     log "Pointing app-database-url back at econ_graph"
     switch_app_database_url shared
     NEXT_STEP="the app tables are back in econ_graph and app-database-url names it; start the backend with KIND_CLUSTER=${KIND_CLUSTER} ${PUBLIC_HINT}scripts/deploy/deploy.sh"
@@ -415,7 +420,7 @@ if [ "$DROP" = true ]; then
     log "Removing the app tables from the combined database (typed confirmation)"
     "${SPLIT[@]}" "${ARGS[@]}" --writers-stopped --drop-source-app
     KEEP_BACKEND_STOPPED=true
-    NEXT_STEP="the app tables are now only in econ_graph_app, but app-database-url still names econ_graph and could not be changed; run KIND_CLUSTER=${KIND_CLUSTER} APP_DATABASE=separate scripts/deploy/create-secrets.sh --context=${CONTEXT} before anything starts the backend (create-secrets.sh refuses shared from now on)"
+    NEXT_STEP="the app tables are now only in econ_graph_app, but app-database-url still names econ_graph and could not be changed; run $(switch_command separate) before anything starts the backend (create-secrets.sh refuses shared from now on)"
     log "Pointing app-database-url at the app database"
     switch_app_database_url separate
     NEXT_STEP="the app tables are now only in econ_graph_app and app-database-url names it; start the backend with KIND_CLUSTER=${KIND_CLUSTER} ${PUBLIC_HINT}scripts/deploy/deploy.sh (APP_DATABASE unset or separate)"

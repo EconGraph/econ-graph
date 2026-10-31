@@ -124,22 +124,19 @@ case "$*" in
   "get secret econ-graph-secrets --ignore-not-found -o jsonpath={.data.app-database-url}")
     printf '%s' "${STUB_APP_URL:-postgresql://econgraph:x@data-postgres-service:5432/econ_graph}" | base64 -w0 ;;
   "get secret econ-graph-secrets --ignore-not-found -o name") echo secret/econ-graph-secrets ;;
+  "get secret econ-graph-postgres --ignore-not-found -o jsonpath={.data.app-password}") printf 'data-pw' | base64 -w0 ;;
+  "get secret econ-graph-app-postgres --ignore-not-found -o jsonpath={.data.app-password}") printf 'app-pw' | base64 -w0 ;;
   "get secret "*" --ignore-not-found -o jsonpath="*) ;;
   "get secret "*" --ignore-not-found -o name") ;;
-  "get persistentvolumeclaim "* | "get persistentvolumeclaim" | "get pvc "*) ;;
-  "get pod postgresql-0 --ignore-not-found -o name") echo pod/postgresql-0 ;;
-  "get pod app-postgres-0 --ignore-not-found -o name") echo pod/app-postgres-0 ;;
-  "create secret generic econ-graph-secrets "*)
-    for a in "$@"; do
-      case "$a" in --from-file=app-database-url=*) sed 's/.*@//' "${a#--from-file=app-database-url=}" >>"$STUB_LOG.app_url"; echo >>"$STUB_LOG.app_url" ;; esac
-    done
-    ;&
-  "create secret generic "*)
-    # A credential from the caller's shell must never be written.
-    for a in "$@"; do
-      case "$a" in --from-file=*) ! grep -qF operator-shell-credential "${a#*=*=}" || echo "LEAKED ${a%%=*}" >>"$STUB_LOG" ;; esac
-    done
-    echo "kind: Secret" ;;
+  "get persistentvolumeclaim"* | "get pvc "*) ;;
+  "get pod postgresql-0 --ignore-not-found -o name"*) echo pod/postgresql-0 ;;
+  "get pod app-postgres-0 --ignore-not-found -o name"*) echo pod/app-postgres-0 ;;
+  # --app-database-only writes app-database-url with a merge patch from a file.
+  "patch secret econ-graph-secrets --type=merge --patch-file="*)
+    last="${*: -1}"
+    python3 -c 'import base64, json, sys; print(base64.b64decode(json.load(open(sys.argv[1]))["data"]["app-database-url"]).decode().split("@")[1])' \
+      "${last#--patch-file=}" >>"$STUB_LOG.app_url" ;;
+  "create secret generic "*) echo "kind: Secret" ;;
   "apply --server-side "*) cat >/dev/null ;;
   "annotate secret "*) ;;
   *) echo "stub kubectl: unexpected call: $*" >&2; exit 1 ;;
@@ -270,9 +267,9 @@ STUB_SOURCE_USERS=f POSTGRES_PASSWORD=operator-shell-credential GRAFANA_ADMIN_PA
 [ "$(tail -n1 "$STUB_LOG.app_url" 2>/dev/null)" = "app-postgres-service:5432/econ_graph_app" ] ||
   fail "drop run: app-database-url not pointed at the app database: $(cat "$STUB_LOG.app_url" 2>/dev/null)"
 removal="$(grep -n -- '--drop-source-app$' "$STUB_LOG" | tail -1 | cut -d: -f1)"
-switch="$(grep -n 'create secret generic econ-graph-secrets' "$STUB_LOG" | tail -1 | cut -d: -f1)"
+switch="$(grep -n 'patch secret econ-graph-secrets' "$STUB_LOG" | tail -1 | cut -d: -f1 || true)"
 [ -n "$switch" ] && [ "$switch" -gt "$removal" ] || fail "drop run: app-database-url not rewritten after the removal"
-never "^LEAKED" "drop run: a credential from the operator's shell was written"
+never "create secret|apply --server-side" "drop run: wrote more than app-database-url"
 grep -q "app-database-url names it" "$tmp/out" || fail "drop run: the next step does not say the Secret was switched"
 grep -q "^python .*--writers-stopped --drop-source-app$" "$STUB_LOG" || fail "no removal"
 never "scale deployment econ-graph-backend --replicas=2" "backend restarted after the removal"
@@ -286,7 +283,7 @@ reset
 STUB_SOURCE_USERS=t convert --cluster kg-test --source-map "$map" --drop-source-app &&
   fail "refused switch reported success"
 never "scale deployment econ-graph-backend --replicas=2" "refused switch: backend restarted"
-grep -q "APP_DATABASE=separate scripts/deploy/create-secrets.sh --context=kind-kg-test" "$tmp/out" ||
+grep -q "APP_DATABASE=separate KUBECTL=.* scripts/deploy/create-secrets.sh --app-database-only --context=kind-kg-test" "$tmp/out" ||
   fail "refused switch: no instruction naming the cluster"
 leftovers "refused switch"
 
