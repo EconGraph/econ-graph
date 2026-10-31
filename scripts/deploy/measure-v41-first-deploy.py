@@ -294,6 +294,10 @@ class Database:
                     results[current] = []
             elif current and line:
                 results[current].append(line.split('\x1f'))
+        if done.returncode and ended:
+            # Every query finished; only COMMIT failed.
+            lines = done.stderr.strip().splitlines()
+            return results, 'commit', (lines or [f'psql exited {done.returncode}'])[-1]
         if done.returncode or not ended:
             lines = done.stderr.strip().splitlines()
             # psql follows the ERROR line with the statement and a caret: report the ERROR.
@@ -411,7 +415,7 @@ def synthetic_legacy_row(row: str, other: str) -> str:
 
 
 ECO_807 = f"""
-SELECT ds.name, count(*)
+SELECT translate(ds.name, E'\\n\\r\\x1f', '   '), count(*)
 FROM data_points s
 JOIN economic_series es ON es.id = s.series_id
 JOIN data_sources ds ON ds.id = es.source_id
@@ -419,7 +423,7 @@ WHERE {synthetic_legacy_row('s', 'other_original')}
   AND (SELECT count(*) FROM data_points a WHERE a.series_id = s.series_id AND a.date = s.date) = 2
   AND EXISTS (SELECT 1 FROM data_points e WHERE e.series_id = s.series_id AND e.date = s.date
               AND e.is_original_release AND e.revision_date < s.date)
-GROUP BY ds.name ORDER BY ds.name"""
+GROUP BY ds.name ORDER BY 1"""
 
 
 def render_eco_807(results) -> list[str]:
@@ -552,11 +556,18 @@ def main(argv=None) -> int:
             out.append(f'- FAILED: {render}')
             failed = True
         elif all(name in results for name in names):
-            out += render(results)
+            try:
+                out += render(results)
+            except (ValueError, IndexError, KeyError) as render_error:
+                out.append(f'- FAILED: unexpected query output: {render_error}')
+                failed = True
         else:
             why = error if failed_query in names else f'not run: {failed_query} failed first'
             out.append(f'- FAILED: {why}')
             failed = True
+    if failed_query == 'commit':
+        out += ['', f'- FAILED: the read-only transaction did not commit cleanly: {error}']
+        failed = True
     out += ['', '### 2. FRED selection (live API)', '']
     lines, fred_failed = measure_fred(args.crawler)
     out += lines
