@@ -21,13 +21,16 @@
 #     findmnt -T prints the same filesystem UUID for every path.
 #   - id -u prints 0 when FAKE_ROOT=1.
 #   - docker answers the kubectl calls the scripts make: get pod <name>
-#     prints pod/<name> when <name> is in FAKE_PODS (space-separated) and
-#     fails when it is FAKE_POD_FAILS; get pv -o jsonpath prints FAKE_PVS
-#     (printf %b; default the three host-storage PersistentVolumes as
+#     prints pod/<name> when <name> is in FAKE_PODS (space-separated; with
+#     FAKE_PODS_FROM_CALL=N, only from the Nth get pod call on) and fails
+#     when it is FAKE_POD_FAILS; get pv -o jsonpath prints FAKE_PVS (printf
+#     %b; default the three host-storage PersistentVolumes as
 #     "<path>\t<namespace>/<claim>" lines) and get pods -A prints
-#     FAKE_POD_LIST (printf %b; "<namespace>/<pod>\t<claim or host path>..."
-#     lines; default none), failing with FAKE_PV_FAILS=1 and
-#     FAKE_POD_LIST_FAILS=1; wait exits FAKE_WAIT_RC (default 0), psql prints
+#     FAKE_POD_LIST (printf %b; "<namespace>/<pod>\t<volume>=<claim or host
+#     path>..." lines; default none), failing with FAKE_PV_FAILS=1 and
+#     FAKE_POD_LIST_FAILS=1; crictl ps on the storage node prints a container
+#     ID when the io.kubernetes.pod.name label is in FAKE_RUNNING and fails
+#     with FAKE_CRICTL_FAILS=1; wait exits FAKE_WAIT_RC (default 0), psql prints
 #     nothing, and pg_restore copies its stdin to FAKE_RESTORE_INPUT.
 #   - pg_restore --list prints "; dbname: <second word of the file>" and,
 #     when FAKE_SWAP_LINK is set, then re-points that symlink at
@@ -147,6 +150,13 @@ case " $* " in
     *" pg_restore "*) cat >"${FAKE_RESTORE_INPUT:-/dev/null}" ;;
     *" psql "*) : ;;
     *" wait "*) exit "${FAKE_WAIT_RC:-0}" ;;
+    *" crictl ps "*)
+        [[ -z "${FAKE_CRICTL_FAILS:-}" ]] || { echo "error: connect: no such file or directory" >&2; exit 1; }
+        for a in "$@"; do
+            case "${a}" in io.kubernetes.pod.name=*)
+                [[ " ${FAKE_RUNNING:-} " != *" ${a#*=} "* ]] || echo 0123456789ab ;;
+            esac
+        done ;;
     *" get pv -o jsonpath="*)
         [[ -z "${FAKE_PV_FAILS:-}" ]] || { echo "error: the server is unavailable" >&2; exit 1; }
         printf '%b' "${FAKE_PVS-/srv/econgraph/data-plane/pg\tecon-graph/postgresql-data-postgresql-0\n/srv/econgraph/app-prod/keycloak-pg\tecon-graph/keycloak-postgres-data-keycloak-postgres-0\n/srv/econgraph/app-prod/app-pg\tecon-graph/app-postgres-data-app-postgres-0\n}" ;;
@@ -158,6 +168,9 @@ case " $* " in
         args=("$@"); name=""
         for i in "${!args[@]}"; do [[ "${args[$i]}" != pod ]] || name="${args[$((i + 1))]}"; done
         [[ "${name}" != "${FAKE_POD_FAILS:-}" ]] || { echo "error: the server is unavailable" >&2; exit 1; }
+        calls="$(($(cat "${STUB_LOG:-/dev/null}.get-pod" 2>/dev/null || echo 0) + 1))"
+        [[ -z "${STUB_LOG:-}" ]] || echo "${calls}" >"${STUB_LOG}.get-pod"
+        [[ "${calls}" -ge "${FAKE_PODS_FROM_CALL:-1}" ]] || exit 0
         [[ " ${FAKE_PODS:-} " != *" ${name} "* ]] || echo "pod/${name}" ;;
     *) echo "fake docker: unsupported: $*" >&2; exit 1 ;;
 esac
