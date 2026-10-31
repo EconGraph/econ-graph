@@ -275,8 +275,9 @@ const DISCOVERY_DUE_SQL: &str = "WITH history AS ( \
            AND NOT (status = 'completed' AND ( \
                  q.id IN (SELECT r.discovery_job_id FROM discovery_runs r \
                           WHERE r.discovery_job_id IS NOT NULL) \
-                 OR q.id IN (SELECT unnest(r.deferred_discovery_job_ids) FROM discovery_runs r \
-                             WHERE r.deferred_discovery_job_ids <> '{}'))) \
+                 OR q.id IN (SELECT d FROM discovery_runs r, \
+                                 unnest(r.deferred_discovery_job_ids) AS d \
+                             WHERE r.deferred_discovery_job_ids <> '{}' AND d IS NOT NULL))) \
          UNION ALL \
          SELECT source, CASE state WHEN 'complete' THEN 'completed' WHEN 'failed' THEN 'failed' \
                 ELSE 'processing' END, COALESCE(finished_at, updated_at) \
@@ -1691,6 +1692,59 @@ mod tests {
             s.tick().await.unwrap().discover_enqueued,
             1,
             "two failures: two hours, and the last was 130 minutes ago"
+        );
+    }
+
+    /// The schema rejects a NULL deferred job id, and the discovery query ignores one anyway: a
+    /// NULL in the set would otherwise drop every unlinked completed discovery job from the
+    /// history (`id IN (..., NULL)` is NULL, never false) and make the source due at once.
+    #[tokio::test]
+    async fn a_null_deferred_job_id_is_rejected_and_ignored() {
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        finished_discovery(p, "completed", 2.0).await;
+        let mut conn = p.get().await.unwrap();
+        let rejected = diesel::sql_query(
+            "INSERT INTO discovery_runs (source, state, deferred_discovery_job_ids) \
+             VALUES ('FRED', 'running', ARRAY[NULL::uuid])",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap_err();
+        assert!(
+            rejected
+                .to_string()
+                .contains("check_discovery_runs_deferred_jobs_not_null"),
+            "{rejected}"
+        );
+
+        // With the check dropped (rolled back below), the query still ignores the NULL.
+        diesel::sql_query("BEGIN").execute(&mut conn).await.unwrap();
+        for sql in [
+            "ALTER TABLE discovery_runs \
+             DROP CONSTRAINT check_discovery_runs_deferred_jobs_not_null",
+            "INSERT INTO discovery_runs (source, state, finished_at, deferred_discovery_job_ids) \
+             VALUES ('FRED', 'complete', NOW() - INTERVAL '30 days', ARRAY[NULL::uuid])",
+        ] {
+            diesel::sql_query(sql).execute(&mut conn).await.unwrap();
+        }
+        let due: Result<Vec<DueSource>, _> = diesel::sql_query(DISCOVERY_DUE_SQL)
+            .bind::<Array<Text>, _>(vec!["FRED".to_string()])
+            .bind::<Array<Text>, _>(vec![data_source_template(SourceId::Fred).name])
+            .bind::<Double, _>(DISCOVERY_INTERVAL.as_secs_f64())
+            .bind::<Double, _>(DISCOVERY_RETRY_BASE.as_secs_f64())
+            .bind::<Double, _>(DISCOVERY_RETRY_CAP.as_secs_f64())
+            .load(&mut conn)
+            .await;
+        diesel::sql_query("ROLLBACK")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        let due = due.unwrap();
+        assert_eq!(due.len(), 1);
+        assert!(
+            !due[0].due,
+            "the discovery completed two hours ago still counts"
         );
     }
 

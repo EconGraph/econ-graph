@@ -94,7 +94,10 @@ CREATE TABLE discovery_runs (
         CHECK (chunks_total >= 0 AND chunks_done >= 0 AND chunks_failed >= 0
                AND chunks_done + chunks_failed <= chunks_total),
     CONSTRAINT check_discovery_runs_finished
-        CHECK ((state IN ('complete', 'failed', 'superseded')) = (finished_at IS NOT NULL))
+        CHECK ((state IN ('complete', 'failed', 'superseded')) = (finished_at IS NOT NULL)),
+    -- A NULL job id would make the scheduler's `id IN (deferred ids)` test NULL for every job.
+    CONSTRAINT check_discovery_runs_deferred_jobs_not_null
+        CHECK (array_position(deferred_discovery_job_ids, NULL) IS NULL)
 );
 
 -- Only the newest run of a source may finalize: starting a run supersedes the older one first.
@@ -108,7 +111,8 @@ CREATE INDEX idx_discovery_runs_source_started
 CREATE INDEX idx_discovery_runs_discovery_job
     ON discovery_runs (discovery_job_id);
 
--- The few runs with deferred discovery jobs, which the scheduler searches by source.
+-- The few runs with deferred discovery jobs: the scheduler collects their job ids on every tick,
+-- and can read them from this small partial index instead of scanning every run.
 CREATE INDEX idx_discovery_runs_deferred_jobs
     ON discovery_runs (source)
     WHERE deferred_discovery_job_ids <> '{}';
