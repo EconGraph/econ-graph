@@ -144,7 +144,7 @@ export interface CompanyPeerComparison {
   company: CompanyResearchCompany;
   ratios: CompanyFinancialRatio[];
 }
-export const GET_COMPANY_COMPARISONS = `query GetCompanyResearchComparisons($cik: String!, $periodStart: Date, $periodEnd: Date!, $revision: CompanyRevisionInput) {
+export const GET_COMPANY_COMPARISONS = `query GetCompanyResearchComparisons($cik: String!, $periodStart: NaiveDate, $periodEnd: NaiveDate!, $revision: CompanyRevisionInput) {
   companyRatios(cik: $cik, periodStart: $periodStart, periodEnd: $periodEnd, revision: $revision) {
     name value unit unavailableReason provenance { factId anchor filingAnchor accession filed taxonomy concept unit periodStart periodEnd value }
   }
