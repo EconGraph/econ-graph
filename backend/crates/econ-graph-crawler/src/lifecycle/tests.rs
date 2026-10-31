@@ -1504,6 +1504,8 @@ async fn successor_proposals_match_the_per_series_query() {
             titled("new_freq", "Rate", "Monthly"),
             titled("old_unlisted", "Elsewhere", "Annual"),
             titled("new_unlisted", "Elsewhere", "Annual"),
+            titled("old_marked", "Real output (DISCONTINUED)", "Annual"),
+            titled("new_marked", "Real output", "Annual"),
         ],
     )
     .await
@@ -1522,6 +1524,7 @@ async fn successor_proposals_match_the_per_series_query() {
         "old_restricted",
         "old_freq",
         "old_unlisted",
+        "old_marked",
     ]
     .map(String::from)
     .to_vec();
@@ -1531,6 +1534,7 @@ async fn successor_proposals_match_the_per_series_query() {
         "new_dup2",
         "new_restricted",
         "new_freq",
+        "new_marked",
     ]
     .map(String::from)
     .to_vec();
@@ -1542,7 +1546,8 @@ async fn successor_proposals_match_the_per_series_query() {
         let candidates: Vec<Uuid> = diesel::sql_query(
             "SELECT DISTINCT COALESCE(es.id,sm.id) AS id FROM series_metadata old \
              JOIN series_metadata sm ON sm.source_id=old.source_id \
-                AND lower(trim(sm.title))=lower(trim(old.title)) \
+                AND lower(trim(sm.title)) \
+                    = lower(trim(regexp_replace(old.title, '\\s*\\(discontinued\\)', '', 'gi'))) \
                 AND sm.frequency IS NOT DISTINCT FROM old.frequency \
              LEFT JOIN economic_series es ON es.source_id=sm.source_id AND es.external_id=sm.external_id \
              WHERE old.source_id=$1 AND old.external_id=$2 AND sm.external_id<>$2 \
@@ -1566,8 +1571,9 @@ async fn successor_proposals_match_the_per_series_query() {
     assert_eq!(proposals, per_series);
     assert_eq!(
         proposals.keys().collect::<Vec<_>>(),
-        vec!["old_unique"],
-        "only the unique, public, same-frequency listed match is proposed"
+        vec!["old_marked", "old_unique"],
+        "only the unique, public, same-frequency listed match is proposed (ignoring FRED's \
+         discontinued marker in the old title)"
     );
     let stored = persist::find_series_id_conn(&mut conn, SourceId::Fred, "new_unique")
         .await
@@ -2220,6 +2226,48 @@ async fn only_a_fetch_claimed_after_the_review_lifts_the_restriction() {
         lift(pool, "s", Some(Utc::now() + chrono::Duration::days(1))).await,
         None
     );
+    // A lift restores the stored state the restriction overrode.
+    let mut conn = pool.get().await.unwrap();
+    restricted_series(pool, "missing").await;
+    restricted_series(pool, "linked").await;
+    diesel::sql_query(
+        "UPDATE series_lifecycle SET missing_refreshes=3 WHERE external_id='missing'",
+    )
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    diesel::sql_query(
+        "UPDATE series_lifecycle SET successor_id=gen_random_uuid() WHERE external_id='linked'",
+    )
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    drop(conn);
+    for (id, status) in [
+        ("missing", "missing_from_catalog"),
+        ("linked", "superseded"),
+    ] {
+        request_restriction_review(pool, SourceId::Fred, true, id, "false positive")
+            .await
+            .unwrap();
+        assert_eq!(
+            lift(pool, id, Some(Utc::now() + chrono::Duration::days(1)))
+                .await
+                .as_deref(),
+            Some(status)
+        );
+        let r = review(pool, id).await;
+        assert_eq!(
+            (
+                r.status.as_str(),
+                r.crawl_status.as_str(),
+                r.series_active,
+                r.metadata_active
+            ),
+            (status, status, true, true),
+            "{id}"
+        );
+    }
     db.drop().await;
 }
 
@@ -2296,11 +2344,15 @@ async fn discontinued_series_get_successor_proposals_and_confirmations() {
         return;
     };
     let pool = &db.pool;
-    let titled = |id: &str| DiscoveredSeries {
-        title: "Same measure".into(),
+    // As FRED marks it: the old series' title carries "(DISCONTINUED)".
+    let titled = |id: &str, title: &str| DiscoveredSeries {
+        title: title.into(),
         ..counter_series(id)
     };
-    let listed = [titled("old"), titled("new")];
+    let listed = [
+        titled("old", "Gross Domestic Product (DISCONTINUED)"),
+        titled("new", "Gross Domestic Product"),
+    ];
     persist::persist_discovered(pool, SourceId::Fred, &listed)
         .await
         .unwrap();

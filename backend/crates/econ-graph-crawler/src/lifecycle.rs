@@ -11,8 +11,11 @@
 //! and hidden; only a fetch by an adapter that
 //! [checks restriction markers](crate::SourceAdapter::checks_restriction_markers), claimed
 //! after the review, publishes it again ([`lift_reviewed_restriction_conn`]). A marker found
-//! by a fetch or a catalog first cancels the review. Each step is recorded in
-//! `series_lifecycle_events`.
+//! by a fetch (worker or `crawler fetch`) or a catalog first cancels the review. Each step is
+//! recorded in `series_lifecycle_events`. Not counted as evidence, so a later clean fetch can
+//! still lift it: a restricted result whose commit is lost (lost lease, rolled-back
+//! transaction), and a catalog snapshot ignored as older than one already applied. Every
+//! lift still rests on a fetch that read upstream after the review and found no marker.
 //!
 //! Locking: catalog reconciliation and successor confirmation take an exclusive
 //! per-source transaction advisory lock. Per-series writers (fetch success, NotFound,
@@ -548,7 +551,8 @@ pub async fn review_guarded_catalog(
 }
 
 /// For each ended series, the one listed, public series with the same normalized title and
-/// frequency, if exactly one exists. One set-based query: reconciliation holds the
+/// frequency, if exactly one exists. The ended series' title is compared without a
+/// "(DISCONTINUED)" marker, which is how FRED marks a discontinued series. One set-based query: reconciliation holds the
 /// exclusive source lock, so its cost must not grow with one query per ended series.
 async fn successor_proposals(
     conn: &mut AsyncPgConnection,
@@ -568,7 +572,9 @@ async fn successor_proposals(
     }
     let rows: Vec<Proposal> = diesel::sql_query(
         "WITH old AS ( \
-             SELECT external_id, lower(trim(title)) AS title, frequency FROM series_metadata \
+             SELECT external_id, \
+                 lower(trim(regexp_replace(title, '\\s*\\(discontinued\\)', '', 'gi'))) AS title, \
+                 frequency FROM series_metadata \
              WHERE source_id=$1 AND external_id = ANY($2)), \
          listed AS ( \
              SELECT COALESCE(es.id, sm.id) AS id, sm.external_id, lower(trim(sm.title)) AS title, \
@@ -1084,6 +1090,27 @@ struct StatusChange {
     status: Option<String>,
 }
 
+/// [`record_restricted_conn`] in its own transaction, under the shared source lock as the
+/// worker takes it: for a restricted result outside the worker (`crawler fetch`).
+pub async fn record_restricted(
+    pool: &DatabasePool,
+    source: SourceId,
+    external_id: &str,
+) -> AppResult<()> {
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let external = external_id.to_string();
+    conn.transaction::<(), AppError, _>(async move |conn| {
+        let source_id = persist::data_source_id_conn(conn, source).await?;
+        lock_source_shared(conn, source_id).await?;
+        record_restricted_conn(conn, source, &external).await?;
+        Ok(())
+    })
+    .await
+}
+
 /// Hide an explicitly restricted fetch result under the worker's current lease.
 /// Unlike an absence inference this positive legal fact does not need repeated catalogs.
 pub(crate) async fn record_restricted_conn(
@@ -1194,8 +1221,10 @@ pub async fn request_restriction_review(
 /// [checks restriction markers](crate::SourceAdapter::checks_restriction_markers) (call it
 /// for no other), publish a reviewed `restricted` series again: only when an operator reviewed
 /// it before `claimed_at`, the time this fetch's job was claimed (so the fetch read upstream
-/// after the review). Becomes `active`; the next catalog sets any other publication state.
-/// Returns the new status when it changed. Run in the fetch's commit, after its upsert.
+/// after the review). Its stored state then applies again: `superseded` with a confirmed
+/// successor, `missing_from_catalog` after three catalog absences, `active` otherwise; the
+/// next catalog sets any other. Its rows become visible as any listed or fetched series is.
+/// Returns the new status. Run in the fetch's commit, after its upsert.
 pub(crate) async fn lift_reviewed_restriction_conn(
     conn: &mut AsyncPgConnection,
     source: SourceId,
@@ -1206,6 +1235,8 @@ pub(crate) async fn lift_reviewed_restriction_conn(
     struct Lifted {
         #[diesel(sql_type = Text)]
         reason: String,
+        #[diesel(sql_type = Text)]
+        status: String,
     }
     let Some(claimed_at) = claimed_at else {
         return Ok(None);
@@ -1213,11 +1244,14 @@ pub(crate) async fn lift_reviewed_restriction_conn(
     let source_id = persist::data_source_id_conn(conn, source).await?;
     lock_series(conn, source_id, external_id).await?;
     let Some(lifted) = diesel::sql_query(
-        "UPDATE series_lifecycle SET status='active',since=NULL, \
+        "UPDATE series_lifecycle SET \
+            status=CASE WHEN successor_id IS NOT NULL THEN 'superseded' \
+                WHEN missing_refreshes>=3 THEN 'missing_from_catalog' ELSE 'active' END, \
+            since=CASE WHEN successor_id IS NULL AND missing_refreshes<3 THEN NULL ELSE NOW() END, \
             restriction_cleared_at=NULL,restriction_clear_reason=NULL \
          WHERE source_id=$1 AND external_id=$2 AND status='restricted' \
             AND restriction_cleared_at IS NOT NULL AND restriction_cleared_at < $3 \
-         RETURNING old.restriction_clear_reason AS reason",
+         RETURNING old.restriction_clear_reason AS reason, status",
     )
     .bind::<SqlUuid, _>(source_id)
     .bind::<Text, _>(external_id)
@@ -1229,11 +1263,13 @@ pub(crate) async fn lift_reviewed_restriction_conn(
         return Ok(None);
     };
     diesel::sql_query(
-        "UPDATE economic_series SET crawl_status='success',is_active=TRUE \
+        "UPDATE economic_series SET is_active=TRUE, \
+            crawl_status=CASE WHEN $3='active' THEN 'success' ELSE $3 END \
          WHERE source_id=$1 AND external_id=$2",
     )
     .bind::<SqlUuid, _>(source_id)
     .bind::<Text, _>(external_id)
+    .bind::<Text, _>(&lifted.status)
     .execute(&mut *conn)
     .await?;
     diesel::sql_query(
@@ -1254,9 +1290,9 @@ pub(crate) async fn lift_reviewed_restriction_conn(
         ),
     )
     .await?;
-    tracing::warn!(%source, series_id = external_id, "restriction lifted after review: a fetch \
-        found no restriction marker; the series is published again");
-    Ok(Some("active".into()))
+    tracing::warn!(%source, series_id = external_id, status = %lifted.status, "restriction lifted \
+        after review: a fetch found no restriction marker; the series is published again");
+    Ok(Some(lifted.status))
 }
 
 /// Cancel pending restriction reviews of `external_ids` (new restriction evidence), recording

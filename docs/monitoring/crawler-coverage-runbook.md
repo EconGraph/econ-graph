@@ -175,18 +175,21 @@ crawler clear-restriction --source FRED --series SERIES_ID --reason "what the re
 
 The series stays restricted, and hidden, until a fetch whose job was claimed after the review
 succeeds and finds no restriction marker; the command queues that fetch at the highest
-priority. That fetch then makes the series `active` and visible, and the next catalog sets any
-other publication state. If the fetch, or a catalog, still finds the marker, the review is
-cancelled and the series stays hidden. If a fetch of the series was already running, the
-command says so: run it again once that fetch has ended. Every review, lift and cancellation
-is recorded in `series_lifecycle_events` with the reason. Only a source whose fetch checks
+priority. That fetch makes the series visible again with its stored state (`superseded` with
+a confirmed successor, `missing_from_catalog` after three catalog absences, otherwise
+`active`), and the next catalog sets any other publication state. A fetch (by the worker or
+`crawler fetch`) or a catalog that finds the marker before then cancels the review, and the
+series stays hidden. If a fetch of the series was already queued, the command adds none and
+says so: if that job had already been claimed when the review was recorded, it can't publish
+the series, so run the command again once it has finished. Every review, lift and
+cancellation is recorded in `series_lifecycle_events` with the reason. Only a source whose fetch checks
 restriction markers (FRED) can be reviewed this way; the command refuses any other, and a
 licence-gated one.
 
 Data Sources shows lifecycle counts. Series pages distinguish proposed successors from
 confirmed successors. A `missing_from_catalog`, `retired` or `discontinued` series gets a
 proposal when exactly one listed, public series that is not itself discontinued has the same
-title and frequency. A proposed match is a review hint: compare source definitions, units
+title (ignoring FRED's "(DISCONTINUED)" marker in the old title) and frequency. A proposed match is a review hint: compare source definitions, units
 and base periods before confirming it against the data database:
 
 ```sh
