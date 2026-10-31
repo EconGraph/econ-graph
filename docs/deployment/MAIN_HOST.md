@@ -95,7 +95,10 @@ images. In order, it:
 1. records the main host in the operator deploy configuration, so later deploys
    use it;
 2. when the issuer changes, marks `deployment/keycloak` with the annotation
-   `econgraph.io/issuer-change-logout-pending`;
+   `econgraph.io/issuer-change-logout-pending`. The mark stays until the sign-out has
+   run, so a switch that stopped part-way signs everyone out on the next run, whichever
+   main host that run names, even when the issuer is not changing then: the cluster's
+   state can't show whether the marked issuer already issued sessions;
 3. sets Keycloak's hostname and web client origins and waits for its rollout;
 4. reruns the realm import, which preserves catalog grants and moves the realm
    `frontendUrl` (it overrides the hostname) to the main host, so Keycloak now
@@ -140,7 +143,8 @@ Once the switch is accepted, make the redirects to www permanent:
 scripts/deploy/switch-main-host.sh --context kind-econ-graph --host econgraph.com --finalize --confirm-production UID-PREFIX
 ```
 
-It refuses, changing nothing, unless the switch to www completed: Keycloak's
+It refuses, changing nothing, unless the switch to www completed: no sign-out is still
+pending (the `econgraph.io/issuer-change-logout-pending` annotation is absent), Keycloak's
 hostname, the realm `frontendUrl`, the backend's issuer and finished rollout, the
 deploy configuration and the served routes are all on www, and `check-public-site.sh`
 passes with the temporary redirects. It then records `MAIN_HOST_PERMANENT`, reapplies

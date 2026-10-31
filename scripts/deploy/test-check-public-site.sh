@@ -9,7 +9,12 @@
 #   - CORS: both public origins must be allowed; http://localhost:3000 and
 #     https://evil.example must get the backend's 403 with no Access-Control-Allow-Origin,
 #     so an allowed refused origin, a 2xx without the header, and a 502 all fail;
-#   - the sign-in page must refuse a http://localhost redirect URI.
+#   - the sign-in page must refuse a http://localhost redirect URI;
+#   - before the gateway cut-over, ingress-nginx's 308s with its own page are the known
+#     ECO-709 case: https on the alternate name with :443, and locally plain http to
+#     https://MAIN_HOST with or without :443;
+#   - MAIN_HOST and MAIN_HOST_PERMANENT come from the deploy config for the same base
+#     domain when neither --main-host nor the environment gives them.
 #
 # Usage: scripts/deploy/test-check-public-site.sh
 set -euo pipefail
@@ -65,7 +70,13 @@ elif url.scheme == 'http' or url.hostname != main:
     if scenario == 'query': response['Location'] = base + url.path
     if scenario == 'port': response['Location'] = 'https://' + main + ':443' + path
     if scenario == 'wrong-status': status = 302 if status == 301 else 301
-    if scenario.startswith('nginx') and url.scheme == 'https':
+    if scenario in ('nginx-http', 'nginx-http-443', 'nginx-http-page', 'nginx-http-other') and url.scheme == 'http' and local:
+        # ingress-nginx's ssl redirect from plain http, before the gateway cut-over.
+        status = 308
+        response['Location'] = 'https://' + main + (':443' if scenario == 'nginx-http-443' else '') + path
+        if scenario == 'nginx-http-other': response['Location'] = 'https://' + url.hostname + path
+        if scenario != 'nginx-http-page': body = '<html><center><h1>308 Permanent Redirect</h1></center><hr><center>nginx</center></html>'
+    if scenario.startswith('nginx') and not scenario.startswith('nginx-http') and url.scheme == 'https':
         # ingress-nginx before the gateway cut-over: a 308 spelling out :443 (ECO-709).
         status = 308
         response['Location'] = 'https://' + main + ':443' + path
@@ -170,6 +181,19 @@ print(status, end='')
         result = run('nginx-plain', via=via)
         assert result.returncode != 0 and 'econgraph.com redirects (308)' in result.stdout, result.stdout
     print('ok ingress-nginx 308 with :443 and its own page is the known ECO-709 case; without the page it fails')
+    # Locally, before the cut-over, plain http answered by ingress-nginx's 308 to
+    # https://MAIN_HOST (with or without :443) and its page is the same known case.
+    for scenario, target in [('nginx-http', 'https://www.econgraph.com/series'),
+                             ('nginx-http-443', 'https://www.econgraph.com:443/series')]:
+        result = run(scenario)
+        assert result.returncode == 0, result.stdout
+        assert f'redirects (308) through ingress-nginx to {target}' in result.stdout, result.stdout
+    result = run('nginx-http-page')
+    assert result.returncode != 0 and 'FAIL  plain http://econgraph.com redirects (308)' in result.stdout, result.stdout
+    # A 308 with nginx's page to the same name, not the main host, still fails.
+    result = run('nginx-http-other')
+    assert result.returncode != 0 and 'FAIL  plain http://econgraph.com redirects (308) to \'https://econgraph.com/series' in result.stdout, result.stdout
+    print('ok locally, ingress-nginx 308 from plain http with its page is the known ECO-709 case; without the page it fails')
     # Without MAIN_HOST_PERMANENT in the environment, the deploy config's is used, for
     # the same base domain only; the environment, even empty, wins.
     deploy_env.write_text('PUBLIC_HOST=econgraph.com\nMAIN_HOST_PERMANENT=www.econgraph.com\n')
@@ -183,10 +207,28 @@ print(status, end='')
     result = subprocess.run([str(check), '--host', 'econgraph.com'], env=dict(env, STUB_MAIN='www.econgraph.com',
                             STUB_SCENARIO='', STUB_REDIRECT_STATUS='302'), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     assert result.returncode == 0, result.stdout
+    # MAIN_HOST too: the deploy config's for the same base domain, so the bare command checks
+    # the served host after a switch to the apex; the environment and --main-host win.
+    deploy_env.write_text('PUBLIC_HOST=econgraph.com\nMAIN_HOST=econgraph.com\n')
+    bare = lambda **extra: subprocess.run([str(check), '--host', 'econgraph.com'] + extra.pop('args', []),
+                                         env=dict(env, STUB_SCENARIO='', **extra), text=True,
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    result = bare(STUB_MAIN='econgraph.com', STUB_REDIRECT_STATUS='301')
+    assert result.returncode == 0 and 'redirects (301) to https://econgraph.com/series' in result.stdout, result.stdout
+    result = bare(STUB_MAIN='www.econgraph.com', STUB_REDIRECT_STATUS='302', MAIN_HOST='www.econgraph.com')
+    assert result.returncode == 0, result.stdout
+    result = bare(STUB_MAIN='www.econgraph.com', STUB_REDIRECT_STATUS='302', args=['--main-host', 'www.econgraph.com'])
+    assert result.returncode == 0, result.stdout
+    deploy_env.write_text('PUBLIC_HOST=other.example\nMAIN_HOST=econgraph.com\n')
+    result = bare(STUB_MAIN='www.econgraph.com', STUB_REDIRECT_STATUS='302')
+    assert result.returncode == 0 and 'to https://www.econgraph.com/series' in result.stdout, result.stdout
+    deploy_env.write_text('PUBLIC_HOST=econgraph.com\nMAIN_HOST=elsewhere.example\n')
+    result = bare(STUB_MAIN='www.econgraph.com', STUB_REDIRECT_STATUS='302')
+    assert result.returncode == 2 and 'must be econgraph.com or www.econgraph.com, not elsewhere.example' in result.stdout, result.stdout
     deploy_env.unlink()
-    print('ok MAIN_HOST_PERMANENT from the deploy config for the same base domain; the environment wins')
+    print('ok MAIN_HOST and MAIN_HOST_PERMANENT from the deploy config for the same base domain; the environment and --main-host win')
     result = run(main='other.invalid', explicit=True)
-    assert result.returncode == 2 and '--main-host must be' in result.stdout, result.stdout
+    assert result.returncode == 2 and 'must be econgraph.com or www.econgraph.com, not other.invalid' in result.stdout, result.stdout
     print('ok unrelated main host rejected before curl')
 print('public site checks: all passed')
 PY

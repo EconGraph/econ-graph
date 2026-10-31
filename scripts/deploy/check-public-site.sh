@@ -7,12 +7,14 @@
 #   scripts/deploy/check-public-site.sh --host econgraph.com --via-cloudflare
 #   scripts/deploy/check-public-site.sh --host econgraph.com --main-host econgraph.com # apex rollback
 #
-# MAIN_HOST defaults to www.HOST; --main-host overrides the environment.
+# MAIN_HOST comes from --main-host, else the environment, else the host's deploy config
+# when its PUBLIC_HOST is HOST or unset, else www.HOST: the main host the cluster was
+# deployed with, as lib/public-host.sh's main_host_init reads it, so the bare command
+# checks the served host before and after scripts/deploy/switch-main-host.sh.
 # The redirects to MAIN_HOST are permanent (301) when MAIN_HOST is HOST, or when
 # MAIN_HOST_PERMANENT names MAIN_HOST (scripts/deploy/switch-main-host.sh
 # --finalize); otherwise temporary (302). render-public-host.py uses the same rule.
-# MAIN_HOST_PERMANENT comes from the environment, else from the host's deploy config
-# when its PUBLIC_HOST is HOST or unset (as lib/public-host.sh's main_host_init reads it).
+# MAIN_HOST_PERMANENT comes from the environment, else from the same deploy config.
 #
 # What it checks:
 #   - the frontend, and a /graphql search sent with the public Origin;
@@ -33,7 +35,9 @@
 #     and through Cloudflare by its Always Use HTTPS (a 301 to https on the same
 #     name), whose https request is then checked;
 #   - until the gateway cut-over (ECO-800), ingress-nginx's 308 with :443 for the
-#     alternate name is reported as the known ECO-709 case;
+#     alternate name, and locally its 308 from plain http to https://MAIN_HOST (with or
+#     without :443), each with nginx's own redirect page, are reported as the known
+#     ECO-709 case;
 #   - not served on the public host: Keycloak's admin console and master
 #     realm, metrics, the GraphQL playground and the admin API, including
 #     encoded-traversal variants.
@@ -102,12 +106,28 @@ done
     exit 2
 }
 HOST="${HOST,,}"
+
+# The deploy config's MAIN_HOST and MAIN_HOST_PERMANENT, where neither the command line nor
+# the environment gives them, and only for the same base domain.
+if [ -z "$MAIN_HOST" ] || [ -z "${MAIN_HOST_PERMANENT_SET:-}" ]; then
+    # shellcheck source=scripts/deploy/lib/deploy-config.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/lib/deploy-config.sh"
+    configured_base="$(deploy_config_value PUBLIC_HOST "host name")" || exit 2
+    if [ -z "$configured_base" ] || [ "${configured_base,,}" = "$HOST" ]; then
+        if [ -z "$MAIN_HOST" ]; then
+            MAIN_HOST="$(deploy_config_value MAIN_HOST "host name")" || exit 2
+        fi
+        if [ -z "${MAIN_HOST_PERMANENT_SET:-}" ]; then
+            MAIN_HOST_PERMANENT="$(deploy_config_value MAIN_HOST_PERMANENT "host name")" || exit 2
+        fi
+    fi
+fi
 MAIN_HOST="${MAIN_HOST:-www.${HOST}}"
 MAIN_HOST="${MAIN_HOST,,}"
 case "$MAIN_HOST" in
     "$HOST") ALTERNATE_HOST="www.${HOST}" ;;
     "www.${HOST}") ALTERNATE_HOST="$HOST" ;;
-    *) echo "--main-host must be ${HOST} or www.${HOST}" >&2; exit 2 ;;
+    *) echo "the main host (--main-host, MAIN_HOST or the deploy config) must be ${HOST} or www.${HOST}, not ${MAIN_HOST}" >&2; exit 2 ;;
 esac
 for tool in curl python3; do
     command -v "$tool" >/dev/null || {
@@ -116,14 +136,6 @@ for tool in curl python3; do
     }
 done
 
-if [ -z "${MAIN_HOST_PERMANENT_SET:-}" ]; then
-    # shellcheck source=scripts/deploy/lib/deploy-config.sh
-    source "$(dirname "${BASH_SOURCE[0]}")/lib/deploy-config.sh"
-    configured_base="$(deploy_config_value PUBLIC_HOST "host name")" || exit 2
-    if [ -z "$configured_base" ] || [ "${configured_base,,}" = "$HOST" ]; then
-        MAIN_HOST_PERMANENT="$(deploy_config_value MAIN_HOST_PERMANENT "host name")" || exit 2
-    fi
-fi
 if [ "$MAIN_HOST" = "$HOST" ] || [ "${MAIN_HOST_PERMANENT,,}" = "$MAIN_HOST" ]; then
     REDIRECT_STATUS=301
 else
@@ -298,6 +310,13 @@ ingress_nginx_redirect() {
     [ "$2" = 308 ] && [ "$3" = "$INGRESS_NGINX_TARGET" ] &&
         grep -qF '<center>nginx</center>' "$tmp/$1"
 }
+# ingress_nginx_plain_redirect NAME STATUS LOCATION: the response saved as NAME is
+# ingress-nginx's 308 from plain http to https://MAIN_HOST, with or without :443, before the
+# cut-over (the same ECO-709 exception as the https alternate's).
+ingress_nginx_plain_redirect() {
+    [ "$2" = 308 ] && { [ "$3" = "$REDIRECT_TARGET" ] || [ "$3" = "$INGRESS_NGINX_TARGET" ]; } &&
+        grep -qF '<center>nginx</center>' "$tmp/$1"
+}
 status="$(fetch alternate "${ALTERNATE_BASE}${REDIRECT_PATH}")"
 location="$(header alternate Location)"
 if [ "$status" = "$REDIRECT_STATUS" ] && [ "$location" = "$REDIRECT_TARGET" ]; then
@@ -345,6 +364,8 @@ for name in "$HOST" "www.${HOST}"; do
     location="$(header plain Location)"
     if [ "$status" = "$REDIRECT_STATUS" ] && [ "$location" = "$REDIRECT_TARGET" ]; then
         pass "plain http://${name} (even claiming https) redirects (${status}) to ${location}"
+    elif [ "$VIA_CLOUDFLARE" = false ] && ingress_nginx_plain_redirect plain "$status" "$location"; then
+        pass "plain http://${name} (even claiming https) redirects (308) through ingress-nginx to ${location} (ECO-709: production not yet cut over to the gateway)"
     elif [ "$VIA_CLOUDFLARE" = true ] && [ "$status" = 301 ] && [ "$location" = "https://${name}${REDIRECT_PATH}" ]; then
         status="$(fetch plain-https "https://${name}${REDIRECT_PATH}")"
         location="$(header plain-https Location)"

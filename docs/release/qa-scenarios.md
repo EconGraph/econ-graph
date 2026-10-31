@@ -139,7 +139,7 @@ scenario: a passing routing probe does not show that sign-in completes.
 
 | Check | Expected result |
 | --- | --- |
-| Open HTTP on each public name and HTTPS on the apex, with a page path and query | A redirect to the same path and query on `https://www.econgraph.com`: 302 until the switch is finalized, 301 after; the destination serves content without another canonical-host redirect |
+| Open HTTP on each public name and HTTPS on the apex, with a page path and query | HTTP first gets Cloudflare's 301 to HTTPS on the same name (Always Use HTTPS); HTTPS on the apex then redirects to the same path and query on `https://www.econgraph.com`: 302 until the switch is finalized, 301 after; the destination serves content without another canonical-host redirect |
 | Open HTTPS www directly, in both a fresh and an existing browser profile | App loads without a redirect loop; the canonical link uses HTTPS www and the path, without query/fragment. Clear cached permanent redirects if an existing profile retains the opposite redirect |
 | Start sign-in from a page reached through each name | Both flows reach the same www realm, complete the callback on www, and return to the intended page |
 | Reload, renew a token, and sign out after signing in | Session restore/renewal and logout use www callbacks; no apex issuer or callback is introduced |
