@@ -348,3 +348,21 @@ data:
           annotations:
             summary: crawler-worker coverage metrics are stale
             description: crawler-worker is running but has not refreshed the crawler_coverage_* gauges for over 15 minutes (the coverage query is failing, see the worker log for "updating coverage gauges failed", or /metrics is not scraped), so the coverage and freshness alerts see old numbers.
+
+      - name: crawler.companyfacts
+        rules:
+        - alert: SecCompanyfactsLoadFailed
+          expr: (kube_job_status_failed{namespace="econ-graph", job_name=~"sec-companyfacts-ingest-.*"} > 0) and on(namespace,job_name) (kube_job_created{namespace="econ-graph"} > time() - 3600)
+          labels:
+            severity: warning
+          annotations:
+            summary: SEC companyfacts nightly ingestion failed
+            description: Inspect the Job and company_fact_load_runs. Rerun both archives together; completed companies are idempotent and historical revisions are retained.
+        - alert: SecCompanyfactsStale
+          expr: (kube_cronjob_spec_suspend{namespace="econ-graph", cronjob="sec-companyfacts-freshness"} == 0) unless on(namespace,cronjob) (kube_cronjob_status_last_successful_time{namespace="econ-graph", cronjob="sec-companyfacts-freshness"} > time() - 1800)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: SEC companyfacts freshness checks are failing or missing
+            description: The enabled freshness check has not passed within 30 minutes. It fails for missing evidence, a failed/interrupted latest load, or a successful load older than 24 hours. Inspect its Job logs and company_fact_load_runs.

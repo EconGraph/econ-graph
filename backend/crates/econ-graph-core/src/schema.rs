@@ -227,6 +227,64 @@ diesel::table! {
 }
 
 diesel::table! {
+    company_fact_filings (id) {
+        id -> Uuid,
+        #[max_length = 10]
+        cik -> Varchar,
+        accession -> Text,
+        filed -> Date,
+        report_date -> Nullable<Date>,
+        form -> Text,
+        primary_document -> Nullable<Text>,
+        is_xbrl -> Bool,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    company_fact_load_runs (id) {
+        id -> Uuid,
+        started_at -> Timestamptz,
+        completed_at -> Nullable<Timestamptz>,
+        status -> Text,
+        companies_count -> Int8,
+        facts_count -> Int8,
+        filings_count -> Int8,
+        error -> Nullable<Text>,
+        companyfacts_sha256 -> Nullable<Text>,
+        submissions_sha256 -> Nullable<Text>,
+        source_mode -> Text,
+        companyfacts_last_modified -> Nullable<Timestamptz>,
+        submissions_last_modified -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    company_facts (id) {
+        id -> Uuid,
+        #[max_length = 10]
+        cik -> Varchar,
+        taxonomy -> Text,
+        concept -> Text,
+        period_start -> Nullable<Date>,
+        period_end -> Date,
+        unit -> Text,
+        accession -> Text,
+        filed -> Date,
+        value -> Numeric,
+        form -> Text,
+        fiscal_year -> Nullable<Int4>,
+        fiscal_period -> Nullable<Text>,
+        frame -> Nullable<Text>,
+        label -> Nullable<Text>,
+        description -> Nullable<Text>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     countries (id) {
         id -> Uuid,
         #[max_length = 3]
@@ -448,7 +506,7 @@ diesel::table! {
 
     financial_annotations (id) {
         id -> Uuid,
-        statement_id -> Uuid,
+        statement_id -> Nullable<Uuid>,
         line_item_id -> Nullable<Uuid>,
         annotation_type -> AnnotationType,
         #[max_length = 255]
@@ -462,6 +520,9 @@ diesel::table! {
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
         resolved_at -> Nullable<Timestamptz>,
+        research_anchor -> Nullable<Jsonb>,
+        research_anchor_key -> Nullable<Text>,
+        research_cik -> Nullable<Text>,
     }
 }
 
@@ -1020,6 +1081,9 @@ diesel::allow_tables_to_appear_in_same_query!(
     chart_annotations,
     chart_collaborators,
     companies,
+    company_fact_filings,
+    company_fact_load_runs,
+    company_facts,
     countries,
     country_correlations,
     crawl_attempts,

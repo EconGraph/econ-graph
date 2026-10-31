@@ -64,3 +64,6 @@ serial_test.workspace = true
 tracing-subscriber.workspace = true
 # In-process stand-in for the data plane's GraphQL endpoint.
 wiremock.workspace = true
+
+[build-dependencies]
+econ-graph-flags-build = { path = "../econ-graph-flags-build" }

@@ -50,7 +50,8 @@
               "annotation:create",
               "annotation:comment",
               "chart:share",
-              "api:mcp"
+              "api:mcp",
+              "catalog.sec:read"
             ]
           },
           "realm": [
@@ -265,6 +266,10 @@
         {
           "name": "catalog.ilo:read",
           "description": "Read the International Labour Organization (ILO) catalog"
+        },
+        {
+          "name": "catalog.sec:read",
+          "description": "Read structured SEC company research"
         }
       ]
     }

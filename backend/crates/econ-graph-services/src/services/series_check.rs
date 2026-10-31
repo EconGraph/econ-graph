@@ -216,6 +216,60 @@ impl DataPlaneClient {
         }
     }
 
+    /// Validate an immutable company-research target through the independently authorized
+    /// data plane. Uses the same configured trust, bearer forwarding, timeout and Host policy
+    /// as series preflights. A malformed, denied or unavailable response fails closed.
+    pub async fn company_research_target_exists(
+        &self,
+        anchor: &econ_graph_core::models::AnnotationAnchor,
+    ) -> AppResult<bool> {
+        anchor
+            .validate()
+            .map_err(|e| AppError::ValidationError(e.to_string()))?;
+        let anchor =
+            serde_json::to_string(anchor).map_err(|e| AppError::ValidationError(e.to_string()))?;
+        if anchor.len() > 16_384 {
+            return Err(AppError::ValidationError(
+                "Company note anchor is too large".into(),
+            ));
+        }
+        let mut request = self.http.post(&self.url).json(&serde_json::json!({
+            "query": "query CompanyResearchTargetExists($anchor: String!) { companyResearchTargetExists(anchor: $anchor) }",
+            "operationName": "CompanyResearchTargetExists",
+            "variables": { "anchor": anchor },
+        }));
+        if let Some(authorization) = &self.authorization {
+            request = request.header(reqwest::header::AUTHORIZATION, authorization);
+        }
+        if let Some(host) = &self.host {
+            request = request.header(reqwest::header::HOST, host);
+        }
+        let unavailable =
+            || AppError::DataPlaneUnavailable("Company research target check unavailable".into());
+        let mut response = request.send().await.map_err(|_| unavailable())?;
+        if !response.status().is_success() {
+            return Err(unavailable());
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|_| unavailable())? {
+            if bytes.len() + chunk.len() > 32_768 {
+                return Err(unavailable());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let body: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| unavailable())?;
+        if body
+            .get("errors")
+            .is_some_and(|e| !e.is_null() && e.as_array().is_none_or(|e| !e.is_empty()))
+        {
+            return Err(unavailable());
+        }
+        body.get("data")
+            .and_then(|d| d.get("companyResearchTargetExists"))
+            .and_then(serde_json::Value::as_bool)
+            .ok_or_else(unavailable)
+    }
+
     fn unavailable(&self, id: Uuid, detail: String) -> AppError {
         tracing::warn!(series_id = %id, url = %self.log_url, "series check failed: {detail}");
         AppError::DataPlaneUnavailable(detail)
@@ -279,6 +333,51 @@ mod tests {
     use super::*;
     use wiremock::matchers::{body_partial_json, method};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn company_target_check_fails_closed_for_errors_missing_fields_and_oversized_answers() {
+        let anchor = econ_graph_core::models::AnnotationAnchor::V1 {
+            target: econ_graph_core::models::SubjectRef::Company {
+                cik: "0000320193".into(),
+            },
+            chart_id: None,
+            observation_date: None,
+            observation_value: None,
+        };
+        for response in [
+            serde_json::json!({"data":{"companyResearchTargetExists":true}}),
+            serde_json::json!({"data":{"companyResearchTargetExists":false}}),
+            serde_json::json!({"data":{"companyResearchTargetExists":true},"errors":[{"message":"denied"}]}),
+            serde_json::json!({"data":{"companyResearchTargetExists":null}}),
+            serde_json::json!({"data":{"companyResearchTargetExists":"true"}}),
+            serde_json::json!({"data":{"companyResearchTargetExists":true},"padding":"x".repeat(33000)}),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(body_partial_json(
+                    serde_json::json!({"operationName":"CompanyResearchTargetExists"}),
+                ))
+                .respond_with(ResponseTemplate::new(200).set_body_json(&response))
+                .mount(&server)
+                .await;
+            let result = client(server.uri(), None, Duration::from_secs(2))
+                .company_research_target_exists(&anchor)
+                .await;
+            if response.get("errors").is_some()
+                || response.get("padding").is_some()
+                || !response["data"]["companyResearchTargetExists"].is_boolean()
+            {
+                assert!(result.is_err());
+            } else {
+                assert_eq!(
+                    result.unwrap(),
+                    response["data"]["companyResearchTargetExists"]
+                        .as_bool()
+                        .unwrap()
+                );
+            }
+        }
+    }
 
     fn client(url: String, host: Option<&str>, timeout: Duration) -> DataPlaneClient {
         DataPlaneClient::new(&DataGraphqlConfig {

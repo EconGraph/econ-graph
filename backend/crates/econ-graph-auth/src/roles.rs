@@ -99,6 +99,9 @@ role_catalog! {
     /// Read the International Labour Organization (ILO) catalog.
     CatalogIloRead => "catalog.ilo:read",
 
+    /// Read structured SEC company research.
+    CatalogSecRead => "catalog.sec:read",
+
     // Collaboration
     /// Create an annotation on a series.
     AnnotationCreate => "annotation:create",
@@ -171,6 +174,7 @@ impl Role {
             "Swiss National Bank (SNB)" => Some(Self::CatalogSnbRead),
             "UN Statistics Division" => Some(Self::CatalogUnstatsRead),
             "International Labour Organization (ILO)" => Some(Self::CatalogIloRead),
+            "SEC EDGAR" => Some(Self::CatalogSecRead),
             _ => None,
         }
     }
