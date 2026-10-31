@@ -115,14 +115,24 @@ elif prog == 'btrfs':
         subvolumes[str(path)] = 'uuid-%d' % (len(subvolumes) + 1)
         save()
     elif args[:2] == ['subvolume', 'show']:
-        if str(path) in subvolumes:
-            out = 'Name: x\n\tUUID: \t\t%s\n' % subvolumes[str(path)]
-        else:
-            code = 1
+        # Root-tree searches are denied to the real unprivileged operator.
+        out = 'ERROR: Could not search B-tree: Operation not permitted\n'
+        code = 1
     elif args[:2] == ['subvolume', 'delete']:
         path.rmdir()
         subvolumes.pop(str(path), None)
         save()
+elif prog == 'btrfs-subvolume-uuid.py':
+    if state.get('metadata_unreadable'):
+        out = 'cannot read btrfs subvolume identity: Operation not permitted\n'
+        code = 1
+    elif args[0] == '--check':
+        out = 'uuid-containing-subvolume\n'
+    elif state.get('new_metadata_unreadable'):
+        code = 1
+    else:
+        out = state.get('subvolumes', {}).get(args[-1], '')
+        code = 0 if out else 1
 elif prog == 'recreate-kind-cluster.sh':
     if not state.get('cluster'):
         config = args[args.index('--config') + 1]
@@ -226,6 +236,9 @@ class DeployRcToQaTest(unittest.TestCase):
             target = self.repo / source
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / source, target)
+        helper = self.repo / 'scripts/qa/lib/btrfs-subvolume-uuid.py'
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        helper.symlink_to(stub)
         for script in ('recreate-kind-cluster.sh', 'load-release-images.sh', 'restore-kind-databases.sh',
                        'deploy.sh'):
             target = self.repo / 'scripts/deploy' / script
@@ -283,6 +296,9 @@ class DeployRcToQaTest(unittest.TestCase):
         self.assertIn(message, result.stdout)
         # Only reads: docker ps and kubectl get through docker exec.
         for call in self.logged():
+            if call['prog'] == 'btrfs-subvolume-uuid.py':
+                self.assertEqual(call['args'][0], '--check')
+                continue
             self.assertEqual(call['prog'], 'docker', call)
             self.assertIn(call['args'][0], ('ps', 'exec', 'info'), call)
             self.assertIn('get', call['args'], call) if call['args'][0] == 'exec' else None
@@ -347,7 +363,33 @@ class DeployRcToQaTest(unittest.TestCase):
         result = self.deploy('--tag', TAG, '--dump-dir', str(self.dump), '--dry-run')
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertFalse((self.qa_root / NAME).exists())
-        self.assertFalse(any(c['prog'] not in ('docker',) for c in self.logged()))
+        self.assertFalse(any(c['prog'] not in ('docker', 'btrfs-subvolume-uuid.py') for c in self.logged()))
+
+    def test_metadata_unreadable_fails_before_creating_storage(self):
+        state = self.read_state()
+        state['metadata_unreadable'] = True
+        self.write_state(state)
+        self.assert_refused(self.deploy(), 'cannot read btrfs identities')
+        self.assertFalse((self.qa_root / NAME).exists())
+        self.assertFalse(any(c['prog'] == 'btrfs' for c in self.logged()))
+
+    def test_a_failed_uuid_read_never_records_an_empty_identity(self):
+        state = self.read_state()
+        state['new_metadata_unreadable'] = True
+        self.write_state(state)
+        result = self.deploy()
+        self.assertEqual(result.returncode, 3, result.stdout)
+        self.assertIn('could not read the new', result.stdout)
+        recorded = (self.qa_root / NAME / 'state.env').read_text()
+        self.assertNotIn('SUBVOLUME_data_plane=', recorded)
+        self.assertFalse(self.read_state().get('cluster'))
+        # Reruns cannot adopt the orphan after metadata access recovers.
+        state = self.read_state()
+        state.pop('new_metadata_unreadable')
+        self.write_state(state)
+        result = self.deploy()
+        self.assertEqual(result.returncode, 3, result.stdout)
+        self.assertIn('is not the btrfs subvolume this script created', result.stdout)
 
     # --- A full run, a rerun and a teardown ---------------------------------------------------
 

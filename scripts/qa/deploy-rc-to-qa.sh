@@ -185,7 +185,7 @@ check_contained() {
 }
 # subvolume_id PATH: the btrfs subvolume UUID of PATH, which must be a subvolume.
 subvolume_id() {
-    btrfs subvolume show "$1" 2>/dev/null | sed -n 's/^[[:space:]]*UUID:[[:space:]]*//p' | head -1
+    python3 "${SCRIPT_REPO}/scripts/qa/lib/btrfs-subvolume-uuid.py" "$1"
 }
 
 # state_get KEY: a value from state.env, or nothing.
@@ -397,6 +397,13 @@ if cluster_exists; then
     fi
 fi
 
+# Check the unprivileged metadata ioctl on the target filesystem before creating a
+# worktree or subvolume. Failure must not leave an unowned subvolume behind.
+storage_parent="$QA_ROOT"
+while [ ! -e "$storage_parent" ]; do storage_parent="$(dirname "$storage_parent")"; done
+python3 "${SCRIPT_REPO}/scripts/qa/lib/btrfs-subvolume-uuid.py" --check "$storage_parent" >/dev/null ||
+    refuse "cannot read btrfs identities under ${QA_ROOT}; no QA storage was created"
+
 if [ "$DRY_RUN" = true ]; then
     echo "[dry-run] QA environment ${NAME} in ${QA_DIR}, tag ${TAG} (${COMMIT}), dump ${DUMP_DIR}"
     echo "[dry-run] worktree ${SRC} at ${TAG}; btrfs subvolumes ${STORAGE}/{data-plane,app-prod}"
@@ -428,7 +435,9 @@ for volume in data-plane app-prod; do
     key="SUBVOLUME_${volume//-/_}"
     if [ ! -e "${STORAGE}/${volume}" ]; then
         btrfs subvolume create "${STORAGE}/${volume}" >/dev/null
-        state_set "$key" "$(subvolume_id "${STORAGE}/${volume}")"
+        actual="$(subvolume_id "${STORAGE}/${volume}")" && [ -n "$actual" ] ||
+            refuse "could not read the new ${STORAGE}/${volume} identity; choose a new --name after correcting metadata access"
+        state_set "$key" "$actual"
     fi
     [ -n "$(state_get "$key")" ] && [ "$(subvolume_id "${STORAGE}/${volume}")" = "$(state_get "$key")" ] ||
         refuse "${STORAGE}/${volume} is not the btrfs subvolume this script created"
