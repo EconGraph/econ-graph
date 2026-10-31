@@ -71,7 +71,10 @@ case " \$* " in
   *" config get-contexts -o name "*) echo kind-econ-graph; echo other ;;
   *" config current-context "*) echo other ;;
   *" get namespace kube-system "*) echo "$cluster_uid" ;;
-  *" get configmap econgraph-cluster-role "*) printf 'production $cluster_uid' ;;
+  # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
+  *" get configmap econgraph-cluster-role "*" -o name"*) echo configmap/econgraph-cluster-role ;;
+  *" get configmap econgraph-cluster-role "*"{.data.role}"*) printf 'production#' ;;
+  *" get configmap econgraph-cluster-role "*) printf '$cluster_uid#' ;;
   *" get namespace "*)
     [ "\${STUB_NO_NAMESPACE:-0}" = 1 ] && { echo "NotFound" >&2; exit 1; }
     echo namespace/x ;;

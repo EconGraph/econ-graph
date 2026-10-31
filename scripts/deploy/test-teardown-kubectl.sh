@@ -58,7 +58,13 @@ case " \$* " in
     *" config view "*) echo "https://127.0.0.1:6443"; exit 0 ;;
     *" get namespace kube-system "*) echo "$CLUSTER_UID"; exit 0 ;;
     *" get configmap econgraph-cluster-role "*)
-        [ "\${FAKE_PRODUCTION:-false}" = true ] && echo "production $CLUSTER_UID"
+        # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
+        [ "\${FAKE_PRODUCTION:-false}" = true ] || exit 0
+        case " \$* " in
+            *" -o name "*) echo configmap/econgraph-cluster-role ;;
+            *"{.data.role}"*) printf 'production#' ;;
+            *) printf '%s#' "$CLUSTER_UID" ;;
+        esac
         exit 0 ;;
     *"{.status.phase}"*) echo "\${FAKE_PHASE:-Running}"; exit 0 ;;
     *" pg_dump "*) [ -z "\${FAKE_DUMP_FAILS:-}" ] || exit 1; echo "PGDMP stub archive"; exit 0 ;;

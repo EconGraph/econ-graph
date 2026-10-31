@@ -14,11 +14,14 @@
 #      control-plane container on the daemon kind deletes it from; a cluster
 #      whose kube-system UID can't be read there is not deleted;
 #   2. asks for a confirmation:
-#      - a cluster with a production marker (kube-system/econgraph-cluster-role
-#        with any role other than `none`, valid or not), or whose marker can't
-#        be read: the first 8 characters of its kube-system UID, typed at a
-#        terminal or given as --confirm-production; --yes does not answer it;
-#      - any other cluster: a typed `yes`, or --yes;
+#      - a cluster with a production marker, or whose marker can't be read: the
+#        first 8 characters of its kube-system UID, typed at a terminal or
+#        given as --confirm-production; --yes does not answer it. Any
+#        ConfigMap kube-system/econgraph-cluster-role counts as a production
+#        marker, valid or not, empty included, except role exactly `none` with
+#        no kube-system-uid or one without whitespace;
+#      - any other cluster (no such ConfigMap, or that `none` marker): a typed
+#        `yes`, or --yes;
 #      a --confirm-production that doesn't match the cluster is refused, and
 #      without a terminal a confirmation that isn't given on the command line
 #      is refused;
@@ -82,7 +85,8 @@ while [ $# -gt 0 ]; do
             if [ $# -lt 2 ] || [ -z "$2" ]; then echo "$usage" >&2; exit 2; fi
             CONFIRM_PRODUCTION="$2"; shift 2 ;;
         --confirm-production=*) CONFIRM_PRODUCTION="${1#*=}"; shift ;;
-        -h|--help) echo "$usage"; exit 0 ;;
+        # The header above, up to its first non-comment line.
+        -h|--help) awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; s = 1; next } s { exit }' "$0"; exit 0 ;;
         *) echo "$usage" >&2; exit 2 ;;
     esac
 done
@@ -161,7 +165,7 @@ in_node() {
 # production marker calls for (see the top of this file), or exit having
 # changed nothing. Runs before any backup or delete.
 confirm_delete() {
-    local prompt="$1" nodes uid marker role marker_uid production role_text code answer
+    local prompt="$1" nodes uid production role_text code answer
     nodes="$(kind get nodes --name "${KIND_CLUSTER}" 2>/dev/null | tr '\n' ' ')" || nodes="(unknown)"
     uid="$(in_node get namespace "${CLUSTER_ROLE_NAMESPACE}" -o 'jsonpath={.metadata.uid}')" || uid=""
     if [ -z "${uid}" ]; then
@@ -179,22 +183,22 @@ confirm_delete() {
     fi
     # Broader than cluster_is_marked_production (lib/cluster-role.sh), which
     # decides whether a cluster may hold the tunnel token: before a delete, any
-    # marker other than role=none asks for the UID prefix, and so does one that
-    # can't be read.
+    # marker but `none` (cluster_role_marker_guards_delete) asks for the UID
+    # prefix, and so does one that can't be read.
     production="true"
-    if marker="$(in_node -n "${CLUSTER_ROLE_NAMESPACE}" get configmap "${CLUSTER_ROLE_CONFIGMAP}" \
-        --ignore-not-found -o 'jsonpath={.data.role}{" "}{.data.kube-system-uid}')"; then
-        read -r role marker_uid <<<"$marker" || true
-        if [ "${role:-}" = "production" ] && [ "${marker_uid:-}" = "${uid}" ]; then
+    if cluster_role_read_marker in_node; then
+        if [ "${CLUSTER_ROLE_MARKER_EXISTS}" = true ] &&
+            [ "${CLUSTER_ROLE_MARKER_ROLE}" = "production" ] && [ "${CLUSTER_ROLE_MARKER_UID}" = "${uid}" ]; then
             role_text="marked production: this is the cluster serving econgraph.com"
-        elif cluster_role_marker_guards_delete "$marker"; then
-            role_text="the marker says role=${role:-(none)}, kube-system-uid=${marker_uid:-(missing)}; treated as production"
+        elif cluster_role_marker_guards_delete "${CLUSTER_ROLE_MARKER_EXISTS}" \
+            "${CLUSTER_ROLE_MARKER_ROLE}" "${CLUSTER_ROLE_MARKER_UID}"; then
+            role_text="ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_CONFIGMAP} says $(cluster_role_marker_text); treated as production"
         else
             production="false"
-            if [ -z "${role:-}" ]; then
+            if [ "${CLUSTER_ROLE_MARKER_EXISTS}" != true ]; then
                 role_text="not production (no ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_CONFIGMAP})"
             else
-                role_text="not production (role=${role})"
+                role_text="not production ($(cluster_role_marker_text))"
             fi
         fi
     else

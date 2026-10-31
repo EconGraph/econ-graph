@@ -87,8 +87,14 @@ set -- "${args[@]}"
 case "$*" in
   "version --request-timeout=15s") ;;
   "get namespace kube-system "*) printf 'uid-this-cluster' ;;
+  # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
   "get configmap econgraph-cluster-role "*)
-    [ "${STUB_MARKER:-none}" != production ] || printf 'production uid-this-cluster' ;;
+    [ "${STUB_MARKER:-none}" = production ] || exit 0
+    case "$*" in
+      *" -o name") echo configmap/econgraph-cluster-role ;;
+      *"{.data.role}"*) printf 'production#' ;;
+      *) printf 'uid-this-cluster#' ;;
+    esac ;;
   "get pod "*" -o jsonpath={.status.phase} --ignore-not-found") printf Running ;;
   "exec postgresql-0 -c postgresql -- postgres --version" | "exec app-postgres-0 -c postgres -- postgres --version")
     echo "postgres (PostgreSQL) ${STUB_SERVER:-18.1}" ;;
