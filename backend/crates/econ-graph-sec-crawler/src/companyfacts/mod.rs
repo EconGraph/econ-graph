@@ -1,6 +1,6 @@
 //! Nightly SEC companyfacts ingestion. It does not enable the unfinished company pages.
 //!
-//! Official bulk source contract: https://www.sec.gov/search-filings/edgar-application-programming-interfaces
+//! Official bulk source contract: <https://www.sec.gov/search-filings/edgar-application-programming-interfaces>
 pub mod archive;
 pub mod parse;
 pub mod store;
