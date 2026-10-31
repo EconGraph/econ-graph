@@ -197,6 +197,7 @@ jobs:
             - '.github/workflows/ci-core.yml'
             - 'backend/migrations/**'
             - 'backend/scripts/check_migration_order.py'
+            - 'backend/scripts/test_check_migration_order.py'
           # E2E Image Build builds the ci/docker/e2e images. Beyond the
           # Dockerfiles: what decides the build context, the files they COPY
           # by name, and what decides where the frontend build lands (the
@@ -511,11 +512,26 @@ jobs:
     # it. Stop if selection failed or the run was cancelled.
     if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.migrations == 'true') }}
 
+    services:
+      migration-postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: migration-test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432/tcp
+
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         persist-credentials: false
+        # Target-tip comparisons and published-version protection need branches and final tags.
+        fetch-depth: 0
         ref: ${{ github.event.inputs.branch || github.ref }}
 
     - name: Setup Python
@@ -523,10 +539,18 @@ jobs:
       with:
         python-version: '3.14'
 
+    - name: Test target migration coordination
+      env:
+        MIGRATION_TEST_DATABASE_URL: postgres://postgres:migration-test@127.0.0.1:${{ job.services.migration-postgres.ports['5432'] }}/postgres
+      run: python3 -m unittest discover -s backend/scripts -p test_check_migration_order.py -v
+
     - name: Run migration order validation
+      env:
+        MIGRATION_EVENT_PATH: ${{ github.event_path }}
+        MIGRATION_EVENT_NAME: ${{ github.event_name }}
       run: |
         cd backend
-        python3 scripts/check_migration_order.py
+        python3 scripts/check_migration_order.py --event-path "$MIGRATION_EVENT_PATH" --event-name "$MIGRATION_EVENT_NAME"
 
     - name: Test migration validation with duplicate timestamps
       run: |
