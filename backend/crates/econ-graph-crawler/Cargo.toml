@@ -80,6 +80,7 @@ testkit = ["dep:wiremock"]
 econ-graph-flags-build = { path = "../econ-graph-flags-build" }
 
 [dev-dependencies]
+tempfile.workspace = true
 # tests/catalog_roles.rs: every source's data_sources row maps to a catalog read role
 econ-graph-auth = { path = "../econ-graph-auth" }
 wiremock.workspace = true
