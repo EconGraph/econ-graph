@@ -25,8 +25,8 @@ unofficial `iceberg-rust` package. Version compatibility comes from the
 | Appends | Apache `Transaction::fast_append` creates actual snapshots/manifests. The crate writes one sorted data file group per series partition and stages a dataset batch before SQL publication. |
 | Row deletes | Apache provides equality-delete writers and readers, but fast-append validation accepts data files only. No untested row-delete transaction is assumed. |
 | Corrections | Existing IDs are retained. Physical append records carry `_commit_generation`; the DataFusion logical view selects the newest generation per observation UUID. This preserves in-place Postgres corrections while keeping prior snapshots readable. |
-| Compaction | The selected transaction API has no complete data-file rewrite/compaction operation. It is not silently replaced by deletion or an unverified maintenance job. Retained physical versions and repeated mirrored series cause storage/read amplification until a measured rewrite path passes parity and recovery checks. |
-| Snapshot expiry | Apache exposes `expire_snapshots`, but its age defaults can expire history even when explicit IDs are supplied. This implementation does not call it or delete objects automatically. History/backup retention requires explicit operating policy and recovery evidence. |
+| Compaction | A bounded native replacement-snapshot path rewrites deduplicated logical rows with Apache manifest/metadata builders. It preserves prior snapshots/objects and publishes by the same SQL CAS. Repeated mirror appends amplify physical storage between compactions. |
+| Snapshot expiry | The explicit maintenance path supplies both cutoff and retain-last to Apache `expire_snapshots`; it never invokes implicit age defaults or deletes objects. Old SQL checkpoint pointers and their metadata/object chains remain recoverable. History/backup retention still requires operating policy and recovery evidence. |
 
 The relevant upstream implementations are
 [transaction actions](https://github.com/apache/iceberg-rust/tree/v0.10.1/crates/iceberg/src/transaction),
@@ -113,3 +113,33 @@ revision modes/context, actual DataFusion reads, uncommitted/crashed writers, st
 corrections, idempotent retries, conflicting writers, rollback of caller-side summary changes,
 pinned old snapshots and catalog checkpoints. It does not establish production capacity or
 complete maintenance/recovery acceptance.
+
+## Bounded maintenance and scheduling
+
+`timeseries maintenance --max-rows N` reports physical/logical row amplification and retained
+snapshot counts without changing storage. An explicit positive row budget prevents compaction
+from collecting an unapproved dataset size. `--apply` compacts amplified tables using a native
+replacement snapshot and requires an exact `TIMESERIES_TARGET_ID`; publication verifies the
+same durable write fence as the crawler. A conflicting writer causes CAS failure and requires a
+fresh plan. Prior snapshots remain readable and no old object is removed.
+
+Snapshot-reference expiry is opt-in with `--expire-before <RFC3339> --retain-last N`. The cutoff
+must be in the past and at least one recent snapshot is retained. Every observation vintage
+remains in the current logical data. Expiry changes only metadata references; the SQL receipt
+history and prior metadata/object chains are retained for recovery. It is not backup deletion
+or a storage reclamation policy.
+
+`scripts/train4/maintain-timeseries.sh` is the cron/Kubernetes entrypoint. Set
+`ICEBERG_COMPACTION_MAX_ROWS` to the explicitly tested budget and
+`TIMESERIES_MAINTENANCE_BINARY` to the installed binary path when needed. It defaults to dry run;
+`TIMESERIES_MAINTENANCE_APPLY=true` enables fenced publication. Optional
+`ICEBERG_EXPIRE_BEFORE`/`ICEBERG_RETAIN_LAST` carry the explicit retention decision. Schedule it
+only after the operator chooses capacity and retention; no service is installed or enabled by
+the feature branch. For example, an operator-owned cron schedule can invoke this entrypoint
+daily with environment credentials injected by the existing secret mechanism.
+
+The integration suite verifies a physical 7-row correction log compacts to 6 logical rows,
+rejects a 5-row budget for that dataset, preserves the exact contents/old pinned snapshot,
+expires metadata snapshots to the requested retain-last value, and still traverses the old
+recovery objects afterward. This bounds correctness; production throughput/capacity remains
+an independent acceptance gate.

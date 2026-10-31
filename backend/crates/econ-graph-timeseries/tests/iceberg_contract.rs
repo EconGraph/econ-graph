@@ -202,6 +202,79 @@ async fn real_iceberg_roundtrip_parity_upserts_conflicts_and_atomicity() -> Resu
         latest.iter().find(|r| r.id == correction.id).unwrap().value,
         correction.value
     );
+    let plan = catalog.maintenance_plan(dataset).await?;
+    assert_eq!(plan.physical_rows, 7);
+    assert_eq!(plan.logical_rows, 6);
+    assert!(plan.compact_recommended);
+    assert!(catalog
+        .prepare_compaction(Uuid::new_v4(), dataset, 5)
+        .await
+        .is_err());
+    let compact = catalog
+        .prepare_compaction(Uuid::new_v4(), dataset, 6)
+        .await?;
+    let mut conn = pool.get().await?;
+    conn.build_transaction()
+        .run::<_, anyhow::Error, _>(async |conn| {
+            SqlCatalog::commit_prepared_conn(conn, &compact).await
+        })
+        .await?;
+    drop(conn);
+    assert_eq!(
+        encoding::canonical_rows(&catalog.read_rows(&compact.next).await?)?,
+        encoding::canonical_rows(&latest)?
+    );
+    let plan = catalog.maintenance_plan(dataset).await?;
+    assert_eq!(plan.physical_rows, 6);
+    assert!(!plan.compact_recommended);
+    assert_eq!(
+        catalog
+            .load_at(&compact.next)
+            .await?
+            .metadata()
+            .current_snapshot()
+            .unwrap()
+            .summary()
+            .operation,
+        iceberg::spec::Operation::Replace
+    );
+    let expiry = catalog
+        .prepare_snapshot_expiry(
+            Uuid::new_v4(),
+            dataset,
+            Utc::now().timestamp_millis() + 1000,
+            1,
+        )
+        .await;
+    assert!(expiry.is_err(), "future cutoff is refused");
+    let expiry = catalog
+        .prepare_snapshot_expiry(Uuid::new_v4(), dataset, Utc::now().timestamp_millis(), 1)
+        .await?;
+    let mut conn = pool.get().await?;
+    conn.build_transaction()
+        .run::<_, anyhow::Error, _>(async |conn| {
+            SqlCatalog::commit_prepared_conn(conn, &expiry).await
+        })
+        .await?;
+    drop(conn);
+    assert_eq!(
+        catalog
+            .load_at(&expiry.next)
+            .await?
+            .metadata()
+            .snapshots()
+            .len(),
+        1
+    );
+    assert_eq!(
+        encoding::canonical_rows(&catalog.read_rows(&expiry.next).await?)?,
+        encoding::canonical_rows(&latest)?
+    );
+    assert!(catalog
+        .reachable_objects(&expiry.next)
+        .await?
+        .iter()
+        .any(|o| o.location == prepared.next.metadata_location));
     // A read pinned before the correction keeps its original exact value and metadata.
     assert_eq!(
         encoding::canonical_rows(&catalog.read_rows(&prepared.next).await?)?,
@@ -215,7 +288,7 @@ async fn real_iceberg_roundtrip_parity_upserts_conflicts_and_atomicity() -> Resu
             .iter()
             .find(|p| p.dataset_id == dataset)
             .unwrap(),
-        &left.next
+        &expiry.next
     );
     Ok(())
 }

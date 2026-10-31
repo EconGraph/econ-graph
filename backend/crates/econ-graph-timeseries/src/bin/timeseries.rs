@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use clap::{Parser, Subcommand};
 use diesel_async::SimpleAsyncConnection;
 use econ_graph_core::{
@@ -18,6 +18,17 @@ struct Args {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Plan bounded compaction for every catalog table; --apply requires exact recovery target.
+    Maintenance {
+        #[arg(long)]
+        max_rows: u64,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        expire_before: Option<DateTime<Utc>>,
+        #[arg(long, default_value_t = 1)]
+        retain_last: usize,
+    },
     /// Write genuine Iceberg/Parquet via the same library used by the crawl commit path.
     /// Requires an explicitly disposable database and warehouse; never deletes objects.
     Smoke {
@@ -30,6 +41,12 @@ enum Command {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Args::parse().command {
+        Command::Maintenance {
+            max_rows,
+            apply,
+            expire_before,
+            retain_last,
+        } => maintenance(max_rows, apply, expire_before, retain_last).await,
         Command::Smoke { output, migrate } => smoke(output, migrate).await,
     }
 }
@@ -100,5 +117,69 @@ async fn smoke(output: Option<std::path::PathBuf>, migrate: bool) -> Result<()> 
         std::fs::write(path, serde_json::to_vec_pretty(&report)?)?;
     }
     println!("{}", serde_json::to_string(&report)?);
+    Ok(())
+}
+
+async fn maintenance(
+    max_rows: u64,
+    apply: bool,
+    expire_before: Option<DateTime<Utc>>,
+    retain_last: usize,
+) -> Result<()> {
+    anyhow::ensure!(
+        max_rows > 0,
+        "maintenance needs an explicit positive row budget"
+    );
+    let url = std::env::var("DATA_DATABASE_URL").context("DATA_DATABASE_URL is required")?;
+    let catalog = SqlCatalog::new(create_pool(&url).await?, StorageConfig::from_env()?);
+    let selection = econ_graph_core::observation_storage::ObservationStorage::from_env()?;
+    if apply {
+        anyhow::ensure!(
+            selection.target_id.is_some(),
+            "maintenance publication requires explicit TIMESERIES_TARGET_ID"
+        );
+    }
+    let mut reports = vec![];
+    for pointer in catalog.checkpoint().await?.tables {
+        let plan = catalog.maintenance_plan(pointer.dataset_id).await?;
+        let mut compacted = false;
+        let mut expired = false;
+        if apply && plan.compact_recommended {
+            let prepared = catalog
+                .prepare_compaction(Uuid::new_v4(), pointer.dataset_id, max_rows)
+                .await?;
+            let mut conn = catalog.pool.get().await?;
+            compacted = conn
+                .build_transaction()
+                .run::<_, anyhow::Error, _>(async |conn| {
+                    selection.assert_write_allowed_conn(conn).await?;
+                    SqlCatalog::commit_prepared_conn(conn, &prepared).await
+                })
+                .await?;
+        }
+        if apply && let Some(cutoff) = expire_before {
+            let prepared = catalog
+                .prepare_snapshot_expiry(
+                    Uuid::new_v4(),
+                    pointer.dataset_id,
+                    cutoff.timestamp_millis(),
+                    retain_last,
+                )
+                .await?;
+            let mut conn = catalog.pool.get().await?;
+            expired = conn
+                .build_transaction()
+                .run::<_, anyhow::Error, _>(async |conn| {
+                    selection.assert_write_allowed_conn(conn).await?;
+                    SqlCatalog::commit_prepared_conn(conn, &prepared).await
+                })
+                .await?;
+        }
+        reports.push(json!({"plan":plan,"dry_run":!apply,"compacted":compacted,"snapshot_metadata_expired":expired,"objects_deleted":0,"current":catalog.pointer(pointer.dataset_id).await?}));
+    }
+    println!(
+        "{}",
+        serde_json::to_string(&json!({"format":1,"status":"passed","tables":reports}))?
+    );
     Ok(())
 }

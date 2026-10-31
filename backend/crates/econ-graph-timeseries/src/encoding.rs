@@ -37,6 +37,17 @@ pub fn schema() -> Result<Schema> {
         .build()?)
 }
 pub fn to_batch(schema: &Schema, rows: &[Observation], generation: i64) -> Result<RecordBatch> {
+    for row in rows {
+        anyhow::ensure!(
+            row.attributes.as_ref().is_none_or(|v| v.is_object()),
+            "observation attributes must be an object or absent"
+        );
+        anyhow::ensure!(
+            row.created_at.timestamp_subsec_nanos() % 1000 == 0
+                && row.updated_at.timestamp_subsec_nanos() % 1000 == 0,
+            "observation audit timestamp exceeds stored microsecond precision"
+        );
+    }
     let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
     let values: Vec<_> = rows
         .iter()
