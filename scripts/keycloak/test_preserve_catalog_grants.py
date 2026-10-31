@@ -602,15 +602,20 @@ class CatalogPolicyTests(unittest.TestCase):
         # as when the realm file drops the client; the realm's default role is never deleted.
         attributes = self.state[self.prefix]["attributes"]
         attributes["de.adorsys.keycloak.config.state-default-roles-client-temp-x-0"] = '["temp-role"]'
-        attributes["de.adorsys.keycloak.config.state-default-roles-realm-0"] = json.dumps(
-            [r["name"] for r in self.realm["roles"]["realm"]] + [self.realm["defaultRole"]["name"]])
         self.state[self.prefix + "/users/reader/role-mappings"] = {
             "realmMappings": [{"name": "custom-public-policy"}],
-            "clientMappings": {"temp-x": {"mappings": [{"name": "temp-role"}]}}}
+            "clientMappings": {"temp-x": {"mappings": [{"name": "temp-role"}, {"name": "op-role"}]}}}
+        merged, warnings = self.merge_with_warnings()
+        # The client stays: only the roles config-cli made go; an operator's stays.
+        self.assertEqual(merged["users"][0]["clientRoles"], {"temp-x": ["op-role"]})
+        self.assertIn("temp-x role temp-role is no longer in the realm file", warnings)
+        # The client goes too: every role on it goes with it, whoever made it.
+        attributes["de.adorsys.keycloak.config.state-default-clients-0"] = json.dumps(
+            [c["clientId"] for c in self.realm["clients"]] + ["temp-x"])
         merged, warnings = self.merge_with_warnings()
         self.assertEqual(merged["users"][0]["clientRoles"], {"temp-x": []})
-        self.assertIn("temp-role is no longer in the realm file", warnings)
-        self.assertNotIn(self.realm["defaultRole"]["name"], warnings)
+        self.assertIn("client temp-x is no longer in the realm file, so the import deletes it and its roles "
+                      "temp-role, op-role", warnings)
         # Without roles.client config-cli deletes no client role.
         del self.realm["roles"]["client"]
         self.assertEqual(preserve.roles_config_cli_deletes(self.realm, attributes, "temp-x"), set())
@@ -633,7 +638,9 @@ class CatalogPolicyTests(unittest.TestCase):
         self.realm["roles"]["client"]["econ-graph-api"] = [
             r for r in self.realm["roles"]["client"]["econ-graph-api"] if r["name"] != "catalog.ilo:read"]
         self.add_target("clientScope", "basic", "basic", ["catalog.ilo:read"])
-        self.merge()
+        merged, warnings = self.merge_with_warnings()
+        self.assertIn("client scope basic admits catalog.ilo:read to econgraph-anonymous tokens until the "
+                      "import deletes it", warnings)
         self.state[self.prefix + "/client-scopes/basic/scope-mappings/clients/api"] = [
             {"name": "catalog.ilo:read"}, {"name": "catalog.bls:read"}]
         with self.assertRaises(RuntimeError) as raised:

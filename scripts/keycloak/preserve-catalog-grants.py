@@ -168,25 +168,27 @@ def roles_config_cli_deletes(realm, attributes, client=None):
     longer declares. A grant of one written into the import would fail it part way ("Cannot
     find client role"). As config-cli 6.5.1 does it (RoleImportService): without a roles.realm
     or roles.client list it deletes none of that kind, and with roles.client every role of a
-    client missing from it, as when the file drops the client. The default role is Keycloak's."""
-    roles = realm.get("roles", {})
+    client missing from it. A client config-cli deletes takes all its roles with it, whoever
+    made them (clients_config_cli_deletes)."""
+    roles = realm.get("roles") or {}
     if client is None:
         declared = roles.get("realm")
     else:
-        declared = roles["client"].get(client, []) if "client" in roles else None
+        declared = (roles.get("client") or {}).get(client, []) if roles.get("client") is not None else None
     if declared is None:
         return set()
     kind = "roles-realm" if client is None else "roles-client-" + client
-    return (config_cli_state(attributes, kind) - {role["name"] for role in declared}
-            - {realm.get("defaultRole", {}).get("name")})
+    return config_cli_state(attributes, kind) - {role["name"] for role in declared}
 
 
-def without_deleted(names, deleted, where):
-    """NAMES less the roles the import deletes, naming each grant that goes with its role."""
+def without_deleted(names, deleted, where, owner=""):
+    """NAMES less the roles the import deletes, naming each grant that goes with its role.
+    OWNER, when given, names the client the roles belong to."""
     gone = [n for n in names if n in deleted]
     if gone:
+        shown = ", ".join((owner + " role " if owner else "") + n for n in gone)
         warn("%s %s no longer in the realm file, so the import deletes %s and its grant on %s"
-             % (", ".join(gone), "is" if len(gone) == 1 else "are", "it" if len(gone) == 1 else "them", where))
+             % (shown, "is" if len(gone) == 1 else "are", "it" if len(gone) == 1 else "them", where))
     return [n for n in names if n not in deleted]
 
 
@@ -281,10 +283,13 @@ def check_anonymous_client_scopes(realm, get, prefix, anon_id, api_id, live=True
     import deletes (DELETED_ROLES) reach no token after it, so they aren't refused.
     """
     admitted = {}  # (kind, name) -> catalog reads admitted other than directly by the reader
+    skipped = {}  # the same for catalog reads the import deletes
     def admit(key, roles):
-        roles = {r for r in roles if catalog_read(r) and r not in deleted_roles}
-        if roles:
-            admitted.setdefault(key, set()).update(roles)
+        roles = {r for r in roles if catalog_read(r)}
+        if roles - set(deleted_roles):
+            admitted.setdefault(key, set()).update(roles - set(deleted_roles))
+        if roles & set(deleted_roles):
+            skipped.setdefault(key, set()).update(roles & set(deleted_roles))
     for entry in realm.get("clientScopeMappings", {}).get(API_CLIENT, []):
         if "clientScope" in entry:
             admit(("clientScope", entry["clientScope"]), entry.get("roles", []))
@@ -305,7 +310,7 @@ def check_anonymous_client_scopes(realm, get, prefix, anon_id, api_id, live=True
                 scopes = required(get(prefix + "/clients/" + anon_id + "/" + kind + "-client-scopes"))
                 assigned.update(s["name"] for s in scopes)
                 ids.update((s["name"], s["id"]) for s in scopes)
-    if live:
+    if live and api_id:
         # A scope the realm file newly assigns is read too, if it exists already.
         ids.update((s["name"], s["id"]) for s in required(get(prefix + "/client-scopes"))
                    if s["name"] in assigned | defaults)
@@ -319,6 +324,12 @@ def check_anonymous_client_scopes(realm, get, prefix, anon_id, api_id, live=True
             direct = {r["name"] for r in required(get(own))}
             admit(("client", ANONYMOUS_CLIENT),
                   {r["name"] for r in required(get(own + "/composite"))} - direct)
+    reaching = [("clientScope", name) for name in sorted(assigned)] + [("client", ANONYMOUS_CLIENT)]
+    for key in reaching:
+        if key in skipped:
+            warn("%s admits %s to %s tokens until the import deletes %s"
+                 % ("client scope " + key[1] if key[0] == "clientScope" else "its own scope",
+                    ", ".join(sorted(skipped[key])), ANONYMOUS_CLIENT, "it" if len(skipped[key]) == 1 else "them"))
     refused = sorted("client scope %s (%s)" % (name, ", ".join(sorted(admitted[("clientScope", name)])))
                      for name in assigned if ("clientScope", name) in admitted)
     if ("client", ANONYMOUS_CLIENT) in admitted:
@@ -487,9 +498,17 @@ def merge_catalog_policy(realm, get):
             account_label = "the %s service account" % ANONYMOUS_CLIENT
             user["realmRoles"] = without_deleted(
                 user["realmRoles"], roles_config_cli_deletes(realm, observed_attrs), account_label)
+            deleted_clients = clients_config_cli_deletes(realm, observed_attrs)
             for name in user["clientRoles"]:
+                if name in deleted_clients:
+                    # The client goes, with every role on it; a grant left in would fail the import.
+                    warn("client %s is no longer in the realm file, so the import deletes it and its roles "
+                         "%s on %s" % (name, ", ".join(user["clientRoles"][name]), account_label))
+                    user["clientRoles"][name] = []
+                    continue
                 deleted = deleted_roles if name == API_CLIENT else roles_config_cli_deletes(realm, observed_attrs, name)
-                user["clientRoles"][name] = without_deleted(user["clientRoles"][name], deleted, account_label)
+                user["clientRoles"][name] = without_deleted(user["clientRoles"][name], deleted, account_label,
+                                                            "" if name == API_CLIENT else name)
     return realm
 
 

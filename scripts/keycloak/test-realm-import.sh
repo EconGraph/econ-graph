@@ -10,9 +10,9 @@
 # as k8s/manifests/keycloak/realm-import-job.yaml runs them: render-realm.sh,
 # preserve-catalog-grants.py, keycloak-config-cli, then preserve-catalog-grants.py --complete.
 # That first import's realm file also declares a client, temp-x, with a client role
-# temp-role, and ten roles catalog.retired_<n>:read. The script checks it seeds the realm file's catalog policy, then
-# makes the changes an operator makes and imports the realm file without temp-x, the retired
-# roles and catalog.ilo:read, checking:
+# temp-role, and ten roles catalog.retired_<n>:read. The script checks it seeds the realm
+# file's catalog policy, then makes the changes an operator makes and imports the realm file
+# without temp-x, the retired roles and catalog.ilo:read, checking:
 #
 #   - catalog reads granted through the scope mappings of a client the realm file doesn't
 #     declare, of a client scope, and of a declared client survive the import;
@@ -26,7 +26,8 @@
 #     does catalog-public mapped there, which hands an anonymous token (checked) a catalog
 #     taken off the reader's own scope;
 #   - temp-x, which config-cli created and now deletes, doesn't fail the import although
-#     it held a catalog read and the anonymous service account holds its role directly;
+#     it held a catalog read and the anonymous service account holds its roles directly,
+#     temp-role and op-role, which an operator added;
 #   - neither do catalog.ilo:read and the retired roles, deleted the same way although granted
 #     (one directly to the anonymous service account): their grants are named and dropped,
 #     and a catalog role an operator made keeps its grants;
@@ -204,7 +205,9 @@ api POST "/client-scopes/$SCOPE_ID/scope-mappings/realm" "[$PUBLIC]" >/dev/null
 READER_ID="$(api GET "/clients/$ANON_ID/service-account-user" | json 'd["id"]')"
 api POST "/users/$READER_ID/role-mappings/clients/$API_ID" "[$(role catalog.retired_0:read)]" >/dev/null
 TEMP_ID="$(client_id temp-x)"
-api POST "/users/$READER_ID/role-mappings/clients/$TEMP_ID" "[$(api GET "/clients/$TEMP_ID/roles/temp-role")]" >/dev/null
+api POST "/clients/$TEMP_ID/roles" '{"name":"op-role"}' >/dev/null
+api POST "/users/$READER_ID/role-mappings/clients/$TEMP_ID" \
+    "[$(api GET "/clients/$TEMP_ID/roles/temp-role"),$(api GET "/clients/$TEMP_ID/roles/op-role")]" >/dev/null
 # A catalog read on `basic`, which anonymous tokens are built with.
 api POST "/client-scopes/$BASIC_ID/scope-mappings/clients/$API_ID" "[$FRED]" >/dev/null
 # What set-catalog-access.sh does, through its helper.
@@ -287,7 +290,7 @@ for target in "client partner-x: api:mcp" "client scope catalog-extra: api:mcp" 
     "catalog.ilo:read is no longer in the realm file, so the import deletes it and its grant on client partner-x" \
     "catalog.ilo:read is no longer in the realm file, so the import deletes it and its grant on client econgraph-anonymous" \
     "catalog.retired_0:read is no longer in the realm file, so the import deletes it and its grant on the econgraph-anonymous service account" \
-    "temp-role is no longer in the realm file, so the import deletes it and its grant on the econgraph-anonymous service account"; do
+    "client temp-x is no longer in the realm file, so the import deletes it and its roles"; do
     grep -qF "$target" "$WORK/warnings-second" || fail "no warning for $target: $(cat "$WORK/warnings-second")"
 done
 [ "$(grep -v 'is no longer in the realm file' "$WORK/warnings-second" | grep -c 'catalog\.\|temp-x')" = 0 ] ||
