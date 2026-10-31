@@ -85,7 +85,7 @@ if [ "$DRY_RUN" = true ]; then
         echo "[dry-run] apply gateway routes with permanent (301) redirects to ${MAIN_HOST}"
     else
         echo "[dry-run] atomically retain other settings and write PUBLIC_HOST/MAIN_HOST in ${CONFIG_FILE}; drop a MAIN_HOST_PERMANENT naming another host"
-        echo "[dry-run] if issuer changes: mark deployment/keycloak so the sign-out below survives a rerun; if not, clear a marker naming another host without signing out"
+        echo "[dry-run] if issuer changes: mark deployment/keycloak so the sign-out below survives a rerun; any marker left by an earlier run also signs out"
         echo "[dry-run] patch Keycloak hostname/client origins and wait for its rollout; preserve release images"
         echo "[dry-run] rerun the catalog-preserving realm import, moving the realm frontendUrl to ${MAIN_HOST}"
         echo "[dry-run] if marked: sign out every realm session once, then clear the mark"
@@ -256,18 +256,16 @@ fi
 # realm session is then signed out once the import has moved the issuer, so sessions
 # begun during the Keycloak rollout or the import go too. A marker on the Keycloak
 # Deployment, set before the first change and cleared after the sign-out, makes a rerun
-# after an interruption still sign out. A marker for another host, left by a switch that
-# stopped before Keycloak issued anything for that host, is cleared without signing out
-# when the issuer stays: no session was issued by the marked issuer.
+# after an interruption still sign out. Any marker signs out on the next run, even when
+# the issuer is not changing now: Keycloak's current hostname and frontendUrl can't show
+# whether the marked issuer served sessions before the run stopped.
 if [ "$current_hostname" != "https://${MAIN_HOST}/idp" ] ||
     { [ -n "$current_frontend_url" ] && [ "$current_frontend_url" != "https://${MAIN_HOST}/idp" ]; }; then
     echo "Issuer is changing: realm sessions will be signed out after the realm import; users must sign in again."
     kc -n econ-graph annotate deployment/keycloak --overwrite "${LOGOUT_ANNOTATION}=https://${MAIN_HOST}/idp" >/dev/null
     logout_pending="https://${MAIN_HOST}/idp"
-elif [ -n "$logout_pending" ] && [ "$logout_pending" != "https://${MAIN_HOST}/idp" ]; then
-    echo "Clearing the sign-out marker for ${logout_pending}: the issuer stays https://${MAIN_HOST}/idp, so nobody is signed out."
-    kc -n econ-graph annotate deployment/keycloak "${LOGOUT_ANNOTATION}-" >/dev/null
-    logout_pending=""
+elif [ -n "$logout_pending" ]; then
+    echo "A sign-out is pending from an earlier run (${logout_pending}): realm sessions will be signed out after the realm import."
 fi
 # 1. Keycloak's issuer. set env patches existing Deployments: applying repo manifests
 # would reset release images. The realm's frontendUrl overrides KC_HOSTNAME, so

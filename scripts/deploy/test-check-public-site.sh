@@ -70,10 +70,11 @@ elif url.scheme == 'http' or url.hostname != main:
     if scenario == 'query': response['Location'] = base + url.path
     if scenario == 'port': response['Location'] = 'https://' + main + ':443' + path
     if scenario == 'wrong-status': status = 302 if status == 301 else 301
-    if scenario in ('nginx-http', 'nginx-http-443', 'nginx-http-page') and url.scheme == 'http' and local:
+    if scenario in ('nginx-http', 'nginx-http-443', 'nginx-http-page', 'nginx-http-other') and url.scheme == 'http' and local:
         # ingress-nginx's ssl redirect from plain http, before the gateway cut-over.
         status = 308
         response['Location'] = 'https://' + main + (':443' if scenario == 'nginx-http-443' else '') + path
+        if scenario == 'nginx-http-other': response['Location'] = 'https://' + url.hostname + path
         if scenario != 'nginx-http-page': body = '<html><center><h1>308 Permanent Redirect</h1></center><hr><center>nginx</center></html>'
     if scenario.startswith('nginx') and not scenario.startswith('nginx-http') and url.scheme == 'https':
         # ingress-nginx before the gateway cut-over: a 308 spelling out :443 (ECO-709).
@@ -189,6 +190,9 @@ print(status, end='')
         assert f'redirects (308) through ingress-nginx to {target}' in result.stdout, result.stdout
     result = run('nginx-http-page')
     assert result.returncode != 0 and 'FAIL  plain http://econgraph.com redirects (308)' in result.stdout, result.stdout
+    # A 308 with nginx's page to the same name, not the main host, still fails.
+    result = run('nginx-http-other')
+    assert result.returncode != 0 and 'FAIL  plain http://econgraph.com redirects (308) to \'https://econgraph.com/series' in result.stdout, result.stdout
     print('ok locally, ingress-nginx 308 from plain http with its page is the known ECO-709 case; without the page it fails')
     # Without MAIN_HOST_PERMANENT in the environment, the deploy config's is used, for
     # the same base domain only; the environment, even empty, wins.
