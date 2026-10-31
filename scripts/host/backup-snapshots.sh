@@ -26,7 +26,9 @@
 #
 # Installed as /usr/local/sbin/econgraph-backup-snapshots and run by
 # econgraph-backup-snapshots.timer (scripts/host/install-backup-timer.sh).
-# Safe to run by hand at any time; concurrent runs are serialised.
+# Safe to run by hand at any time. It holds /run/econgraph-backup-snapshots.lock
+# while it runs; if another run, or scripts/host/restore-snapshot.sh, holds
+# it, it stops at once with an error (that hour is skipped).
 #
 # Usage: sudo scripts/host/backup-snapshots.sh [--dry-run]
 #

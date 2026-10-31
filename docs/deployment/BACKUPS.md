@@ -396,8 +396,11 @@ is set aside, not deleted.
    lock the hourly `backup-snapshots.sh` holds
    (`/run/econgraph-backup-snapshots.lock`) and keeps it until it exits, so
    no backup run or second restore overlaps it. If the lock is held, it stops
-   without changing anything; `--lock-wait=SECONDS` waits up to that long
-   first. A dry run takes no lock. It then asks you to type the subvolume name (`@econgraph-data-plane` or
+   without changing anything; `--lock-wait=SECONDS` (up to 86400) waits up
+   to that long first. A dry run takes no lock. The lock is held while it
+   waits at the typed confirmation too: an hourly backup run that starts
+   meanwhile fails at once (`systemctl status econgraph-backup-snapshots`
+   shows it failed) and that hour's snapshot is skipped. It then asks you to type the subvolume name (`@econgraph-data-plane` or
    `@econgraph-app-prod`), unmounts the subvolume, renames it to
    `@econgraph-<name>.replaced-<stamp>`, puts a writable snapshot of the
    chosen snapshot in its place under the original name, and remounts it.

@@ -31,14 +31,15 @@
 #     FAKE_POD_LIST_FAILS=1; crictl ps -q on econ-graph-worker, for a pod in
 #     econ-graph (any other crictl call is unsupported), prints a container
 #     ID when the io.kubernetes.pod.name label is in FAKE_RUNNING and fails
-#     with FAKE_CRICTL_FAILS=1; with FAKE_LOCK_PROBE set to a lock file, each
-#     call first logs "lock-probe held" or "lock-probe free" for it; wait exits FAKE_WAIT_RC (default 0), psql prints
+#     with FAKE_CRICTL_FAILS=1;
+#   - with FAKE_LOCK_PROBE set to a lock file, every docker, findmnt and
+#     mountpoint call also logs "lock-probe held" or "lock-probe free" for it; wait exits FAKE_WAIT_RC (default 0), psql prints
 #     nothing, and pg_restore copies its stdin to FAKE_RESTORE_INPUT.
 #   - pg_restore --list prints "; dbname: <second word of the file>" and,
 #     when FAKE_SWAP_LINK is set, then re-points that symlink at
 #     FAKE_SWAP_TO (a symlink changed between the check and the restore).
 #
-# Every btrfs and docker call is appended to STUB_LOG.
+# Every btrfs, docker, findmnt and mountpoint call is appended to STUB_LOG.
 
 # shellcheck disable=SC2016  # the stubs' $ expand when they run, not here
 make_stubs() {
@@ -122,12 +123,20 @@ EOF
 
     cat >"${dir}/mountpoint" <<'EOF'
 #!/bin/bash
+echo "mountpoint $*" >>"${STUB_LOG:-/dev/null}"
+if [[ -n "${FAKE_LOCK_PROBE:-}" ]]; then
+    if flock -n "${FAKE_LOCK_PROBE}" true; then echo "lock-probe free"; else echo "lock-probe held"; fi >>"${STUB_LOG:-/dev/null}"
+fi
 [[ "$1" == -q ]] && shift
 [[ -f "$1/.fake-mount" ]]
 EOF
 
     cat >"${dir}/findmnt" <<'EOF'
 #!/bin/bash
+echo "findmnt $*" >>"${STUB_LOG:-/dev/null}"
+if [[ -n "${FAKE_LOCK_PROBE:-}" ]]; then
+    if flock -n "${FAKE_LOCK_PROBE}" true; then echo "lock-probe free"; else echo "lock-probe held"; fi >>"${STUB_LOG:-/dev/null}"
+fi
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --mountpoint) [[ -s "$2/.fake-mount" ]] || exit 1; cat "$2/.fake-mount"; exit 0 ;;

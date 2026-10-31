@@ -47,7 +47,9 @@
 # holds (/run/econgraph-backup-snapshots.lock), and keeps it until it exits,
 # after the swap and remount: no backup run snapshots, sends or prunes
 # meanwhile, and no second restore runs. If the lock is held it stops,
-# changing nothing; --lock-wait=SECONDS waits up to that long for it first.
+# changing nothing; --lock-wait=SECONDS (up to 86400) waits up to that long
+# for it first. While it waits at the typed confirmation it still holds the
+# lock, so an hourly backup run that starts then fails and is skipped.
 # The storage node restart that follows (below) is yours to run after the
 # script exits, so the lock does not cover it.
 #
@@ -97,7 +99,9 @@ for arg in "$@"; do
         --from-pool) FROM_POOL="true" ;;
         --lock-wait=*)
             LOCK_WAIT="${arg#*=}"
-            [[ "$LOCK_WAIT" =~ ^[0-9]+$ ]] || { echo "$usage" >&2; exit 2; } ;;
+            # At most a day: flock can't set up a timer for some larger values.
+            [[ "$LOCK_WAIT" =~ ^[0-9]{1,5}$ ]] && [ "$((10#$LOCK_WAIT))" -le 86400 ] ||
+                { echo "$usage (SECONDS: 0 to 86400)" >&2; exit 2; } ;;
         -*) echo "$usage" >&2; exit 2 ;;
         *) snap="$arg" ;;
     esac
@@ -124,7 +128,13 @@ fi
 # The backup lock, held until this script exits (fd 9 stays open).
 if [ "$DRY_RUN" = "false" ]; then
     exec 9>"$LOCK_FILE"
-    if ! flock -w "$LOCK_WAIT" 9; then
+    lock_status=0
+    flock -w "$((10#$LOCK_WAIT))" 9 || lock_status=$?
+    if [ "$lock_status" -ne 0 ] && [ "$lock_status" -ne 1 ]; then
+        echo "error: could not take the lock $LOCK_FILE (flock exited $lock_status); nothing changed" >&2
+        exit 1
+    fi
+    if [ "$lock_status" -eq 1 ]; then
         echo "error: $LOCK_FILE is held: a backup-snapshots run (econgraph-backup-snapshots.service)" >&2
         echo "  or another restore is in progress. Nothing changed. Wait for it to finish" >&2
         echo "  (systemctl status econgraph-backup-snapshots.service), then re-run, or pass --lock-wait=SECONDS." >&2
