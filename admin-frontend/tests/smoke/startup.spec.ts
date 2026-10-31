@@ -23,3 +23,20 @@ test("the production admin app starts without Node globals", async ({
   await expect(page.getByRole("tabpanel")).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test("expired operator credentials use the shared client login handling", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    if (location.pathname === "/admin/")
+      localStorage.setItem("auth_token", "expired");
+  });
+  await page.route("**/graphql", (route) =>
+    route.fulfill({ status: 401, json: { error: "unauthorized" } }),
+  );
+  await page.goto("/admin/");
+  await expect(page).toHaveURL(/\/login$/);
+  expect(
+    await page.evaluate(() => localStorage.getItem("auth_token")),
+  ).toBeNull();
+});

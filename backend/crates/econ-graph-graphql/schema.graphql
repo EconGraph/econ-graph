@@ -295,6 +295,42 @@ type ChartCollaboratorType {
 }
 
 """
+One stored queue job, including its most recent execution outcome.
+"""
+type CrawlerJob {
+	id: ID!
+	source: String!
+	seriesId: String!
+	kind: String!
+	status: String!
+	priority: Int!
+	retryCount: Int!
+	maxRetries: Int!
+	scheduledFor: DateTime
+	startedAt: DateTime
+	finishedAt: DateTime
+	updatedAt: DateTime!
+	"""
+	Worker-recorded error with URLs and common credential assignments redacted.
+	"""
+	errorMessage: String
+}
+
+"""
+Scheduler configuration for an adapter present in this server build.
+"""
+type CrawlerSource {
+	source: String!
+	name: String!
+	"""
+	Null until the crawler has created this source's stored configuration.
+	"""
+	enabled: Boolean
+	crawlFrequencyHours: Int
+	requiresAdminApproval: Boolean
+}
+
+"""
 Queue counts for one crawl source.
 """
 type CrawlerSourceStatus {
@@ -737,6 +773,11 @@ type Mutation {
 	"""
 	triggerCrawl(input: TriggerCrawlInput!): CrawlerStatus!
 	"""
+	Enable or disable future automatic scheduling for one registered source. Existing jobs
+	and in-flight work are unaffected; explicit triggerCrawl remains an operator override.
+	"""
+	setCrawlerSourceEnabled(source: String!, enabled: Boolean!): Boolean!
+	"""
 	Create a new chart annotation
 	"""
 	createAnnotation(input: CreateAnnotationInput!): ChartAnnotationType!
@@ -927,6 +968,14 @@ type Query {
 		"""
 		after: String
 	): DataPointConnection!
+	"""
+	Persistent queue history, most recently updated first (requires admin.system:read).
+	"""
+	crawlerJobs(limit: Int, offset: Int, source: String, status: String): [CrawlerJob!]!
+	"""
+	Registered adapters and their real scheduler configuration (requires admin.system:read).
+	"""
+	crawlerSources: [CrawlerSource!]!
 	"""
 	Crawler status, derived from the crawl queue (workers keep no other state; requires
 	`admin.system:read`).
