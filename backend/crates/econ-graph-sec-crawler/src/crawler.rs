@@ -8,7 +8,7 @@ use uuid::Uuid;
 #[cfg(feature = "xbrl-parser")]
 use crate::models::DtsReference;
 use crate::models::{CrawlConfig, CrawlResult, FilingInfo, SecCompany};
-use crate::storage::{XbrlFileTooLarge, XbrlStorage, XbrlStorageConfig};
+use crate::storage::{FilingIdentityConflict, XbrlFileTooLarge, XbrlStorage, XbrlStorageConfig};
 use crate::submissions::EdgarSubmissions;
 use crate::utils::{
     get_fiscal_quarter, pad_cik, parse_accession_number, parse_sec_date, unpad_cik,
@@ -127,10 +127,11 @@ fn db_error(context: &str, e: impl std::fmt::Display) -> CrawlError {
     CrawlError::Transient(format!("SEC: {context}: {e}"))
 }
 
-/// Maps a failure to store a filing's XBRL file: a file over the size limit is permanent (a retry
-/// would download the same file), anything else is a database error and retryable.
+/// Size and identity conflicts are permanent per-filing failures; database failures are retryable.
 fn storage_error(e: anyhow::Error) -> CrawlError {
-    if e.downcast_ref::<XbrlFileTooLarge>().is_some() {
+    if e.downcast_ref::<XbrlFileTooLarge>().is_some()
+        || e.downcast_ref::<FilingIdentityConflict>().is_some()
+    {
         CrawlError::Permanent(format!("SEC: {e}"))
     } else {
         db_error("storing XBRL file", format!("{e:#}"))
@@ -369,7 +370,7 @@ impl SecEdgarCrawler {
             .map_err(|e| db_error("upserting company", e))
     }
 
-    /// Accession numbers already stored for `company_id`.
+    /// Accessions with downloaded content; metadata-only rows must still be completed.
     async fn stored_accessions(
         &self,
         company_id: Uuid,
@@ -384,6 +385,12 @@ impl SecEdgarCrawler {
             .map_err(|e| db_error("database connection", e))?;
         let rows: Vec<String> = fs::financial_statements
             .filter(fs::company_id.eq(company_id))
+            .filter(fs::xbrl_file_hash.is_not_null())
+            .filter(
+                fs::xbrl_file_content
+                    .is_not_null()
+                    .or(fs::xbrl_file_oid.is_not_null()),
+            )
             .select(fs::accession_number)
             .load(&mut conn)
             .await
@@ -789,6 +796,98 @@ fn sec_company(id: Uuid, cik: &str, subs: &EdgarSubmissions) -> SecCompany {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn stored_accessions_only_skips_filings_with_downloaded_content() {
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        use econ_graph_core::schema::{companies, financial_statements as fs};
+        use econ_graph_core::{
+            create_pool, run_migration_set, test_utils::ScratchDatabase, MigrationSet,
+        };
+        let database = ScratchDatabase::create("filing_skip_completion");
+        run_migration_set(&database.url, MigrationSet::Data)
+            .await
+            .unwrap();
+        let pool = create_pool(&database.url).await.unwrap();
+        let company = Uuid::new_v4();
+        let mut conn = pool.get().await.unwrap();
+        diesel::insert_into(companies::table)
+            .values((
+                companies::id.eq(company),
+                companies::cik.eq("0000320193"),
+                companies::name.eq("Skip fixture"),
+            ))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        drop(conn);
+        let config = CrawlConfig::default();
+        let crawler = SecEdgarCrawler::with_fetcher(
+            pool.clone(),
+            config.clone(),
+            sec_http_fetcher(&config.user_agent, config.max_requests_per_second).unwrap(),
+            SecEndpoints::new("http://data/", "http://archives"),
+        );
+        let now = Utc::now();
+        let accession = "0000320193-24-000001";
+        let stored = crawler
+            .storage
+            .store_xbrl_file(
+                accession,
+                b"original",
+                company,
+                now,
+                now,
+                2024,
+                None,
+                Some("10-K"),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(crawler
+            .stored_accessions(company)
+            .await
+            .unwrap()
+            .contains(accession));
+        let mut conn = pool.get().await.unwrap();
+        diesel::update(fs::table.find(stored.id))
+            .set((
+                fs::xbrl_file_hash.eq(None::<String>),
+                fs::xbrl_file_content.eq(None::<Vec<u8>>),
+            ))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        drop(conn);
+        assert!(!crawler
+            .stored_accessions(company)
+            .await
+            .unwrap()
+            .contains(accession));
+        let completed = crawler
+            .storage
+            .store_xbrl_file(
+                accession,
+                b"original",
+                company,
+                now,
+                now,
+                2024,
+                None,
+                Some("10-K"),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(completed.id, stored.id);
+        assert!(crawler
+            .stored_accessions(company)
+            .await
+            .unwrap()
+            .contains(accession));
+    }
+
     #[test]
     fn normalize_cik_pads_and_rejects_garbage() {
         assert_eq!(normalize_cik("320193").unwrap(), "0000320193");
@@ -800,6 +899,22 @@ mod tests {
                 "{bad:?} should be rejected"
             );
         }
+    }
+
+    #[test]
+    fn immutable_filing_conflicts_are_permanent_so_later_filings_can_continue() {
+        for kind in ["metadata", "content"] {
+            let error = storage_error(
+                FilingIdentityConflict {
+                    accession_number: "0000320193-24-000001".into(),
+                    kind,
+                }
+                .into(),
+            );
+            assert!(matches!(error, CrawlError::Permanent(_)));
+            assert!(!error.is_retryable());
+        }
+        assert!(storage_error(anyhow::anyhow!("connection lost")).is_retryable());
     }
 
     #[test]
