@@ -498,7 +498,7 @@ image_names="$(python3 - "$SRC" <<'PY'
 import sys, yaml
 names = set()
 for manifest in ('backend-deployment.yaml', 'crawler-worker.yaml', 'frontend-deployment.yaml',
-                 'crawler-migrate-job.yaml'):
+                 'crawler-migrate-job.yaml', 'chart-api-deployment.yaml'):
     try:
         docs = list(yaml.safe_load_all(open(f'{sys.argv[1]}/k8s/manifests/{manifest}')))
     except FileNotFoundError:
