@@ -7,8 +7,9 @@
 # Starts a throwaway Keycloak in dev mode in Docker and runs the realm import Job's steps
 # against it, as k8s/manifests/keycloak/realm-import-job.yaml runs them: render-realm.sh,
 # preserve-catalog-grants.py, keycloak-config-cli, then preserve-catalog-grants.py
-# --complete. After a first import it makes the changes an operator makes, imports again
-# and checks:
+# --complete. The first import's realm file also declares a client, temp-x. After it, the
+# script makes the changes an operator makes, imports the realm file as it is (without
+# temp-x) and checks:
 #
 #   - catalog reads granted through the scope mappings of a client the realm file doesn't
 #     declare, of a client scope, and of a declared client survive the import;
@@ -17,6 +18,8 @@
 #   - realm-role scope mappings on those targets are left alone;
 #   - what scripts/keycloak/catalog-access.py (set-catalog-access.sh's helper) set on
 #     catalog-public, admin and the anonymous reader's scope survives;
+#   - temp-x, which config-cli created and now deletes, doesn't fail the import although
+#     it held a catalog read;
 #   - a further import changes nothing and warns about nothing.
 #
 # Needs docker, python3 and curl; touches no cluster. Each run uses its own container
@@ -38,10 +41,14 @@ ID="realm-import-test-$$-$RANDOM"
 NET="$ID-net"
 KC="$ID-kc"
 
-grep -qF "image: $KC_TAG" "$REPO/k8s/manifests/keycloak/deployment.yaml" \
-    || { echo "k8s/manifests/keycloak/deployment.yaml no longer deploys $KC_TAG; update KC_IMAGE" >&2; exit 1; }
-grep -qF "image: $CLI_TAG" "$REPO/k8s/manifests/keycloak/realm-import-job.yaml" \
-    || { echo "realm-import-job.yaml no longer runs $CLI_TAG; update CLI_IMAGE" >&2; exit 1; }
+# Every image: line, exactly; a pinned digest or another tag there means updating this script.
+check_images() { # MANIFEST IMAGE
+    local found
+    found="$(sed -n 's/^ *image: *//p' "$REPO/$1" | grep -F "${2%%:*}" | sort -u)"
+    [ "$found" = "$2" ] || { echo "$1 runs '${found:-nothing}', not $2; update this script" >&2; exit 1; }
+}
+check_images k8s/manifests/keycloak/deployment.yaml "$KC_TAG"
+check_images k8s/manifests/keycloak/realm-import-job.yaml "$CLI_TAG"
 
 WORK="$(mktemp -d)"
 cleanup() {
@@ -58,7 +65,8 @@ docker network create "$NET" >/dev/null
 docker run -d --name "$KC" --network "$NET" -p 127.0.0.1::8080 \
     -e KC_BOOTSTRAP_ADMIN_USERNAME="$ADMIN" -e KC_BOOTSTRAP_ADMIN_PASSWORD="$PASS" \
     -e KC_HTTP_RELATIVE_PATH=/idp "$KC_IMAGE" start-dev >/dev/null
-PORT="$(docker port "$KC" 8080/tcp | head -n1 | sed 's/.*://')"
+PORT="$(docker port "$KC" 8080/tcp | head -n1 | sed 's/.*://')" || true
+[ -n "$PORT" ] || { echo "Keycloak didn't start" >&2; docker logs "$KC" 2>&1 | tail -20 >&2; exit 1; }
 BASE="http://127.0.0.1:${PORT}/idp"
 for _ in $(seq 1 150); do curl -sf "$BASE/realms/master" >/dev/null && break; sleep 2; done
 curl -sf "$BASE/realms/master" >/dev/null || { docker logs "$KC" 2>&1 | tail -20; exit 1; }
@@ -76,16 +84,24 @@ api() { # METHOD PATH [JSON]
 json() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 names() { json '",".join(sorted(r["name"] for r in d))'; }
 
-# The Job's steps, in its order; prints the catalog-policy step's warnings to WORK/warnings-TAG.
+# The Job's steps, in its order; the catalog-policy step's warnings go to WORK/warnings-TAG.
+# With extra-client, the realm file also declares a client temp-x.
 import_realm() {
     local tag="$1"
     KC_WEB_BASE_URL=http://localhost KC_WEB_E2E_BASE_URL=http://localhost \
         KC_ANONYMOUS_CLIENT_SECRET=scratch-anonymous-secret \
         bash "$REPO/scripts/keycloak/render-realm.sh" "$REPO/config/keycloak/econ-graph-realm.json" \
         >"$WORK/realm-template.json"
+    if [ "${2:-}" = extra-client ]; then
+        python3 -c 'import json, sys
+realm = json.load(open(sys.argv[1]))
+realm["clients"].append({"clientId": "temp-x", "publicClient": False, "fullScopeAllowed": False})
+json.dump(realm, open(sys.argv[1], "w"))' "$WORK/realm-template.json"
+    fi
     KEYCLOAK_URL="$BASE" KEYCLOAK_USER="$ADMIN" KEYCLOAK_PASSWORD="$PASS" \
         python3 "$REPO/scripts/keycloak/preserve-catalog-grants.py" "$WORK/realm-template.json" \
-        >"$WORK/econ-graph-realm.json" 2>"$WORK/warnings-$tag"
+        >"$WORK/econ-graph-realm.json" 2>"$WORK/warnings-$tag" \
+        || { cat "$WORK/warnings-$tag" >&2; exit 1; }
     chmod a+r "$WORK/econ-graph-realm.json"
     chmod a+rx "$WORK"
     docker run --rm --network "$NET" -v "$WORK/econ-graph-realm.json:/rendered/econ-graph-realm.json:ro" \
@@ -93,29 +109,34 @@ import_realm() {
         -e IMPORT_BEHAVIORS_REMOVEDEFAULTROLEFROMUSER=true \
         -e IMPORT_FILES_LOCATIONS=/rendered/econ-graph-realm.json \
         "$CLI_IMAGE" >"$WORK/config-cli-$tag.log" 2>&1 \
-        || { tail -30 "$WORK/config-cli-$tag.log" >&2; exit 1; }
+        || { grep -m5 ' ERROR ' "$WORK/config-cli-$tag.log" >&2 || tail -30 "$WORK/config-cli-$tag.log" >&2; exit 1; }
     KEYCLOAK_URL="$BASE" KEYCLOAK_USER="$ADMIN" KEYCLOAK_PASSWORD="$PASS" \
         python3 "$REPO/scripts/keycloak/preserve-catalog-grants.py" --complete "$WORK/econ-graph-realm.json" >/dev/null
 }
 
-import_realm first
+import_realm first extra-client
 [ ! -s "$WORK/warnings-first" ] || fail "a first import warned: $(cat "$WORK/warnings-first")"
 
 client_id() { api GET "/clients?clientId=$1" | json 'd[0]["id"]'; }
 API_ID="$(client_id econ-graph-api)"
 WEB_ID="$(client_id econ-graph-web)"
 ANON_ID="$(client_id econgraph-anonymous)"
-role() { api GET "/clients/$API_ID/roles/$1"; }
+role() { api GET "/clients/$API_ID/roles/$1" || { echo "no role $1" >&2; exit 1; }; }
 
 # An operator's targets: a client and a client scope the realm file doesn't declare.
 api POST /clients '{"clientId":"partner-x","fullScopeAllowed":false,"serviceAccountsEnabled":true}' >/dev/null
 api POST /client-scopes '{"name":"catalog-extra","protocol":"openid-connect"}' >/dev/null
 PARTNER_ID="$(client_id partner-x)"
 SCOPE_ID="$(api GET /client-scopes | json '[s["id"] for s in d if s["name"] == "catalog-extra"][0]')"
-GRANTS="[$(role catalog.imf:read),$(role catalog.bank_of_canada:read),$(role api:mcp)]"
+IMF="$(role catalog.imf:read)"
+BANK_OF_CANADA="$(role catalog.bank_of_canada:read)"
+MCP="$(role api:mcp)"
+WTO="$(role catalog.world_trade_organization:read)"
+GRANTS="[$IMF,$BANK_OF_CANADA,$MCP]"
 api POST "/clients/$PARTNER_ID/scope-mappings/clients/$API_ID" "$GRANTS" >/dev/null
 api POST "/client-scopes/$SCOPE_ID/scope-mappings/clients/$API_ID" "$GRANTS" >/dev/null
-api POST "/clients/$WEB_ID/scope-mappings/clients/$API_ID" "[$(role catalog.world_trade_organization:read)]" >/dev/null
+api POST "/clients/$WEB_ID/scope-mappings/clients/$API_ID" "[$WTO]" >/dev/null
+api POST "/clients/$(client_id temp-x)/scope-mappings/clients/$API_ID" "[$IMF]" >/dev/null
 PUBLIC="$(api GET /roles/catalog-public)"
 api POST "/clients/$PARTNER_ID/scope-mappings/realm" "[$PUBLIC]" >/dev/null
 api POST "/client-scopes/$SCOPE_ID/scope-mappings/realm" "[$PUBLIC]" >/dev/null
@@ -150,7 +171,8 @@ grep -q '^admin: .*catalog\.bls:read' "$WORK/after" || fail "admin lost catalog.
 for target in "client partner-x: api:mcp" "client scope catalog-extra: api:mcp"; do
     grep -qF "$target" "$WORK/warnings-second" || fail "no warning for $target: $(cat "$WORK/warnings-second")"
 done
-! grep -q 'catalog\.' "$WORK/warnings-second" || fail "a catalog read was warned about: $(cat "$WORK/warnings-second")"
+! grep -q 'catalog\.\|temp-x' "$WORK/warnings-second" || fail "unexpected warning: $(cat "$WORK/warnings-second")"
+[ "$(api GET "/clients?clientId=temp-x")" = "[]" ] || fail "temp-x, dropped from the realm file, still exists"
 
 import_realm third
 mv "$WORK/after" "$WORK/after-second"

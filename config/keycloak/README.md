@@ -339,13 +339,17 @@ every client and client scope: it sets each one's to what the realm file's
 `clientScopeMappings` declares, and removes them from every client and client scope the file
 doesn't list there, including mappings made in Keycloak. Catalog reads in those mappings are
 operator policy and are kept like the grants above. `preserve-catalog-grants.py` writes each
-client's and client scope's live `catalog.*:read` scope mappings into the import. A catalog read
-the file declares for a client or client scope takes effect only when the import creates it.
-Other `econ-graph-api` roles there are configuration as code. When one was mapped in Keycloak but
-isn't declared, the import removes it and first names it in the Job's `render-realm` log
-(`kubectl -n econ-graph logs job/keycloak-realm-import -c render-realm`), as in
-`warning: the realm import removes econ-graph-api scope mappings the realm file doesn't declare
-on client partner-x: api:mcp`. To keep such a mapping, declare it:
+client's and client scope's live `catalog.*:read` scope mappings into the import. As with the
+grants above, a catalog read the file declares there seeds only a new realm (or the retry of an
+interrupted first import); after that, a client or client scope the import creates, or recreates
+after an operator deleted it, gets none. A client that config-cli created and the realm file no
+longer lists is deleted by the import, and its grants with it.
+Other `econ-graph-api` roles there, the anonymous reader's scope included, are configuration as
+code. When one was mapped in Keycloak but isn't declared, the import removes it and first names it
+in the Job's `render-realm` log, as in `warning: the realm import removes econ-graph-api scope
+mappings the realm file doesn't declare on client partner-x: api:mcp`. Read it with
+`kubectl -n econ-graph logs job/keycloak-realm-import -c render-realm` until the next deploy
+replaces the Job. To keep such a mapping, declare it:
 
 ```json
 "clientScopeMappings": {

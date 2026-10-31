@@ -371,15 +371,66 @@ class CatalogPolicyTests(unittest.TestCase):
         self.add_target("client", "partner", "partner-x", ["catalog.ecb:read", "api:mcp", "annotation:create"])
         merged, warnings = self.merge_with_warnings(realm)
         entries = self.scope_entries(merged)
-        # A declared catalog read seeds a new target only; the live grants are the policy.
+        # Once the realm is initialized the live grants are the policy: a declared catalog read
+        # neither returns to a live target nor reaches one the import creates or recreates.
         self.assertEqual(entries[("client", "partner-x")], ["api:mcp", "catalog.ecb:read"])
-        self.assertEqual(entries[("clientScope", "not-created-yet")], ["catalog.fred:read"])
+        self.assertEqual(entries[("clientScope", "not-created-yet")], [])
         self.assertIn("client partner-x: annotation:create", warnings)
         self.assertNotIn("api:mcp", warnings)
         # An emptied live mapping on a declared target stays empty.
         self.state[self.prefix + "/clients/partner/scope-mappings/clients/api"] = [{"name": "api:mcp"}]
         merged, _ = self.merge_with_warnings(realm)
         self.assertEqual(self.scope_entries(merged)[("client", "partner-x")], ["api:mcp"])
+
+    def test_a_retried_first_import_seeds_declared_scope_mappings(self):
+        # A first import that stopped part way leaves the target live but unmapped; the retry
+        # applies the declared catalog reads, as it does the composites' defaults.
+        self.state[self.prefix]["attributes"] = {preserve.PENDING: json.dumps({"policy": True, "reader": False})}
+        realm = copy.deepcopy(self.realm)
+        realm["clientScopeMappings"]["econ-graph-api"] += [
+            {"client": "partner-x", "roles": ["catalog.fred:read"]},
+            {"clientScope": "not-created-yet", "roles": ["catalog.fred:read"]}]
+        self.add_target("client", "partner", "partner-x", ["catalog.ecb:read"])
+        entries = self.scope_entries(self.merge_with_warnings(realm)[0])
+        self.assertEqual(entries[("client", "partner-x")], ["catalog.fred:read", "catalog.ecb:read"])
+        self.assertEqual(entries[("clientScope", "not-created-yet")], ["catalog.fred:read"])
+
+    def test_clients_config_cli_deletes_get_no_scope_mapping_entry(self):
+        # config-cli deletes a client it created once the realm file drops it, then could not
+        # resolve an entry naming it; the client's grants go with it.
+        state = 'de.adorsys.keycloak.config.state-default-clients-'
+        self.state[self.prefix]["attributes"].update({
+            state + "0": '["econ-graph-web","econ-graph-api","econgraph-anon',
+            state + "1": 'ymous","temp-x"]'})
+        self.add_target("client", "temp", "temp-x", ["catalog.imf:read", "api:mcp"])
+        self.add_target("client", "partner", "partner-x", ["catalog.imf:read"])
+        merged, warnings = self.merge_with_warnings()
+        entries = self.scope_entries(merged)
+        self.assertNotIn(("client", "temp-x"), entries)
+        self.assertEqual(entries[("client", "partner-x")], ["catalog.imf:read"])
+        self.assertEqual(warnings, "")
+        # Still declared, it is kept like any other client.
+        realm = copy.deepcopy(self.realm)
+        realm["clients"].append({"clientId": "temp-x"})
+        self.assertEqual(self.scope_entries(self.merge_with_warnings(realm)[0])[("client", "temp-x")],
+                         ["catalog.imf:read"])
+        self.state[self.prefix]["attributes"][state + "1"] = "not json"
+        with self.assertRaises(ValueError):
+            self.merge()
+
+    def test_duplicate_scope_mapping_entries_fail_the_deploy(self):
+        self.realm["clientScopeMappings"]["econ-graph-api"].append(
+            {"client": "econgraph-anonymous", "roles": ["catalog.fred:read"]})
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn("econgraph-anonymous", str(raised.exception))
+
+    def test_undeclared_roles_removed_from_the_anonymous_scope_are_named(self):
+        self.state[self.prefix + "/clients/anon/scope-mappings/clients/api"] = [
+            {"name": "catalog.bea:read"}, {"name": "api:mcp"}]
+        merged, warnings = self.merge_with_warnings()
+        self.assertIn("client econgraph-anonymous: api:mcp", warnings)
+        self.assertEqual(self.scope_entries(merged)[("client", "econgraph-anonymous")], ["catalog.bea:read"])
 
     def test_catalog_access_changes_survive_alongside_preserved_scope_mappings(self):
         # set-catalog-access.sh --withdraw empties the anonymous scope; a partner's grant of
