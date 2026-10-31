@@ -2,6 +2,8 @@
   {
     "id": "GHSA-g3hv-75wg-m249",
     "package": "minimatch",
+    "versions": "3.1.5",
+    "paths": ["node_modules/minimatch"],
     "reason": "ECO-809. Only minimatch 3.1.5 is left, a devDependency of eslint 9 with @eslint/eslintrc and @eslint/config-array 0.21, eslint-plugin-import, eslint-plugin-jsx-a11y and eslint-plugin-react (whose newest releases accept no eslint above 9), and of nyc 15 with its test-exclude 6 and of glob 7 under nyc and rimraf 3 (all via @storybook/test-runner, whose newest release still requires nyc ^15). They require minimatch ^3 and call its CommonJS default export, removed in the only patched release line (11.0.1+); no 3.x release is patched. It never reaches the app bundle (no production dependency uses minimatch) and only matches lint, coverage and file globs from this repository, never outside input. Every other minimatch copy is overridden to ^11.0.1. Remove when none of these needs minimatch 3.",
     "reviewBy": "2027-01-31"
   }
