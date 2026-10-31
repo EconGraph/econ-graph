@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import yaml
-from safety import Kubernetes, identifier
+from safety import Kubernetes, identifier, scratch_environment
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -70,6 +70,7 @@ def main():
         if settings.get('kind') != 'ConfigMap' or settings.get('metadata', {}).get('name') != 'platform-settings':
             raise ValueError('settings must be the platform-settings ConfigMap')
         data = settings['data']
+        scratch_environment(data.get('ENVIRONMENT'), args.owner)
         serialized = json.dumps(data)
         if any(x in serialized for x in ['example.invalid', '192.0.2.', 'localhost', '${']):
             raise ValueError('replace documentation/example settings before reconcile')

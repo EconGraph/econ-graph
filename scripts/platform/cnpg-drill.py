@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 import uuid
-from safety import Kubernetes, LABEL, identifier
+from safety import Kubernetes, LABEL, DISPOSABLE, identifier, sql_identifier
 
 
 def poll(read, accepted, seconds=1200):
@@ -34,6 +34,7 @@ def primary(kube, namespace, cluster):
 
 
 def sql(kube, args, cluster, statement, database='postgres', user='postgres'):
+    sql_identifier(database)
     if user != 'postgres':
         statement = 'SET ROLE \"' + identifier(user) + '\";\n' + statement
     return kube.run('exec', '-i', '-n', args.namespace, primary(kube, args.namespace, cluster), '-c', 'postgres',
@@ -49,11 +50,11 @@ def recovery_cluster(source, name, owner, object_store, target):
         'name': 'barman-cloud.cloudnative-pg.io',
         'parameters': {'barmanObjectName': object_store, 'serverName': source['metadata']['name']}}}]
     return {'apiVersion': 'postgresql.cnpg.io/v1', 'kind': 'Cluster',
-            'metadata': {'name': name, 'namespace': source['metadata']['namespace'], 'labels': {LABEL: owner}}, 'spec': spec}
+            'metadata': {'name': name, 'namespace': source['metadata']['namespace'], 'labels': {LABEL: owner}, 'annotations': {DISPOSABLE: 'true'}}, 'spec': spec}
 
 
 def backup_restore(kube, args, source, report):
-    kube.owned('objectstore.barmancloud.cnpg.io', args.object_store, args.owner, args.namespace)
+    kube.disposable_owned('objectstore.barmancloud.cnpg.io', args.object_store, args.owner, args.namespace)
     configured = [p.get('parameters', {}).get('barmanObjectName') for p in source['spec'].get('plugins', []) if p.get('isWALArchiver')]
     if configured != [args.object_store]:
         raise ValueError('source WAL archiver must use the exact owned ObjectStore')
@@ -95,7 +96,7 @@ def migrate_copy(kube, args, source, report):
     digest = hashlib.file_digest(args.archive.open('rb'), 'sha256').hexdigest()
     if digest != manifest['archive_sha256']:
         raise ValueError('archive checksum mismatch')
-    database = source['spec']['bootstrap']['initdb']['database']
+    database = sql_identifier(source['spec']['bootstrap']['initdb']['database'])
     role = identifier(source['spec']['bootstrap']['initdb']['owner'])
     if not manifest.get('table_counts') or any(not re.fullmatch(r'[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*', t) or not isinstance(n, int) or n < 0 for t, n in manifest['table_counts'].items()):
         raise ValueError('nonempty valid table-count manifest required before restoring')
@@ -138,7 +139,7 @@ def migrate_copy(kube, args, source, report):
 def drain(kube, args, source, report):
     if not args.node or not args.e2e_argv:
         raise ValueError('drain requires owned --node and --e2e-argv JSON file')
-    node = kube.owned('node', args.node, args.owner)
+    node = kube.disposable_owned('node', args.node, args.owner)
     if node.get('spec', {}).get('unschedulable'):
         raise ValueError('refusing already cordoned node')
     command = json.loads(args.e2e_argv.read_text())
@@ -162,7 +163,7 @@ def drain(kube, args, source, report):
         finally:
             if process.poll() is None:
                 process.terminate(); process.wait(timeout=30)
-            current = kube.owned('node', args.node, args.owner)
+            current = kube.disposable_owned('node', args.node, args.owner)
             if current['metadata']['uid'] != node['metadata']['uid']:
                 raise ValueError('node replaced: refusing uncordon of replacement')
             kube.run('uncordon', args.node)
@@ -204,8 +205,15 @@ def main():
     try:
         if args.execute:
             kube = Kubernetes(args.kubectl, args.kubeconfig, args.context)
-            kube.owned('namespace', args.namespace, args.owner)
-            source = kube.owned('cluster', args.source_cluster, args.owner, args.namespace)
+            kube.disposable_owned('namespace', args.namespace, args.owner)
+            source = kube.disposable_owned('cluster', args.source_cluster, args.owner, args.namespace)
+            # Every configured WAL destination can receive writes during any drill.
+            for plugin in source['spec'].get('plugins', []):
+                if plugin.get('isWALArchiver'):
+                    store = plugin.get('parameters', {}).get('barmanObjectName')
+                    if not store:
+                        raise ValueError('WAL archiver must name an explicitly disposable ObjectStore')
+                    kube.disposable_owned('objectstore.barmancloud.cnpg.io', store, args.owner, args.namespace)
             {'backup-restore': backup_restore, 'migrate-copy': migrate_copy, 'drain': drain}[args.mode](kube, args, source, report)
     except Exception as error:
         report.update({'status': 'unavailable-or-failed', 'reason': str(error)})

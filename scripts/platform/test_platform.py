@@ -48,6 +48,32 @@ class PlatformTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(json.loads(Path(report).read_text())['status'], 'unavailable-or-failed')
 
+    def test_scratch_environment_cannot_target_production_or_other_owner(self):
+        owner = '12345678-abcd-4321-abcd-123456789abc'
+        self.assertEqual(safety.scratch_environment('fit-12345678abcd4321', owner), 'fit-12345678abcd4321')
+        for environment in ['production', 'fit-replace-me', 'scratch-another', '', None]:
+            with self.assertRaises(ValueError):
+                safety.scratch_environment(environment, owner)
+
+    def test_operational_owner_does_not_authorize_disposable_drills(self):
+        kube = object.__new__(safety.Kubernetes)
+        owned = {'metadata': {'labels': {safety.LABEL: 'owner'}}}
+        with patch.object(kube, 'get', return_value=owned):
+            for resource in ['namespace', 'cluster', 'objectstore.barmancloud.cnpg.io', 'node']:
+                with self.assertRaises(ValueError):
+                    kube.disposable_owned(resource, 'test', 'owner')
+        owned['metadata']['annotations'] = {safety.DISPOSABLE: 'true'}
+        with patch.object(kube, 'get', return_value=owned):
+            self.assertEqual(kube.disposable_owned('cluster', 'test', 'owner'), owned)
+
+    def test_database_names_cannot_redirect_libpq(self):
+        kube = Mock()
+        for value in ['postgresql://other/db', 'host=other dbname=prod', 'app db', 'app;drop', '', None]:
+            with self.assertRaises(ValueError):
+                drill.sql(kube, SimpleNamespace(namespace='test'), 'test', 'SELECT 1', value)
+        kube.run.assert_not_called()
+        self.assertEqual(safety.sql_identifier('econ_graph_app'), 'econ_graph_app')
+
     def test_wrong_owner_refused(self):
         kube = object.__new__(safety.Kubernetes)
         with patch.object(kube, 'get', return_value={'metadata': {'labels': {safety.LABEL: 'other'}}}):

@@ -5,11 +5,26 @@ import re
 import subprocess
 
 LABEL = 'econgraph.io/drill-owner'
+DISPOSABLE = 'econgraph.io/disposable-drill'
 
 
 def identifier(value):
     if not re.fullmatch(r'[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?', value):
         raise ValueError('owner/name must be a nonempty DNS label')
+    return value
+
+
+def sql_identifier(value):
+    # libpq interprets database strings containing '=' or URI schemes as DSNs.
+    if not isinstance(value, str) or not re.fullmatch(r'[a-z_][a-z0-9_]{0,62}', value):
+        raise ValueError('database must be a plain SQL identifier, never a connection string')
+    return value
+
+
+def scratch_environment(value, owner):
+    suffix = identifier(owner).replace('-', '')[:16]
+    if value not in ('fit-' + suffix, 'scratch-' + suffix):
+        raise ValueError('scratch ENVIRONMENT must be fit- or scratch- plus the first 16 non-hyphen owner characters')
     return value
 
 
@@ -38,6 +53,12 @@ class Kubernetes:
         value = self.get(resource, name, namespace)
         if value.get('metadata', {}).get('labels', {}).get(LABEL) != identifier(owner):
             raise ValueError('refusing resource without exact scratch ownership label: ' + resource + '/' + name)
+        return value
+
+    def disposable_owned(self, resource, name, owner, namespace=None):
+        value = self.owned(resource, name, owner, namespace)
+        if value.get('metadata', {}).get('annotations', {}).get(DISPOSABLE) != 'true':
+            raise ValueError('refusing resource without explicit disposable-drill annotation: ' + resource + '/' + name)
         return value
 
     def apply(self, value):
