@@ -17,7 +17,7 @@ source "${repo_root}/scripts/backup/test-stubs.sh"
 failures=0
 tmp="$(mktemp -d)"
 holder=""
-trap '[ -z "${holder}" ] || kill "${holder}" 2>/dev/null; rm -rf "${tmp}"' EXIT
+trap '[ -z "${holder}" ] || kill "${holder}" 2>/dev/null || true; rm -rf "${tmp}"' EXIT
 make_stubs "${tmp}/bin"
 # restore-snapshot.sh mounts the filesystem top level on a mktemp directory
 # under /mnt once its checks pass. The checks run here are meant to stop it
@@ -308,7 +308,7 @@ hold_lock() {
         sleep 0.05
     done
 }
-release_lock() { kill "${holder}" 2>/dev/null || true; wait "${holder}" 2>/dev/null || true; }
+release_lock() { kill "${holder}" 2>/dev/null || true; wait "${holder}" 2>/dev/null || true; holder=""; }
 hold_lock 60
 before="$(tree_state "${root}")"
 run_script "restore-snapshot refuses while the backup lock is held" 1 "${lock} is held" \
