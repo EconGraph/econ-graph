@@ -16,6 +16,7 @@ pub mod financial_line_item;
 pub mod financial_ratios;
 pub mod financial_statement;
 pub mod global_analysis;
+pub mod observation;
 pub mod search;
 
 // Durable annotation identities shared across research consumers.
@@ -45,6 +46,7 @@ pub use financial_line_item::*;
 pub use financial_ratios::*;
 pub use financial_statement::*;
 pub use global_analysis::*;
+pub use observation::*;
 pub use search::*;
 
 pub use research_reference::*;
