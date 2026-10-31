@@ -8,13 +8,13 @@ use econ_graph_core::test_utils::POSTGRES_IMAGE_TAG;
 use testcontainers::core::WaitFor;
 use testcontainers::{runners::AsyncRunner, GenericImage, ImageExt};
 
-const UP: &str = include_str!("../../../migrations/data/2026-10-31-120000_company_facts/up.sql");
+const UP: &str = include_str!("../../../migrations/data/2026-11-01-000200_company_facts/up.sql");
 const DOWN: &str =
-    include_str!("../../../migrations/data/2026-10-31-120000_company_facts/down.sql");
+    include_str!("../../../migrations/data/2026-11-01-000200_company_facts/down.sql");
 const PROVENANCE_UP: &str =
-    include_str!("../../../migrations/data/2026-10-31-120100_company_fact_run_provenance/up.sql");
+    include_str!("../../../migrations/data/2026-11-01-000300_company_fact_run_provenance/up.sql");
 const PROVENANCE_DOWN: &str =
-    include_str!("../../../migrations/data/2026-10-31-120100_company_fact_run_provenance/down.sql");
+    include_str!("../../../migrations/data/2026-11-01-000300_company_fact_run_provenance/down.sql");
 
 #[derive(QueryableByName)]
 struct Value {
