@@ -59,7 +59,7 @@ patches:
     \          - name: OIDC_JWKS_URL\n            value: http://keycloak-service:8080/idp/realms/econ-graph/protocol/openid-connect/certs\n\
     \          - name: OIDC_REQUIRED\n            value: 'true'\n          - name:\
     \ OIDC_ISSUER\n            value: http://example-50d858e098.localhost/idp/realms/econ-graph\n\
-    \          - name: DATA_GRAPHQL_URL\n            value: http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql\n\
+    \          - name: DATA_GRAPHQL_URL\n            value: http://branch-data-proxy:8080/data/graphql\n\
     \          - name: DATA_GRAPHQL_HOST\n            value: example-50d858e098.localhost\n\
     \          resources:\n            requests:\n              memory: 256Mi\n  \
     \            cpu: 100m\n            limits:\n              memory: 512Mi\n   \
