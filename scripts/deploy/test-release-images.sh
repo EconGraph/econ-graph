@@ -44,7 +44,7 @@
 #     choice without warning; a copy that lost its pin is pinned again;
 #   - load refuses when tagging or kind load leaves a node on another image,
 #     and records status=partial; verify refuses a partial load;
-#   - verify restarts the three Deployments, waits, passes when every running
+#   - verify restarts the four Deployments, waits, passes when every running
 #     pod runs the loaded image, skips terminating pods, and fails on a pod on
 #     another image or a Deployment with no running pod;
 #   - rollback points the names back at pre-<tag> on every node, restarts, and
@@ -63,6 +63,7 @@ repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 load="$repo_root/scripts/deploy/load-release-images.sh"
 verify="$repo_root/scripts/deploy/verify-release-images.sh"
 rollback="$repo_root/scripts/deploy/rollback-release-images.sh"
+python3 "$repo_root/scripts/deploy/test-release-artifacts.py"
 failures=0
 fail() {
   echo "FAIL $1"
@@ -75,24 +76,27 @@ mkdir -p "$tmp/bin"
 export STUB_LOG="$tmp/log" STUB_STATE="$tmp/state"
 export STUB_COMMIT="d00f596618276a4bf6cd556be628a8d9064a2571"
 TAG="v4.0.0-rc.3"
-# The tag the manifests run the three images under, as the scripts read it.
+# The tag the manifests run the core images under, as the scripts read it.
 STUB_LOCAL_TAG="$(grep -m1 -oE 'image: econ-graph-backend:[^[:space:]]+' "$repo_root/k8s/manifests/backend-deployment.yaml")"
 export STUB_LOCAL_TAG="${STUB_LOCAL_TAG##*:}"
 [ -n "$STUB_LOCAL_TAG" ] || { echo "no econ-graph-backend tag in k8s/manifests/backend-deployment.yaml"; exit 1; }
+STUB_CHART_TAG="$(grep -m1 -oE 'image: econ-graph-chart-api:[^[:space:]]+' "$repo_root/k8s/manifests/chart-api-deployment.yaml")"
+export STUB_CHART_TAG="${STUB_CHART_TAG##*:}"
 # The crawler-migrate Job's manifest, and the image it names.
 job_manifest="$repo_root/k8s/manifests/crawler-migrate-job.yaml"
 job_image="$(grep -m1 -oE 'image: econ-graph-crawler-worker:[^[:space:]]+' "$job_manifest")"
 job_image="${job_image#image: }"
 [ -n "$job_image" ] || { echo "no econ-graph-crawler-worker image in $job_manifest"; exit 1; }
 
-# New images: digest a/b/c and image ID 1/2/3 for backend/crawler-worker/frontend.
+# New images: digest a/b/c/f and image ID 1/2/3/4 for backend/crawler-worker/frontend/chart-api.
 # What production runs now: backend 9, crawler-worker 7 (under another tag; its
 # local name points at 8), frontend 6.
 cat >"$tmp/bin/stub-common" <<'STUB'
 rep() { local s=""; for _ in $(seq 64); do s+="$1"; done; printf '%s' "$s"; }
 image_name() { local r="${1##*/}"; r="${r%%[:@]*}"; printf '%s' "${r#econ-graph-}"; }
-digest_of() { case "$1" in backend) echo "sha256:$(rep a)" ;; crawler-worker) echo "sha256:$(rep b)" ;; frontend) echo "sha256:$(rep c)" ;; esac; }
-id_of() { case "$1" in backend) echo "sha256:$(rep 1)" ;; crawler-worker) echo "sha256:$(rep 2)" ;; frontend) echo "sha256:$(rep 3)" ;; esac; }
+digest_of() { case "$1" in backend) echo "sha256:$(rep a)" ;; crawler-worker) echo "sha256:$(rep b)" ;; frontend) echo "sha256:$(rep c)" ;; chart-api) echo "sha256:$(rep f)" ;; esac; }
+id_of() { case "$1" in backend) echo "sha256:$(rep 1)" ;; crawler-worker) echo "sha256:$(rep 2)" ;; frontend) echo "sha256:$(rep 3)" ;; chart-api) echo "sha256:$(rep 4)" ;; esac; }
+local_tag() { if [ "$1" = chart-api ]; then echo "$STUB_CHART_TAG"; else echo "$STUB_LOCAL_TAG"; fi; }
 NODES="econ-graph-control-plane econ-graph-worker"
 # A node's containerd: lines "ref id" in $STUB_STATE/node-<node>; labels as
 # lines "node ref key=value" in $STUB_STATE/labels.
@@ -169,6 +173,7 @@ case "$1" in
   buildx)
     [ "$2 $3 $5 $6" = "imagetools inspect --format {{json .Manifest}}" ] || { echo "stub docker: unexpected: $*" >&2; exit 1; }
     ref="$4"; name="$(image_name "$ref")"; d="$(digest_of "$name")"
+    [ "${STUB_IMAGE_MISSING:-}" != "$name" ] || { echo "ERROR: $ref: not found" >&2; exit 1; }
     case "$ref" in
       ghcr.io/econgraph/econ-graph-*:sha-"$STUB_COMMIT") ;;
       ghcr.io/econgraph/econ-graph-*:v4.0.0-rc.3) [ "${STUB_RC_DIGEST_DIFFERS:-0}" != 1 ] || d="sha256:$(rep d)" ;;
@@ -196,7 +201,7 @@ case "$1" in
           "{{.Id}}") if [ "${STUB_ID_IS_DIGEST:-}" = "$name" ]; then digest_of "$name"; else id_of "$name"; fi ;;
           *) exit 1 ;;
         esac ;;
-      econ-graph-*:"$STUB_LOCAL_TAG")
+      econ-graph-*:"$STUB_LOCAL_TAG"|econ-graph-chart-api:"$STUB_CHART_TAG")
         [ -e "$STUB_STATE/tagged-$name" ] || { echo "No such image: $ref" >&2; exit 1; }
         id_of "$name" ;;
       *) exit 1 ;;
@@ -247,7 +252,7 @@ source "$(dirname "$0")/stub-common"
 case "$*" in
   version) echo "kind v0.33.0 go1.25.3 linux/amd64" ;;
   "get nodes --name econ-graph") printf '%s\n' $NODES ;;
-  "load docker-image econ-graph-"*":${STUB_LOCAL_TAG} --name econ-graph")
+  "load docker-image econ-graph-"*" --name econ-graph")
     name="$(image_name "$3")"
     [ "${STUB_LOAD_FAILS:-}" != "$name" ] || { echo "ERROR: failed to load image" >&2; exit 1; }
     for node in $NODES; do
@@ -280,7 +285,7 @@ args=("$@")
 [ "${args[0]}" = --context ] && ctx="${args[1]}" && args=("${args[@]:2}")
 [ "${args[0]}" = -n ] && args=("${args[@]:2}")
 set -- "${args[@]}"
-name_of() { case "$1" in econ-graph-backend) echo backend ;; crawler-worker) echo crawler-worker ;; econ-graph-frontend) echo frontend ;; esac; }
+name_of() { case "$1" in econ-graph-backend) echo backend ;; crawler-worker) echo crawler-worker ;; econ-graph-frontend) echo frontend ;; chart-api-service) echo chart-api ;; esac; }
 [ "${ctx:-}" = kind-econ-graph ] || { echo "error: context ${ctx:-(current)} not found" >&2; exit 1; }
 case "$*" in
   "config view --minify -o jsonpath="*) echo "https://127.0.0.1:6443" ;;
@@ -302,7 +307,7 @@ case "$*" in
   "rollout restart deployment/"*)
     d="${3#deployment/}"
     cp "$STUB_STATE/running-$d" "$STUB_STATE/previous-$d"
-    node_get "${STUB_POD_NODE:-econ-graph-worker}" "docker.io/library/econ-graph-$(name_of "$d"):${STUB_LOCAL_TAG}" >"$STUB_STATE/running-$d"
+    node_get "${STUB_POD_NODE:-econ-graph-worker}" "docker.io/library/econ-graph-$(name_of "$d"):$(local_tag "$(name_of "$d")")" >"$STUB_STATE/running-$d"
     touch "$STUB_STATE/restarted-$d" ;;
   "rollout status deployment/"*" --timeout=600s") ;;
   "get pods -l app="*" -o jsonpath="*)
@@ -338,10 +343,11 @@ old_backend="sha256:$(rep 9)"
 old_crawler="sha256:$(rep 7)"
 old_crawler_named="sha256:$(rep 8)"
 old_frontend="sha256:$(rep 6)"
+old_chart="sha256:$(rep 5)"
 records="$tmp/home/econgraph-releases/$TAG"
 kind_version="$(sed -nE 's/^KIND_VERSION="([^"]+)"$/\1/p' "$repo_root/scripts/deploy/lib/kind-version.sh")"
 pinned_kind="$tmp/home/.local/share/econgraph/bin/kind-$kind_version"
-names=(backend crawler-worker frontend)
+names=(backend crawler-worker frontend chart-api)
 nodes=(econ-graph-control-plane econ-graph-worker)
 
 # Every call of every case also goes to $tmp/all-calls, for the context check at the end.
@@ -359,11 +365,13 @@ reset() {
     node_set "$node" docker.io/library/econ-graph-crawler-worker:"${STUB_LOCAL_TAG}" "$old_crawler_named"
     node_set "$node" docker.io/library/econ-graph-crawler-worker:v4.0.0-bea-fix-525c2132 "$old_crawler"
     node_set "$node" docker.io/library/econ-graph-frontend:"${STUB_LOCAL_TAG}" "$old_frontend"
+    node_set "$node" docker.io/library/econ-graph-chart-api:"${STUB_CHART_TAG}" "$old_chart"
   done
   : >"$STUB_STATE/labels"
   echo "$old_backend" >"$STUB_STATE/running-econ-graph-backend"
   echo "$old_crawler" >"$STUB_STATE/running-crawler-worker"
   echo "$old_frontend" >"$STUB_STATE/running-econ-graph-frontend"
+  echo "$old_chart" >"$STUB_STATE/running-chart-api-service"
   # The pinned kind, where install-kind.sh puts it under the scratch HOME.
   mkdir -p "$(dirname "$pinned_kind")"
   cp "$tmp/bin/kind" "$pinned_kind"
@@ -396,7 +404,7 @@ run() {
   HOME="$tmp/home" TMPDIR="$tmp/tmpdir" "$@" >"$tmp/out" 2>&1
 }
 pre() { echo "docker.io/library/econ-graph-$1:pre-$TAG"; }
-local_ref() { echo "docker.io/library/econ-graph-$1:${STUB_LOCAL_TAG}"; }
+local_ref() { echo "docker.io/library/econ-graph-$1:$(local_tag "$1")"; }
 node_changes() { grep -E 'load docker-image|ctr -n k8s.io images (tag|label)|rollout restart' "$STUB_LOG"; }
 nothing_changed() { # $1: what for
   grep -qE '^docker .* (pull|tag) ' "$STUB_LOG" && fail "$1: pulled or tagged"
@@ -422,7 +430,7 @@ for n in "${names[@]}"; do
     fail "load --dry-run did not resolve ghcr.io/econgraph/econ-graph-$n:sha-$STUB_COMMIT"
   grep -qF "imagetools inspect ghcr.io/econgraph/econ-graph-$n:$TAG --format" "$STUB_LOG" ||
     fail "load --dry-run did not resolve ghcr.io/econgraph/econ-graph-$n:$TAG"
-  grep -qF "econ-graph-$n:${STUB_LOCAL_TAG}" "$tmp/out" || fail "load --dry-run did not name econ-graph-$n:${STUB_LOCAL_TAG}"
+  grep -qF "econ-graph-$n:$(local_tag "$n")" "$tmp/out" || fail "load --dry-run did not name econ-graph-$n:$(local_tag "$n")"
 done
 grep -qF "keep $old_crawler as $(pre crawler-worker)" "$tmp/out" ||
   fail "load --dry-run would not keep the crawler-worker image that runs: $(cat "$tmp/out")"
@@ -435,7 +443,7 @@ grep -E '^(docker|kind)' "$STUB_LOG" | grep -vqF 'DOCKER_HOST=unix:///var/run/do
 grep -q '^warning' "$tmp/out" && fail "a clean load warned: $(grep '^warning' "$tmp/out")"
 grep '^kind(' "$STUB_LOG" | grep -vqF "kind($pinned_kind)" && fail "a kind call did not run the pinned kind: $(grep '^kind(' "$STUB_LOG" | grep -vF "kind($pinned_kind)" | head -1)"
 grep -qF "kind($pinned_kind) DOCKER_HOST=unix:///var/run/docker.sock load docker-image" "$STUB_LOG" || fail "load did not kind load with the pinned kind"
-[ "$(grep -c '^docker .* pull ' "$STUB_LOG")" = 3 ] || fail "load did not pull exactly three images"
+[ "$(grep -c '^docker .* pull ' "$STUB_LOG")" = 4 ] || fail "load did not pull exactly four images"
 # The crawler-migrate Job's image is the name the load moved.
 for node in "${nodes[@]}"; do
   [ "$(node_get "$node" "docker.io/library/$job_image")" = "$(id_of crawler-worker)" ] ||
@@ -444,11 +452,11 @@ done
 for n in "${names[@]}"; do
   grep -qxF "docker DOCKER_HOST=unix:///var/run/docker.sock DOCKER_CONTEXT= pull ghcr.io/econgraph/econ-graph-$n@$(digest_of "$n")" "$STUB_LOG" ||
     fail "load did not pull ghcr.io/econgraph/econ-graph-$n by digest"
-  grep -qF "tag $(id_of "$n") econ-graph-$n:${STUB_LOCAL_TAG}" "$STUB_LOG" || fail "load did not tag econ-graph-$n:${STUB_LOCAL_TAG} by image ID"
-  grep -qF "load docker-image econ-graph-$n:${STUB_LOCAL_TAG} --name econ-graph" "$STUB_LOG" ||
-    fail "load did not kind load econ-graph-$n:${STUB_LOCAL_TAG}"
+  grep -qF "tag $(id_of "$n") econ-graph-$n:$(local_tag "$n")" "$STUB_LOG" || fail "load did not tag econ-graph-$n:$(local_tag "$n") by image ID"
+  grep -qF "load docker-image econ-graph-$n:$(local_tag "$n") --name econ-graph" "$STUB_LOG" ||
+    fail "load did not kind load econ-graph-$n:$(local_tag "$n")"
   for node in "${nodes[@]}"; do
-    [ "$(node_get "$node" "$(local_ref "$n")")" = "$(id_of "$n")" ] || fail "econ-graph-$n:${STUB_LOCAL_TAG} on $node is not the loaded image"
+    [ "$(node_get "$node" "$(local_ref "$n")")" = "$(id_of "$n")" ] || fail "econ-graph-$n:$(local_tag "$n") on $node is not the loaded image"
     grep -qxF "$node $(pre "$n") io.cri-containerd.pinned=pinned" "$STUB_STATE/labels" || fail "$(pre "$n") is not pinned on $node"
   done
 done
@@ -500,7 +508,7 @@ grep -qF "unchecked job/crawler-migrate crawler-migrate-c Pending: its container
 sed -n '/^Not checked:$/,$p' "$tmp/out" | grep -qF "unchecked job/crawler-migrate crawler-migrate-c Pending: its container never started" ||
   fail "verify's summary did not list the crawler-migrate pod that never started: $(cat "$tmp/out")"
 grep -q 'rollout restart.*crawler-migrate\|delete job' "$STUB_LOG" && fail "verify restarted or deleted the crawler-migrate Job"
-for d in econ-graph-backend crawler-worker econ-graph-frontend; do
+for d in econ-graph-backend crawler-worker econ-graph-frontend chart-api-service; do
   grep -qxF "kubectl --context kind-econ-graph -n econ-graph rollout restart deployment/$d" "$STUB_LOG" || fail "verify did not restart deployment/$d"
   grep -qxF "kubectl --context kind-econ-graph -n econ-graph rollout status deployment/$d --timeout=600s" "$STUB_LOG" ||
     fail "verify did not wait for deployment/$d"
@@ -622,6 +630,11 @@ run env CLUSTER_ROLE_CONTEXT=kind-other "$load" --tag "$TAG" --dry-run ||
 grep '^kubectl' "$STUB_LOG" | grep -vq '^kubectl --context kind-econ-graph ' && fail "load followed an inherited CLUSTER_ROLE_CONTEXT"
 grep -qF "context         kind-econ-graph" "$tmp/out" || fail "load did not show the cluster's identity: $(cat "$tmp/out")"
 
+# A chart pod on another image must fail verification as well.
+reset
+load_ok
+expect_fail "MISMATCH chart-api-service chart-api-service-new2" env STUB_WRONG_DEPLOYMENT=chart-api-service "$verify" --tag "$TAG"
+
 # === manifests that name the crawler-worker image differently for the Job
 # The load moves one name per image; a Job on another name would be left on another image.
 make_repo
@@ -721,6 +734,8 @@ refuses() {
   return 0
 }
 refuses "a revision mismatch" "has org.opencontainers.image.revision 89ebfa64e3da9efd7db5cade91fe69ae1d57179f, not $STUB_COMMIT" STUB_BAD_REVISION=crawler-worker
+refuses "a missing chart artifact" "not found" STUB_IMAGE_MISSING=chart-api
+refuses "a chart revision mismatch" "has org.opencontainers.image.revision" STUB_BAD_REVISION=chart-api
 refuses "a missing revision label" "has no org.opencontainers.image.revision label" STUB_NO_REVISION=frontend
 refuses "a pulled image without the registry's digest" "does not carry digest $(digest_of backend)" STUB_PULLED_DIGEST_DIFFERS=backend
 refuses "an rc tag on another digest" "refusing" STUB_RC_DIGEST_DIFFERS=1
@@ -809,15 +824,16 @@ if ! run "$rollback" --to "pre-$TAG"; then fail "rollback failed: $(cat "$tmp/ou
 for node in "${nodes[@]}"; do
   for n in "${names[@]}"; do
     grep -qF "exec $node ctr -n k8s.io images tag --force $(pre "$n") $(local_ref "$n")" "$STUB_LOG" ||
-      fail "rollback did not retag econ-graph-$n:${STUB_LOCAL_TAG} on $node"
+      fail "rollback did not retag econ-graph-$n:$(local_tag "$n") on $node"
     grep -qxF "$node $(local_ref "$n") io.cri-containerd.pinned=pinned" "$STUB_STATE/labels" ||
-      fail "the pin did not carry over to econ-graph-$n:${STUB_LOCAL_TAG} on $node"
+      fail "the pin did not carry over to econ-graph-$n:$(local_tag "$n") on $node"
   done
   [ "$(node_get "$node" "$(local_ref crawler-worker)")" = "$old_crawler" ] ||
     fail "rollback did not point econ-graph-crawler-worker:${STUB_LOCAL_TAG} on $node at the image it ran"
   # The crawler-migrate Job's image name is the Deployment's: the retag covers it.
   [ "$(node_get "$node" "docker.io/library/$job_image")" = "$old_crawler" ] ||
     fail "rollback left $job_image, which the crawler-migrate Job runs, on $node on another image than deployment/crawler-worker"
+  [ "$(node_get "$node" "$(local_ref chart-api)")" = "$old_chart" ] || fail "rollback did not restore chart-api on $node"
 done
 grep -q 'crawler-migrate' "$STUB_LOG" && fail "rollback touched the crawler-migrate Job: $(grep crawler-migrate "$STUB_LOG" | head -1)"
 grep -qF "ok crawler-worker crawler-worker-new1 docker.io/library/econ-graph-crawler-worker@$old_crawler" "$tmp/out" ||

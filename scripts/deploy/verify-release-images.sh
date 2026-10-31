@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # After scripts/deploy/deploy.sh: restart the backend, crawler-worker and
-# frontend Deployments so their pods start from the images
+# frontend and chart-api Deployments so their pods start from the images
 # load-release-images.sh put on the nodes, then check that every running pod
 # runs exactly those images.
 #
@@ -19,7 +19,7 @@
 # Steps:
 #   1. kubectl rollout restart, then rollout status (up to 600s), for
 #      deployment/econ-graph-backend, deployment/crawler-worker and
-#      deployment/econ-graph-frontend in namespace econ-graph. deploy.sh only
+#      deployment/econ-graph-frontend and deployment/chart-api-service in namespace econ-graph. deploy.sh only
 #      restarts pods whose spec changed, and loading a new image under the same
 #      name changes no spec.
 #   2. For every running pod of each Deployment (pods already terminating, or
@@ -137,5 +137,5 @@ if [ "$failed" = true ]; then
     print_unchecked
     ri_die "some pods do not run the images loaded for ${TAG}"
 fi
-echo "Every running backend, crawler-worker and frontend pod, and every crawler-migrate pod that started, runs ${TAG} (${commit})."
+echo "Every running backend, crawler-worker, frontend and chart-api pod, and every crawler-migrate pod that started, runs ${TAG} (${commit})."
 print_unchecked

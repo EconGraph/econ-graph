@@ -1,9 +1,9 @@
 name: Release Images
 
-# Builds and publishes the backend, crawler-worker and frontend images.
+# Builds and publishes the backend, crawler-worker, frontend and chart-api images.
 #
 # - workflow_dispatch, or a push of a `vX.Y.Z-rc.N` tag: builds and pushes
-#   whichever of the three images don't already have a `sha-<commit>` tag (so
+#   whichever of the four images don't already have a `sha-<commit>` tag (so
 #   a second build of the same commit can't silently replace an image a QA
 #   run already tested, and a partial failure can be retried without that
 #   turning into "this commit can never be built again"), then makes sure the
@@ -115,7 +115,7 @@ jobs:
         set -euo pipefail
         owner="${{ steps.owner.outputs.owner }}"
         sha_tag="sha-${{ steps.sha.outputs.sha }}"
-        for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend; do
+        for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend econ-graph-chart-api; do
           ref="${REGISTRY}/${owner}/${image}:${sha_tag}"
           key="$(echo "${image}" | tr '-' '_')"
           if inspect_err="$(docker buildx imagetools inspect "${ref}" 2>&1 >/dev/null)"; then
@@ -147,6 +147,7 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-backend
         tags: type=raw,value=sha-${{ steps.sha.outputs.sha }}
+        labels: org.opencontainers.image.revision=${{ steps.sha.outputs.sha }}
         flavor: latest=false
 
     - name: Metadata for crawler-worker image
@@ -156,6 +157,7 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-crawler-worker
         tags: type=raw,value=sha-${{ steps.sha.outputs.sha }}
+        labels: org.opencontainers.image.revision=${{ steps.sha.outputs.sha }}
         flavor: latest=false
 
     - name: Metadata for frontend image
@@ -165,6 +167,17 @@ jobs:
       with:
         images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-frontend
         tags: type=raw,value=sha-${{ steps.sha.outputs.sha }}
+        labels: org.opencontainers.image.revision=${{ steps.sha.outputs.sha }}
+        flavor: latest=false
+
+    - name: Metadata for chart-api image
+      id: meta-chart-api
+      if: steps.check.outputs.econ_graph_chart_api != 'true'
+      uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+      with:
+        images: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-chart-api
+        tags: type=raw,value=sha-${{ steps.sha.outputs.sha }}
+        labels: org.opencontainers.image.revision=${{ steps.sha.outputs.sha }}
         flavor: latest=false
 
     - name: Build and push backend image
@@ -210,6 +223,17 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
+    - name: Build and push chart-api image
+      if: steps.check.outputs.econ_graph_chart_api != 'true'
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+      with:
+        context: ./chart-api-service
+        push: true
+        tags: ${{ steps.meta-chart-api.outputs.tags }}
+        labels: ${{ steps.meta-chart-api.outputs.labels }}
+        cache-from: type=gha,scope=chart-api
+        cache-to: type=gha,mode=max,scope=chart-api
+
     # Apply the rc tag itself here (only for a tag push, not workflow_dispatch:
     # the Actions UI lets a manual run be started "from" a tag, which must
     # never cause the tag to be re-pointed). Runs whether each image was just
@@ -222,7 +246,7 @@ jobs:
         set -euo pipefail
         owner="${{ steps.owner.outputs.owner }}"
         sha_tag="sha-${{ steps.sha.outputs.sha }}"
-        for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend; do
+        for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend econ-graph-chart-api; do
           src="${REGISTRY}/${owner}/${image}:${sha_tag}"
           digest="$(docker buildx imagetools inspect "${src}" --format '{{json .Manifest}}' | jq -r '.digest')"
           if [ -z "${digest}" ] || [ "${digest}" = "null" ]; then
@@ -301,7 +325,7 @@ jobs:
     # the tag below: the sha tag could in principle be repointed between this
     # step and the retag step (or already have drifted, if the build job's
     # refuse-to-rebuild guard was somehow bypassed), and retagging a digest
-    # instead of a tag closes that gap. Resolve all three before retagging
+    # instead of a tag closes that gap. Resolve all four before retagging
     # any of them, so a missing image fails loudly instead of leaving only
     # some images retagged.
     - name: Resolve the rc-built images to their digests
@@ -310,7 +334,7 @@ jobs:
         set -euo pipefail
         owner="${{ steps.owner.outputs.owner }}"
         sha_tag="sha-${GITHUB_SHA}"
-        for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend; do
+        for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend econ-graph-chart-api; do
           src="${REGISTRY}/${owner}/${image}:${sha_tag}"
           echo "Resolving ${src} to a digest..."
           digest="$(docker buildx imagetools inspect "${src}" --format '{{json .Manifest}}' | jq -r '.digest')"
@@ -330,6 +354,7 @@ jobs:
           [econ-graph-backend]="${{ steps.digests.outputs.econ_graph_backend }}"
           [econ-graph-crawler-worker]="${{ steps.digests.outputs.econ_graph_crawler_worker }}"
           [econ-graph-frontend]="${{ steps.digests.outputs.econ_graph_frontend }}"
+          [econ-graph-chart-api]="${{ steps.digests.outputs.econ_graph_chart_api }}"
         )
         for image in "${!digests[@]}"; do
           src="${REGISTRY}/${owner}/${image}@${digests[$image]}"

@@ -34,7 +34,7 @@
 #      manifests' name (docker exec on the rootful daemon), and check that the
 #      name now points at it. pre-<tag> stays. ctr copies the copy's labels, so
 #      the name is pinned too.
-#   3. kubectl rollout restart and rollout status for the three Deployments,
+#   3. kubectl rollout restart and rollout status for the four Deployments,
 #      then check that every running pod's imageID is the copy's image ID.
 #   4. Append the result to ~/econgraph-releases/<tag>/rollback.txt; a run that
 #      fails after it starts retagging records status=partial with what it did.
@@ -164,7 +164,7 @@ if [ "$DRY_RUN" = true ]; then
             esac
         done
     done
-    [ "$RESTART" = false ] || echo "  rollout restart and wait for the three Deployments on ${CLUSTER_ROLE_CONTEXT}, then check their pods"
+    [ "$RESTART" = false ] || echo "  rollout restart and wait for the four Deployments on ${CLUSTER_ROLE_CONTEXT}, then check their pods"
     [ -z "$missing" ] || echo "  and exit 3: no copy on${missing}"
     exit 0
 fi
@@ -230,7 +230,7 @@ if [ -n "$missing" ]; then
     exit 3
 fi
 if [ "$RESTART" = true ]; then
-    echo "Every running backend, crawler-worker and frontend pod runs the ${TO} images."
+    echo "Every running backend, crawler-worker, frontend and chart-api pod runs the ${TO} images."
 else
     echo "The nodes name the ${TO} images; pods switch when they restart."
 fi
