@@ -396,8 +396,10 @@ fn revision_filter_skipping(
     }
 }
 
-/// Excludes synthetic legacy rows from `asOf`/`originalOnly` reads, without deleting or rewriting
-/// any row.
+/// Excludes synthetic legacy rows from every read that resolves revisions (`asOf`,
+/// `originalOnly`, the latest revision), without deleting or rewriting any row. Such a read pairs
+/// it with [`revision_filter_excluding_synthetic`], or for raw SQL uses [`synthetic_legacy_row`],
+/// so every endpoint agrees on a date's value.
 ///
 /// Before this crate tracked vintages, sources like FRED were crawled current-values-only and
 /// stored with `revision_date = date` and `is_original_release = true` — a legacy row that really
@@ -419,8 +421,9 @@ pub fn exclude_synthetic_legacy_rows(
 }
 
 /// SQL: the `data_points` row aliased `row` is a synthetic legacy row (see
-/// [`exclude_synthetic_legacy_rows`]), with `other` the alias its subquery uses.
-fn synthetic_legacy_row(row: &str, other: &str) -> String {
+/// [`exclude_synthetic_legacy_rows`]), with `other` the alias its subquery uses. For readers
+/// written as raw SQL; the definition lives only here.
+pub fn synthetic_legacy_row(row: &str, other: &str) -> String {
     format!(
         "({row}.revision_date = {row}.date AND {row}.is_original_release \
          AND EXISTS (\
