@@ -415,6 +415,62 @@ finally:
         self.assertEqual(cleaned.read_text(), 'yes')
         self.assertLess(report['scenarios'][0]['duration_seconds'], 10)
 
+    def test_an_overrun_kills_and_reports_what_escaped_the_process_group(self):
+        # setsid moves the child out of the scenario's process group, so the group kill misses
+        # it; the runner finds it by the run's marker.
+        pid_file = self.dir / 'escaped.pid'
+        self.scenario('escaper', mutates='no',
+                      body=f'setsid sleep 300 >/dev/null 2>&1 & echo $! > "{pid_file}"; wait')
+        (self.scenarios / 'escaper').write_text((self.scenarios / 'escaper').read_text().replace(
+            '# qa-description', '# qa-timeout: 1\n# qa-description'))
+        code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'],
+                                      dict(self.env, QA_TIMEOUT_GRACE_SECONDS='2'))
+        self.assertEqual(code, 1)
+        pid = int(pid_file.read_text())
+        self.assertEqual(report['scenarios'][0]['reason'],
+                         f'timed out after 1s; left running, now killed: sleep ({pid})')
+        assert_stopped(self, pid)
+
+    def test_a_scenario_that_leaves_a_process_running_fails(self):
+        pid_file = self.dir / 'left.pid'
+        # Exit only once the child has its own session (its session id is its pid), so the
+        # group kill can't catch it before setsid has run.
+        self.scenario('leaver', mutates='no',
+                      body=f'setsid sleep 300 >/dev/null 2>&1 & echo $! > "{pid_file}"\n'
+                           'until [ "$(cut -d" " -f6 /proc/$!/stat)" = "$!" ]; do sleep 0.05; done')
+        code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
+        self.assertEqual(code, 1)
+        pid = int(pid_file.read_text())
+        self.assertEqual((report['scenarios'][0]['status'], report['scenarios'][0]['reason']),
+                         ('fail', f'left running, now killed: sleep ({pid})'))
+        assert_stopped(self, pid)
+
+    def test_a_cleanup_command_ends_within_the_grace_period(self):
+        # qa.run starts commands in their own session, outside the group the runner kills, so
+        # one started in cleanup gets only what is left of the grace period.
+        pid_file = self.dir / 'cleanup.pid'
+        path = self.scenarios / 'slow-cleanup'
+        path.write_text(f'''#!/usr/bin/env python3
+# qa-scenario: slow-cleanup
+# qa-mutates: no
+# qa-profiles: ci
+# qa-timeout: 1
+# qa-description: slow cleanup
+import qa
+try:
+    qa.run(['sleep', '300'], timeout=600)
+finally:
+    qa.run(['sh', '-c', 'echo $$ > {str(pid_file)}; exec sleep 300'], timeout=1200)
+''')
+        path.chmod(0o755)
+        code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'],
+                                      dict(self.env, QA_TIMEOUT_GRACE_SECONDS='4'))
+        self.assertEqual(code, 1)
+        result = report['scenarios'][0]
+        self.assertEqual(result['reason'], 'timed out after 1s')
+        self.assertLess(result['duration_seconds'], 1 + 4 + 2)
+        assert_stopped(self, int(pid_file.read_text()))
+
     def test_stopping_the_runner_lets_the_running_scenario_clean_up(self):
         started, cleaned = self.dir / 'started', self.dir / 'cleaned'
         child_pid = self.dir / 'child.pid'
