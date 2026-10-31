@@ -89,7 +89,10 @@ A fresh realm grants SEC reads to signed-in users, while anonymous access remain
 ungranted. Existing realm imports preserve live catalog grants deliberately; they
 do not automatically expand a live user's privileges. After acceptance, an
 operator must explicitly grant `catalog.sec:read` to the intended existing realm
-role using the normal Keycloak catalog-grant tooling. Release builds keep the
+role in Keycloak administration: open Realm roles → user → Associated roles,
+assign the `econ-graph-api` client role `catalog.sec:read`, and obtain a fresh
+access token. The existing `--make-public` helper grants anonymous access too,
+so it does not implement this signed-in-only rollout. Release builds keep the
 feature disabled until the full company-research acceptance gate passes.
 
 The same schema snapshot describes development and release builds. A disabled

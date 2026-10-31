@@ -328,8 +328,20 @@ pub struct CompanyPeriod {
     pub end: NaiveDate,
     pub kind: String,
 }
+fn serialized_anchor(target: SubjectRef) -> Option<String> {
+    target.validate().ok()?;
+    serde_json::to_string(&AnnotationAnchor::V1 {
+        target,
+        chart_id: None,
+        observation_date: None,
+        observation_value: None,
+    })
+    .ok()
+}
 #[derive(SimpleObject)]
 pub struct CompanyFactEvidence {
+    pub anchor: Option<String>,
+    pub filing_anchor: Option<String>,
     pub fact_id: ID,
     pub cik: String,
     pub taxonomy: String,
@@ -344,7 +356,26 @@ pub struct CompanyFactEvidence {
 impl From<FactEvidence> for CompanyFactEvidence {
     fn from(f: FactEvidence) -> Self {
         let (start, end) = dates(&f.period);
+        let filing = FilingRef {
+            cik: f.cik.clone(),
+            accession: f.accession.clone(),
+        };
+        let filing_anchor = serialized_anchor(SubjectRef::Filing {
+            filing: filing.clone(),
+        });
+        let anchor = CompanyFactSubject {
+            cik: f.cik.clone(),
+            taxonomy: f.taxonomy.clone(),
+            concept: f.concept.clone(),
+            period: f.period.clone(),
+            unit: f.unit.clone(),
+        }
+        .reference()
+        .ok()
+        .and_then(|subject| serialized_anchor(SubjectRef::FiledFact { subject, filing }));
         Self {
+            anchor,
+            filing_anchor,
             fact_id: f.fact_id.into(),
             cik: f.cik,
             taxonomy: f.taxonomy,
@@ -372,10 +403,26 @@ pub struct CompanyStatementLine {
     pub derivation: Option<String>,
     pub restated: bool,
     pub anchor: Option<String>,
+    pub subject_anchor: Option<String>,
 }
 impl From<company_financials::FinancialStatementLine> for CompanyStatementLine {
     fn from(line: company_financials::FinancialStatementLine) -> Self {
         let (start, end) = dates(&line.period);
+        let subject_anchor = line
+            .provenance
+            .first()
+            .and_then(|f| {
+                CompanyFactSubject {
+                    cik: f.cik.clone(),
+                    taxonomy: line.taxonomy.clone(),
+                    concept: line.concept.clone(),
+                    period: line.period.clone(),
+                    unit: line.unit.clone(),
+                }
+                .reference()
+                .ok()
+            })
+            .and_then(|subject| serialized_anchor(SubjectRef::Fact { subject }));
         let anchor = if line.derivation.is_none() && line.provenance.len() == 1 {
             let f = &line.provenance[0];
             let subject = CompanyFactSubject {
@@ -404,6 +451,7 @@ impl From<company_financials::FinancialStatementLine> for CompanyStatementLine {
             None
         };
         Self {
+            subject_anchor,
             key: line.key,
             label: line.label,
             taxonomy: line.taxonomy,
@@ -503,6 +551,11 @@ pub async fn financial_statement(
         })
         .map(|f| {
             let evidence = FactEvidence::from(&f);
+            let restated = facts.iter().any(|prior| {
+                prior.subject == f.subject
+                    && (&prior.filed, &prior.accession) < (&f.filed, &f.accession)
+                    && prior.value != f.value
+            });
             company_financials::FinancialStatementLine {
                 key: format!("{}:{}", f.subject.taxonomy, f.subject.concept),
                 label: f.label.clone().unwrap_or_else(|| f.subject.concept.clone()),
@@ -513,7 +566,7 @@ pub async fn financial_statement(
                 value: f.value,
                 provenance: vec![evidence],
                 derivation: None,
-                restated: false,
+                restated,
             }
             .into()
         })
@@ -651,7 +704,33 @@ pub async fn target_exists(ctx: &Context<'_>, anchor: &AnnotationAnchor) -> Resu
             let Ok(subject) = CompanyFactSubject::from_reference(subject) else {
                 return Ok(false);
             };
-            Ok(service::fact_exists(pool, &subject, None).await?)
+            if service::fact_exists(pool, &subject, None).await? {
+                return Ok(true);
+            }
+            // A derived line has a stable economic subject but no fabricated raw row.
+            // Validate its current derivation against the retained filed operands.
+            let facts = service::calculation_facts(pool, &subject.cik).await?;
+            for kind in [
+                StatementKind::IncomeStatement,
+                StatementKind::BalanceSheet,
+                StatementKind::CashFlow,
+            ] {
+                let lines = company_financials::normalized_statement(
+                    &facts,
+                    kind,
+                    &RevisionSelection::Latest,
+                )
+                .map_err(|e| bad_user_input(e.to_string()))?;
+                if lines.iter().any(|line| {
+                    line.taxonomy == subject.taxonomy
+                        && line.concept == subject.concept
+                        && line.unit == subject.unit
+                        && line.period == subject.period
+                }) {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
         }
         SubjectRef::FiledFact { subject, filing } => {
             let Ok(subject) = CompanyFactSubject::from_reference(subject) else {
@@ -704,3 +783,7 @@ mod tests {
         .is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "company_research_tests.rs"]
+mod api_tests;
