@@ -62,6 +62,36 @@ remotely. So a scenario, and any command it runs through a hook such as `QA_REDE
 must not leave anything running, including helpers that persist on purpose: an ssh
 ControlMaster (ControlPersist), `kubectl port-forward` or a gpg-agent.
 
+## A QA environment for a release candidate
+
+`scripts/qa/deploy-rc-to-qa.sh` stands up a scratch kind cluster running a release
+candidate's published images on a copy of production's data, for the lab profile and
+manual QA:
+
+```bash
+scripts/qa/deploy-rc-to-qa.sh --tag vX.Y.Z-rc.N --dump-dir ~/econgraph-backups/<timestamp>
+```
+
+It works from any checkout: it runs the candidate's own deploy scripts from a worktree of
+the tag (from v4.1). The dump directory is a verified backup (`counts.env`, the dumps and
+`secrets/`), read and never written. Everything else is in `~/econgraph-qa/NAME/`
+(`ECONGRAPH_QA_ROOT` overrides the root; never under `/tmp`), and the cluster `NAME`
+(default `qa-<tag without dots>`) is created by the script and marked as its own. It
+refuses the production cluster names, a cluster with a production marker or one it did not
+create, and a dump inside the QA root.
+
+The site is at `http://localhost:PORT`, on 127.0.0.1 only, with sign-in on that address.
+crawler-worker runs at 0 replicas and production's crawler API keys are not copied. The QA
+accounts `qa-a`, `qa-b` and `qa-admin` (realm role `admin`) get random passwords in
+`~/econgraph-qa/NAME/accounts.env` and `accounts/<user>.password` (mode 600), for
+`QA_USERNAME` and `QA_PASSWORD_FILE`. The script prints the URL, the accounts file and
+`TARGET_URL` and `TARGET_HOST` for the QA prompt; run the scenarios with
+`QA_LAB_TARGET_OK=localhost --target http://localhost:PORT --profile lab`.
+
+Rerun it to finish or refresh an environment. `--teardown` deletes the cluster and its
+directory, never the dump; `--dry-run` only checks and prints the plan. The script's usage
+header is the full reference.
+
 ## Profiles
 
 Each scenario declares in its header whether it changes state (`qa-mutates: yes` or `no`) and
