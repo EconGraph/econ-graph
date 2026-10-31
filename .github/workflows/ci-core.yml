@@ -190,6 +190,7 @@ jobs:
             - 'scripts/keycloak/**'
             - 'k8s/manifests/keycloak/realm-import-job.yaml'
             - 'k8s/manifests/keycloak/deployment.yaml'
+            - 'scripts/deploy/deploy.sh'
           migrations:
             - '.github/workflows/ci-core.yml'
             - 'backend/migrations/**'
@@ -448,6 +449,9 @@ jobs:
     name: Keycloak Realm Import
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # The release production runs, whose realm the test upgrades from.
+      PREVIOUS_RELEASE: v4.0.1
     needs: [changes]
     # Only when the realm, its import or this workflow changed; every push to main and
     # manual run still gets it. Stop if selection failed or the run was cancelled.
@@ -459,10 +463,23 @@ jobs:
       with:
         persist-credentials: false
 
-    # A real Keycloak and keycloak-config-cli: which scope mappings a deploy keeps
+    # Production's upgrade path starts from the last release's realm import.
+    - name: Checkout the previous release's realm import
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
+        ref: ${{ env.PREVIOUS_RELEASE }}
+        path: previous-release
+        sparse-checkout: |
+          config/keycloak
+          scripts/keycloak
+
+    # A real Keycloak and keycloak-config-cli: what a deploy keeps, removes and refuses
     # (scripts/keycloak/test-realm-import.sh).
     - name: Run the realm import against a throwaway Keycloak
       run: scripts/keycloak/test-realm-import.sh
+      env:
+        PREVIOUS_RELEASE_DIR: previous-release
 
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
