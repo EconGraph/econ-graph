@@ -40,7 +40,7 @@ enum Command {
         output: Option<std::path::PathBuf>,
         #[arg(long)]
         migrate: bool,
-        /// Required disposable database identity: actual DB must be eg_smoke_<UUID without dashes>.
+        /// Required disposable identity: the actual DB must be `eg_smoke_UUID` (UUID without dashes).
         #[arg(long)]
         disposable_target: Uuid,
     },
