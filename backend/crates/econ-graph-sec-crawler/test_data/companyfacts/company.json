@@ -13,7 +13,7 @@
           ]
         }
       },
-      "Assets": {"label":"Assets","units":{"USD":[{"end":"2023-12-30","val":900719925474099312345,"accn":"0000320193-24-000006","form":"10-Q","filed":"2024-02-02"}]}},
+      "Assets": {"label":"Assets","units":{"USD":[{"end":"2023-12-30","val":900719925474099312345,"fy":null,"accn":"0000320193-24-000006","form":"10-Q","filed":"2024-02-02"}]}},
       "EarningsPerShareDiluted": {"label":"Diluted EPS","units":{"USD/shares":[{"start":"2023-10-01","end":"2023-12-30","val":2.18,"accn":"0000320193-24-000006","form":"10-Q","filed":"2024-02-02"}]}}
     }
   }

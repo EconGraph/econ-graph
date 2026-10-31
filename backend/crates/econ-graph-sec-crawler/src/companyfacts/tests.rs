@@ -48,6 +48,32 @@ fn exact_values_restatements_and_duplicate_metadata() {
     assert!(parsed.facts.iter().any(|f| f.subject.unit == "USD/shares"));
 }
 #[test]
+fn fiscal_year_null_is_optional_but_nonnull_values_must_be_integers() {
+    let parsed = parse_companyfacts(FACTS).unwrap();
+    let asset = parsed
+        .facts
+        .iter()
+        .find(|f| f.subject.concept == "Assets")
+        .unwrap();
+    assert_eq!(asset.fiscal_year, None);
+    let raw = std::str::from_utf8(FACTS).unwrap();
+    let absent = parse_companyfacts(raw.replace(",\"fy\":null", "").as_bytes()).unwrap();
+    let absent_asset = absent
+        .facts
+        .iter()
+        .find(|f| f.subject.concept == "Assets")
+        .unwrap();
+    assert_eq!(asset, absent_asset);
+    for value in ["\"2024\"", "2024.5", "true", "2147483648", "{}"] {
+        let invalid = raw.replace("\"fy\":null", &format!("\"fy\":{value}"));
+        assert!(
+            parse_companyfacts(invalid.as_bytes()).is_err(),
+            "accepted {value}"
+        );
+    }
+}
+
+#[test]
 fn rejects_conflicts_bad_periods_and_nonnumeric_values() {
     let text = std::str::from_utf8(FACTS).unwrap();
     for changed in [
