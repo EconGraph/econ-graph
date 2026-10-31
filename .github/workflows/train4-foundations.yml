@@ -1,0 +1,94 @@
+name: Train 4 Foundations
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'infra/talos/**'
+      - 'platform/**'
+      - 'scripts/talos/**'
+      - 'scripts/platform/**'
+      - 'scripts/objectstore/**'
+      - 'scripts/host/**'
+      - 'scripts/train4/**'
+      - 'scripts/data-access/**'
+      - 'scripts/keycloak/dev-readonly-token.py'
+      - 'scripts/keycloak/independent-data-realm.py'
+      - 'ci/scripts/install-train4-tools.py'
+      - '.github/workflows/train4-foundations.yml'
+  merge_group:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  guardrails:
+    name: Train 4 tooling guards and recovery controls
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: train4_tooling
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d train4_tooling"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+        ports:
+          - 5448:5432
+    env:
+      TRAIN4_RECOVERY_TEST_DATABASE_URL: postgres://postgres:password@127.0.0.1:5448/train4_tooling
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install validation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client shellcheck python3-venv
+          python3 -m venv "$RUNNER_TEMP/train4-python"
+          "$RUNNER_TEMP/train4-python/bin/python" -m pip install -r scripts/platform/requirements.txt
+          echo "$RUNNER_TEMP/train4-python/bin" >> "$GITHUB_PATH"
+      - name: Exercise dry-run and ownership guards
+        run: |
+          python3 -m unittest discover -s scripts/talos -p test_talos.py
+          python3 -m unittest discover -s scripts/objectstore -p 'test_*.py'
+          bash scripts/host/test-objectstore-snapshot-coverage.sh
+          bash scripts/host/test-backup-scripts.sh
+          python3 -m unittest discover -s scripts/data-access -p 'test_*.py'
+          python3 scripts/platform/test_platform.py
+          python3 scripts/train4/test_recovery.py
+          shellcheck scripts/train4/maintain-timeseries.sh
+          shellcheck -x scripts/host/backup-snapshots.sh scripts/host/test-objectstore-snapshot-coverage.sh
+  infrastructure:
+    name: Train 4 provider and platform schemas
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      TF_VAR_state_passphrase: ci-only-schema-encryption-key-not-runtime-state
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install checksum-locked validation tools
+        run: |
+          python3 ci/scripts/install-train4-tools.py --bin-dir "$RUNNER_TEMP/train4-tools" --tool tofu --tool helm --tool kubectl
+          echo "$RUNNER_TEMP/train4-tools" >> "$GITHUB_PATH"
+          sudo apt-get update
+          sudo apt-get install -y python3-venv
+          python3 -m venv "$RUNNER_TEMP/train4-python"
+          "$RUNNER_TEMP/train4-python/bin/python" -m pip install -r scripts/platform/requirements.txt
+          echo "$RUNNER_TEMP/train4-python/bin" >> "$GITHUB_PATH"
+      - name: Validate pinned provider configuration without a hypervisor
+        run: |
+          tofu -chdir=infra/talos init -backend=false -input=false -lockfile=readonly
+          tofu -chdir=infra/talos fmt -check -recursive
+          tofu -chdir=infra/talos validate -no-color
+          tofu -chdir=infra/talos test -no-color
+      - name: Render and validate pinned charts and platform resources
+        run: python3 scripts/platform/validate.py --fetch --helm helm --kubectl kubectl --cache "$RUNNER_TEMP/train4-platform-assets"
