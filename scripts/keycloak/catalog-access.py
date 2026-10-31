@@ -150,17 +150,29 @@ def plan_and_apply(kc, role_name, mode, dry_run, out):
                 steps.append(("remove %s from %s" % (role_name, name), "DELETE", write_path))
 
     target = {"admin-only": "admin-only", "withdraw": "not public", "public": "public"}[mode]
-    if anonymous and mode != "public":
+
+    def leak(paths):
+        out("warning: %s tokens admit %s through %s, so visitors read it while the service account "
+            "holds it, and deploys refuse to run; remove that scope mapping in Keycloak"
+            % (ANONYMOUS_CLIENT, role_name, " and ".join(paths)))
+
+    def own_scope_leak():
+        # Once the reader's own scope no longer maps the role directly, a composite still
+        # admitting it comes from a realm role mapped there.
+        if anonymous and mode != "public" and holds(scope_path + "/composite") and not holds(scope_path):
+            leak(["a realm role mapped on its own scope"])
+
+    if anonymous:
         # Anonymous tokens are built with the reader's client scopes as well as its own scope
-        # mapping, and the realm import refuses a catalog read mapped on one of them.
-        scopes = [scope["name"] for kind in ("default", "optional")
-                  for scope in kc.call("GET", "/clients/%s/%s-client-scopes" % (anonymous[0]["id"], kind))
-                  if holds("/client-scopes/%s/scope-mappings/clients/%s" % (scope["id"], api_id))]
-        if scopes:
-            out("warning: client scope %s, assigned to %s, maps %s, so anonymous tokens include it while "
-                "the service account holds it, and deploys refuse to run; remove it from that client "
-                "scope's scope mappings in Keycloak" % (", ".join(scopes), ANONYMOUS_CLIENT, role_name))
+        # mapping, composites expanded, and the realm import refuses a catalog read reaching
+        # them other than mapped directly on the reader's own scope.
+        paths = ["client scope " + scope["name"] for kind in ("default", "optional")
+                 for scope in kc.call("GET", "/clients/%s/%s-client-scopes" % (anonymous[0]["id"], kind))
+                 if holds("/client-scopes/%s/scope-mappings/clients/%s/composite" % (scope["id"], api_id))]
+        if paths:
+            leak(paths)
     if not steps:
+        own_scope_leak()
         out("%s is already %s; nothing to change" % (role_name, target))
         return 0
     for description, method, path in steps:
@@ -181,11 +193,12 @@ def plan_and_apply(kc, role_name, mode, dry_run, out):
     if wrong:
         raise RuntimeError("after the change %s is not %s: %s; run the command again"
                            % (role_name, target, "; ".join(wrong)))
+    own_scope_leak()
     if anonymous and mode != "public":
         account = kc.call("GET", "/clients/%s/service-account-user" % anonymous[0]["id"], missing_ok=True)
         if account and holds("/users/%s/role-mappings/clients/%s/composite" % (account["id"], api_id)):
             out("note: the %s service account still holds %s through another mapping; anonymous tokens "
-                "leave it out unless a client scope assigned to it maps it (warned about above)"
+                "leave it out unless a scope it is built with admits it (warned about above)"
                 % (ANONYMOUS_CLIENT, role_name))
     out("%s is now %s" % (role_name, target))
     return len(steps)

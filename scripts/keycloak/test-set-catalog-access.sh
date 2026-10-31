@@ -231,14 +231,21 @@ reset
 set_state '{"reader_scopes": {"basic": ["catalog.fred:read"]}, "reader_direct": ["catalog.fred:read"]}'
 run -- --context kind-econ-graph --admin-only catalog.fred:read
 [ "$status" = 0 ] || fail "a reader client scope stopped the change: $(cat "$out")"
-grep -qF "warning: client scope basic, assigned to econgraph-anonymous, maps catalog.fred:read" "$out" ||
+grep -qF "warning: econgraph-anonymous tokens admit catalog.fred:read through client scope basic," "$out" ||
   fail "the reader's client scope is not named: $(cat "$out")"
 run -- --context kind-econ-graph --admin-only catalog.fred:read
-grep -qF "warning: client scope basic" "$out" || fail "an unchanged role hides the client scope: $(cat "$out")"
+grep -qF "through client scope basic" "$out" || fail "an unchanged role hides the client scope: $(cat "$out")"
+run -- --context kind-econ-graph --make-public catalog.fred:read
+grep -qF "through client scope basic" "$out" || fail "--make-public hides the client scope: $(cat "$out")"
+reset
+set_state '{"scope_realm": ["catalog.fred:read"], "reader_direct": ["catalog.fred:read"]}'
+run -- --context kind-econ-graph --withdraw catalog.fred:read
+grep -qF "admit catalog.fred:read through a realm role mapped on its own scope" "$out" ||
+  fail "a realm role on the reader's own scope is not named: $(cat "$out")"
 reset
 set_state '{"reader_scopes": {"basic": []}, "reader_direct": ["catalog.fred:read"]}'
 run -- --context kind-econ-graph --admin-only catalog.fred:read
-if grep -q "warning: client scope" "$out"; then fail "warned about a client scope that maps nothing: $(cat "$out")"; fi
+if grep -q "warning: econgraph-anonymous tokens" "$out"; then fail "warned about a client scope that maps nothing: $(cat "$out")"; fi
 grep -qF "note: the econgraph-anonymous service account still holds catalog.fred:read" "$out" ||
   fail "no note for the reader's other mapping: $(cat "$out")"
 

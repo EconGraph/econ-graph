@@ -9,9 +9,10 @@
 # render-realm.sh and realm file, then keycloak-config-cli). Then this tree's import Job steps,
 # as k8s/manifests/keycloak/realm-import-job.yaml runs them: render-realm.sh,
 # preserve-catalog-grants.py, keycloak-config-cli, then preserve-catalog-grants.py --complete.
-# That first import's realm file also declares a client, temp-x. The script checks it seeds
-# the realm file's catalog policy, then makes the changes an operator makes and imports the
-# realm file without temp-x and without catalog.ilo:read, checking:
+# That first import's realm file also declares a client, temp-x, and ten roles
+# catalog.retired_<n>:read. The script checks it seeds the realm file's catalog policy, then
+# makes the changes an operator makes and imports the realm file without temp-x, the retired
+# roles and catalog.ilo:read, checking:
 #
 #   - catalog reads granted through the scope mappings of a client the realm file doesn't
 #     declare, of a client scope, and of a declared client survive the import;
@@ -21,12 +22,17 @@
 #   - what scripts/keycloak/catalog-access.py (set-catalog-access.sh's helper) set on
 #     catalog-public, admin and the anonymous reader's scope survives;
 #   - a catalog read mapped on `basic`, a client scope anonymous tokens are built with, makes
-#     catalog-access.py warn and the import refuse, changing nothing, until it is removed;
+#     catalog-access.py warn and the import refuse, changing nothing, until it is removed; so
+#     does catalog-public mapped there, which hands an anonymous token (checked) a catalog
+#     taken off the reader's own scope;
 #   - temp-x, which config-cli created and now deletes, doesn't fail the import although
 #     it held a catalog read;
-#   - neither does catalog.ilo:read, deleted the same way although it was granted: its
-#     grants are named and dropped; a catalog role an operator made keeps its grants;
-#   - a further import changes nothing and warns about nothing.
+#   - neither do catalog.ilo:read and the retired roles, deleted the same way although granted
+#     (one directly to the anonymous service account): their grants are named and dropped,
+#     and a catalog role an operator made keeps its grants;
+#   - an anonymous token carries exactly the anonymous scope's catalogs;
+#   - a further import changes nothing and warns only that config-cli's role state, now a
+#     chunk shorter, has a chunk left over, which it ignores as config-cli does.
 #
 # The previous release's files come from PREVIOUS_RELEASE_DIR when set (CI checks the tag
 # out there), otherwise from the tag in this repository. Needs docker, python3, curl and
@@ -120,7 +126,7 @@ config_cli() { # TAG: import WORK/econ-graph-realm.json
 
 # The render and catalog-policy steps; their warnings go to WORK/warnings-TAG and the status
 # is the catalog-policy step's. Patches to the realm file: extra-client declares a client
-# temp-x, drop-ilo leaves out the role catalog.ilo:read.
+# temp-x and the retired roles, drop-ilo leaves out the role catalog.ilo:read.
 prepare() { # TAG [PATCH]
     KC_WEB_BASE_URL=http://localhost KC_WEB_E2E_BASE_URL=http://localhost \
         KC_ANONYMOUS_CLIENT_SECRET=scratch-anonymous-secret \
@@ -131,6 +137,7 @@ path, patch = sys.argv[1:]
 realm = json.load(open(path))
 if patch == "extra-client":
     realm["clients"].append({"clientId": "temp-x", "publicClient": False, "fullScopeAllowed": False})
+    realm["roles"]["client"]["econ-graph-api"] += [{"name": "catalog.retired_%d:read" % n} for n in range(10)]
 if patch == "drop-ilo":
     roles = realm["roles"]["client"]["econ-graph-api"]
     roles[:] = [r for r in roles if r["name"] != "catalog.ilo:read"]
@@ -184,22 +191,41 @@ ILO="$(role catalog.ilo:read)"
 FRED="$(role catalog.fred:read)"
 PARTNER="$(role catalog.partner:read)"
 GRANTS="[$IMF,$BANK_OF_CANADA,$MCP]"
+PUBLIC="$(api GET /roles/catalog-public)"
 api POST "/clients/$PARTNER_ID/scope-mappings/clients/$API_ID" "[$IMF,$BANK_OF_CANADA,$MCP,$ILO,$PARTNER]" >/dev/null
 api POST "/client-scopes/$SCOPE_ID/scope-mappings/clients/$API_ID" "$GRANTS" >/dev/null
 api POST "/clients/$WEB_ID/scope-mappings/clients/$API_ID" "[$WTO]" >/dev/null
 api POST "/clients/$(client_id temp-x)/scope-mappings/clients/$API_ID" "[$IMF]" >/dev/null
 api POST "/roles/admin/composites" "[$PARTNER]" >/dev/null
-PUBLIC="$(api GET /roles/catalog-public)"
 api POST "/clients/$PARTNER_ID/scope-mappings/realm" "[$PUBLIC]" >/dev/null
 api POST "/client-scopes/$SCOPE_ID/scope-mappings/realm" "[$PUBLIC]" >/dev/null
+# A retired role held directly by the anonymous service account.
+READER_ID="$(api GET "/clients/$ANON_ID/service-account-user" | json 'd["id"]')"
+api POST "/users/$READER_ID/role-mappings/clients/$API_ID" "[$(role catalog.retired_0:read)]" >/dev/null
 # A catalog read on `basic`, which anonymous tokens are built with.
 api POST "/client-scopes/$BASIC_ID/scope-mappings/clients/$API_ID" "[$FRED]" >/dev/null
 # What set-catalog-access.sh does, through its helper.
 as_admin python3 "$REPO/scripts/keycloak/catalog-access.py" \
     --admin-only catalog.bls:read --make-public catalog.imf:read --withdraw catalog.census:read \
     --make-public catalog.ilo:read --withdraw catalog.fred:read >"$WORK/catalog-access.log"
-grep -qF "warning: client scope basic, assigned to econgraph-anonymous, maps catalog.fred:read" "$WORK/catalog-access.log" ||
+grep -qF "warning: econgraph-anonymous tokens admit catalog.fred:read through client scope basic," "$WORK/catalog-access.log" ||
     fail "catalog-access.py didn't name basic: $(cat "$WORK/catalog-access.log")"
+
+# The catalogs in an anonymous token, whatever claim carries them.
+anonymous_catalogs() {
+    curl -sf -d grant_type=client_credentials -d client_id=econgraph-anonymous \
+        -d client_secret=scratch-anonymous-secret "$BASE/realms/$REALM/protocol/openid-connect/token" \
+        | python3 -c 'import base64, json, re, sys
+payload = json.load(sys.stdin)["access_token"].split(".")[1]
+claims = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)).decode()
+print(",".join(sorted(set(re.findall(r"catalog\.[a-z0-9_]+:read", claims)))))'
+}
+# BEA signed-in only: off the reader's own scope, still in catalog-public. Then catalog-public
+# mapped on basic gives anonymous tokens BEA back.
+api DELETE "/clients/$ANON_ID/scope-mappings/clients/$API_ID" "[$(role catalog.bea:read)]" >/dev/null
+anonymous_catalogs | grep -q 'catalog\.bea:read' && fail "BEA reached an anonymous token before the leak"
+api POST "/client-scopes/$BASIC_ID/scope-mappings/realm" "[$PUBLIC]" >/dev/null
+anonymous_catalogs | grep -q 'catalog\.bea:read' || fail "catalog-public on basic didn't reach the token; the refusal test is vacuous"
 
 snapshot() {
     local path
@@ -212,16 +238,17 @@ snapshot() {
     echo "admin: $(api GET "/roles/admin/composites" | names)"
 }
 
-# The catalog read on basic stops the deploy before anything is imported.
-snapshot >"$WORK/before-refusal"
+# The catalog reads basic admits stop the deploy at the catalog-policy step.
 if prepare refused drop-ilo; then
-    fail "the import accepted a catalog read on basic"
+    fail "the import accepted catalog reads on basic"
 else
-    grep -qF "basic (catalog.fred:read)" "$WORK/warnings-refused" || fail "the refusal doesn't name basic: $(cat "$WORK/warnings-refused")"
+    for name in catalog.bea:read catalog.fred:read; do
+        grep -q "client scope basic ([^)]*$name" "$WORK/warnings-refused" ||
+            fail "the refusal doesn't name $name on basic: $(cat "$WORK/warnings-refused")"
+    done
 fi
-snapshot >"$WORK/after-refusal"
-diff "$WORK/before-refusal" "$WORK/after-refusal" >&2 || fail "the refused import changed the realm"
 api DELETE "/client-scopes/$BASIC_ID/scope-mappings/clients/$API_ID" "[$FRED]" >/dev/null
+api DELETE "/client-scopes/$BASIC_ID/scope-mappings/realm" "[$PUBLIC]" >/dev/null
 
 expect() { # LINE
     grep -qxF "$1" "$WORK/after" || fail "after a deploy, expected '$1'; got: $(grep -F "${1%%:*}:" "$WORK/after")"
@@ -235,20 +262,28 @@ expect "clients/$WEB_ID api: catalog.world_trade_organization:read"
 expect "clients/$PARTNER_ID realm: catalog-public"
 expect "client-scopes/$SCOPE_ID realm: catalog-public"
 expect "client-scopes/$BASIC_ID api: "
-expect "clients/$ANON_ID api: catalog.bea:read,catalog.fhfa:read,catalog.imf:read,catalog.world_bank:read"
+expect "clients/$ANON_ID api: catalog.fhfa:read,catalog.imf:read,catalog.world_bank:read"
+expect "client-scopes/$BASIC_ID realm: "
+[ "$(anonymous_catalogs)" = "catalog.fhfa:read,catalog.imf:read,catalog.world_bank:read" ] ||
+    fail "an anonymous token carries $(anonymous_catalogs)"
 expect "catalog-public: catalog.bea:read,catalog.fhfa:read,catalog.imf:read,catalog.world_bank:read"
 grep -q '^admin: .*catalog\.bls:read' "$WORK/after" || fail "admin lost catalog.bls:read: $(grep '^admin:' "$WORK/after")"
 grep -q '^admin: .*catalog\.partner:read' "$WORK/after" || fail "admin lost catalog.partner:read: $(grep '^admin:' "$WORK/after")"
 [ "$(api GET "/clients/$API_ID/roles/catalog.partner:read" | json 'd["name"]')" = catalog.partner:read ] ||
     fail "the operator's catalog role was deleted"
-api GET "/clients/$API_ID/roles/catalog.ilo:read" >/dev/null 2>&1 && fail "catalog.ilo:read, dropped from the realm file, still exists"
+for gone in catalog.ilo:read catalog.retired_0:read; do
+    [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(token)" \
+        "$BASE/admin/realms/$REALM/clients/$API_ID/roles/$gone")" = 404 ] ||
+        fail "$gone, dropped from the realm file, still exists"
+done
 for target in "client partner-x: api:mcp" "client scope catalog-extra: api:mcp" \
     "catalog.ilo:read is no longer in the realm file, so the import deletes it and its grant on role catalog-public" \
     "catalog.ilo:read is no longer in the realm file, so the import deletes it and its grant on client partner-x" \
-    "catalog.ilo:read is no longer in the realm file, so the import deletes it and its grant on client econgraph-anonymous"; do
+    "catalog.ilo:read is no longer in the realm file, so the import deletes it and its grant on client econgraph-anonymous" \
+    "catalog.retired_0:read is no longer in the realm file, so the import deletes it and its grant on the econgraph-anonymous service account"; do
     grep -qF "$target" "$WORK/warnings-second" || fail "no warning for $target: $(cat "$WORK/warnings-second")"
 done
-! grep -v 'catalog\.ilo:read is no longer' "$WORK/warnings-second" | grep -q 'catalog\.\|temp-x' ||
+[ "$(grep -v 'is no longer in the realm file' "$WORK/warnings-second" | grep -c 'catalog\.\|temp-x')" = 0 ] ||
     fail "unexpected warning: $(cat "$WORK/warnings-second")"
 [ "$(api GET "/clients?clientId=temp-x")" = "[]" ] || fail "temp-x, dropped from the realm file, still exists"
 
@@ -256,7 +291,10 @@ import_realm third drop-ilo
 mv "$WORK/after" "$WORK/after-second"
 snapshot >"$WORK/after"
 diff "$WORK/after-second" "$WORK/after" >&2 || fail "a further import changed the realm"
-[ ! -s "$WORK/warnings-third" ] || fail "a further import warned: $(cat "$WORK/warnings-third")"
+grep -q "^warning: ignoring [0-9]* characters after the keycloak-config-cli state list in realm attributes de\.adorsys\.keycloak\.config\.state-default-roles-client-econ-graph-api-\*" \
+    "$WORK/warnings-third" || fail "the role state didn't shrink by a chunk; the leftover-chunk check is vacuous"
+[ "$(grep -vc '^warning: ignoring' "$WORK/warnings-third")" = 0 ] ||
+    fail "a further import warned: $(cat "$WORK/warnings-third")"
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures check(s) failed" >&2

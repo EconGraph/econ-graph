@@ -129,7 +129,9 @@ def warn(message):
 # keycloak-config-cli records what it created in realm attributes named
 # de.adorsys.keycloak.config.state-default-<kind>-<n>: one JSON list of names, split into numbered
 # chunks. It deletes what it created and the realm file no longer declares, and nothing else.
-# "default" is its import cache key, which the realm import Job leaves unset.
+# "default" is its import cache key, which the realm import Job leaves unset. When the list
+# shrinks by a chunk, config-cli leaves the old last chunk behind and reads only the first JSON
+# value of the joined text; so does config_cli_state.
 CONFIG_CLI_STATE = "de.adorsys.keycloak.config.state-default-"
 
 
@@ -140,12 +142,17 @@ def config_cli_state(attributes, kind):
                     if name.startswith(key) and name[len(key):].isdigit())
     if not chunks:
         return set()
+    joined = "".join(value for _, value in chunks)
     try:
-        names = json.loads("".join(value for _, value in chunks))
+        names, end = json.JSONDecoder().raw_decode(joined)
     except ValueError:
         names = None
     if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
         raise RuntimeError("Unreadable keycloak-config-cli state (realm attributes %s*)" % key)
+    if joined[end:].strip():
+        warn("ignoring %d characters after the keycloak-config-cli state list in realm attributes %s*, "
+             "as config-cli does; they are left over from a longer list"
+             % (len(joined) - end, key))
     return set(names)
 
 
@@ -156,14 +163,16 @@ def clients_config_cli_deletes(realm, attributes):
     return config_cli_state(attributes, "clients") - {client["clientId"] for client in realm["clients"]}
 
 
-def api_roles_config_cli_deletes(realm, attributes):
-    """econ-graph-api roles config-cli created and the realm file no longer declares. A grant
-    of one written into the import would fail it part way ("Cannot find client role")."""
-    declared = realm.get("roles", {}).get("client", {})
-    if API_CLIENT not in declared:
-        return set()
-    return (config_cli_state(attributes, "roles-client-" + API_CLIENT)
-            - {role["name"] for role in declared[API_CLIENT]})
+def roles_config_cli_deletes(realm, attributes, client=None):
+    """Roles of CLIENT (realm roles when None) that config-cli created and the realm file no
+    longer declares. A grant of one written into the import would fail it part way ("Cannot
+    find client role")."""
+    roles = realm.get("roles", {})
+    declared = roles.get("realm") if client is None else roles.get("client", {}).get(client)
+    if declared is None:
+        return set()  # config-cli manages, and deletes, none of them.
+    kind = "roles-realm" if client is None else "roles-client-" + client
+    return config_cli_state(attributes, kind) - {role["name"] for role in declared}
 
 
 def without_deleted(names, deleted, where):
@@ -236,40 +245,85 @@ def preserve_scope_mappings(realm, get, prefix, api_id, attributes, seed_default
                     entry["roles"] = [r for r in entry.get("roles", []) if not catalog_read(r)]
 
 
-def check_anonymous_client_scopes(realm, get, prefix, anon_id, live=True):
-    """Refuse catalog reads mapped on a client scope that anonymous tokens are built with.
+def declared_catalog_reads(realm, role_names):
+    """The catalog reads the merged realm file's realm roles ROLE_NAMES grant, at any depth."""
+    roles = {role["name"]: role for role in realm.get("roles", {}).get("realm", [])}
+    found, pending, seen = set(), list(role_names), set()
+    while pending:
+        name = pending.pop()
+        if name in seen or name not in roles:
+            continue
+        seen.add(name)
+        composites = roles[name].get("composites") or {}
+        found.update(r for r in (composites.get("client") or {}).get(API_CLIENT, []) if catalog_read(r))
+        pending.extend(composites.get("realm") or [])
+    return found
 
-    The reader's token carries every role it holds that any of its client scopes admits, so a
-    catalog read mapped on, say, `basic` would reach visitors even after it was removed from
-    the reader's own scope mapping, the supported switch for anonymous access. Its scopes are
-    those assigned to it live and in the realm file; realm default scopes, assigned to a
-    recreated reader, are named with a warning. Without a live realm only the file is read.
+
+def check_anonymous_client_scopes(realm, get, prefix, anon_id, api_id, live=True):
+    """Refuse catalog reads that reach anonymous tokens other than through the anonymous
+    client's own direct scope mapping of each catalog read.
+
+    The reader's token carries every role it holds that any of its client scopes, or its own
+    scope mapping, admits, with composite roles expanded. A catalog read admitted by `basic`,
+    or by a realm role such as catalog-public mapped on a scope, would reach visitors even
+    after it was removed from the reader's own scope mapping, the supported switch for
+    anonymous access. The client scopes are those assigned to it live and in the realm file;
+    realm default scopes, assigned to a recreated reader, are named with a warning. Live
+    scopes are read with composites expanded; the realm file's mappings through the
+    declared realm composites. Without a live realm only the file is read.
     """
-    mapped = {entry["clientScope"]: [r for r in entry.get("roles", []) if catalog_read(r)]
-              for entry in realm.get("clientScopeMappings", {}).get(API_CLIENT, []) if "clientScope" in entry}
-    mapped = {name: roles for name, roles in mapped.items() if roles}
-    if not mapped:
-        return
-    assigned = set()
+    admitted = {}  # (kind, name) -> catalog reads admitted other than directly by the reader
+    def admit(key, roles):
+        roles = {r for r in roles if catalog_read(r)}
+        if roles:
+            admitted.setdefault(key, set()).update(roles)
+    for entry in realm.get("clientScopeMappings", {}).get(API_CLIENT, []):
+        if "clientScope" in entry:
+            admit(("clientScope", entry["clientScope"]), entry.get("roles", []))
+    for entry in realm.get("scopeMappings", []):
+        target = ("clientScope", entry["clientScope"]) if "clientScope" in entry else ("client", entry.get("client"))
+        admit(target, declared_catalog_reads(realm, entry.get("roles", [])))
+    assigned, defaults, ids = set(), set(), {}
     for client in realm.get("clients", []):
         if client["clientId"] == ANONYMOUS_CLIENT:
             assigned.update(client.get("defaultClientScopes", []), client.get("optionalClientScopes", []))
-    if anon_id:
+    defaults.update(realm.get("defaultDefaultClientScopes", []), realm.get("defaultOptionalClientScopes", []))
+    if live:
         for kind in ("default", "optional"):
-            assigned.update(s["name"] for s in required(get(prefix + "/clients/" + anon_id + "/" + kind + "-client-scopes")))
-    refused = sorted("%s (%s)" % (name, ", ".join(mapped[name])) for name in assigned & set(mapped))
+            scopes = required(get(prefix + "/default-" + kind + "-client-scopes"))
+            defaults.update(s["name"] for s in scopes)
+            ids.update((s["name"], s["id"]) for s in scopes)
+            if anon_id:
+                scopes = required(get(prefix + "/clients/" + anon_id + "/" + kind + "-client-scopes"))
+                assigned.update(s["name"] for s in scopes)
+                ids.update((s["name"], s["id"]) for s in scopes)
+    if api_id:
+        for name, scope_id in ids.items():
+            admit(("clientScope", name), [r["name"] for r in required(
+                get(prefix + "/client-scopes/" + scope_id + "/scope-mappings/clients/" + api_id + "/composite"))])
+        if anon_id:
+            # The reader's own scope may admit catalog reads only directly, one by one.
+            own = prefix + "/clients/" + anon_id + "/scope-mappings/clients/" + api_id
+            direct = {r["name"] for r in required(get(own))}
+            admit(("client", ANONYMOUS_CLIENT),
+                  {r["name"] for r in required(get(own + "/composite"))} - direct)
+    refused = sorted("client scope %s (%s)" % (name, ", ".join(sorted(admitted[("clientScope", name)])))
+                     for name in assigned if ("clientScope", name) in admitted)
+    if ("client", ANONYMOUS_CLIENT) in admitted:
+        refused.append("its own scope, through realm roles (%s)"
+                       % ", ".join(sorted(admitted[("client", ANONYMOUS_CLIENT)])))
     if refused:
         raise RuntimeError(
-            "Client scopes assigned to %s map catalog reads, which would reach anonymous visitors whatever "
-            "its own scope mapping says; remove them from these client scopes' scope mappings before "
-            "deploying, and use scripts/keycloak/set-catalog-access.sh --make-public for public catalogs: %s"
-            % (ANONYMOUS_CLIENT, "; ".join(refused)))
-    defaults = set(realm.get("defaultDefaultClientScopes", []) + realm.get("defaultOptionalClientScopes", []))
-    for kind in ("default", "optional") if live else ():
-        defaults.update(s["name"] for s in required(get(prefix + "/default-" + kind + "-client-scopes")))
-    for name in sorted(defaults & set(mapped)):
-        warn("realm default client scope %s maps %s; a recreated %s would be assigned it and give "
-             "anonymous visitors those catalogs" % (name, ", ".join(mapped[name]), ANONYMOUS_CLIENT))
+            "Catalog reads reach %s's tokens other than through its own scope mapping, so they would "
+            "reach anonymous visitors whatever that says; remove these scope mappings in Keycloak (or "
+            "the realm file) before deploying, and use scripts/keycloak/set-catalog-access.sh "
+            "--make-public for public catalogs: %s" % (ANONYMOUS_CLIENT, "; ".join(refused)))
+    for name in sorted(defaults - assigned):
+        if ("clientScope", name) in admitted:
+            warn("realm default client scope %s admits %s; a recreated %s would be assigned it and give "
+                 "anonymous visitors those catalogs" % (name, ", ".join(sorted(admitted[("clientScope", name)])),
+                                                         ANONYMOUS_CLIENT))
 
 
 def merge_catalog_policy(realm, get):
@@ -292,7 +346,7 @@ def merge_catalog_policy(realm, get):
     if observed is None:
         attributes[PENDING] = json.dumps({"policy": True, "reader": True}, sort_keys=True)
         realm["attributes"] = attributes
-        check_anonymous_client_scopes(realm, get, prefix, None, live=False)
+        check_anonymous_client_scopes(realm, get, prefix, None, None, live=False)
         return realm
     anonymous = required(get(prefix + "/clients?clientId=" + ANONYMOUS_CLIENT))
     pending = json.loads(observed_attrs[PENDING]) if PENDING in observed_attrs else None
@@ -314,7 +368,7 @@ def merge_catalog_policy(realm, get):
     api_clients = required(get(prefix + "/clients?clientId=" + API_CLIENT))
     api_id = api_clients[0]["id"] if api_clients else None
     check_catalog_reads_are_plain(realm, get, prefix, api_id)
-    deleted_roles = api_roles_config_cli_deletes(realm, observed_attrs)
+    deleted_roles = roles_config_cli_deletes(realm, observed_attrs, API_CLIENT)
 
     # Keep catalog-specific edges on managed composites. Their non-catalog behavior
     # remains configuration as code. catalog-public itself belongs entirely to operators.
@@ -367,7 +421,7 @@ def merge_catalog_policy(realm, get):
 
     if api_id:
         preserve_scope_mappings(realm, get, prefix, api_id, observed_attrs, seed_defaults, deleted_roles)
-    check_anonymous_client_scopes(realm, get, prefix, anonymous[0]["id"] if anonymous else None)
+    check_anonymous_client_scopes(realm, get, prefix, anonymous[0]["id"] if anonymous else None, api_id)
 
     if seed["reader"]:
         return realm  # The reader was absent at bootstrap; retry its declared defaults.
@@ -418,9 +472,12 @@ def merge_catalog_policy(realm, get):
             user["realmRoles"] = [r["name"] for r in mappings.get("realmMappings", []) if r["name"] not in default_roles]
             user["clientRoles"] = {name: [r["name"] for r in value["mappings"]]
                                    for name, value in mappings.get("clientMappings", {}).items()}
-            if API_CLIENT in user["clientRoles"]:
-                user["clientRoles"][API_CLIENT] = without_deleted(
-                    user["clientRoles"][API_CLIENT], deleted_roles, "the %s service account" % ANONYMOUS_CLIENT)
+            account_label = "the %s service account" % ANONYMOUS_CLIENT
+            user["realmRoles"] = without_deleted(
+                user["realmRoles"], roles_config_cli_deletes(realm, observed_attrs), account_label)
+            for name in user["clientRoles"]:
+                user["clientRoles"][name] = without_deleted(
+                    user["clientRoles"][name], roles_config_cli_deletes(realm, observed_attrs, name), account_label)
     return realm
 
 
