@@ -391,6 +391,13 @@ jobs:
     - name: Check that the deploy scripts default to the kind cluster's kubectl
       run: scripts/deploy/test-kind-kubectl-default.sh
 
+    # deploy.sh's temporary files are its own (mktemp under TMPDIR, removed on exit), so two
+    # deploys on one host never share one.
+    - name: Check deploy.sh's temporary files
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        scripts/deploy/test-deploy-temp-files.sh
+
     # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
     - name: Check the Keycloak database backup and restore scripts
       run: scripts/deploy/test-keycloak-db-scripts.sh
