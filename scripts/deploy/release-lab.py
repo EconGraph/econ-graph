@@ -464,7 +464,7 @@ def render_manifests(record):
     images = record['images']
     branch = 'lab-' + record['name']
     docs = renderer.render(branch, images['backend']['lab_tag'], images['frontend']['lab_tag'],
-                           True, images['crawler-worker']['lab_tag'])
+                           True, images['crawler-worker']['reference'])
     slug, branch_namespace = renderer.identity(branch)
     # The branch rendering's addresses become the lab's port-forward ports on localhost:
     # Keycloak's (its issuer and admin console) and the frontend's (its origin).
@@ -490,6 +490,10 @@ def render_manifests(record):
         if d['kind'] in ('Deployment', 'StatefulSet', 'Job'):
             for c in d['spec']['template']['spec'].get('initContainers', []) + \
                     d['spec']['template']['spec']['containers']:
+                # The renderer validates the verified source reference; the lab runs
+                # its already loaded local tag, whose format is kept in existing records.
+                if c['image'] == images['crawler-worker']['reference']:
+                    c['image'] = images['crawler-worker']['lab_tag']
                 if c['image'] in {i['lab_tag'] for i in images.values()}:
                     # Loaded into the node by the lab; never pulled.
                     c['imagePullPolicy'] = 'Never'
