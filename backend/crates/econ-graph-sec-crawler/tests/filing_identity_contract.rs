@@ -81,6 +81,9 @@ async fn repeated_ingest_preserves_legacy_id_and_refuses_silent_retargeting() {
         .await
         .unwrap_err();
     assert!(changed.to_string().contains("filing content changed"));
+    assert!(changed
+        .downcast_ref::<econ_graph_sec_crawler::storage::FilingIdentityConflict>()
+        .is_some());
     assert_eq!(
         storage
             .retrieve_xbrl_file("0000320193-24-000001")
@@ -218,6 +221,9 @@ async fn metadata_only_completion_is_atomic_preserves_identity_and_rejects_parti
         .await
         .unwrap_err();
     assert!(bad_metadata.to_string().contains("filing metadata changed"));
+    assert!(bad_metadata
+        .downcast_ref::<econ_graph_sec_crawler::storage::FilingIdentityConflict>()
+        .is_some());
     let (left, right) = tokio::join!(
         storage.store_xbrl_file(
             "0000320193-24-000001",

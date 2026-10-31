@@ -114,8 +114,18 @@ pub enum AnnotationAnchor {
         /// Legacy series annotations may also belong to a chart; preserve both identities.
         chart_id: Option<Uuid>,
         observation_date: Option<NaiveDate>,
+        /// Decimal strings preserve exact values; numeric JSON is rejected.
+        #[serde(default, deserialize_with = "decimal_string")]
         observation_value: Option<BigDecimal>,
     },
+}
+
+fn decimal_string<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<BigDecimal>, D::Error> {
+    Option::<String>::deserialize(deserializer)?
+        .map(|value| value.parse().map_err(serde::de::Error::custom))
+        .transpose()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
