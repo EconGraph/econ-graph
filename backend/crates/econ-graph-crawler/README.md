@@ -43,7 +43,8 @@ Disabling purging preserves the full delay. If a fetch returns NotFound before a
 That series is no longer a scheduling candidate until catalog discovery lists it again.
 
 Catalog discovery considers registered sources other than SEC, including static catalogs,
-unless an existing `data_sources` row is disabled. A source with no retained discovery
+unless an existing `data_sources` row is disabled. Neither refresh nor discovery includes a
+[licence-gated](#licence-gate) source. A source with no retained discovery
 history is eligible immediately. After a completed or cancelled discovery, the scheduler
 waits 7 days. After a terminal failure, once worker retries are exhausted, it waits 1 hour;
 consecutive failed discovery jobs double that delay up to 1 day. Successful discovery resets
@@ -57,7 +58,7 @@ The queue's unique index rejects concurrent duplicates, so no leader election is
 ## `crawler` CLI
 
 Reads `DATA_DATABASE_URL` (or `--database-url`; `DATABASE_URL` is not read) and source API keys from `FRED_API_KEY`, `BLS_API_KEY`,
-`BEA_API_KEY`, `CENSUS_API_KEY`.
+`BEA_API_KEY`, `CENSUS_API_KEY`, `WTO_API_KEY`.
 
 ```bash
 crawler enqueue  --source FRED --series GDP,UNRATE [--priority 1-10]   # fetch_series jobs
@@ -81,15 +82,59 @@ worker's environment as well as in the CLI's environment for direct `fetch` call
 Use `crawler --help` for the full command list. For queue-backed full-history re-fetches and
 progress reporting, see the [re-fetch guide](../../../docs/technical/OBSERVATION_PRECISION_REFETCH.md).
 
+## Licence gate
+
+The [licence gate](src/licence.rs) keeps the crawler from downloading a source that the
+maintainer has not decided to download. Sources whose terms restrict them are not all gated:
+FRED and WTO are downloaded and stored, and their catalogs are hidden from users through
+Keycloak catalog roles instead. The gate covers IMF, which the maintainer decided not to
+download, and SNB, BOJ and UN_STATS, which have restrictive or unclear terms, no adapter and no
+decision to download them. Each gated source has a `crawl_<source>` build flag in
+[`flags.flagd.json`](../../../config/flags/flags.flagd.json), off in both the `release` and
+`dev` profiles:
+
+| Source | Flag | Restriction | Review |
+|---|---|---|---|
+| IMF | `crawl_imf` | Bulk download by automated technology needs explicit permission; commercial reuse needs permission | [ECO-175](https://linear.app/econgraph/issue/ECO-175) |
+| BOJ | `crawl_boj` | Reproduction for commercial purposes needs the Bank's prior permission | [ECO-743](https://linear.app/econgraph/issue/ECO-743) |
+| SNB | `crawl_snb` | Use is permitted for non-commercial purposes only | [ECO-742](https://linear.app/econgraph/issue/ECO-742) |
+| UN_STATS | `crawl_un_stats` | The SDG Global Database states no terms; the generic UN terms allow personal, non-commercial use only | [ECO-182](https://linear.app/econgraph/issue/ECO-182) |
+
+The restrictions come from the
+[data source terms of use](https://linear.app/econgraph/document/data-source-terms-of-use-42433ce643db)
+register. Sources that aren't listed are not gated. While a source's flag is off:
+
+- `crawler-worker` registers no adapter for it, so its startup reference-data refresh, job
+  dispatch, scheduler and coverage never reach the source.
+- The worker never claims its jobs, whatever the case of their `source` value. Jobs already
+  queued stay `pending`, untouched: they aren't failed, retried or deleted. The worker logs why
+  once per process, and `crawler status` marks the source
+  `disabled: licence (<ticket>); not claimed`. A job claimed some other way is never fetched:
+  the worker returns it to `retrying` with the refusal as its error, without spending a retry.
+- The refresh scheduler neither refreshes nor re-discovers it.
+- `crawler enqueue`, `discover`, `fetch`, `refetch` and `record-reference-seeds`, and GraphQL
+  `triggerCrawl`, refuse it with the restriction and the ticket link.
+- `crawler sources` shows `disabled: licence (<ticket>)` in its `CRAWL` column.
+
+To crawl a gated source, first settle its licence question: written permission, a revised
+verdict in the register, or a maintainer decision to download it and restrict who sees it.
+Then set the flag's `defaultVariant` to `on` in
+[`flags.flagd.json`](../../../config/flags/flags.flagd.json), or in `dev.flagd.json` for
+development builds only, and run `node scripts/flags-merge`
+(see [feature flags](../../../config/flags/README.md)). The flag is compiled in, so the
+change takes effect on the next build.
+
 ## Development-only static catalogs
 
-Nine hardcoded catalogs (BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO) register behind
+Eight hardcoded catalogs (BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS) register behind
 the `static_catalogs` build flag; see [feature flags](../../../config/flags/README.md).
 They are on in the `dev` flag profile used by local Cargo builds and tests, and off in the
 `release` flag profile used by the Dockerfile and deployments. Cargo's `--release` option
 does not select the flag profile. To include static catalogs explicitly, use `FLAGS_PROFILE=dev cargo build --release -p
 econ-graph-crawler-worker`, or `--build-arg FLAGS_PROFILE=dev` to `backend/Dockerfile`. Their
-discovery writes a fixed series list with no HTTP and they can't fetch data.
+discovery writes a fixed series list with no HTTP and they can't fetch data. The BOJ, SNB and
+UN_STATS catalogs are licence-gated like any other adapter for those sources, so the queue
+never runs their discovery while the [licence gate](#licence-gate) flags are off.
 
 ## Tests
 

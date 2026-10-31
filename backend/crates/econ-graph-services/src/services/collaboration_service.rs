@@ -1475,8 +1475,7 @@ mod tests {
 
         let container = TestContainer::new().await;
         container.clean_database().await.unwrap();
-        let url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
+        let url = container.database_url().to_string();
         let single = DatabasePool::builder()
             .max_size(1)
             .connection_timeout(Duration::from_secs(1))

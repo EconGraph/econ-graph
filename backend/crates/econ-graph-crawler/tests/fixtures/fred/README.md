@@ -49,3 +49,10 @@ the copyright-notes safety net keeps the series. The observations use FRED's doc
 a single vintage and match FRED's published values; the
 [fixture generator](make_observations_usrec.py) writes them from the list of recession months, so
 edit and rerun it rather than editing the JSON.
+
+`release_series_53.json` uses the documented
+[`/fred/release/series` response format](https://fred.stlouisfed.org/docs/api/fred/release_series.html)
+for one catalog page of release 53 (Gross Domestic Product), in `series_id` order. It is
+synthetic: three series that a `title_contains = "gross domestic product"` rule matches (one of
+them titled `(DISCONTINUED)`) and one that it does not. The `crawler check-selection` tests
+(`src/check_selection/tests.rs`) read it.

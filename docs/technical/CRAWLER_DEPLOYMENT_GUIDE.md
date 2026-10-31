@@ -29,6 +29,7 @@ crawler status   [--json]                            # queue-derived status
 crawler sources                                      # known sources, policies, API key state
 crawler fetch    --source FRED --series GDP          # one fetch now, bypassing the queue (debugging)
 crawler migrate  [--dry-run]                         # apply (or list) pending data migrations
+crawler check-selection [--source FRED,BEA] [--json] # curated lists and rules vs live catalogs (no database)
 ```
 
 From a checkout, run Cargo commands from `backend/` (`cd backend` from the repository
@@ -57,7 +58,9 @@ Kubernetes: `k8s/manifests/crawler-worker.yaml` (one replica, `Recreate`, image
 `scripts/deploy/build-images.sh` and `scripts/deploy/deploy.sh` build and apply it. The worker
 does not run migrations. Before applying it, `deploy.sh` runs the Job `crawler-migrate`
 (`k8s/manifests/crawler-migrate-job.yaml`, `/app/crawler migrate` from the same image), which
-applies the data migrations and must complete; see
+applies the data migrations and must complete. When any data migration is pending, `deploy.sh`
+first stops the running worker (`precheck-db-migration.sh --stop-crawler`), so it doesn't write
+while they run; see
 [database migrations](../development/MIGRATIONS.md#applying-the-data-set-crawler-migrate).
 
 Configuration (flags or environment):
@@ -74,22 +77,23 @@ Configuration (flags or environment):
 | `CRAWLER_HTTP_TIMEOUT_SECS` | 30 | ordinary HTTP request timeout; source reference-file requests use at least 120 seconds |
 | `CRAWLER_DATA_DIR` | `/app/data` in the image | crawler selection files and dataset definitions, described below |
 | `REFERENCE_DATA_DIR` | `/app/reference` in the image | shared country data and backend search abbreviations, described below |
-| `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY` | unset | from Secret `crawler-api-keys`; the worker starts without them, but FRED, BEA and Census jobs fail with an auth error when their key is missing |
+| `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY`, `WTO_API_KEY` | unset | from Secret `crawler-api-keys`; the worker starts without them, but FRED, BEA and Census jobs fail with an auth error when their key is missing. Without `WTO_API_KEY` the worker leaves the WTO source out entirely (no discovery, refreshes or coverage gauges) and logs a warning at startup |
 | `CRAWLER_SCHEDULER` | true | enqueue due refreshes and catalog discovery in the background (see below); `false` disables it, leaving `triggerCrawl` / the CLI as the only way to enqueue work |
 | `CRAWLER_SCHEDULER_INTERVAL_SECS` | 300 | seconds between scheduler ticks |
 
 The crawler reads its selection files and dataset definitions from `CRAWLER_DATA_DIR`,
 which defaults to `backend/crates/econ-graph-crawler/data/` in a source checkout.
-`bls_series.csv` and `fred_series.csv` select series to crawl; BLS supplies its series’ titles,
-units and frequency. `wdi_indicators.csv` selects World Bank indicators and their units, and
-`bea_tables.csv` selects BEA tables. Dataset definitions live in `datasets/<source>.toml`;
+`bls_series.csv` selects BLS series to crawl; BLS supplies their titles, units and frequency.
+`wdi_indicators.csv` selects World Bank indicators and their units.
+`catalog_selection/fred.toml` and `catalog_selection/bea.toml` hold the rules that select FRED
+and BEA series from the upstream catalogs. Dataset definitions live in `datasets/<source>.toml`;
 the production adapters use `fred.toml`, `bls.toml`, `bea.toml`, `census.toml`, `fhfa.toml` and
 `world_bank.toml`.
 
-Before processing jobs, the worker loads the BLS and FRED lists and validates dataset
-definitions for every registered adapter. Missing or invalid files in these startup checks
-stop the worker. The World Bank indicator list and BEA table list are loaded when their
-adapters first need them. These loaders cache their results, including errors, for the
+Before processing jobs, the worker loads the BLS list and the FRED and BEA selection rules,
+and validates dataset definitions for every registered adapter. Missing or invalid files in
+these startup checks stop the worker. The World Bank indicator list is loaded when its
+adapter first needs it. These loaders cache their results, including errors, for the
 process lifetime; restart the worker after correcting a file.
 
 `REFERENCE_DATA_DIR` defaults to `backend/crates/econ-graph-core/data/` in a source checkout.
@@ -120,7 +124,7 @@ fetching still goes through the same worker loop as a manual `crawler enqueue`. 
    A series that has never been crawled is due immediately. A series whose `crawl_status`
    is `failed` backs off to twice its interval, measured from the latest of its last crawl
    and its last attempt. A persisted series marked `not_found` backs off to ten times its
-   interval instead.
+   interval instead, as does one marked `absent` (a complete BEA response omitted it).
 
    A discovered series without an `economic_series` row has no attempt history, so its last
    failed `fetch_series` queue row supplies the failure time. Finished queue rows are purged
@@ -129,6 +133,13 @@ fetching still goes through the same worker loop as a manual `crawler enqueue`. 
    twice-the-interval backoff applies. If the provider reports a metadata-only series as
    not found, the worker deactivates its `series_metadata` row instead; it becomes a candidate
    again only when catalog discovery lists that id again.
+
+   Sources that track publication lifecycle (FRED and BEA) keep the row active instead and
+   count confirmed NotFound results (and, separately, BEA responses that omit the series). A
+   series with a publication state other than active is not a candidate, except one retired
+   only by those fetch results (three NotFound, or six omissions in a row): it is
+   probed once every 12 intervals, and a successful fetch makes it active again (see the
+   [crawler coverage runbook](../monitoring/crawler-coverage-runbook.md#catalog-selection-and-retained-series)).
 
    Only sources in `CRAWLER_SOURCES` (default: all) are considered, and only series whose
    `data_sources` row is enabled and whose own `is_active` flag is set; for Census, only ids
@@ -146,9 +157,9 @@ fetching still goes through the same worker loop as a manual `crawler enqueue`. 
    retained queue rows (14 days by default); purging history can reset the backoff, never
    lengthen it. Sources whose `data_sources` row is disabled are excluded.
 
-   This applies to every adapter in `default_registry()`: FRED, BLS, BEA, Census, FHFA and
+   This applies to every adapter in `default_registry()`: FRED, BLS, BEA, Census, FHFA, WTO and
    World Bank with the release flag profile. The `static_catalogs` build flag also registers
-   ten static catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO). It is enabled
+   nine static catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS). It is enabled
    by `FLAGS_PROFILE=dev`, the local Cargo default, and disabled by `FLAGS_PROFILE=release`,
    the image default. Cargo’s `--release` option controls optimization independently; static
    catalogs are selected through [build flags](../../config/flags/README.md#how-the-backend-reads-it),
@@ -190,6 +201,50 @@ cd backend && cargo run -p econ-graph-crawler --bin crawler -- record-reference-
 ```
 
 It replaces that source's previous seed migration. If any list fails to download or parse, it writes nothing and names every failure; `--skip-failed` writes the rest and leaves the failed lists for the crawl. A refused (401, 403) or throttled (429) request stops it at once. Never write or edit a seed by hand: made-up validators would let the crawl keep wrong labels as unchanged.
+
+## Check curated lists and selection rules
+
+`crawler check-selection` checks each source's curated list or catalog selection rules against
+the source's live upstream catalog, without a database and without writing anything (its
+database pool cannot connect, so a read or write would fail the check). With no `--source` it
+checks FRED, BEA, BLS, World Bank, Census and FHFA, one source at a time; what each check
+downloads and reports is in [Data sources](../data-sources/README.md#checking-selections-against-the-live-catalogs).
+
+Its requests follow the worker's per-source policies and retries, at `--rate-percent` (default
+25) of each policy's rate, burst and concurrency. Its rate limiter is its own, so beside a
+running worker on the same API keys the two together send up to 125% of each policy rate. For
+FRED, whose policy is its 120-a-minute limit, that is up to 150 a minute (the fetcher backs off
+on 429s). BEA also caps data volume per minute and locks a key out for an hour when exceeded.
+To stay within the limits, run the check while the worker is idle.
+
+```bash
+crawler check-selection --source FRED,BEA        # text report
+crawler check-selection --json                   # every source, as JSON
+```
+
+| Exit status | Meaning |
+|---|---|
+| 0 | every checked source is clean |
+| 1 | a source has a problem (missing, discontinued, restricted, over-broad, over-cap, over-quota) |
+| 2 | a source's check could not finish (download, parse or authentication failure) |
+| 3 | nothing worse, but a source was skipped because its API key is not set |
+| 64 | the command line was refused: a parse error, or a source `check-selection` doesn't check or that is licence-gated |
+
+The API keys live only in the cluster's `crawler-api-keys` Secret, so run the check there:
+
+```bash
+scripts/deploy/check-selection.sh --namespace econ-graph [--source FRED] [--json]
+scripts/deploy/check-selection.sh --namespace econ-graph-br-<slug> --image econ-graph-crawler-worker:<tag>
+```
+
+The script requires `--namespace`. It runs the check as a one-off Job with the namespace's
+`crawler-worker` image (or `--image`) and that namespace's optional key references, so keys never
+appear on a command line or in output. It waits, prints the Job's log, deletes the Job and exits
+with the check's status (its own usage errors exit 64, a Job that doesn't finish 4). It refuses
+to start (exit 5) while another `crawler-check-selection` Job is running in the namespace, and
+warns, naming the combined rate, when the namespace's `crawler-worker` is running; it never
+scales the worker. A branch namespace without `crawler-api-keys` reports the keyed sources as
+skipped.
 
 ## Retries
 

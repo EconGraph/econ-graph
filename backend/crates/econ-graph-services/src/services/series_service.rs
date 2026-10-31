@@ -16,6 +16,24 @@ use econ_graph_core::{
     schema::{data_points, economic_series},
 };
 
+/// Public reads exclude legally restricted series independently of activity filters.
+/// Internal crawler storage remains untouched; a missing lifecycle row means active.
+pub fn public_series_predicate() -> diesel::expression::SqlLiteral<Bool> {
+    sql::<Bool>(&public_series_sql("economic_series"))
+}
+
+/// Restriction condition shared by public series and observation readers.
+const PUBLIC_SERIES_SQL: &str = "NOT EXISTS (SELECT 1 FROM series_lifecycle lifecycle \
+    WHERE lifecycle.source_id = {series}.source_id \
+      AND lifecycle.external_id = {series}.external_id \
+      AND lifecycle.status = 'restricted')";
+
+/// Build the public restriction condition for a trusted, code-defined SQL table alias.
+/// Never pass user input as `series_alias`.
+pub fn public_series_sql(series_alias: &str) -> String {
+    PUBLIC_SERIES_SQL.replace("{series}", series_alias)
+}
+
 /// **List Economic Series with Filtering**
 ///
 /// Retrieves a filtered list of economic time series from the database based on search parameters.
@@ -142,6 +160,7 @@ fn filtered_series(
     let mut query = economic_series::table
         .filter(economic_series::is_active.eq(params.is_active.unwrap_or(true)))
         .filter(economic_series::end_date.is_not_null())
+        .filter(public_series_predicate())
         .into_boxed();
 
     if let Some(sources) = sources {
@@ -236,6 +255,7 @@ pub async fn get_series_by_id(
 
     let series = economic_series::table
         .filter(economic_series::id.eq(series_id))
+        .filter(public_series_predicate())
         .select(EconomicSeries::as_select())
         .first::<EconomicSeries>(&mut *conn)
         .await
@@ -245,7 +265,7 @@ pub async fn get_series_by_id(
 }
 
 /// The catalog (its data source's `name`) of the series with this id, observations or not;
-/// `None` when there is no such series.
+/// `None` when there is no such series or it is restricted, as for [`series_exists`].
 pub async fn series_catalog(
     pool: &DatabasePool,
     series_id: uuid::Uuid,
@@ -259,6 +279,7 @@ pub async fn series_catalog(
     economic_series::table
         .inner_join(data_sources::table)
         .filter(economic_series::id.eq(series_id))
+        .filter(public_series_predicate())
         .select(data_sources::name)
         .first::<String>(&mut *conn)
         .await
@@ -275,6 +296,7 @@ pub async fn series_exists(pool: &DatabasePool, series_id: uuid::Uuid) -> AppRes
     })?;
     Ok(economic_series::table
         .find(series_id)
+        .filter(public_series_predicate())
         .select(economic_series::id)
         .first::<uuid::Uuid>(&mut *conn)
         .await
@@ -495,6 +517,13 @@ fn filtered_data_points(
 ) -> data_points::BoxedQuery<'static, diesel::pg::Pg> {
     let mut query = data_points::table
         .filter(data_points::series_id.eq(params.series_id))
+        .filter(
+            data_points::series_id.eq_any(
+                economic_series::table
+                    .filter(public_series_predicate())
+                    .select(economic_series::id),
+            ),
+        )
         .into_boxed();
 
     if let Some(start_date) = params.start_date {
@@ -513,10 +542,12 @@ fn filtered_data_points(
         query = query.filter(data_points::is_original_release.eq(true));
     }
     if as_of_or_latest {
-        query = query.filter(econ_graph_core::models::revision_filter(
-            params.as_of,
-            original_only,
-        ));
+        query = query.filter(
+            econ_graph_core::models::revision_filter_excluding_synthetic(
+                params.as_of,
+                original_only,
+            ),
+        );
     }
 
     query

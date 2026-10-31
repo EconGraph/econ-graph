@@ -4,7 +4,8 @@
 # https only, without the admin and debug paths; localhost stays as it was), the rate
 # limits cover the copies, plain http and www redirect to https://<host>, Keycloak's
 # hostname and the backend's issuer agree on https://<host>/idp/realms/econ-graph, the
-# JWKS stays in-cluster, the realm import allows the public origin plus localhost, CORS
+# JWKS stays in-cluster, the realm import allows the public origin only (the committed
+# manifests keep localhost), CORS
 # gains the origin once, and bad host names are refused.
 #
 # Needs python3 with PyYAML. Usage: scripts/deploy/test-render-public-host.sh
@@ -86,9 +87,9 @@ check "the backend's issuer is Keycloak's" \
 check "the JWKS is still fetched in-cluster" \
   "env('Deployment', 'econ-graph-backend', 'backend', 'OIDC_JWKS_URL').startswith('http://keycloak-service:8080/')"
 check "Keycloak's realm placeholders use the public origin" \
-  "env('Deployment', 'keycloak', 'keycloak', 'KC_WEB_BASE_URL') == 'https://econgraph.com' and env('Deployment', 'keycloak', 'keycloak', 'KC_WEB_E2E_BASE_URL') == 'http://localhost'"
-check "the realm import allows the public origin and localhost" \
-  "env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_BASE_URL') == 'https://econgraph.com' and env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_E2E_BASE_URL') == 'http://localhost'"
+  "env('Deployment', 'keycloak', 'keycloak', 'KC_WEB_BASE_URL') == 'https://econgraph.com' and env('Deployment', 'keycloak', 'keycloak', 'KC_WEB_E2E_BASE_URL') == 'https://econgraph.com'"
+check "the realm import allows the public origin only" \
+  "env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_BASE_URL') == 'https://econgraph.com' and env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_E2E_BASE_URL') == 'https://econgraph.com'"
 check "CORS allows the public origin first and keeps the local one" \
   "docs[('ConfigMap', 'econ-graph-config')]['data']['CORS_ORIGIN'] == 'https://econgraph.com,http://localhost,http://localhost:3000'"
 check "cloudflared is untouched (0 replicas, as committed)" \
@@ -98,13 +99,51 @@ check "cloudflared is untouched (0 replicas, as committed)" \
 twice="$("$render" econgraph.com - <<<"$rendered")"
 [ "$twice" = "$rendered" ] || fail "rendering is not idempotent"
 
-# The rendered realm-import values give the redirect URIs the realm needs.
-realm="$(env -i PATH="$PATH" KC_WEB_BASE_URL=https://econgraph.com KC_WEB_E2E_BASE_URL=http://localhost \
-  "${repo_root}/scripts/keycloak/render-realm.sh" "${repo_root}/config/keycloak/econ-graph-realm.json")"
-for uri in https://econgraph.com/auth/callback https://econgraph.com/silent-callback.html \
-  http://localhost/auth/callback; do
-  grep -qF -- "\"$uri\"" <<<"$realm" || fail "realm redirect URIs lack $uri"
+# web_client MANIFESTS: the econ-graph-web client of the realm rendered with the realm-import
+# Job's KC_WEB_BASE_URL and KC_WEB_E2E_BASE_URL from MANIFESTS (stdin), as JSON with its
+# redirectUris, webOrigins and post-logout redirect URIs.
+web_client() {
+  local values base e2e
+  values="$(python3 -c '
+import sys, yaml
+for d in yaml.safe_load_all(sys.stdin):
+    if d and d["kind"] == "Job" and d["metadata"]["name"] == "keycloak-realm-import":
+        for c in d["spec"]["template"]["spec"]["initContainers"] + d["spec"]["template"]["spec"]["containers"]:
+            env = {e["name"]: e.get("value") for e in c.get("env", [])}
+            if "KC_WEB_BASE_URL" in env:
+                print(env["KC_WEB_BASE_URL"], env["KC_WEB_E2E_BASE_URL"])
+                break
+')"
+  read -r base e2e <<<"$values"
+  env -i PATH="$PATH" KC_WEB_BASE_URL="$base" KC_WEB_E2E_BASE_URL="$e2e" \
+    "${repo_root}/scripts/keycloak/render-realm.sh" "${repo_root}/config/keycloak/econ-graph-realm.json" |
+    python3 -c '
+import json, sys
+client = next(c for c in json.load(sys.stdin)["clients"] if c["clientId"] == "econ-graph-web")
+print(json.dumps({
+    "redirectUris": client["redirectUris"],
+    "webOrigins": client["webOrigins"],
+    "postLogout": client["attributes"]["post.logout.redirect.uris"].split("##"),
+}))'
+}
+
+# With a public host, the web client accepts the public host only: no localhost redirect URI,
+# web origin or post-logout URI.
+public_client="$(web_client <<<"$rendered")"
+for uri in https://econgraph.com/auth/callback https://econgraph.com/silent-callback.html; do
+  grep -qF -- "\"$uri\"" <<<"$public_client" || fail "public realm redirect URIs lack $uri"
 done
+grep -qF -- '"https://econgraph.com"' <<<"$public_client" || fail "public realm web origins lack the host"
+if grep -q localhost <<<"$public_client"; then
+  fail "public realm still allows localhost: $public_client"
+fi
+
+# Without one (the committed manifests: local clusters), it keeps localhost.
+local_client="$(web_client <"$manifests/keycloak/realm-import-job.yaml")"
+for uri in http://localhost/auth/callback http://localhost/silent-callback.html; do
+  grep -qF -- "\"$uri\"" <<<"$local_client" || fail "local realm redirect URIs lack $uri"
+done
+grep -qF -- '"http://localhost"' <<<"$local_client" || fail "local realm web origins lack localhost"
 
 for bad in localhost "" "econgraph" "https://econgraph.com" "econgraph.com/" "www.econgraph.com" \
   "econ graph.com" "-econgraph.com"; do

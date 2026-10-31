@@ -27,6 +27,7 @@ const sources: DataSource[] = [
     seriesCount: 1234,
     createdAt: '2026-10-01T00:00:00Z',
     updatedAt: '2026-10-01T00:00:00Z',
+    notice: null,
   },
   {
     id: '0199a0e0-0000-7000-8000-000000000002',
@@ -38,6 +39,7 @@ const sources: DataSource[] = [
     seriesCount: 18,
     createdAt: '2026-10-01T00:00:00Z',
     updatedAt: '2026-10-01T00:00:00Z',
+    notice: null,
   },
 ];
 
@@ -50,6 +52,30 @@ const mockSources = (data: DataSource[] | undefined, extra: object = {}) =>
   } as unknown as ReturnType<typeof useDataSources>);
 
 describe('DataSources', () => {
+  it('shows the publication lifecycle counts reported by each source', () => {
+    mockSources([
+      {
+        ...sources[0],
+        lifecycleCounts: {
+          discontinued: 2,
+          missingFromCatalog: 3,
+          retired: 4,
+          superseded: 5,
+        },
+      },
+    ]);
+    renderWithProviders(<DataSources />);
+    const fred = within(screen.getByRole('region', { name: sources[0].name }));
+    for (const [label, count] of [
+      ['Discontinued', '2'],
+      ['Missing from catalog', '3'],
+      ['Retired', '4'],
+      ['Superseded', '5'],
+    ]) {
+      expect(fred.getByText(label).parentElement).toHaveTextContent(count);
+    }
+  });
+
   it("shows each source's series count and their total", () => {
     mockSources(sources);
     renderWithProviders(<DataSources />);

@@ -285,11 +285,13 @@ jobs:
 
     # The postgres-backup CronJob's backup, sync and restore scripts, in its
     # images, against scratch econ_graph, econ_graph_app and keycloak databases
-    # and an S3 mock.
+    # and an S3 mock; and backup-postgres-now.sh, which starts one, against a stub
+    # kubectl.
     - name: Check the backup and restore scripts
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-postgres-backup-scripts.sh
+        scripts/deploy/test-backup-postgres-now.sh
 
   deploy-manifests:
     name: Deploy Manifest Rendering
@@ -308,15 +310,18 @@ jobs:
 
     # deploy.sh applies PUBLIC_HOST (https://econgraph.com) to the localhost-only
     # manifests through render-public-host.py and lib/public-host.sh; check the
-    # rendering against the manifests, and the library and the cut-over's rollback
-    # NetworkPolicy step against a stub kubectl.
+    # rendering against the manifests, the library and the cut-over's rollback
+    # NetworkPolicy step against a stub kubectl, and check-public-site.sh's www
+    # redirect checks against a stub curl.
     - name: Check the public-host rendering
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-render-public-host.sh
+        scripts/deploy/test-check-public-site.sh
         scripts/deploy/test-public-host-lib.sh
         python3 scripts/deploy/test-cloudflare-dns-token.py
         scripts/deploy/test-cutover-rollback-policy.sh
+        scripts/deploy/test-stage-tunnel-origin-ca.sh
 
     - name: Check isolated branch rendering and deployment guards
       run: |
@@ -379,9 +384,12 @@ jobs:
       run: scripts/deploy/test-install-kind.sh
 
     # The pre-deploy database check (backup running, crawler stop, long transactions),
-    # against a stub kubectl.
+    # and deploy.sh's use of it when data migrations are pending, against a stub kubectl.
     - name: Check the pre-deploy database check
-      run: scripts/deploy/test-precheck-db-migration.sh
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        scripts/deploy/test-precheck-db-migration.sh
+        scripts/deploy/test-data-migrations.sh
 
     # Loading a release candidate's GHCR images into the kind cluster, the
     # restart and image check after deploy.sh, and the rollback, against stub
@@ -412,6 +420,13 @@ jobs:
     # identity printed first, and the resume hint keeping the run's options, against stubs.
     - name: Check the full-history re-fetch script
       run: scripts/deploy/test-refetch-full-history.sh
+
+    # The selection check Job: --namespace required, the crawler-worker image and optional key
+    # refs, cleanup before and after, and the check's exit status, against stubs.
+    - name: Check the selection check script
+      run: |
+        shellcheck -x scripts/deploy/check-selection.sh scripts/deploy/test-check-selection.sh
+        scripts/deploy/test-check-selection.sh
 
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
@@ -601,6 +616,11 @@ jobs:
         python3 scripts/keycloak/test_preserve_catalog_grants.py
         scripts/check-keycloak-roles
 
+    - name: Check the catalog-access operator script against stubs
+      run: |
+        shellcheck -x scripts/keycloak/set-catalog-access.sh scripts/keycloak/test-set-catalog-access.sh
+        scripts/keycloak/test-set-catalog-access.sh
+
     - name: Check the branch-clone delete safety checks
       run: scripts/backup/test-branch-clone.sh
 
@@ -783,8 +803,8 @@ jobs:
   # are picked up automatically. Tests read DATABASE_URL (see
   # econ-graph-core/src/test_utils.rs); when it is unset they fall back to
   # testcontainers, which also works here because ubuntu-latest has Docker.
-  # --test-threads=1: many DB tests drop/recreate the public schema of the shared
-  # database, so running them concurrently within one test binary is flaky.
+  # The suites run in parallel: each TestContainer test gets a scratch database of its
+  # own on that server, so a test that drops its schema drops no one else's.
   backend-workspace-tests:
     name: Backend Workspace Tests (all tests)
     runs-on: ubuntu-latest
@@ -819,6 +839,18 @@ jobs:
       with:
         ref: ${{ github.event.inputs.branch || github.ref }}
         persist-credentials: false
+
+    # The runner image's SDKs this job never uses: about 34 GB on ubuntu-24.04, more than
+    # the job's own peak (a 12 GB target dir). Runners don't all have the same free space,
+    # and a full disk fails the job with only "No space left on device" from the runner.
+    # The deletion takes about two minutes, so it runs in the background: the disk peaks
+    # much later. The prune keeps the running Postgres service's image.
+    - name: Free runner disk
+      run: |
+        df -h /
+        nohup sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/hostedtoolcache /usr/local/.ghcup \
+          /usr/share/swift /usr/local/share/powershell >/dev/null 2>&1 &
+        docker image prune --all --force || true
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
@@ -878,6 +910,20 @@ jobs:
         done
       working-directory: backend
 
+    - name: Run publication lifecycle and public visibility regressions (required)
+      run: |
+        set -euo pipefail
+        : "${DATABASE_URL:?DATABASE_URL is required for lifecycle regressions}"
+        for filter in graphql::lifecycle::tests graphql::lifecycle_visibility_tests; do
+          log="$RUNNER_TEMP/lifecycle-${filter//:/_}.log"
+          cargo test -p econ-graph-graphql --lib "$filter" -- --test-threads=1 --nocapture | tee "$log"
+          grep -Eq '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' "$log"
+        done
+        log="$RUNNER_TEMP/lifecycle-cross-section.log"
+        cargo test -p econ-graph-services --lib restricted_series -- --test-threads=1 --nocapture | tee "$log"
+        grep -Eq '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' "$log"
+      working-directory: backend
+
     - name: Run catalog and anonymous permission regressions (required)
       run: |
         set -euo pipefail
@@ -885,7 +931,7 @@ jobs:
         cargo test -p econ-graph-auth --lib anonymous::tests -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/anonymous-catalog.log"
         grep -Eq '^test result: ok\. 15 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/anonymous-catalog.log"
         cargo test -p econ-graph-graphql --test catalog_authorization -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-auth.log"
-        grep -Eq '^test result: ok\. 6 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-auth.log"
+        grep -Eq '^test result: ok\. 7 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-auth.log"
         cargo test -p econ-graph-services --lib trusted_plane_tests -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-trust.log"
         grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/catalog-trust.log"
         cargo test -p econ-graph-services --lib services::series_check::tests::readable_series_exists_applies_the_plane_answer_and_the_callers_grants -- --exact --test-threads=1 --nocapture | tee "$RUNNER_TEMP/catalog-plane-grants.log"
@@ -946,6 +992,21 @@ jobs:
         done
       working-directory: backend
 
+    # Checkpoints, not only the report at the end: they show where the disk filled. When it
+    # fills, the runner can lose the step logs, but annotations survive (they did on main).
+    - name: Disk checkpoint (after the required regressions)
+      if: ${{ !cancelled() }}
+      env:
+        CHECKPOINT: after the required regressions
+      run: &disk_checkpoint |
+        # As annotations, which outlast the step logs when the disk fills.
+        free_gb="$(df --output=avail -BG / | tail -1 | tr -dc 0-9)" || free_gb=
+        target="$(du -sh backend/target 2>/dev/null | cut -f1)" || target=
+        echo "::notice::disk ${CHECKPOINT}: ${free_gb:-?} GB free, target dir ${target:-none}"
+        if [ -n "$free_gb" ] && [ "$free_gb" -lt 20 ]; then
+          echo "::warning::only ${free_gb} GB free on /"
+        fi
+
     # No lint exemptions for the new crawler crate (the workspace-wide clippy in
     # backend-smoke-tests still carries ~23 -A exemptions for legacy code).
     # --no-deps keeps -D warnings scoped to the crawler crates; without it the
@@ -982,10 +1043,10 @@ jobs:
         cargo test -p econ-graph-core crawl_queue -- --test-threads=1
         cargo test -p econ-graph-core --lib models::dataset -- --test-threads=1
         cargo test -p econ-graph-graphql --lib graphql::datasets -- --test-threads=1
-        cargo test -p econ-graph-services queue_service -- --test-threads=1
-        cargo test -p econ-graph-services cross_section -- --test-threads=1
+        cargo test -p econ-graph-services queue_service
+        cargo test -p econ-graph-services cross_section
         cargo test -p econ-graph-graphql --lib cross_section -- --test-threads=1
-        cargo test -p econ-graph-services search_service -- --test-threads=1
+        cargo test -p econ-graph-services search_service
         cargo test -p econ-graph-graphql --lib graphql::search_filter_db_tests -- --test-threads=1
       working-directory: backend
 
@@ -998,13 +1059,13 @@ jobs:
         cargo build --release -p econ-graph-crawler --bin crawler
         release_sources="$(target/release/crawler sources)"
         echo "$release_sources"
-        for live in FRED BLS BEA CENSUS WORLD_BANK FHFA BOC; do
+        for live in FRED BLS BEA CENSUS WORLD_BANK FHFA WTO BOC; do
           if ! echo "$release_sources" | grep -qE "^$live\b.*\byes\b"; then
             echo "::error::$live has no adapter in a release build"
             exit 1
           fi
         done
-        for gone in IMF ECB OECD BOE BOJ RBA SNB UN_STATS ILO WTO; do
+        for gone in IMF ECB OECD BOE BOJ RBA SNB UN_STATS ILO; do
           if echo "$release_sources" | grep -qE "^$gone\b.*\byes\b"; then
             echo "::error::$gone has an adapter in a release build"
             exit 1
@@ -1014,16 +1075,28 @@ jobs:
       env:
         FLAGS_PROFILE: release
 
+    - name: Disk checkpoint (after the feature and release builds)
+      if: ${{ !cancelled() }}
+      env:
+        CHECKPOINT: after the feature and release builds
+      run: *disk_checkpoint
+
     # The complete workspace suite is required, including integration tests.
     - name: Run all workspace tests (lib, bins, integration tests)
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         status=0
-        cargo test --workspace --no-fail-fast --lib --bins --tests -- --test-threads=1 || status=$?
+        cargo test --workspace --no-fail-fast --lib --bins --tests || status=$?
         # The XBRL integration tests need the xbrl-parser feature (required-features).
-        cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests -- --test-threads=1 || status=$?
+        cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests || status=$?
         exit $status
       working-directory: backend
+
+    - name: Disk checkpoint (before the doctests)
+      if: ${{ !cancelled() }}
+      env:
+        CHECKPOINT: before the doctests
+      run: *disk_checkpoint
 
     # Report documentation failures even when the broader test step failed.
     - name: Run workspace doctests
@@ -1036,6 +1109,17 @@ jobs:
         cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --doc || status=$?
         exit $status
       working-directory: backend
+
+    # Headroom left at the end of the job, and what used it.
+    - name: Disk usage
+      if: always()
+      env:
+        CHECKPOINT: end of job
+      run: |
+        df -h / || true
+        du -sh backend/target backend/target/* ~/.cargo/registry ~/.rustup 2>/dev/null || true
+        docker system df || true
+        echo "::notice::disk end of job: $(df --output=avail -BG / | tail -1 | tr -dc 0-9) GB free"
 
   backend-db-tests:
     # One job for all database-backed lib tests. They used to be 13 jobs that

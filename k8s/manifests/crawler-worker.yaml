@@ -9,9 +9,10 @@
 #
 # API keys come from the optional Secret `crawler-api-keys`. Every key is optional:
 # the worker starts without them, and jobs for a source that requires a missing key
-# fail with an auth error (the source is then paused, see CRAWLER_PAUSE_AFTER). Never commit real values; create the Secret out of band
-# with scripts/deploy/create-secrets.sh, which reads FRED_API_KEY, BLS_API_KEY, BEA_API_KEY
-# and CENSUS_API_KEY from the environment and stores whichever are set.
+# fail with an auth error (the source is then paused, see CRAWLER_PAUSE_AFTER), except
+# WTO, which is skipped entirely (a warning at startup) until WTO_API_KEY is set. Never commit real values; create the Secret out of band
+# with scripts/deploy/create-secrets.sh, which reads FRED_API_KEY, BLS_API_KEY, BEA_API_KEY,
+# CENSUS_API_KEY and WTO_API_KEY from the environment and stores whichever are set.
 #
 # Afterwards: kubectl -n econ-graph rollout restart deployment/crawler-worker
 apiVersion: apps/v1
@@ -144,6 +145,12 @@ spec:
             secretKeyRef:
               name: crawler-api-keys
               key: census-api-key
+              optional: true
+        - name: WTO_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: crawler-api-keys
+              key: wto-api-key
               optional: true
         resources:
           requests:

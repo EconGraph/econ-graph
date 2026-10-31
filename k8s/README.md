@@ -276,7 +276,8 @@ connection's own.
 **The host name is one setting, `PUBLIC_HOST`.** `deploy.sh` and `restart-k8s-rollout.sh`
 apply it through `scripts/deploy/lib/public-host.sh` and
 `scripts/deploy/render-public-host.py`. The committed manifests stay localhost-only, and
-`http://localhost` keeps working on the host:
+`http://localhost` still serves the app on the host, but signing in works only on
+`https://econgraph.com`: the realm accepts no localhost redirect:
 
 | What | Value for `PUBLIC_HOST=econgraph.com` |
 | --- | --- |
@@ -284,7 +285,7 @@ apply it through `scripts/deploy/lib/public-host.sh` and
 | HTTPRoutes | a separate `<name>-public` route per localhost one, for `econgraph.com` on listener `https` only, labelled `econgraph.io/public-host=true`, without `/admin`, `/api/admin` and `/playground`; the rate limits cover them |
 | `www.econgraph.com` and plain http | `econ-graph-www-redirect` and `econ-graph-public-redirect`: permanent redirects to `https://econgraph.com`, same path |
 | Keycloak `KC_HOSTNAME` | `https://econgraph.com/idp`; the admin console stays on the port-forward (`KC_HOSTNAME_ADMIN`) |
-| Realm client `econ-graph-web` | redirect URIs and web origins for `https://econgraph.com` and `http://localhost` |
+| Realm client `econ-graph-web` | redirect URIs and web origins for `https://econgraph.com` only (`KC_WEB_BASE_URL` and `KC_WEB_E2E_BASE_URL`); without a public host, `http://localhost` |
 | Backend `OIDC_ISSUER` | `https://econgraph.com/idp/realms/econ-graph`; the signing keys are still fetched in-cluster (`OIDC_JWKS_URL`) |
 | Backend `CORS_ALLOWED_ORIGINS` | `https://econgraph.com` added to `http://localhost,http://localhost:3000` |
 
@@ -519,11 +520,14 @@ name it. The data and app databases each have a role `econgraph`, created by the
   `crawler-migrate` Job read it as `DATA_DATABASE_URL`, and so does the backend (optional there).
 - `app-database-url`: the backend reads it as `APP_DATABASE_URL` and applies the app migrations
   to it at startup. It names `econ_graph_app` on
-  `app-postgres-service` (`APP_DATABASE=separate`), or, in a cluster deployed before the app
-  database existed, the data database's URL (`APP_DATABASE=shared`). An existing cluster keeps
-  its setting until `create-secrets.sh` runs with `APP_DATABASE` set; a new Secret gets
-  `separate`. Moving an existing cluster to `separate` means moving its app rows into
-  `econ_graph_app` first: the script only rewrites the URL.
+  `app-postgres-service` (`APP_DATABASE=separate`), or the data database's URL
+  (`APP_DATABASE=shared`) while the app records are still in `econ_graph`, as on a cluster
+  deployed before the app database existed. With `APP_DATABASE` unset, the key's current
+  setting is kept; a cluster without `econ-graph-secrets` gets `separate`; an existing Secret
+  without the key needs `APP_DATABASE`. `create-secrets.sh` refuses `separate` while
+  `econ_graph` holds the app tables, and `shared` once they are only in `econ_graph_app`
+  (`scripts/deploy/lib/app-database-guard.sh`). `scripts/deploy/convert-app-data.sh` moves
+  the app rows and rewrites the key ([the runbook](../docs/deployment/APP_DATA_CONVERSION.md)).
 - `database-url`: the same URL as `data-database-url`. No binary reads `DATABASE_URL`; the key is
   kept for manifests of earlier versions, which read it.
 
@@ -564,7 +568,7 @@ scripts/deploy/set-crawler-keys.sh  # Run yourself; hidden input, then restarts 
 | `econ-graph-secrets` | `app-database-url`, `data-database-url`, and `database-url` (the same URL as `data-database-url`); see [Databases](#databases). The retired in-house login keys (`jwt-secret`, `google-*`, `facebook-*`) are removed if an older run left them | backend (`app-database-url`, `data-database-url`), crawler-worker (`data-database-url`), manifests of earlier versions (`database-url`) |
 | `econ-graph-postgres` | `postgres-password` (`POSTGRES_PASSWORD`, generated), `app-password` (`APP_DB_PASSWORD`, generated) | the data database (`postgresql`), its init script |
 | `econ-graph-app-postgres` | `postgres-password` (`APP_POSTGRES_PASSWORD`, generated), `app-password` (`APP_POSTGRES_APP_PASSWORD`, generated) | the app database (`app-postgres`), its init script |
-| `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
+| `crawler-api-keys` | optional `fred-api-key`, `bls-api-key`, `bea-api-key`, `census-api-key`, `wto-api-key` (`FRED_API_KEY`, ...) | crawler-worker |
 | `econ-graph-keycloak` | `admin-username`, `admin-password`, `db-password`, `anonymous-client-secret`, optional `google-idp-client-id`, `google-idp-client-secret` (`KEYCLOAK_*`), and `facebook-idp-client-id`, `facebook-idp-client-secret`, kept if present but never written: Facebook sign-in is disabled and `KEYCLOAK_FACEBOOK_*` is refused; the passwords and the anonymous client secret are generated on the first run, the username defaults to `admin` | Keycloak, the realm import and the backend (`anonymous-client-secret`) |
 | `grafana-admin` | `admin-password` (`GRAFANA_ADMIN_PASSWORD`, generated) | Grafana (user `admin`) |
 | `monitoring-auth` | `auth`, one htpasswd line (`MONITORING_BASIC_AUTH`, e.g. `htpasswd -nB admin`, which prompts); only written when set | no manifest reads it |
@@ -898,3 +902,18 @@ above-limit GraphQL requests receive 429s and that each route's BackendTrafficPo
 is accepted; the shared Gateway's burst policy applies to branch routes too.
 Finally remove one branch and confirm the other branch and primary row counts are
 unchanged. Offline rendering/guard tests cannot replace these runtime checks.
+
+## Tunnel origin certificate verification
+
+The optional private-CA flow authenticates the tunnel connector's TLS connection to the
+gateway. Stage only its public trust certificate with
+`scripts/deploy/stage-tunnel-origin-ca.sh --context <context> --dry-run`, then follow
+[Tunnel origin TLS](../docs/deployment/TUNNEL_ORIGIN_TLS.md) for issuer selection,
+certificate checks, the remote dashboard transition and rollback. Staging does not change
+the gateway issuer or disable the dashboard's existing No TLS Verify setting. A deploy whose
+gateway issuer is `econ-graph-origin-ca` runs the staging itself before issuing the
+certificate. The issuer comes from `GATEWAY_TLS_ISSUER` in the environment, else the
+host's deploy config (`ECONGRAPH_DEPLOY_ENV`, else `$ECONGRAPH_CONFIG_DIR/deploy.env`, else
+`~/.config/econgraph/deploy.env`) when it matches the existing
+certificate's issuer or there is none, else the existing issuer; a config line that would
+change the issuer is refused without an explicit choice.

@@ -1,6 +1,6 @@
 //! Test utilities for the econ-graph-core crate
 
-use crate::database::{redact_database_url, DatabasePool};
+use crate::database::DatabasePool;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 
@@ -108,104 +108,121 @@ impl Drop for ScratchDatabase {
     }
 }
 
-/// Test container for database testing
+/// A test database and a connection pool to it.
+///
+/// [`TestContainer::new`] gives a test a database of its own on the test server, so that
+/// [`TestContainer::clean_database`], which drops the schema, never drops one another test is
+/// using. [`get_test_db`] shares one database between tests that only read and insert.
 pub struct TestContainer {
     pool: DatabasePool,
+    database_url: String,
+    /// The test's own database, dropped with the last handle to it; `None` when shared.
+    _scratch: Option<Arc<ScratchDatabase>>,
     #[cfg(test)]
-    _container: ContainerAsync<GenericImage>,
+    _container: Option<Arc<ContainerAsync<GenericImage>>>,
 }
 
 impl TestContainer {
-    /// Create a new test container with ephemeral Postgres
-    #[cfg(test)]
+    /// A database of the caller's own: a migrated scratch database on the server
+    /// `DATABASE_URL` names, dropped when the returned value is. In this crate's own tests
+    /// without `DATABASE_URL`, an ephemeral Postgres container instead, unmigrated.
     pub async fn new() -> Self {
-        println!("DEBUG: Creating TestContainer in test mode");
-        // Check if we should use testcontainers or external DB
-        if let Ok(database_url) = std::env::var("DATABASE_URL") {
-            println!(
-                "DEBUG: Using external DATABASE_URL: {}",
-                redact_database_url(&database_url)
-            );
-            // Use external database if DATABASE_URL is set
-            let pool = crate::database::create_pool(&database_url)
-                .await
-                .expect("Failed to connect to test database");
-
-            // Don't run migrations automatically - let tests handle this after cleaning
-
-            // Create a dummy container for the struct
-            let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
-                .with_wait_for(WaitFor::message_on_stderr(
-                    "database system is ready to accept connections",
-                ))
-                .with_env_var("POSTGRES_DB", "test")
-                .with_env_var("POSTGRES_USER", "test")
-                .with_env_var("POSTGRES_PASSWORD", "test");
-
-            let container = postgres_image
-                .start()
-                .await
-                .expect("Failed to start container");
-
-            Self {
-                pool,
-                _container: container,
-            }
-        } else {
-            println!("DEBUG: Using testcontainers for ephemeral database");
-            // Use testcontainers for ephemeral database
-            let postgres_image = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
-                .with_wait_for(WaitFor::message_on_stderr(
-                    "database system is ready to accept connections",
-                ))
-                .with_env_var("POSTGRES_DB", "econ_graph_test")
-                .with_env_var("POSTGRES_USER", "postgres")
-                .with_env_var("POSTGRES_PASSWORD", "postgres");
-
-            let container = postgres_image
-                .start()
-                .await
-                .expect("Failed to start container");
-            let port = container
-                .get_host_port_ipv4(5432)
-                .await
-                .expect("Failed to get port");
-            let database_url = format!(
-                "postgres://postgres:postgres@localhost:{}/econ_graph_test",
-                port
-            );
-
-            // Create pool
-            let pool = crate::database::create_pool(&database_url)
-                .await
-                .expect("Failed to connect to testcontainer database");
-
-            // Don't run migrations automatically - let tests handle this after cleaning
-
-            Self {
-                pool,
-                _container: container,
-            }
+        #[cfg(test)]
+        if std::env::var("DATABASE_URL").is_err() {
+            return Self::in_container().await;
+        }
+        let scratch = tokio::task::spawn_blocking(|| ScratchDatabase::create("test"))
+            .await
+            .expect("Should create a scratch database");
+        crate::database::run_migrations(&scratch.url)
+            .await
+            .expect("Should migrate the scratch database");
+        let pool = crate::database::create_pool(&scratch.url)
+            .await
+            .expect("Failed to connect to the scratch database");
+        Self {
+            pool,
+            database_url: scratch.url.clone(),
+            _scratch: Some(Arc::new(scratch)),
+            #[cfg(test)]
+            _container: None,
         }
     }
 
-    /// Create a new test container (non-test version for compatibility)
-    #[cfg(not(test))]
-    pub async fn new() -> Self {
+    /// The database `DATABASE_URL` names, as it is (in this crate's own tests without it, an
+    /// ephemeral container): what [`get_test_db`] shares.
+    async fn shared() -> Self {
+        #[cfg(test)]
+        if std::env::var("DATABASE_URL").is_err() {
+            return Self::in_container().await;
+        }
         let database_url = std::env::var("DATABASE_URL")
             .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
-
         let pool = crate::database::create_pool(&database_url)
             .await
             .expect("Failed to connect to test database. Set DATABASE_URL to a reachable Postgres instance.");
+        Self {
+            pool,
+            database_url,
+            _scratch: None,
+            #[cfg(test)]
+            _container: None,
+        }
+    }
 
-        // Don't run migrations automatically - let tests handle this after cleaning
-        Self { pool }
+    /// An ephemeral Postgres container, unmigrated: tests migrate it with
+    /// [`clean_database`](Self::clean_database).
+    #[cfg(test)]
+    async fn in_container() -> Self {
+        let container = GenericImage::new("postgres", POSTGRES_IMAGE_TAG)
+            .with_wait_for(WaitFor::message_on_stderr(
+                "database system is ready to accept connections",
+            ))
+            .with_env_var("POSTGRES_DB", "econ_graph_test")
+            .with_env_var("POSTGRES_USER", "postgres")
+            .with_env_var("POSTGRES_PASSWORD", "postgres")
+            .start()
+            .await
+            .expect("Failed to start container");
+        let port = container
+            .get_host_port_ipv4(5432)
+            .await
+            .expect("Failed to get port");
+        let database_url = format!("postgres://postgres:postgres@localhost:{port}/econ_graph_test");
+        let pool = crate::database::create_pool(&database_url)
+            .await
+            .expect("Failed to connect to testcontainer database");
+        Self {
+            pool,
+            database_url,
+            _scratch: None,
+            _container: Some(Arc::new(container)),
+        }
+    }
+
+    /// The same database (and container) with a pool of its own, opened on the calling
+    /// runtime.
+    async fn with_own_pool(&self) -> Self {
+        let pool = crate::database::create_pool(&self.database_url)
+            .await
+            .expect("Failed to connect to test database");
+        Self {
+            pool,
+            database_url: self.database_url.clone(),
+            _scratch: self._scratch.clone(),
+            #[cfg(test)]
+            _container: self._container.clone(),
+        }
     }
 
     /// Get the database pool
     pub fn pool(&self) -> &DatabasePool {
         &self.pool
+    }
+
+    /// The URL of this test's database, for a test that needs a pool or connection of its own.
+    pub fn database_url(&self) -> &str {
+        &self.database_url
     }
 
     /// Clean the database for testing
@@ -232,9 +249,7 @@ impl TestContainer {
             .await?;
 
         // Run migrations after cleaning to ensure database is ready
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://localhost/econ_graph_test".to_string());
-        crate::database::run_migrations(&database_url).await?;
+        crate::database::run_migrations(&self.database_url).await?;
 
         Ok(())
     }
@@ -317,15 +332,21 @@ pub async fn insert_series_without_observations(
     .id
 }
 
-/// Global test database instance
+/// The test database every test shares: its URL (and, in this crate's own tests, its container)
+/// is resolved once.
 static TEST_DB: OnceCell<Arc<TestContainer>> = OnceCell::const_new();
 
-/// Get or create the global test database
+/// The shared test database, with a connection pool of the caller's own.
+///
+/// The pool isn't shared: each `#[tokio::test]` runs on a runtime of its own, and a
+/// diesel-async connection's driver task lives on the runtime that opened it. A pool shared
+/// across tests hands one test connections that die when another test's runtime ends, and
+/// their queries fail with "connection closed" (or the pool times out replacing them).
 pub async fn get_test_db() -> Arc<TestContainer> {
-    TEST_DB
-        .get_or_init(|| async { Arc::new(TestContainer::new().await) })
-        .await
-        .clone()
+    let shared = TEST_DB
+        .get_or_init(|| async { Arc::new(TestContainer::shared().await) })
+        .await;
+    Arc::new(shared.with_own_pool().await)
 }
 
 /// Test database function for compatibility

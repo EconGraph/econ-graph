@@ -135,10 +135,18 @@ run `node scripts/flags-merge`, and remove the code paths for its other value.
   the issue that gates `/mcp` behind the flag) compiles `/mcp` out of release
   builds.
 - `static_catalogs` (build, off in release, on in dev, `remove_by: unscheduled`,
-  owner ECO-142) registers `econ-graph-crawler`'s ten hardcoded dev-only source
-  catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO). Like
+  owner ECO-142) registers `econ-graph-crawler`'s nine hardcoded dev-only source
+  catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS). Like
   `build_canary`, it is permanent: these catalogs are a development convenience,
   so there is no release deadline for removing the flag.
+
+- `crawl_imf`, `crawl_boj`, `crawl_snb` and `crawl_un_stats` (build, off in both profiles,
+  `remove_by: unscheduled`, each owned by its source's licence review: ECO-175, ECO-743,
+  ECO-742 and ECO-182) are the crawler's
+  [licence gate](../../backend/crates/econ-graph-crawler/README.md#licence-gate). Each one
+  lets the crawler download a source that has restrictive or unclear terms and no maintainer
+  decision to download it. They are permanent: a flag is turned on only once that source's
+  licence question is settled, and none is overridden in `dev.flagd.json`.
 
 ## Updating the vendored schema
 

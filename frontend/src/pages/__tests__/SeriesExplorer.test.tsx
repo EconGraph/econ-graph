@@ -838,6 +838,35 @@ describe('SeriesExplorer shows only what the backend returned', () => {
       refetch: vi.fn(),
     }) as any;
 
+  test('badges retained historical search results and distinguishes a candidate successor', async () => {
+    searchHook.mockImplementation(() =>
+      searchReturning([
+        {
+          ...mockSearchResults[0],
+          lifecycle: {
+            status: 'missing_from_catalog',
+            since: '2026-10-25T00:00:00Z',
+            successorId: null,
+            proposedSuccessorId: 'candidate-series',
+          },
+        },
+      ])
+    );
+    const user = userEvent.setup();
+    renderSeriesExplorer();
+    await user.type(screen.getByPlaceholderText(/search economic series/i), 'GDP');
+    await user.click(screen.getByRole('button', { name: /^search$/i }));
+    expect(
+      await screen.findByText(
+        'No longer listed by Federal Reserve Economic Data (FRED) since 2026-10-25'
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Possible successor (not confirmed)' })
+    ).toHaveAttribute('href', '/series/candidate-series');
+    expect(screen.getByText('Gross Domestic Product')).toBeInTheDocument();
+  });
+
   test('does not show a made-up search time', async () => {
     const user = userEvent.setup();
     renderSeriesExplorer();

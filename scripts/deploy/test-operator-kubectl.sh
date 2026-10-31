@@ -27,7 +27,7 @@ CALLS="$WORK/kind-kubectl.log"
 
 cat >"$WORK/bin/kubectl" <<EOF
 #!/bin/sh
-echo "\$*" >>"$PLAIN"
+printf '%s\\n' "\$*" >>"$PLAIN"
 echo "plain kubectl stub: refusing" >&2
 exit 1
 EOF
@@ -35,7 +35,8 @@ EOF
 # The kind kubectl: contexts kind-econ-graph and kind-other exist.
 cat >"$CACHE/bin/kubectl" <<EOF
 #!/bin/sh
-echo "\$*" >>"$CALLS"
+# printf, not echo: sh's echo would turn a jsonpath's \\n into a line break.
+printf '%s\\n' "\$*" >>"$CALLS"
 case " \$* " in
     *" --context kind-econ-graph "*|*" --context kind-other "*) ;;
     *) echo "error: context not found" >&2; exit 1 ;;
@@ -46,9 +47,9 @@ case " \$* " in
         [ -z "\${FAKE_NODES_FAIL:-}" ] || { echo "error: the server is unavailable" >&2; exit 1; }
         echo "econ-graph-control-plane econ-graph-worker" ;;
     *" get namespace kube-system "*) echo "11111111-2222-3333-4444-555555555555" ;;
-    # backup-postgres-now.sh: a wait that times out, and the Job's active pods.
-    *" wait "*) [ -z "\${FAKE_WAIT_FAIL:-}" ] || { echo "error: timed out waiting for the condition" >&2; exit 1; } ;;
-    *" get job/"*) echo "\${FAKE_JOB_ACTIVE:-}" ;;
+    # backup-postgres-now.sh: the new Job's true conditions, FAKE_JOB_CONDITION
+    # (default Complete; empty while it runs).
+    *" get job/"*) echo "\${FAKE_JOB_CONDITION-Complete}" ;;
 esac
 exit 0
 EOF
@@ -138,13 +139,13 @@ reset; out="$(run backup-postgres-now.sh --context missing)"; rc=$?
 expect "backup-postgres-now.sh on an unknown context" nonzero "has no context missing" none
 # A backup Job still running when the wait times out is said, with how to wait
 # for it, and not called failed; a Job that is not running is.
-reset; out="$(FAKE_WAIT_FAIL=1 FAKE_JOB_ACTIVE=1 run backup-postgres-now.sh)"; rc=$?
+reset; out="$(FAKE_JOB_CONDITION='' BACKUP_WAIT_TIMEOUT=1 BACKUP_POLL_SECONDS=0 run backup-postgres-now.sh)"; rc=$?
 expect "backup-postgres-now.sh with the Job still running at the timeout" nonzero "backup-postgres-now: still running: job/postgres-backup-manual-" changes
 grep -qF "did not complete successfully" <<<"$out" &&
     fail "backup-postgres-now.sh with the Job still running: calls it failed"
 grep -qF "don't start another backup" <<<"$out" ||
     fail "backup-postgres-now.sh with the Job still running: does not warn against a second backup"
-reset; out="$(FAKE_WAIT_FAIL=1 run backup-postgres-now.sh)"; rc=$?
+reset; out="$(FAKE_JOB_CONDITION=Failed BACKUP_POLL_SECONDS=0 run backup-postgres-now.sh)"; rc=$?
 expect "backup-postgres-now.sh with a failed Job" nonzero "Backup job did not complete successfully" changes
 grep -qF "still running" <<<"$out" && fail "backup-postgres-now.sh with a failed Job: says it is still running"
 

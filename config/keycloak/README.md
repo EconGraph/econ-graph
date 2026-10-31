@@ -33,9 +33,10 @@ scripts/keycloak/dev-token.sh alice   # prints iss, aud and sub of alice's acces
 
 ### Test users
 
-The release end-to-end suite depends on these; the QA scenario suite signs in as
-`grace` against the release e2e stack. Keep the usernames, ids and
-passwords stable: the ids are the tokens' `sub`, which becomes `users.id`.
+The release end-to-end suite depends on these. It also reads by token (password
+grant) as `staff-admin` for the admin-only FRED catalog and as `grace` for an ordinary
+user; the QA scenario suite signs in as `grace` against the release e2e stack. Keep the
+usernames, ids and passwords stable: the ids are the tokens' `sub`, which becomes `users.id`.
 
 | Username | Id (`sub`) | Password |
 |---|---|---|
@@ -237,7 +238,11 @@ caller can't read; `createAnnotation` answers as for a missing series. Lookups b
 missing series, so none of them reveals what an unreadable catalog contains.
 MCP tools use the authenticated caller's catalog roles as well as `api:mcp`.
 
-The `catalog-public` realm composite grants the initial catalog reads. The `user` composite and
+The `catalog-public` realm composite grants the initial catalog reads: in the realm file,
+BLS, BEA, Census, FHFA, World Bank and Bank of Canada. FRED's `catalog.fred:read` is on
+the `admin` composite instead (`super_admin` includes `admin`), so only admins read FRED. The
+IMF, ECB, OECD, Bank of England, Bank of Japan, RBA, SNB, UN Statistics and ILO reads are
+granted to nobody by default. The `user` composite and
 the `econgraph-anonymous` service account inherit it, so it may hold only `econ-graph-api`
 `catalog.*:read` roles: a deploy stops, before importing anything, while it holds any other
 composite (the error names each one to remove). For the same reason no `catalog.*:read` role
@@ -247,6 +252,13 @@ deploy stops while one is, live or in the realm file. Remove a catalog read role
 Explicit grants to other groups or users still apply. To restrict just anonymous access, remove
 `catalog-public` from the anonymous service account and assign its permitted catalog roles
 individually instead. Use group/composite grants for signed-in exceptions as usual.
+
+The WTO catalog is restricted by default: `catalog.world_trade_organization:read` (World Trade
+Organization) is defined but is in neither `catalog-public` nor the anonymous client's scope, so
+only users or groups granted it can read WTO series. To open it up, grant the role to a user or
+group, or add it to `catalog-public` (and the anonymous scope) to make it public.
+`backend/crates/econ-graph-auth/tests/restricted_catalog_roles.rs` checks that the realm file
+keeps it that way.
 
 Visitors receive no token and no service-account identity. The backend obtains a client-credentials
 token, verifies its signature, issuer and audience, and uses only its catalog-read roles for
@@ -330,6 +342,45 @@ Snapshot failures abort the import instead of falling back to defaults. Snapshot
 separate admin API operations, so preservation is best effort under concurrent administrator edits;
 avoid editing catalog policy during a deployment. Ordinary brokered users are not imported or
 modified. Role definitions and non-catalog structural settings remain configuration as code.
+
+### Changing catalog access on a running cluster
+
+The realm file's catalog grants seed only a new realm. On a running cluster, deploys keep the
+live `catalog-public`, the catalog grants on other composites such as `admin`, and the anonymous
+reader's scope (above), so a change to them is made in Keycloak.
+`scripts/keycloak/set-catalog-access.sh` makes it, on the kind cluster named by `--context`:
+
+```bash
+# Match the realm file: FRED admin-only, and the catalogs it grants to nobody withdrawn:
+scripts/keycloak/set-catalog-access.sh --context kind-econ-graph --dry-run \
+  --admin-only catalog.fred:read \
+  --withdraw catalog.imf:read,catalog.ecb:read,catalog.oecd:read,catalog.boe:read,catalog.boj:read,catalog.rba:read,catalog.snb:read,catalog.unstats:read,catalog.ilo:read
+# The same without --dry-run applies it. To make a catalog public again:
+scripts/keycloak/set-catalog-access.sh --context kind-econ-graph --make-public catalog.fred:read
+```
+
+- `--admin-only` removes the role from `catalog-public` and the anonymous scope and adds it to
+  `admin`; `--withdraw` removes it from both and grants it to nobody; `--make-public` adds it to
+  both and removes a direct grant on `admin`, which then reads it through `catalog-public`.
+- `--dry-run` prints each change it would make and changes nothing in Keycloak. Every step
+  runs only when needed, so running a command again changes nothing.
+- It adds grants before it removes any, so a failure part way never takes a catalog from
+  admins, and it reads back every grant it set. There is no rollback: if it stops with an
+  error, run the same command again to finish.
+- It refuses while `job/keycloak-realm-import` is running, because that deploy step would
+  write back the catalog policy it read before the change. Don't start a deploy while it runs.
+- It refuses, changing nothing, a role that isn't a `catalog.<source>:read` role or doesn't
+  exist, and a realm without `catalog-public` or `admin`. It checks every role before changing
+  any.
+- It runs a short-lived pod with the realm import's Python image, which calls the admin API
+  at `keycloak-service` with the credentials from Secret `econ-graph-keycloak`, passed by
+  reference; nothing prints them. The cluster's identity is printed first.
+- Visitors see the change at the backend's next anonymous-grant renewal and signed-in users
+  when their token expires (above); the script prints the backend restart that applies it
+  to visitors at once.
+
+When a catalog's default access changes for good, change the realm file to match, so a new
+realm starts the same way.
 
 ### Separate and shared data planes
 

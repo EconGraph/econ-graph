@@ -85,7 +85,7 @@ role_catalog! {
     /// Read the Bank of England (BoE) catalog.
     CatalogBoeRead => "catalog.boe:read",
     /// Read the World Trade Organization (WTO) catalog.
-    CatalogWtoRead => "catalog.wto:read",
+    CatalogWorldTradeOrganizationRead => "catalog.world_trade_organization:read",
     /// Read the Bank of Japan (BoJ) catalog.
     CatalogBojRead => "catalog.boj:read",
     /// Read the Reserve Bank of Australia (RBA) catalog.
@@ -164,7 +164,7 @@ impl Role {
                 Some(Self::CatalogOecdRead)
             }
             "Bank of England (BoE)" => Some(Self::CatalogBoeRead),
-            "World Trade Organization (WTO)" => Some(Self::CatalogWtoRead),
+            "World Trade Organization (WTO)" => Some(Self::CatalogWorldTradeOrganizationRead),
             "Bank of Japan (BoJ)" => Some(Self::CatalogBojRead),
             "Reserve Bank of Australia (RBA)" => Some(Self::CatalogRbaRead),
             "Bank of Canada (BoC)" => Some(Self::CatalogBankOfCanadaRead),
@@ -325,6 +325,16 @@ mod tests {
         }
         assert!(serde_json::from_str::<Role>("\"series:nuke\"").is_err());
         assert!(serde_json::from_str::<Vec<Role>>(r#"["api:mcp","nope:nope"]"#).is_err());
+    }
+
+    /// The WTO's catalog role spells the organization out; the acronym form is not a role.
+    #[test]
+    fn world_trade_organization_catalog_role_is_spelled_out() {
+        let role = Role::for_catalog("World Trade Organization (WTO)").unwrap();
+        assert_eq!(role, Role::CatalogWorldTradeOrganizationRead);
+        assert_eq!(role.as_str(), "catalog.world_trade_organization:read");
+        assert!(role.is_catalog());
+        assert!("catalog.wto:read".parse::<Role>().is_err());
     }
 
     #[test]

@@ -287,16 +287,18 @@ impl DataSource {
                 "International trade data including merchandise and services trade for WTO member countries".to_string(),
             ),
             base_url: "https://api.wto.org/timeseries/v1".to_string(),
-            api_key_required: false,
-            rate_limit_per_minute: 1000,
+            // The API portal refuses requests without a (free) subscription key.
+            api_key_required: true,
+            // The free subscription allows one call per second on the data endpoint.
+            rate_limit_per_minute: 60,
             is_visible: true,
             is_enabled: true,
             requires_admin_approval: false,
             crawl_frequency_hours: 24,
             api_documentation_url: Some(
-                "https://www.wto.org/english/res_e/statis_e/data_explorer_e.htm".to_string(),
+                "https://apiportal.wto.org/api-details#api=version1".to_string(),
             ),
-            api_key_name: None,
+            api_key_name: Some("WTO_API_KEY".to_string()),
         }
     }
 

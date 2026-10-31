@@ -10,7 +10,8 @@
 //! `SourceId::Imf` has no adapter (its series ids were made up); it is kept for a future SDMX
 //! adapter.
 
-use crate::adapter::AdapterRegistry;
+use crate::adapter::{AdapterRegistry, ApiKeys};
+use crate::source::SourceId;
 
 // Adapter modules (one per source) are declared here.
 pub mod bea;
@@ -21,6 +22,32 @@ pub mod fhfa;
 pub mod fred;
 pub mod static_catalogs;
 pub mod world_bank;
+pub mod wto;
+
+/// Sources the crawler worker leaves out entirely while their API key is unset, logging one
+/// warning each at startup ([`registry_for_keys`]): no discovery, refreshes or coverage gauges,
+/// rather than jobs that can only fail. For sources that cannot be used at all without a key and
+/// whose key a deployment may not have yet. Other keyed sources (FRED, BEA, Census) stay
+/// registered without their key, so their failed jobs and coverage alerts flag the gap.
+pub const SKIPPED_WITHOUT_KEY: &[SourceId] = &[SourceId::Wto];
+
+/// [`default_registry`] minus the [`SKIPPED_WITHOUT_KEY`] sources whose key `keys` lacks, each
+/// logged as skipped with the environment variable that would enable it. The crawler worker's
+/// registry.
+pub fn registry_for_keys(keys: &ApiKeys) -> AdapterRegistry {
+    let mut registry = default_registry();
+    for &source in SKIPPED_WITHOUT_KEY {
+        if keys.get(source).is_none() && registry.remove(source).is_some() {
+            tracing::warn!(
+                source = %source,
+                env = crate::cli::api_key_env_var(source).unwrap_or("?"),
+                "source skipped: its API key is not set, so it is not crawled, scheduled or \
+                 counted in coverage; set the key and restart the worker to enable it"
+            );
+        }
+    }
+    registry
+}
 
 /// Registry with every production adapter, pointed at the real upstream APIs, plus the
 /// development-only static catalogs when the `static_catalogs` build flag is on
@@ -34,6 +61,7 @@ pub fn default_registry() -> AdapterRegistry {
     registry.register(std::sync::Arc::new(census::CensusAdapter::default()));
     registry.register(std::sync::Arc::new(bea::BeaAdapter::default()));
     registry.register(std::sync::Arc::new(fhfa::FhfaAdapter::default()));
+    registry.register(std::sync::Arc::new(wto::WtoAdapter::default()));
     registry.register(std::sync::Arc::new(boc::BocAdapter::default()));
     // Development only: hardcoded catalogs without live integrations.
     #[cfg(flag_static_catalogs)]
@@ -63,6 +91,7 @@ pub fn registry_at(base_url: &str) -> AdapterRegistry {
     ));
     registry.register(std::sync::Arc::new(bea::BeaAdapter::new(base_url)));
     registry.register(std::sync::Arc::new(fhfa::FhfaAdapter::new(base_url)));
+    registry.register(std::sync::Arc::new(wto::WtoAdapter::new(base_url)));
     registry.register(std::sync::Arc::new(boc::BocAdapter::new(base_url)));
     for adapter in static_catalogs::StaticCatalogAdapter::all() {
         registry.register(std::sync::Arc::new(adapter));
@@ -73,7 +102,6 @@ pub fn registry_at(base_url: &str) -> AdapterRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::SourceId;
 
     #[test]
     fn default_registry_holds_exactly_the_live_sources() {
@@ -91,9 +119,37 @@ mod tests {
                 SourceId::Census,
                 SourceId::WorldBank,
                 SourceId::Boc,
+                SourceId::Wto,
                 SourceId::Fhfa,
             ]
         );
+    }
+
+    /// Without its key a [`SKIPPED_WITHOUT_KEY`] source is left out of the worker's registry;
+    /// with it, the registry is the default one. Other keyed sources stay either way.
+    #[test]
+    fn registry_for_keys_skips_keyless_optional_sources() {
+        let none = registry_for_keys(&ApiKeys::default());
+        assert!(none.get(SourceId::Wto).is_none());
+        assert!(
+            none.get(SourceId::Fred).is_some(),
+            "FRED is kept without its key"
+        );
+        assert!(
+            none.get(SourceId::Census).is_some(),
+            "Census is kept without its key"
+        );
+        let with = registry_for_keys(&ApiKeys {
+            wto: Some("k".into()),
+            ..ApiKeys::default()
+        });
+        assert_eq!(with.ids(), default_registry().ids());
+        for &s in SKIPPED_WITHOUT_KEY {
+            assert!(
+                crate::cli::api_key_env_var(s).is_some(),
+                "{s} needs an env var to be enabled by"
+            );
+        }
     }
 
     #[test]

@@ -31,10 +31,12 @@ pub struct ApiKeys {
     pub bea: Option<String>,
     /// Census (`CENSUS_API_KEY`).
     pub census: Option<String>,
+    /// WTO Timeseries API subscription key (`WTO_API_KEY`).
+    pub wto: Option<String>,
 }
 
 impl ApiKeys {
-    /// Reads `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY` and `CENSUS_API_KEY`.
+    /// Reads `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY` and `WTO_API_KEY`.
     /// Unset, empty or whitespace-only variables become `None`; values are trimmed.
     pub fn from_env() -> Self {
         Self::from_lookup(|name| std::env::var(name).ok())
@@ -51,6 +53,7 @@ impl ApiKeys {
             bls: get("BLS_API_KEY"),
             bea: get("BEA_API_KEY"),
             census: get("CENSUS_API_KEY"),
+            wto: get("WTO_API_KEY"),
         }
     }
 
@@ -61,6 +64,7 @@ impl ApiKeys {
             SourceId::Bls => self.bls.as_deref(),
             SourceId::Bea => self.bea.as_deref(),
             SourceId::Census => self.census.as_deref(),
+            SourceId::Wto => self.wto.as_deref(),
             _ => None,
         }
     }
@@ -74,6 +78,7 @@ impl fmt::Debug for ApiKeys {
             .field("bls", &r(&self.bls))
             .field("bea", &r(&self.bea))
             .field("census", &r(&self.census))
+            .field("wto", &r(&self.wto))
             .finish()
     }
 }
@@ -266,6 +271,35 @@ pub trait SourceAdapter: Send + Sync {
         false
     }
 
+    /// Whether confirmed upstream NotFound results can accumulate publication lifecycle
+    /// evidence. Opt in only when this adapter implements scoped catalog reconciliation,
+    /// which can later reactivate a recovered series. This capability is independent of
+    /// whether a worker has already cached its first successful catalog.
+    fn tracks_catalog_lifecycle(&self) -> bool {
+        false
+    }
+
+    /// Verified publication facts from the last complete successful catalog. Facts are kept
+    /// separate from fetch health, so a successful history fetch cannot revive a retired id.
+    fn catalog_lifecycle(&self) -> crate::lifecycle::CatalogLifecycle {
+        crate::lifecycle::CatalogLifecycle::default()
+    }
+
+    /// Retained source ids positively matched by the current declarative rules, including
+    /// tables removed before rules-driven discovery was introduced. Called by the worker
+    /// only after a complete successful scoped discovery. It must never return every stored
+    /// source id without applying the dataset, family, frequency and exclusion rules.
+    async fn catalog_scope_members(&self, _ctx: &CrawlCtx) -> Result<Vec<String>, CrawlError> {
+        Ok(Vec::new())
+    }
+
+    /// Stable fingerprint of the declarative catalog selection rules. Only adapters that
+    /// return this opt into conservative publication lifecycle tracking. Changing the rules
+    /// establishes a new baseline rather than treating deselected series as upstream removals.
+    fn catalog_scope(&self) -> Option<String> {
+        None
+    }
+
     /// Curated or configured entries (BEA tables, FRED series ids, ...) that the last successful
     /// [`discover`](Self::discover) on this adapter instance skipped because the source no longer
     /// lists them, each named as the skip warning names it. The worker reads this after each
@@ -389,6 +423,11 @@ impl AdapterRegistry {
         self.adapters.insert(adapter.id(), adapter)
     }
 
+    /// Unregisters `source`, returning its adapter, if it had one.
+    pub fn remove(&mut self, source: SourceId) -> Option<Arc<dyn SourceAdapter>> {
+        self.adapters.remove(&source)
+    }
+
     /// The adapter for `source`, if registered.
     pub fn get(&self, source: SourceId) -> Option<Arc<dyn SourceAdapter>> {
         self.adapters.get(&source).cloned()
@@ -448,6 +487,9 @@ mod tests {
         assert_eq!(r.ids(), vec![SourceId::Fred, SourceId::Sec]);
         assert_eq!(r.get(SourceId::Fred).unwrap().id(), SourceId::Fred);
         assert!(r.get(SourceId::Bls).is_none());
+        assert_eq!(r.remove(SourceId::Fred).unwrap().id(), SourceId::Fred);
+        assert!(r.remove(SourceId::Fred).is_none());
+        assert_eq!(r.ids(), vec![SourceId::Sec]);
     }
 
     #[test]
@@ -540,6 +582,7 @@ mod tests {
             "FRED_API_KEY" => Some(" abc ".into()),
             "BLS_API_KEY" => Some("   ".into()),
             "BEA_API_KEY" => Some(String::new()),
+            "WTO_API_KEY" => Some("wto-key\n".into()),
             _ => None,
         });
         assert_eq!(keys.fred.as_deref(), Some("abc"));
@@ -547,6 +590,7 @@ mod tests {
         assert_eq!(keys.bea, None);
         assert_eq!(keys.census, None);
         assert_eq!(keys.get(SourceId::Fred), Some("abc"));
+        assert_eq!(keys.get(SourceId::Wto), Some("wto-key"));
         assert_eq!(keys.get(SourceId::Sec), None);
     }
 
@@ -554,10 +598,12 @@ mod tests {
     fn api_keys_debug_redacts() {
         let keys = ApiKeys {
             fred: Some("supersecret".into()),
+            wto: Some("wtosecret".into()),
             ..ApiKeys::default()
         };
         let s = format!("{keys:?}");
         assert!(!s.contains("supersecret"));
+        assert!(!s.contains("wtosecret"));
         assert!(s.contains("<redacted>"));
     }
 }
