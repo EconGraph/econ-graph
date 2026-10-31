@@ -16,6 +16,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEPLOY="$ROOT/scripts/deploy/deploy.sh"
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
+# Everything this test writes is under its own scratch directory, TMPDIR included.
+mkdir -p "$W/tmp"
+export TMPDIR="$W/tmp"
 failures=0
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; failures=$((failures + 1)); }
@@ -33,7 +36,13 @@ fi
 # 2. The dashboards block, from its heading to the next step.
 block="$(awk '/^# Configure Grafana dashboards$/,/^# Wait for monitoring stack to be ready$/' "$DEPLOY")"
 [ -n "$block" ] || { echo "FAIL the dashboards block was not found in deploy.sh"; exit 1; }
-mkdir -p "$W/bin" "$W/tmp"
+# A block that names a fixed /tmp path would write the host's shared file whatever TMPDIR
+# says: never run it.
+if grep -v '\${TMPDIR:-/tmp}' <<<"$block" | grep -q '/tmp/'; then
+    echo "FAIL the dashboards block names a fixed /tmp path; not running it"
+    exit 1
+fi
+mkdir -p "$W/bin"
 cat >"$W/bin/kubectl" <<'STUB'
 #!/usr/bin/env bash
 # Records the applied file's path and a copy of it; fails when STUB_FAIL is set.
