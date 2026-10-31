@@ -133,12 +133,20 @@ automatically.
 
 `backup-snapshots.sh`, `restore-snapshot.sh`, `delete-snapshots.sh` and
 `snapshot-now.sh` (when run as root) take one lock,
-`/run/econgraph-backup-snapshots.lock`, before they change anything, and
-hold it until they exit, so none of them overlaps another. One that finds it
-held stops without changing anything (`restore-snapshot.sh` can wait with
-`--lock-wait`); dry runs and `delete-snapshots.sh --list` take no lock. The
-lock file is root's, mode 0600, so no other user can open it to hold the
-lock. A lock file with another owner or mode is replaced by one that is.
+`/run/econgraph/backup-snapshots.lock`, before they change anything, and
+hold it until they exit, so none of them overlaps another. That includes
+the time `restore-snapshot.sh` and `delete-snapshots.sh` wait at their typed
+confirmation; an hourly run that starts meanwhile fails and that hour is
+skipped. One that finds the lock held stops without changing anything
+(`restore-snapshot.sh` can wait with `--lock-wait`); dry runs and
+`delete-snapshots.sh --list` take no lock.
+
+`/run/econgraph` is root's, mode 0700, so no other user can open the lock
+file to hold it; a directory or lock file that isn't as the scripts make
+them is refused, never used. The hourly job is a copy installed by
+`install-backup-timer.sh`, so the other three refuse to run while that copy
+takes an older lock: re-run `sudo scripts/host/install-backup-timer.sh`
+after pulling (it waits for a backup run in progress to finish).
 
 Everything that needs root is a script under `scripts/host/`; each refuses
 to run without sudo, takes `--dry-run`, prints every action, and is safe to
@@ -403,7 +411,7 @@ is set aside, not deleted.
    outside Kubernetes are not seen, and the check does not stop the writers
    for you: step 2 still comes first. Before its first check it takes the
    lock the hourly `backup-snapshots.sh` holds
-   (`/run/econgraph-backup-snapshots.lock`) and keeps it until it exits, so
+   (`/run/econgraph/backup-snapshots.lock`) and keeps it until it exits, so
    no backup run or second restore overlaps it. If the lock is held, it stops
    without changing anything; `--lock-wait=SECONDS` (up to 86400) waits up
    to that long first. A dry run takes no lock. The lock is held while it

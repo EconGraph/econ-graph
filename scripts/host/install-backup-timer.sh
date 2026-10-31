@@ -9,8 +9,10 @@
 # then enables the timer. The script is copied (root-owned, 0755) rather
 # than run from the checkout, so root never executes a file that the
 # the operator account can change; re-run this installer after merging changes
-# to backup-snapshots.sh. Safe to re-run. Nothing it installs deletes
-# anything.
+# to backup-snapshots.sh (restore-snapshot.sh, delete-snapshots.sh and
+# snapshot-now.sh refuse to run while the installed copy takes an older
+# lock). It does not replace the script while a backup run is in progress.
+# Safe to re-run. Nothing it installs deletes anything.
 #
 # --run-now also starts one run immediately instead of waiting for the timer.
 #
@@ -76,6 +78,12 @@ install_file() {
 if root_owned "$BIN" 0755 && cmp -s "$SRC" "$BIN"; then
     echo "= $BIN already up to date"
 else
+    # A run in progress keeps the lock its own copy takes, which a newer
+    # copy may not share (the lock moved to /run/econgraph/), so wait for it.
+    if systemctl is-active --quiet "$UNIT.service"; then
+        echo "error: a backup run ($UNIT.service) is in progress; re-run this when it has finished" >&2
+        exit 1
+    fi
     run install -o root -g root -m 0755 "$SRC" "$BIN"
 fi
 

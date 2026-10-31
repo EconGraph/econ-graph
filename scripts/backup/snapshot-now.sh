@@ -16,7 +16,7 @@
 # scripts/host/delete-snapshots.sh (see docs/deployment/BACKUPS.md).
 #
 # Run as root, it first takes the lock the hourly backup-snapshots.sh holds
-# (/run/econgraph-backup-snapshots.lock) and stops if it is held. It also
+# (/run/econgraph/backup-snapshots.lock) and stops if it is held. It also
 # runs as the operator without sudo, taking no lock, provided the operator
 # owns the subvolume roots (the kernel only lets a non-root user snapshot
 # subvolumes it owns) and can
@@ -54,56 +54,63 @@ esac
 
 # >>> backup lock: the same in backup-snapshots.sh, restore-snapshot.sh,
 # delete-snapshots.sh and snapshot-now.sh (test-backup-scripts.sh checks).
-# take_backup_lock FILE WAIT: take FILE's flock on fd 9, waiting up to WAIT
-# seconds, and keep it until the script exits. FILE is root's and mode 0600,
-# so no other user can open it to hold the lock; one that is not is replaced,
-# under the lock, by one that is (a chmod would not close a descriptor some
-# user already has open). After locking, the file must still be the one at
-# FILE (another run may have replaced it meanwhile), or it starts over.
-# Returns 1 when the lock is held, 2 on any other failure.
+# take_backup_lock WAIT: take the backup lock, /run/econgraph/backup-snapshots.lock,
+# on fd 9, waiting up to WAIT seconds, and keep it until the script exits.
+# /run/econgraph is root's, mode 0700, so no other user can open the file to
+# hold the lock; a directory or file that is not as this function makes them
+# is refused, never used. The hourly job installed by install-backup-timer.sh
+# must take this same lock: an installed copy that does not (one installed
+# before it moved here, which locks /run/econgraph-backup-snapshots.lock) is
+# refused until the installer is re-run. Returns 1 when the lock is held, 2
+# on any other failure.
 take_backup_lock() {
-    local file="$1" wait="$2" owner="0:0" tries=0 old_umask status tmp
-    # Under scripts/host/test-backup-scripts.sh only: the test user's own files.
-    [ -z "${ECONGRAPH_TEST_ROOT:-}" ] || owner="${BACKUP_LOCK_OWNER:-0:0}"
-    while :; do
-        tries=$((tries + 1))
-        if [ "$tries" -gt 5 ]; then
-            echo "error: $file keeps being replaced; could not lock it" >&2
+    local wait="$1" root="${ECONGRAPH_TEST_ROOT:-}" owner="0:0" old_umask status
+    local dir file installed
+    dir="$root/run/econgraph"
+    file="$dir/backup-snapshots.lock"
+    installed="$root/usr/local/sbin/econgraph-backup-snapshots"
+    if [ -n "$root" ]; then
+        # Test runs only (scripts/host/test-backup-scripts.sh, never root):
+        # the test user's own files.
+        if [ "$EUID" -eq 0 ]; then
+            echo "error: ECONGRAPH_TEST_ROOT is set; refusing to run as root with it" >&2
             return 2
         fi
-        if [ -L "$file" ] || { [ -e "$file" ] && [ ! -f "$file" ]; }; then
-            echo "error: $file is not a regular file; refusing to use it as the lock" >&2
-            return 2
-        fi
-        old_umask="$(umask)"
-        umask 077
-        if ! exec 9>>"$file"; then
-            umask "$old_umask"
-            echo "error: could not open $file" >&2
-            return 2
-        fi
+        owner="${BACKUP_LOCK_OWNER:-0:0}"
+    fi
+    if [ -e "$installed" ] && ! grep -qF 'run/econgraph/backup-snapshots.lock' "$installed"; then
+        echo "error: the installed hourly job $installed takes an older lock, so it would not" >&2
+        echo "  wait for this run. Re-run sudo scripts/host/install-backup-timer.sh first." >&2
+        return 2
+    fi
+    if [ ! -e "$dir" ] && ! mkdir -m 0700 "$dir" 2>/dev/null && [ ! -d "$dir" ]; then
+        echo "error: could not create $dir" >&2
+        return 2
+    fi
+    if [ -L "$dir" ] || [ ! -d "$dir" ] || [ "$(stat -c '%u:%g %a' "$dir")" != "$owner 700" ]; then
+        echo "error: $dir is not a directory owned by $owner with mode 0700; refusing to lock in it." >&2
+        echo "  Check what made it; if no backup, restore or delete is running, remove it and re-run." >&2
+        return 2
+    fi
+    if [ -L "$file" ] || { [ -e "$file" ] && [ ! -f "$file" ]; }; then
+        echo "error: $file is not a regular file; refusing to use it as the lock" >&2
+        return 2
+    fi
+    old_umask="$(umask)"
+    umask 077
+    if ! exec 9>>"$file"; then
         umask "$old_umask"
-        status=0
-        flock -w "$wait" 9 || status=$?
-        if [ "$status" -eq 1 ]; then
-            return 1
-        elif [ "$status" -ne 0 ]; then
-            echo "error: could not lock $file (flock exited $status)" >&2
-            return 2
-        fi
-        [ "$(stat -L -c %d:%i /proc/self/fd/9)" != "$(stat -c %d:%i "$file" 2>/dev/null)" ] || break
-        exec 9>&-
-    done
-    if [ "$(stat -c '%u:%g %a' "$file")" != "$owner 600" ]; then
-        echo "note: $file is $(stat -c '%u:%g %a' "$file"), not $owner 600; replacing it" >&2
-        tmp=""
-        if ! { tmp="$(mktemp "$file.XXXXXX")" && chown "$owner" "$tmp" && chmod 0600 "$tmp" &&
-            exec 8>>"$tmp" && flock -n 8 && mv -f "$tmp" "$file"; }; then
-            [ -z "$tmp" ] || rm -f "$tmp"
-            echo "error: could not replace $file with a root-only one" >&2
-            return 2
-        fi
-        exec 9>&8 8>&-
+        echo "error: could not open $file" >&2
+        return 2
+    fi
+    umask "$old_umask"
+    status=0
+    flock -w "$wait" 9 || status=$?
+    if [ "$status" -eq 1 ]; then
+        return 1
+    elif [ "$status" -ne 0 ]; then
+        echo "error: could not lock $file (flock exited $status)" >&2
+        return 2
     fi
 }
 # <<< backup lock
@@ -112,9 +119,9 @@ take_backup_lock() {
 # backup run lists, sends or prunes the snapshot directory meanwhile. Without
 # root the lock (in /run) can't be taken; the snapshots are made anyway.
 if [[ "${DRY_RUN}" != "true" && "$(id -u)" == 0 ]]; then
-    lock_file="${ECONGRAPH_TEST_ROOT:-}/run/econgraph-backup-snapshots.lock"
+    lock_file="${ECONGRAPH_TEST_ROOT:-}/run/econgraph/backup-snapshots.lock"
     lock_status=0
-    take_backup_lock "${lock_file}" 0 || lock_status=$?
+    take_backup_lock 0 || lock_status=$?
     [[ "${lock_status}" != 1 ]] || die "${lock_file} is held: a backup-snapshots run, a restore or a delete is in progress; nothing was taken, re-run when it is done"
     [[ "${lock_status}" == 0 ]] || die "could not take ${lock_file}; nothing was taken"
 fi
