@@ -288,6 +288,26 @@ pub async fn update_discovery_run_gauges(
     Ok(())
 }
 
+/// The sources this worker discovers in chunks: their adapter can
+/// ([`chunked_discovery`](econ_graph_crawler::SourceAdapter::chunked_discovery)) and the
+/// worker's single-job switch doesn't list them. Only these get the run gauges, so a source
+/// switched to single-job discovery drops out of `CrawlerDiscoveryRunOverdue`.
+pub fn chunked_run_sources(
+    registry: &econ_graph_crawler::AdapterRegistry,
+    single_job_discovery: &[SourceId],
+) -> Vec<SourceId> {
+    registry
+        .ids()
+        .into_iter()
+        .filter(|id| !single_job_discovery.contains(id))
+        .filter(|&id| {
+            registry
+                .get(id)
+                .is_some_and(|a| a.chunked_discovery().is_some())
+        })
+        .collect()
+}
+
 /// Refreshes the global queue gauges, and the run gauges of `chunked_sources` (the sources
 /// whose adapter discovers in chunks), every `interval` until `stop` becomes true.
 pub async fn queue_gauge_loop(
@@ -717,6 +737,15 @@ mod tests {
             .map(|l| l.value().to_string())
             .collect();
         assert_eq!(sources, HashSet::from(["FRED".to_string()]));
+    }
+
+    /// FRED is a chunked source unless the single-job switch lists it.
+    #[test]
+    fn chunked_run_sources_leave_out_the_single_job_switch() {
+        let registry = econ_graph_crawler::sources::default_registry();
+        assert!(chunked_run_sources(&registry, &[]).contains(&SourceId::Fred));
+        let switched = chunked_run_sources(&registry, &[SourceId::Fred]);
+        assert!(!switched.contains(&SourceId::Fred), "{switched:?}");
     }
 
     /// Coverage from the database lands on /metrics for every covered source.

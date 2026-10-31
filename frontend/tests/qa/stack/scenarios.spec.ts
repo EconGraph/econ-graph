@@ -35,7 +35,7 @@ test('QA scenario suite, ci profile, against the release e2e stack', async ({}, 
   env.QA_OIDC_ISSUER ??= process.env.QA_STACK_OIDC_ISSUER ?? '';
   env.QA_TIMEOUT_GRACE_SECONDS = String(GRACE_SECONDS);
   // This stack is the ci profile's target.
-  env.QA_LAB_TARGET_OK ??= new URL(target).hostname;
+  env.QA_LAB_TARGET_OK ??= new URL(target).host;
 
   // The runner owns its scenarios: on SIGTERM it passes the signal to the running scenario,
   // which cleans up (deletes its annotation, restores catalog roles), kills it after the grace

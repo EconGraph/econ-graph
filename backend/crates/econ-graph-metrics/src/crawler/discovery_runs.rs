@@ -23,7 +23,8 @@
 //!   a source whose runs never complete still ages.
 //!
 //! The polled gauges cover only the enabled sources whose adapter discovers in chunks today, so a
-//! source that stops opting in, or is disabled, drops out (and its alert clears).
+//! source that stops opting in, is disabled or is switched to single-job discovery drops out
+//! (and its alert clears).
 
 use once_cell::sync::Lazy;
 use prometheus::{

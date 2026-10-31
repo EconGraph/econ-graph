@@ -250,7 +250,7 @@ class RunnerTest(unittest.TestCase):
     def test_lab_and_ci_run_only_against_named_targets(self):
         self.scenario('writer')
         env = {k: v for k, v in self.env.items() if k != 'QA_LAB_TARGET_OK'}
-        for target in ('http://localhost:18081', 'http://127.0.0.1', 'http://10.0.0.5',
+        for target in ('http://localhost:18081', 'http://127.0.0.1:8080', 'http://10.0.0.5',
                        'http://[::1]:8080', 'https://lab-1.example'):
             for profile in ('lab', 'ci'):
                 with self.subTest(target=target, profile=profile):
@@ -273,6 +273,52 @@ class RunnerTest(unittest.TestCase):
         # The production profile needs no list.
         code, _, _ = self.report(['--target', 'https://site.example', '--profile', 'production'], env)
         self.assertEqual(code, 0)
+
+    def test_this_hosts_gateway_ports_are_refused_whatever_is_named(self):
+        # On the production host, http(s)://localhost is production's gateway.
+        self.scenario('writer')
+        named = dict(self.env, QA_LAB_TARGET_OK='localhost,127.0.0.1,[::1],localhost:80,127.0.0.1:443')
+        for target in ('http://localhost', 'http://localhost:80', 'https://localhost', 'https://localhost:443',
+                       'http://127.0.0.1', 'https://127.0.0.1', 'http://[::1]', 'https://[::1]:443',
+                       'http://LOCALHOST.', 'https://localhost:443/'):
+            for profile in ('lab', 'ci'):
+                with self.subTest(target=target, profile=profile):
+                    code, _, output = self.report(['--target', target, '--profile', profile], named)
+                    self.assertEqual(code, 2, output)
+                    self.assertIn('production gateway', output)
+        self.assertEqual(self.ran(), [])
+
+    def test_side_urls_get_the_targets_guard(self):
+        self.scenario('writer')
+        named = dict(self.env, QA_LAB_TARGET_OK='localhost:34567')
+        for name, value in (('QA_KEYCLOAK_URL', 'http://localhost/idp'),
+                            ('QA_OIDC_ISSUER', 'https://127.0.0.1/idp/realms/econ-graph'),
+                            ('QA_MCP_URL', 'https://www.econgraph.com/mcp'),
+                            ('QA_OIDC_REDIRECT_URI', 'http://[::1]:80/auth/callback')):
+            for profile in ('lab', 'ci'):
+                with self.subTest(name=name, profile=profile):
+                    code, _, output = self.report(['--target', 'http://localhost:34567', '--profile', profile],
+                                                  dict(named, **{name: value}))
+                    self.assertEqual(code, 2, output)
+                    self.assertIn(name, output)
+        self.assertEqual(self.ran(), [])
+        # The QA environment's own addresses pass.
+        code, _, _ = self.report(['--target', 'http://localhost:34567', '--profile', 'lab'],
+                                 dict(named, QA_OIDC_ISSUER='http://localhost:34567/idp/realms/econ-graph'))
+        self.assertEqual(code, 0)
+
+    def test_a_named_port_allows_only_that_port(self):
+        self.scenario('writer')
+        named = dict(self.env, QA_LAB_TARGET_OK='localhost:34567, lab.example')
+        code, _, _ = self.report(['--target', 'http://localhost:34567', '--profile', 'lab'], named)
+        self.assertEqual(code, 0)
+        code, _, output = self.report(['--target', 'http://localhost:34568', '--profile', 'lab'], named)
+        self.assertEqual(code, 2)
+        self.assertIn('QA_LAB_TARGET_OK', output)
+        # A name without a port allows any port but the gateway's.
+        code, _, _ = self.report(['--target', 'https://lab.example:8443', '--profile', 'lab'], named)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.ran(), ['writer', 'writer'])
 
     def test_naming_a_scenario_the_profile_does_not_run_is_an_error(self):
         self.scenario('lab-only', mutates='no', profiles='lab')

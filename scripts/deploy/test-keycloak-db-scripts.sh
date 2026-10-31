@@ -95,6 +95,8 @@ case "$*" in
   "version --request-timeout=15s") ;;
   "config get-contexts -o name") printf 'kind-econ-graph\nkind-other\nkind-kg-test\n' ;;
   "get namespace kube-system "*) printf '%s' "${STUB_UID:-uid-this-cluster}" ;;
+  # Not a release lab (lib/cluster-role.sh, cluster_role_is_lab).
+  "get configmap econgraph-lab-owner "*) ;;
   # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
   "get configmap econgraph-cluster-role "*)
     [ "${STUB_MARKER:-none}" = production ] || exit 0
