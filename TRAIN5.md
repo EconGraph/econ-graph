@@ -31,14 +31,17 @@ contract is reviewed. API design can proceed against that contract; integration
 must exercise persisted facts and real calculations. Pages, ratio presentation
 and notes join the API contract before the complete research workflow runs.
 
-The review stack starts directly at `main` with the fact-storage PR. The shared
-reference prerequisite [#773](https://github.com/EconGraph/econ-graph/pull/773) has
-landed on main. Each subsequent package below is a separate pull request based on
-the preceding row's branch, so its diff contains only that package. Merge in
-order, retargeting the next PR after its parent lands.
+The review stack starts at `main` with the small release-lab compatibility fix
+[#807](https://github.com/EconGraph/econ-graph/pull/807), which repairs the existing
+manifest checks without changing the public image validator. The shared-reference
+prerequisite [#773](https://github.com/EconGraph/econ-graph/pull/773) has landed on
+main. Each package below is a separate pull request based on the preceding row's
+branch, so its diff contains only that package. Merge in order, retargeting the
+next PR after its parent lands.
 
 | Package | Branch | Review focus |
 | --- | --- | --- |
+| Main CI compatibility | `fix/release-lab-verified-local-images` | Verified source references, pinned local lab images |
 | Fact identity and schema | `stack/train5-fact-storage` | Decimal precision, revisions, Train 6 compatibility |
 | Financial calculations | `stack/train5-calculations` | Actual periods, compatible inputs, missing data, provenance |
 | Bulk ingestion | `stack/train5-ingestion` | Idempotency, recovery, archive bounds, freshness |
