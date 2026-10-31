@@ -1967,57 +1967,6 @@ async fn return_to_active_clears_fetch_counters() {
     db.drop().await;
 }
 
-/// An upstream incident that answers every request with 404 must not fetch-retire the
-/// whole source: while more than 20% of its active series have misses, nothing retires.
-#[tokio::test]
-async fn fetch_only_mass_retirement_is_guarded() {
-    let Some(db) = fetch_counter_db("eco464_fetch_guard").await else {
-        return;
-    };
-    let pool = &db.pool;
-    let ids: Vec<String> = (0..12).map(|i| format!("s{i}")).collect();
-    for id in &ids {
-        persist::persist_series(pool, SourceId::Fred, id, &successful_history())
-            .await
-            .unwrap();
-    }
-    for _ in 1..NOT_FOUND_RETIRE_AFTER {
-        for id in &ids {
-            fetch_miss(pool, id).await;
-        }
-    }
-    let mut conn = pool.get().await.unwrap();
-    let outcome = conn
-        .transaction::<_, AppError, _>(async |conn| {
-            record_not_found_conn(conn, SourceId::Fred, "s0").await
-        })
-        .await
-        .unwrap();
-    assert!(outcome.guarded);
-    assert_eq!(outcome.status, None);
-    let s0 = fetch_evidence(pool, "s0").await;
-    assert_eq!(
-        (s0.status.as_str(), s0.fetch_misses),
-        ("active", NOT_FOUND_RETIRE_AFTER)
-    );
-    // Once the others recover, the same series retires normally.
-    for id in &ids[1..] {
-        persist::persist_series(pool, SourceId::Fred, id, &successful_history())
-            .await
-            .unwrap();
-    }
-    let outcome = conn
-        .transaction::<_, AppError, _>(async |conn| {
-            record_not_found_conn(conn, SourceId::Fred, "s0").await
-        })
-        .await
-        .unwrap();
-    assert!(!outcome.guarded);
-    assert_eq!(fetch_evidence(pool, "s0").await.status, "retired");
-    drop(conn);
-    db.drop().await;
-}
-
 /// A stored row that was already inactive (for example deactivated by the earlier
 /// unlisted-series sweep) and that the rules enroll as a scope member stays inactive until a
 /// catalog lists it outright.

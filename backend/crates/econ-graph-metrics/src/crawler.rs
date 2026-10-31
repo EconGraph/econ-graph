@@ -561,7 +561,7 @@ impl CrawlerCatalogMetrics {
     /// Materialize bounded counter labels at zero before events, so Prometheus can
     /// observe an increase from a baseline rather than seeing only a first value of one.
     pub fn initialize_source(&self, source: &str) {
-        for reason in ["volume", "mass_disappearance", "fetch_mass_missing"] {
+        for reason in ["volume", "mass_disappearance"] {
             self.guard_rejections_total
                 .with_label_values(&[source, reason]);
         }

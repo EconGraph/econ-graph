@@ -129,11 +129,10 @@ The BEA rule `prefix = "SAGDP2"` selects every Regional table whose name starts 
 under that name. `SAGDP2S`, the discontinued SIC-basis series, is excluded.
 Confirmed fetch-level NotFound responses use a separate consecutive-failure counter, reset
 by a successful fetch. Only definite answers count: a FRED 400 "series does not exist" or an
-HTTP 404. Three in a row retire a series from fetching, unless more than 20% of the
-source's active series (and at least ten) currently have fetch misses: an upstream incident
-answering every request with 404 is then more likely than real removals, so nothing is
-fetch-retired, and `crawler_catalog_guard_rejections_total{reason="fetch_mass_missing"}`
-counts each skipped retirement. A BEA GetData response that omits a
+HTTP 404. Three in a row retire a series from fetching. An upstream incident that answers
+every request with 404 can fetch-retire many series at once; that heals itself, because
+fetch-retired series are probed every 12 refresh intervals and the first successful fetch
+reactivates each one. A BEA GetData response that omits a
 requested line or area is weaker evidence (`crawl_status` `absent`) with its own counter:
 six in a row retire the series from fetching. That includes an empty response, which is what
 BEA returns when every requested Regional area is gone or a NIPA table is no longer published
@@ -175,22 +174,26 @@ the data database, setting the source's `data_sources.name` and the series id:
 \set source 'Federal Reserve Economic Data (FRED)'
 \set series 'SERIES_ID'
 BEGIN;
--- Expect exactly one row, with status restricted.
-SELECT l.status, l.since FROM series_lifecycle l JOIN data_sources ds ON ds.id = l.source_id
- WHERE ds.name = :'source' AND l.external_id = :'series';
-UPDATE series_lifecycle l SET status = 'active', since = NULL
-  FROM data_sources ds
- WHERE ds.id = l.source_id AND ds.name = :'source' AND l.external_id = :'series'
-   AND l.status = 'restricted';                     -- expect UPDATE 1
+-- Lifts only a row that is restricted now, and only reactivates rows for that row. Raises,
+-- and so rolls back, unless exactly one lifecycle row changed.
+CREATE TEMP TABLE lifted ON COMMIT DROP AS
+WITH changed AS (
+  UPDATE series_lifecycle l SET status = 'active', since = NULL
+    FROM data_sources ds
+   WHERE ds.id = l.source_id AND ds.name = :'source' AND l.external_id = :'series'
+     AND l.status = 'restricted'
+  RETURNING l.source_id, l.external_id)
+SELECT * FROM changed;
+DO $$ BEGIN
+  IF (SELECT count(*) FROM lifted) <> 1 THEN
+    RAISE EXCEPTION 'expected exactly one restricted series, found %', (SELECT count(*) FROM lifted);
+  END IF;
+END $$;
 UPDATE economic_series es SET is_active = true, crawl_status = 'success'
-  FROM data_sources ds
- WHERE ds.id = es.source_id AND ds.name = :'source' AND es.external_id = :'series';
-                                                    -- expect UPDATE 0 or 1
+  FROM lifted WHERE es.source_id = lifted.source_id AND es.external_id = lifted.external_id;
 UPDATE series_metadata sm SET is_active = true
-  FROM data_sources ds
- WHERE ds.id = sm.source_id AND ds.name = :'source' AND sm.external_id = :'series';
-                                                    -- expect UPDATE 0 or 1
-COMMIT;                                             -- ROLLBACK if any count differs
+  FROM lifted WHERE sm.source_id = lifted.source_id AND sm.external_id = lifted.external_id;
+COMMIT;
 ```
 
 The series' observations were retained while it was restricted; the next scheduled fetch
@@ -217,13 +220,26 @@ files, needs two checks against the data database and the live APIs:
 
 1. **FRED volume.** The GDP release walk is capped at `max_series` in
    `catalog_selection/fred.toml` (500). Count what the rule selects today, and record the
-   count in the release ticket:
+   count in the release ticket. The script reads every page until it has the catalog's whole
+   `count`, matches frequencies the way the rule does (`Quarterly` also matches
+   `Quarterly, End of Period`), and passes the API key in a curl config file rather than on
+   the command line:
 
    ```sh
-   for offset in 0 1000 2000 3000; do
-     curl -s "https://api.stlouisfed.org/fred/release/series?release_id=53&api_key=$FRED_API_KEY&file_type=json&limit=1000&offset=$offset"
-   done | jq -s '[.[].seriess[] | select((.title | ascii_downcase | contains("gross domestic product"))
-     and (.frequency == "Quarterly" or .frequency == "Annual"))] | length'
+   set -euo pipefail
+   dir=$(mktemp -d); trap 'rm -rf "$dir"' EXIT
+   ( umask 077; printf 'get\ndata-urlencode = "api_key=%s"\n' "$FRED_API_KEY" > "$dir/key.cfg" )
+   offset=0
+   while :; do
+     curl -sfK "$dir/key.cfg" -o "$dir/page$offset.json" \
+       "https://api.stlouisfed.org/fred/release/series?release_id=53&file_type=json&limit=1000&offset=$offset"
+     count=$(jq .count "$dir/page$offset.json")
+     offset=$((offset + 1000))
+     [ "$offset" -lt "$count" ] || break
+   done
+   jq -s '[.[].seriess[] | select((.title | ascii_downcase | contains("gross domestic product"))
+       and (.frequency as $q | any("Quarterly", "Annual"; . as $f | $q == $f or ($q | startswith($f + ",")))))]
+     | length' "$dir"/page*.json
    ```
 
    Add the `include` overrides. If the total exceeds `max_series`, every FRED discovery
@@ -235,8 +251,12 @@ files, needs two checks against the data database and the live APIs:
    deploying and record the number:
 
    ```sql
+   -- Table prefixes from the shipped catalog_selection/bea.toml rules.
    SELECT count(*) FROM economic_series es JOIN data_sources ds ON ds.id = es.source_id
-    WHERE ds.name = 'Bureau of Economic Analysis (BEA)' AND NOT es.is_active;
+    WHERE ds.name = 'Bureau of Economic Analysis (BEA)' AND NOT es.is_active
+      AND (es.external_id ~ '^bea_nipa/(T10101|T10105|T10106|T20100|T20600|T20804)'
+        OR (es.external_id LIKE 'bea_regional/SAGDP2%'
+            AND es.external_id NOT LIKE 'bea_regional/SAGDP2S.%'));
    ```
 
 ### Reviewing a guarded catalog
@@ -276,7 +296,7 @@ The worker publishes `crawler_series_lifecycle{source,status}` counts and
 `crawler_series_lifecycle_transitions_total{source,status}` transition counters.
 `CrawlerSeriesPublicationChanged` is informational and points operators to source counts
 and successor candidates. `crawler_catalog_guard_rejections_total{source,reason}` distinguishes
-`volume`, `mass_disappearance` and `fetch_mass_missing`. Counts refresh from the database on the coverage polling
+`volume` and `mass_disappearance`. Counts refresh from the database on the coverage polling
 interval. Event counters are process-local: an increase requires scraping around the event.
 Alert rules do not send notifications without Alertmanager.
 

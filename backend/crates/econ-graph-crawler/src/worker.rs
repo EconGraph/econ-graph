@@ -925,6 +925,16 @@ impl Worker {
                         error: result.err().map(|e| e.to_string()),
                     });
                 }
+                // Every fetch job of every source takes the shared source lock before any row
+                // write. A discovery takes it exclusively and then updates series rows, so a
+                // fetch that wrote rows first and locked later could deadlock with it.
+                if matches!(
+                    item.job_kind(),
+                    JobKind::FetchSeries | JobKind::RefetchSeries
+                ) {
+                    let source_id = persist::data_source_id_conn(conn, source).await?;
+                    crate::lifecycle::lock_source_shared(conn, source_id).await?;
+                }
                 let result: Dispatched = match result {
                     Ok(JobWrite::Series(fetched)) => {
                         let write = persist::persist_series_conn(
@@ -1065,11 +1075,6 @@ impl Worker {
             .registry
             .get(source)
             .is_some_and(|a| a.tracks_catalog_lifecycle());
-        // Every crawl_status write below happens under the shared source lock, so it cannot
-        // interleave with a catalog reconciliation's publication-state writes. Nothing else is
-        // locked yet in this transaction except the queue row, so taking it first is safe.
-        let source_id = persist::data_source_id_conn(conn, source).await?;
-        crate::lifecycle::lock_source_shared(conn, source_id).await?;
         let fetch_miss = match result {
             Err(CrawlError::NotFound(_)) if tracks_lifecycle => {
                 crate::lifecycle::record_not_found_conn(conn, source, &item.series_id).await?
@@ -1077,16 +1082,15 @@ impl Worker {
             Err(CrawlError::Absent(_)) if tracks_lifecycle => {
                 crate::lifecycle::record_absent_conn(conn, source, &item.series_id).await?
             }
-            _ => crate::lifecycle::FetchMissOutcome::default(),
+            _ => None,
         };
-        if fetch_miss.status.is_some() || fetch_miss.guarded {
+        if let Some(status) = fetch_miss {
             pending_metrics
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .push(crate::lifecycle::Reconciled {
-                    transitions: usize::from(fetch_miss.status.is_some()),
-                    transition_statuses: fetch_miss.status.into_iter().collect(),
-                    fetch_guarded: fetch_miss.guarded,
+                    transitions: 1,
+                    transition_statuses: vec![status],
                     ..Default::default()
                 });
         }

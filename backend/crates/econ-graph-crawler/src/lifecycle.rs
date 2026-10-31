@@ -9,8 +9,11 @@
 //! Locking: catalog reconciliation and successor confirmation take an exclusive
 //! per-source transaction advisory lock. Per-series writers (fetch success, NotFound,
 //! restriction) take that lock shared, then an exclusive per-series advisory lock, so
-//! they run concurrently across series and serialize only on the same series. Every
-//! writer takes the source lock first and at most one series lock per transaction.
+//! they run concurrently across series and serialize only on the same series. The worker
+//! takes the shared source lock at the start of every fetch job's commit, for every source,
+//! before any row write: a discovery holds the exclusive lock while it updates series rows, so
+//! a fetch that wrote rows before locking could deadlock with it. Every writer takes the
+//! source lock first and at most one series lock per transaction.
 //!
 //! Known limits, accepted by design:
 //! - The worker reads a catalog's facts (`catalog_scope`, [`CatalogLifecycle`]) from the
@@ -111,8 +114,6 @@ pub struct Reconciled {
     /// Tracked series listed upstream but no longer selected by the rules, when this result
     /// came from a catalog snapshot.
     pub(crate) unselected_tracked: Option<usize>,
-    /// A fetch-retirement was skipped by the fetch-only mass-retirement guard.
-    pub(crate) fetch_guarded: bool,
 }
 
 #[derive(Debug, Clone, QueryableByName, Serialize)]
@@ -384,7 +385,6 @@ async fn apply_snapshot(
         transitions: transition_statuses.len(),
         transition_statuses,
         unselected_tracked: Some(unselected_tracked),
-        fetch_guarded: false,
     })
 }
 
@@ -891,12 +891,6 @@ impl Reconciled {
                 .with_label_values(&[source.as_str(), status])
                 .inc();
         }
-        if self.fetch_guarded {
-            CRAWLER_CATALOG_METRICS
-                .guard_rejections_total
-                .with_label_values(&[source.as_str(), "fetch_mass_missing"])
-                .inc();
-        }
         if let Some(n) = self.unselected_tracked {
             CRAWLER_CATALOG_METRICS
                 .unselected_series
@@ -914,7 +908,7 @@ pub(crate) async fn record_not_found_conn(
     conn: &mut AsyncPgConnection,
     source: SourceId,
     external_id: &str,
-) -> AppResult<FetchMissOutcome> {
+) -> AppResult<Option<String>> {
     record_fetch_miss_conn(conn, source, external_id, FetchMiss::NotFound).await
 }
 
@@ -927,7 +921,7 @@ pub(crate) async fn record_absent_conn(
     conn: &mut AsyncPgConnection,
     source: SourceId,
     external_id: &str,
-) -> AppResult<FetchMissOutcome> {
+) -> AppResult<Option<String>> {
     record_fetch_miss_conn(conn, source, external_id, FetchMiss::Absent).await
 }
 
@@ -961,49 +955,12 @@ impl FetchMiss {
          (SELECT fingerprint FROM catalog_lifecycle_scopes s WHERE s.source_id=$1))";
 }
 
-/// Result of recording one fetch miss.
-#[derive(Debug, Default)]
-pub(crate) struct FetchMissOutcome {
-    /// The new publication status, when it changed.
-    pub(crate) status: Option<String>,
-    /// Retirement was due but skipped by the fetch-only mass-retirement guard.
-    pub(crate) guarded: bool,
-}
-
-/// Fetch-only mass-retirement guard: when more than this share of a source's active series
-/// currently have fetch misses, an upstream incident (every request answering 404) is more
-/// likely than real removals, so no series is fetch-retired. Matches the catalog guard.
-pub(crate) const FETCH_GUARD_MAX_MISSING_PERCENT: i64 = 20;
-/// The guard applies only once at least this many series have misses, so a source with a
-/// handful of series can still retire one.
-pub(crate) const FETCH_GUARD_MIN_SERIES: i64 = 10;
-
-async fn fetch_misses_crowded(conn: &mut AsyncPgConnection, source_id: Uuid) -> AppResult<bool> {
-    #[derive(QueryableByName)]
-    struct Counts {
-        #[diesel(sql_type = diesel::sql_types::BigInt)]
-        missing: i64,
-        #[diesel(sql_type = diesel::sql_types::BigInt)]
-        total: i64,
-    }
-    let c: Counts = diesel::sql_query(
-        "SELECT (SELECT count(*) FROM series_lifecycle WHERE source_id=$1 AND status='active' \
-                    AND (fetch_not_found_count>0 OR fetch_absent_count>0)) AS missing, \
-                (SELECT count(*) FROM economic_series WHERE source_id=$1 AND is_active) AS total",
-    )
-    .bind::<SqlUuid, _>(source_id)
-    .get_result(conn)
-    .await?;
-    Ok(c.missing >= FETCH_GUARD_MIN_SERIES
-        && c.missing * 100 > c.total.max(c.missing) * FETCH_GUARD_MAX_MISSING_PERCENT)
-}
-
 async fn record_fetch_miss_conn(
     conn: &mut AsyncPgConnection,
     source: SourceId,
     external_id: &str,
     miss: FetchMiss,
-) -> AppResult<FetchMissOutcome> {
+) -> AppResult<Option<String>> {
     let source_id = persist::data_source_id_conn(conn, source).await?;
     lock_series(conn, source_id, external_id).await?;
     // Fetch-only evidence has its own scope: it can badge retained history that
@@ -1014,35 +971,7 @@ async fn record_fetch_miss_conn(
         ON CONFLICT(source_id,external_id) DO NOTHING")
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).execute(&mut *conn).await?;
     let (counter, threshold) = miss.counter();
-    #[derive(QueryableByName)]
-    struct Current {
-        #[diesel(sql_type = diesel::sql_types::Integer)]
-        n: i32,
-        #[diesel(sql_type = Text)]
-        status: String,
-        #[diesel(sql_type = diesel::sql_types::Bool)]
-        counts: bool,
-    }
-    // The series lock makes this read current. Only a retirement consults the guard.
-    let current: Option<Current> = diesel::sql_query(format!(
-        "SELECT {counter} AS n, status, {counts} AS counts FROM series_lifecycle \
-         WHERE source_id=$1 AND external_id=$2",
-        counts = FetchMiss::COUNTS_WHEN
-    ))
-    .bind::<SqlUuid, _>(source_id)
-    .bind::<Text, _>(external_id)
-    .get_result(&mut *conn)
-    .await
-    .optional()?;
-    let due = current
-        .as_ref()
-        .is_some_and(|c| c.counts && c.status == "active" && c.n.saturating_add(1) >= threshold);
-    let guarded = due && fetch_misses_crowded(conn, source_id).await?;
-    if guarded {
-        tracing::warn!(%source, external_id, "fetch-only mass-retirement guard: too many of this \
-            source's series are failing as missing at once; not retiring");
-    }
-    let retire = format!("{counter}+1>=$3 AND status='active' AND NOT $4");
+    let retire = format!("{counter}+1>=$3 AND status='active'");
     let change: Option<StatusChange> = diesel::sql_query(format!(
         "UPDATE series_lifecycle SET \
         {counter}=LEAST({counter}::bigint+1,2147483647)::integer, \
@@ -1056,7 +985,6 @@ async fn record_fetch_miss_conn(
     .bind::<SqlUuid, _>(source_id)
     .bind::<Text, _>(external_id)
     .bind::<diesel::sql_types::Integer, _>(threshold)
-    .bind::<diesel::sql_types::Bool, _>(guarded)
     .get_result(&mut *conn)
     .await
     .optional()?;
@@ -1069,10 +997,7 @@ async fn record_fetch_miss_conn(
     .bind::<Text, _>(external_id)
     .execute(&mut *conn)
     .await?;
-    Ok(FetchMissOutcome {
-        status: change.and_then(|c| c.status),
-        guarded,
-    })
+    Ok(change.and_then(|c| c.status))
 }
 
 /// Reset only fetch evidence when history was successfully fetched. Run before the
@@ -1083,7 +1008,8 @@ async fn record_fetch_miss_conn(
 /// concurrently and wait only for a catalog reconciliation of their source.
 ///
 /// A source that does not track lifecycle and has no lifecycle row has no evidence to
-/// reset, so it takes no lock at all.
+/// reset, so it takes no series lock here. The worker already holds the shared source lock
+/// for every fetch job (see the module docs).
 pub(crate) async fn record_fetch_success_conn(
     conn: &mut AsyncPgConnection,
     source_id: Uuid,

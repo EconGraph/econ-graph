@@ -4821,3 +4821,112 @@ async fn absent_fetch_records_absent_status_and_spares_listed_series() {
     drop(w);
     db.drop().await;
 }
+
+/// Every fetch job takes the shared source lock before writing rows, even for a source that
+/// does not track lifecycle. A discovery holds the exclusive lock and then updates the same
+/// series rows; with the lock taken after the row writes, the two deadlocked.
+#[tokio::test]
+async fn fetch_locks_the_source_before_rows_so_discovery_cannot_deadlock() {
+    let Some(db) = review_worker_db("eco464_fetch_lock_first").await else {
+        return;
+    };
+    let id = "t5_fetch_lock_first";
+    create_series(&db.pool, &[id]).await;
+    let source_id = persist::data_source_id(&db.pool, SRC).await.unwrap();
+    let adapter = Arc::new(BatchAdapter::default());
+    assert!(!adapter.tracks_catalog_lifecycle());
+    let w = batch_worker(&db.pool, &adapter, 1);
+    let q = enqueue(&db.pool, SRC.as_str(), id, JobKind::FetchSeries, 5).await;
+    let claim = CrawlQueueItem::claim_by_id(&db.pool, q, &w.config.worker_id)
+        .await
+        .unwrap()
+        .unwrap();
+    // The discovery side: exclusive source lock first, as the worker's discovery commit does.
+    let mut discovery = db.pool.get().await.unwrap();
+    diesel::sql_query("BEGIN")
+        .execute(&mut discovery)
+        .await
+        .unwrap();
+    crate::lifecycle::lock_source_exclusive(&mut discovery, source_id)
+        .await
+        .unwrap();
+    #[derive(QueryableByName)]
+    struct Pid {
+        #[diesel(sql_type=diesel::sql_types::Integer)]
+        pid: i32,
+    }
+    let pid: Pid = diesel::sql_query("SELECT pg_backend_pid() AS pid")
+        .get_result(&mut discovery)
+        .await
+        .unwrap();
+    let job = tokio::spawn(async move {
+        w.commit_result(
+            SRC,
+            &claim,
+            Ok(JobWrite::Series(empty_fetch())),
+            Duration::ZERO,
+        )
+        .await
+    });
+    let mut probe = db.pool.get().await.unwrap();
+    #[derive(QueryableByName)]
+    struct Waiting {
+        #[diesel(sql_type=diesel::sql_types::Bool)]
+        waiting: bool,
+    }
+    let waited = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let w: Waiting = diesel::sql_query(
+                "SELECT EXISTS(SELECT 1 FROM pg_stat_activity \
+                 WHERE $1=ANY(pg_blocking_pids(pid))) AS waiting",
+            )
+            .bind::<diesel::sql_types::Integer, _>(pid.pid)
+            .get_result(&mut probe)
+            .await
+            .unwrap();
+            if w.waiting {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    // Now the discovery updates the series row, as retire_unlisted_conn does. Had the fetch
+    // written the row before waiting for the source lock, this would wait on it: a deadlock.
+    diesel::sql_query("SET LOCAL lock_timeout = '5s'")
+        .execute(&mut discovery)
+        .await
+        .unwrap();
+    let updated = diesel::sql_query(
+        "UPDATE economic_series SET is_active = is_active WHERE source_id=$1 AND external_id=$2",
+    )
+    .bind::<diesel::sql_types::Uuid, _>(source_id)
+    .bind::<diesel::sql_types::Text, _>(id)
+    .execute(&mut discovery)
+    .await;
+    diesel::sql_query(if updated.is_ok() {
+        "COMMIT"
+    } else {
+        "ROLLBACK"
+    })
+    .execute(&mut discovery)
+    .await
+    .unwrap();
+    assert!(waited.is_ok(), "the fetch did not wait for the source lock");
+    assert_eq!(
+        updated.unwrap(),
+        1,
+        "the discovery's row update had to wait"
+    );
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(5), job)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+        JobOutcome::Completed(_)
+    ));
+    drop(discovery);
+    drop(probe);
+    db.drop().await;
+}
