@@ -2,8 +2,8 @@
 // Licensed under the Microsoft Reference Source License (MS-RSL).
 // See LICENSE file for complete terms and conditions.
 
-//! Every data source the crawler can write is readable through a catalog role, and every
-//! catalog role is granted by default unless it is listed here as restricted.
+//! Every data source the crawler can write is readable through a catalog role, and the catalogs
+//! the realm file grants by default are exactly those not listed here as restricted.
 //!
 //! The API serves a source's series only to a caller holding the role
 //! `Role::for_catalog(data_sources.name)` returns, and that function matches on the exact name
@@ -24,17 +24,30 @@ use econ_graph_crawler::source::SourceId;
 /// series catalog.
 const SOURCES_WITHOUT_A_CATALOG_ROLE: &[SourceId] = &[SourceId::Sec];
 
-/// Catalog roles deliberately left out of the default `catalog-public` grant.
+/// Catalog roles deliberately left out of the default `catalog-public` grant. The public set is
+/// read from the realm file; every other catalog role must be listed here, and nothing listed
+/// here may be public.
 const CATALOG_ROLES_NOT_PUBLIC: &[Role] = &[
+    // Admins only.
+    Role::CatalogFredRead,
     // Restricted by default; granted explicitly.
+    Role::CatalogWorldTradeOrganizationRead,
     Role::CatalogBankOfCanadaRead,
+    // Not reviewed for public access; granted to nobody by default.
+    Role::CatalogImfRead,
+    Role::CatalogEcbRead,
+    Role::CatalogOecdRead,
+    Role::CatalogBoeRead,
+    Role::CatalogBojRead,
+    Role::CatalogRbaRead,
+    Role::CatalogSnbRead,
+    Role::CatalogUnstatsRead,
+    Role::CatalogIloRead,
 ];
 
-/// Catalog roles deliberately left out of the anonymous reader's scope mapping.
-const CATALOG_ROLES_NOT_ANONYMOUS: &[Role] = &[
-    // Restricted by default; granted explicitly.
-    Role::CatalogBankOfCanadaRead,
-];
+/// Catalog roles deliberately left out of the anonymous reader's scope mapping. Anonymous
+/// visitors get exactly the public catalogs, so this is the same list.
+const CATALOG_ROLES_NOT_ANONYMOUS: &[Role] = CATALOG_ROLES_NOT_PUBLIC;
 
 const REALM: &str = include_str!("../../../../config/keycloak/econ-graph-realm.json");
 

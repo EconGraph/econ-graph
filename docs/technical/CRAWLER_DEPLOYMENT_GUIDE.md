@@ -157,9 +157,9 @@ fetching still goes through the same worker loop as a manual `crawler enqueue`. 
    retained queue rows (14 days by default); purging history can reset the backoff, never
    lengthen it. Sources whose `data_sources` row is disabled are excluded.
 
-   This applies to every adapter in `default_registry()`: FRED, BLS, BEA, Census, FHFA, WTO and
-   World Bank with the release flag profile. The `static_catalogs` build flag also registers
-   nine static catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS). It is enabled
+   This applies to every adapter in `default_registry()`: FRED, BLS, BEA, Census, FHFA, WTO,
+   Bank of Canada and World Bank with the release flag profile. The `static_catalogs` build
+   flag also registers eight static catalogs (BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS). It is enabled
    by `FLAGS_PROFILE=dev`, the local Cargo default, and disabled by `FLAGS_PROFILE=release`,
    the image default. Cargo’s `--release` option controls optimization independently; static
    catalogs are selected through [build flags](../../config/flags/README.md#how-the-backend-reads-it),
