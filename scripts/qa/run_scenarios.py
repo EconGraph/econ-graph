@@ -21,7 +21,9 @@ trip, from this directory only, when a dedicated QA account (a `qa-` username) i
 The lab and ci profiles run only against targets named in QA_LAB_TARGET_OK (a host, which
 allows any port, or host:port), never against a production host, and never against this
 host's own http://localhost or https://localhost (ports 80 and 443), whatever
-QA_LAB_TARGET_OK says: on the production host, that is production's gateway. --require-pass names scenarios that must pass, not skip. Credentials come from the environment or from files named in it, never
+QA_LAB_TARGET_OK says: on the production host, that is production's gateway. The URLs scenarios
+read beside the target (QA_OIDC_ISSUER, QA_KEYCLOAK_URL, QA_MCP_URL, QA_OIDC_REDIRECT_URI) get the
+same production-host and port 80/443 refusals in those profiles. --require-pass names scenarios that must pass, not skip. Credentials come from the environment or from files named in it, never
 from arguments, and are redacted from everything the runner prints or writes.
 
 Exit status: 0 when no scenario failed, 1 when one did, 2 for a usage error or a refusal.
@@ -267,6 +269,35 @@ def check_target(target: str, profile: str, env: dict[str, str]) -> str | None:
             'state-changing scenarios, so its target must be named in QA_LAB_TARGET_OK '
             f'(e.g. QA_LAB_TARGET_OK={parsed.hostname}:{port} for a lab or the release e2e stack)'
         )
+    return None
+
+
+# URLs scenarios read beside the target. In the lab and ci profiles they get the target's
+# guard against production: never a production host, never this host's port 80 or 443.
+SIDE_URLS = ('QA_OIDC_ISSUER', 'QA_KEYCLOAK_URL', 'QA_MCP_URL', 'QA_OIDC_REDIRECT_URI')
+
+
+def check_side_urls(profile: str, env: dict[str, str]) -> str | None:
+    """Why a URL in SIDE_URLS is unusable under `profile`, or None."""
+    if profile == 'production':
+        return None
+    for name in SIDE_URLS:
+        value = env.get(name, '').strip()
+        if not value:
+            continue
+        parsed = urllib.parse.urlsplit(value)
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+            return f'{name} must be an http(s) URL, not {value!r}'
+        host = parsed.hostname.rstrip('.').lower()
+        try:
+            port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+        except ValueError:
+            return f'{name} has an invalid port'
+        if host in production_hosts(env):
+            return f'refusing the {profile} profile with {name} on production host {parsed.hostname}'
+        if host in LOOPBACK_HOSTS and port in GATEWAY_PORTS:
+            return (f'refusing the {profile} profile with {name} on {parsed.scheme}://{parsed.netloc}: '
+                    f'port {port} on this host is the production gateway on the production host')
     return None
 
 
@@ -735,7 +766,7 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None,
             )
         return 0
 
-    refusal = check_target(args.target, args.profile, env)
+    refusal = check_target(args.target, args.profile, env) or check_side_urls(args.profile, env)
     if refusal:
         print(f'error: {refusal}', file=sys.stderr)
         return 2

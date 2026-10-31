@@ -288,6 +288,25 @@ class RunnerTest(unittest.TestCase):
                     self.assertIn('production gateway', output)
         self.assertEqual(self.ran(), [])
 
+    def test_side_urls_get_the_targets_guard(self):
+        self.scenario('writer')
+        named = dict(self.env, QA_LAB_TARGET_OK='localhost:34567')
+        for name, value in (('QA_KEYCLOAK_URL', 'http://localhost/idp'),
+                            ('QA_OIDC_ISSUER', 'https://127.0.0.1/idp/realms/econ-graph'),
+                            ('QA_MCP_URL', 'https://www.econgraph.com/mcp'),
+                            ('QA_OIDC_REDIRECT_URI', 'http://[::1]:80/auth/callback')):
+            for profile in ('lab', 'ci'):
+                with self.subTest(name=name, profile=profile):
+                    code, _, output = self.report(['--target', 'http://localhost:34567', '--profile', profile],
+                                                  dict(named, **{name: value}))
+                    self.assertEqual(code, 2, output)
+                    self.assertIn(name, output)
+        self.assertEqual(self.ran(), [])
+        # The QA environment's own addresses pass.
+        code, _, _ = self.report(['--target', 'http://localhost:34567', '--profile', 'lab'],
+                                 dict(named, QA_OIDC_ISSUER='http://localhost:34567/idp/realms/econ-graph'))
+        self.assertEqual(code, 0)
+
     def test_a_named_port_allows_only_that_port(self):
         self.scenario('writer')
         named = dict(self.env, QA_LAB_TARGET_OK='localhost:34567, lab.example')

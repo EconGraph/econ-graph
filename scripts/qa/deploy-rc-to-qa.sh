@@ -59,22 +59,18 @@
 #        and anonymous-client-secret replace production's, and the identity provider
 #        keys are dropped;
 #      - Secrets crawler-api-keys (production's upstream API keys), grafana-admin and
-#        monitoring-auth are deleted; deploy.sh generates new monitoring credentials. The
+#        monitoring-auth are deleted; deploy.sh generates a new Grafana admin password (and
+#        monitoring-auth only when MONITORING_BASIC_AUTH is set, which it never is here). The
 #        database passwords the restored data needs are kept.
 #      Keycloak then starts on the copy (migrating it) and a Job adds the QA bootstrap admin
 #      (kc.sh bootstrap-admin), whose password is in accounts/keycloak-admin.password. The
 #      script never signs in with production's admin.
 #   6. Deploys with the candidate's deploy.sh, PUBLIC_HOST empty and no API keys in its
 #      environment; cloudflared stays at 0 replicas (the cluster is not marked production).
-#   7. Moves sign-in to http://localhost:PORT: Keycloak's KC_HOSTNAME and web origins, the
-#      realm import's redirect URIs, the backend's OIDC_ISSUER and CORS_ORIGIN. Without
-#      this, sign-in would send the browser to http://localhost, port 80: production's
-#      gateway on this host.
-#
-# Deliberate differences from the candidate's own deployment, so test what it changes with
-# that in mind: sign-in on http://localhost:PORT (step 7) and its CORS_ORIGIN; no identity
-# providers, new realm keys and client secrets (step 5); crawler-worker at 0 replicas with no
-# API keys (step 8); a QA bootstrap admin in the master realm.
+#   7. Moves sign-in to http://localhost:PORT: Keycloak's KC_HOSTNAME, KC_HOSTNAME_ADMIN and
+#      web origins, the realm import's redirect URIs, the backend's OIDC_ISSUER and
+#      CORS_ORIGIN. Without this, sign-in would send the browser to http://localhost, port 80:
+#      production's gateway on this host.
 #   8. crawler-worker stays at 0 replicas: the worktree's crawler-worker.yaml is set to 0
 #      before deploy.sh, so no crawler ever runs on the restored queue. Scaling it up crawls
 #      from this host's address, which production's crawler shares, so it counts against
@@ -83,6 +79,13 @@
 #      random passwords, passed to Keycloak on stdin, never in arguments or output.
 #  10. Checks the dump directory is unchanged and prints the URL, the accounts file and
 #      the values for the Linear QA prompt.
+#
+# Deliberate differences from the candidate's own deployment, so test what it changes with
+# that in mind: sign-in and Keycloak's admin console on http://localhost:PORT (step 7) and its
+# CORS_ORIGIN; no identity providers, new realm keys and client secrets (step 5);
+# crawler-worker at 0 replicas with no API keys (step 8); a QA bootstrap admin in the master
+# realm. A rerun's deploy.sh puts the candidate's sign-in settings back until step 7 moves
+# them again, so don't test sign-in while it reruns.
 #
 # Needs: git, python3 with PyYAML, btrfs-progs, the rootful Docker daemon
 # (ECONGRAPH_DOCKER_HOST, default unix:///var/run/docker.sock) and `docker login ghcr.io`.
@@ -103,7 +106,7 @@ NAMESPACE=econ-graph
 EXIT_FAILED=1 EXIT_USAGE=2 EXIT_REFUSED=3
 
 TAG="" DUMP_DIR="" NAME="" DRY_RUN=false TEARDOWN=false
-usage() { sed -n '4,5p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '6,8p' "$0" | sed 's/^# \{0,1\}//'; }
 die() { echo "error: $*" >&2; exit "$EXIT_FAILED"; }
 refuse() { echo "refused: $*" >&2; exit "$EXIT_REFUSED"; }
 log() { echo "==> $*"; }
@@ -266,6 +269,7 @@ rc() {
         cd "$SRC"
         env -i PATH="$PATH" LANG="${LANG:-C.UTF-8}" TERM="${TERM:-dumb}" USER="${USER:-}" \
             LOGNAME="${LOGNAME:-}" SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+            DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" \
             KUBECTL="$QA_KUBECTL" KUBECONFIG="$QA_KUBECONFIG" \
             DOCKER_HOST="$DOCKER_HOST" ECONGRAPH_DOCKER_HOST="$DOCKER_HOST" \
             HOME="${QA_DIR}/home" DOCKER_CONFIG="${DOCKER_CONFIG:-${REAL_HOME}/.docker}" \
@@ -469,6 +473,15 @@ if [ -z "$(owner_id)" ]; then
 fi
 [ "$(owner_id)" = "$QA_ID" ] || refuse "cluster ${NAME} is not this QA environment's"
 state_set CLUSTER ready
+# The one-time steps below belong to this cluster: a cluster created anew (the old one deleted
+# behind the script's back) starts them over.
+cluster_uid="$(node_uid)" || die "could not read ${NAME}'s kube-system UID"
+if [ "$(state_get CLUSTER_UID)" != "$cluster_uid" ]; then
+    for step in RESTORED KEYCLOAK_SANITIZED KEYCLOAK_SECRET KEYCLOAK_ADMIN_CREATED KEYCLOAK_ADMIN; do
+        state_set "$step" ""
+    done
+    state_set CLUSTER_UID "$cluster_uid"
+fi
 # The QA kubectl and kubeconfig, checked against the cluster, for this script and the
 # candidate's scripts from here on.
 qk get namespace kube-system -o name >/dev/null
@@ -478,8 +491,44 @@ actual_port="$(docker port "$CONTROL_PLANE" 80/tcp | head -1)"
 
 # --- 4. Images -----------------------------------------------------------------------------
 log "Release images of ${TAG}"
+# load-release-images.sh tags the candidate's images on the rootful daemon under the local
+# names the manifests run, which are production's too. Put each name back where it pointed
+# before, so nothing loaded into production later picks up the candidate by name.
+image_names="$(python3 - "$SRC" <<'PY'
+import sys, yaml
+names = set()
+for manifest in ('backend-deployment.yaml', 'crawler-worker.yaml', 'frontend-deployment.yaml',
+                 'crawler-migrate-job.yaml'):
+    try:
+        docs = list(yaml.safe_load_all(open(f'{sys.argv[1]}/k8s/manifests/{manifest}')))
+    except FileNotFoundError:
+        continue
+    for doc in docs:
+        spec = ((doc or {}).get('spec') or {}).get('template', {}).get('spec', {})
+        for container in spec.get('containers', []) + spec.get('initContainers', []):
+            if container.get('image', '').startswith('econ-graph-'):
+                names.add(container['image'])
+print('\n'.join(sorted(names)))
+PY
+)"
+declare -A image_before=()
+while read -r image; do
+    [ -n "$image" ] || continue
+    image_before["$image"]="$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)"
+done <<<"$image_names"
+restore_image_names() {
+    local image
+    for image in "${!image_before[@]}"; do
+        if [ -n "${image_before[$image]}" ]; then
+            docker tag "${image_before[$image]}" "$image"
+        else
+            docker image rm --no-prune "$image" >/dev/null 2>&1 || true
+        fi
+    done
+}
 status=0
 rc scripts/deploy/load-release-images.sh --tag "$TAG" --cluster "$NAME" --allow-missing-nodes || status=$?
+restore_image_names
 # 3: loaded, but a fresh cluster had no previous images to keep.
 [ "$status" = 0 ] || [ "$status" = 3 ] || die "load-release-images.sh failed (exit ${status})"
 
@@ -560,10 +609,14 @@ yaml.safe_dump({'apiVersion': 'batch/v1', 'kind': 'Job',
                 'metadata': {'name': 'keycloak-qa-admin', 'namespace': 'econ-graph'},
                 'spec': {'backoffLimit': 0, 'template': {'spec': pod}}}, sys.stdout, sort_keys=False)
 PY
-    qk -n "$NAMESPACE" delete job keycloak-qa-admin --ignore-not-found >/dev/null
-    qk apply -f "${QA_DIR}/keycloak-qa-admin.yaml" >/dev/null
-    qk -n "$NAMESPACE" wait --for=condition=complete job/keycloak-qa-admin --timeout=900s >/dev/null
-    qk -n "$NAMESPACE" delete job keycloak-qa-admin >/dev/null
+    # Once: kc.sh bootstrap-admin fails for an admin that exists.
+    if [ "$(state_get KEYCLOAK_ADMIN_CREATED)" != "done" ]; then
+        qk -n "$NAMESPACE" delete job keycloak-qa-admin --ignore-not-found >/dev/null
+        qk apply -f "${QA_DIR}/keycloak-qa-admin.yaml" >/dev/null
+        qk -n "$NAMESPACE" wait --for=condition=complete job/keycloak-qa-admin --timeout=900s >/dev/null
+        state_set KEYCLOAK_ADMIN_CREATED "done"
+        qk -n "$NAMESPACE" delete job keycloak-qa-admin >/dev/null
+    fi
     qk -n "$NAMESPACE" rollout restart deployment/keycloak >/dev/null
     qk -n "$NAMESPACE" rollout status deployment/keycloak --timeout=900s
     state_set KEYCLOAK_ADMIN "done"
@@ -593,7 +646,8 @@ rc env "${app_database[@]}" scripts/deploy/deploy.sh
 ORIGIN="http://localhost:${PORT}"
 log "Sign-in on ${ORIGIN}"
 qk -n "$NAMESPACE" set env deployment/keycloak \
-    "KC_HOSTNAME=${ORIGIN}/idp" "KC_WEB_BASE_URL=${ORIGIN}" "KC_WEB_E2E_BASE_URL=${ORIGIN}" >/dev/null
+    "KC_HOSTNAME=${ORIGIN}/idp" "KC_HOSTNAME_ADMIN=${ORIGIN}/idp" \
+    "KC_WEB_BASE_URL=${ORIGIN}" "KC_WEB_E2E_BASE_URL=${ORIGIN}" >/dev/null
 qk -n "$NAMESPACE" rollout status deployment/keycloak --timeout=900s
 python3 - "${SRC}/k8s/manifests/keycloak/realm-import-job.yaml" "$ORIGIN" >"${QA_DIR}/realm-import.yaml" <<'PY'
 import sys, yaml
@@ -646,9 +700,9 @@ for user in users:
     password = open(os.path.join(directory, user + '.password')).read().strip()
     lines += [f'{key}_USERNAME={user}', f'{key}_PASSWORD={password}',
               f'{key}_PASSWORD_FILE={os.path.join(directory, user + ".password")}']
-lines += ['KEYCLOAK_ADMIN_USERNAME=qa-keycloak-admin',
-          'KEYCLOAK_ADMIN_PASSWORD=' + open(os.path.join(directory, 'keycloak-admin.password')).read().strip(),
-          'KEYCLOAK_ADMIN_PASSWORD_FILE=' + os.path.join(directory, 'keycloak-admin.password')]
+lines += ['QA_KEYCLOAK_ADMIN_USERNAME=qa-keycloak-admin',
+          'QA_KEYCLOAK_ADMIN_PASSWORD=' + open(os.path.join(directory, 'keycloak-admin.password')).read().strip(),
+          'QA_KEYCLOAK_ADMIN_PASSWORD_FILE=' + os.path.join(directory, 'keycloak-admin.password')]
 tmp = accounts + '.tmp'
 with open(tmp, 'w') as out:
     out.write('\n'.join(lines) + '\n')
@@ -701,7 +755,11 @@ For the Linear QA prompt:
   TARGET_URL=${ORIGIN}
   TARGET_HOST=localhost:${PORT}
 
-QA scenarios: QA_LAB_TARGET_OK=localhost:${PORT} scripts/qa/run-scenarios.sh --target ${ORIGIN} --profile lab
+QA scenarios (clearing other runs' side inputs, so none of them points at production):
+  env -u QA_KUBE_CONTEXT -u QA_KEYCLOAK_URL -u QA_OIDC_ISSUER -u QA_MCP_URL -u QA_OIDC_REDIRECT_URI \\
+    -u QA_REDEPLOY_COMMAND -u QA_DATA_REDEPLOY_COMMAND -u QA_BACKUP_COMMAND -u QA_RESTORE_COMMAND \\
+    -u QA_CRAWL_SAMPLE_COMMAND -u QA_CONVERSION_CHECK_COMMAND -u QA_SCRATCH_DATABASE_URL \\
+    QA_LAB_TARGET_OK=localhost:${PORT} scripts/qa/run-scenarios.sh --target ${ORIGIN} --profile lab
 crawler-worker is at 0 replicas and has no API keys; Keycloak has no identity providers.
 Tear down: $0 --tag ${TAG} --name ${NAME} --teardown
 EOF

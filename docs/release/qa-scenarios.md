@@ -90,7 +90,7 @@ copy holds none of production's secrets that would let it act as production:
 - Secret `econ-graph-keycloak` keeps only `db-password`, with a new anonymous client secret
   and a QA bootstrap admin (`qa-keycloak-admin`), and no identity provider keys;
 - `crawler-api-keys`, `grafana-admin` and `monitoring-auth` are deleted (the deploy generates
-  new monitoring credentials), and crawler-worker runs at 0 replicas from the first deploy.
+  a new Grafana admin password), and crawler-worker runs at 0 replicas from the first deploy.
 
 It keeps the database passwords the restored data needs (the restored Secrets
 `econ-graph-secrets`, `econ-graph-postgres` and `econ-graph-app-postgres`), and the users'
@@ -98,7 +98,10 @@ password hashes in the Keycloak copy, for realistic sign-in tests.
 
 The QA accounts `qa-a`, `qa-b` and `qa-admin` (realm role `admin`) get random passwords in
 `~/econgraph-qa/NAME/accounts.env` and `accounts/<user>.password` (mode 600), for
-`QA_USERNAME` and `QA_PASSWORD_FILE`; the QA Keycloak admin's are there too. The script
+`QA_USERNAME` and `QA_PASSWORD_FILE`; the QA Keycloak admin's are there too, as
+`QA_KEYCLOAK_ADMIN_USERNAME` and `QA_KEYCLOAK_ADMIN_PASSWORD_FILE`. The script prints a runner
+command that clears the side inputs other runs may have left in the shell (`QA_KUBE_CONTEXT`,
+`QA_KEYCLOAK_URL` and the redeploy and backup hooks), so none of them points at production. The script
 prints the URL, the accounts file and `TARGET_URL` and `TARGET_HOST` for the QA prompt; run the
 scenarios with `QA_LAB_TARGET_OK=localhost:PORT --target http://localhost:PORT --profile lab`.
 
@@ -125,7 +128,10 @@ its public name. `QA_LAB_TARGET_OK` is a comma-separated list of hosts, each all
 or `host:port` (`[v6]:port`), allowing only that port; the release e2e stack's spec sets it to its
 own `localhost:PORT`. Whatever it names, the lab and ci profiles refuse `localhost`, `127.0.0.1`
 and `::1` on ports 80 and 443 (given or by default): on the production host, that is
-production's gateway.
+production's gateway. The URLs scenarios read beside the target (`QA_OIDC_ISSUER`,
+`QA_KEYCLOAK_URL`, `QA_MCP_URL`, `QA_OIDC_REDIRECT_URI`) get the same production-host and
+port 80/443 refusals in those profiles; other side inputs, such as `QA_KUBE_CONTEXT` and the
+redeploy hooks, are the operator's to set for the run.
 
 The production exception is fixed in the runner (`PRODUCTION_MUTATING_EXCEPTIONS` in
 `scripts/qa/run_scenarios.py`): the name `annotation-round-trip` and the one file that may carry

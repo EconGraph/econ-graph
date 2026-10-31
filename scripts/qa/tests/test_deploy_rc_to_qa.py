@@ -35,6 +35,13 @@ PRODUCTION_KEYCLOAK = {'db-password': 'restored-db-password', 'admin-username': 
                        'anonymous-client-secret': 'PRODUCTION-ANONYMOUS-SECRET',
                        'google-idp-client-id': 'prod-google-id', 'google-idp-client-secret': 'PRODUCTION-GOOGLE-SECRET'}
 
+# The local names production's manifests run, as the candidate's do; production's daemon has
+# the backend's (pointing at production's image) and not the others.
+LOCAL_IMAGES = sorted({c['image'] for f in ('backend-deployment.yaml', 'crawler-worker.yaml', 'frontend-deployment.yaml')
+                       for d in yaml.safe_load_all((ROOT / 'k8s/manifests' / f).read_text()) if d and d.get('spec')
+                       for c in d['spec'].get('template', {}).get('spec', {}).get('containers', [])
+                       if c.get('image', '').startswith('econ-graph-')})
+
 STUB = r'''#!/usr/bin/env python3
 import json, os, pathlib, sys
 # Settings beside the stub, not in the environment: the script runs the candidate's scripts
@@ -82,6 +89,18 @@ if prog == 'docker':
         os.symlink(STUB_DIR / 'stub.py', args[-1])
     elif args[0] == 'run':
         pass
+    elif args[:2] == ['image', 'inspect']:
+        image = state.setdefault('daemon_images', {}).get(args[-1])
+        if image:
+            out = image
+        else:
+            code = 1
+    elif args[0] == 'tag':
+        state.setdefault('daemon_images', {})[args[2]] = args[1]
+        save()
+    elif args[:2] == ['image', 'rm']:
+        state.setdefault('daemon_images', {}).pop(args[-1], None)
+        save()
 elif prog == 'kind':
     if args[:2] == ['get', 'kubeconfig']:
         out = 'apiVersion: v1\nkind: Config\n'
@@ -107,7 +126,8 @@ elif prog == 'btrfs':
 elif prog == 'recreate-kind-cluster.sh':
     if not state.get('cluster'):
         config = args[args.index('--config') + 1]
-        state.update(cluster=True, uid='uid-qa', created=state.get('created', 0) + 1, config=config)
+        created = state.get('created', 0) + 1
+        state.update(cluster=True, uid='uid-qa-%d' % created, created=created, config=config)
         cp = [m for n in __import__('yaml').safe_load(open(config))['nodes'] for m in n.get('extraPortMappings', [])]
         state['port'] = cp[0]['hostPort']
         save()
@@ -148,7 +168,11 @@ elif prog == 'kubectl':
             users[user]['roles'] = sorted(set(users[user]['roles']) | {kc[kc.index('--rolename') + 1]})
         save()
 elif prog in ('load-release-images.sh',):
-    code = int(os.environ.get('STUB_LOAD_EXIT', '3'))
+    # As the real one: the candidate's images take the manifests' local names on the daemon.
+    for image in CONFIG.get('local_images', []):
+        state.setdefault('daemon_images', {})[image] = 'sha256:candidate'
+    save()
+    code = 3
 elif prog == 'deploy.sh':
     import yaml
     docs = [d for d in yaml.safe_load_all(open('k8s/manifests/crawler-worker.yaml')) if d]
@@ -178,7 +202,7 @@ class DeployRcToQaTest(unittest.TestCase):
         self.calls = self.work / 'calls.jsonl'
         (self.bin / 'stub-env.json').write_text(json.dumps({
             'state': str(self.state), 'calls': str(self.calls), 'name': NAME,
-            'production_keycloak': PRODUCTION_KEYCLOAK}))
+            'production_keycloak': PRODUCTION_KEYCLOAK, 'local_images': LOCAL_IMAGES}))
         stub.chmod(0o755)
         for prog in ('docker', 'kind', 'btrfs'):
             (self.bin / prog).symlink_to(stub)
@@ -195,7 +219,9 @@ class DeployRcToQaTest(unittest.TestCase):
         for source in ('scripts/qa/deploy-rc-to-qa.sh', 'scripts/deploy/lib/keycloak_sanitize.py',
                        'terraform/k8s/kind-config.yaml',
                        'k8s/manifests/keycloak/realm-import-job.yaml', 'k8s/manifests/keycloak/deployment.yaml',
-                       'k8s/manifests/crawler-worker.yaml', 'scripts/deploy/lib/agent-access.sh',
+                       'k8s/manifests/crawler-worker.yaml', 'k8s/manifests/backend-deployment.yaml',
+                       'k8s/manifests/frontend-deployment.yaml', 'k8s/manifests/crawler-migrate-job.yaml',
+                       'scripts/deploy/lib/agent-access.sh',
                        'scripts/deploy/lib/kind-version.sh'):
             target = self.repo / source
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -219,7 +245,7 @@ class DeployRcToQaTest(unittest.TestCase):
             (self.dump / name).write_text('x' * 10)
         self.dump_before = self.fingerprint(self.dump)
         self.qa_root = self.work / 'qa'
-        self.write_state({})
+        self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}})
 
     def fingerprint(self, path):
         return sorted((str(p), p.stat().st_size, p.stat().st_mtime_ns) for p in path.rglob('*'))
@@ -374,6 +400,10 @@ class DeployRcToQaTest(unittest.TestCase):
         self.assertTrue(any('delete secret crawler-api-keys' in t for t in texts))
         self.assertTrue(any('delete secret grafana-admin monitoring-auth' in t for t in texts))
         self.assertTrue(any(f'KC_HOSTNAME=http://localhost:{port}/idp' in t for t in texts))
+        self.assertTrue(any(f'KC_HOSTNAME_ADMIN=http://localhost:{port}/idp' in t for t in texts))
+        # The daemon's local names are back where production had them: the name production's
+        # daemon held points at production's image again, the others are gone.
+        self.assertEqual(state['daemon_images'], {LOCAL_IMAGES[0]: 'sha256:production'})
         self.assertTrue(any(f'OIDC_ISSUER=http://localhost:{port}/idp/realms/econ-graph' in t for t in texts))
         self.assertTrue(any(f'"CORS_ORIGIN":"http://localhost:{port}"' in t for t in texts))
         self.assertTrue(any('scale deployment/crawler-worker --replicas=0' in t for t in texts))
@@ -431,7 +461,8 @@ class DeployRcToQaTest(unittest.TestCase):
         self.assertNotIn('resourceVersion', state['keycloak_secret']['metadata'])
         job = yaml.safe_load((qa / 'keycloak-qa-admin.yaml').read_text())
         self.assertIn('kc.sh bootstrap-admin user', job['spec']['template']['spec']['containers'][0]['args'][0])
-        self.assertIn('KEYCLOAK_ADMIN_USERNAME=qa-keycloak-admin', accounts.read_text())
+        self.assertIn('QA_KEYCLOAK_ADMIN_USERNAME=qa-keycloak-admin', accounts.read_text())
+        self.assertIn('QA_KEYCLOAK_ADMIN_PASSWORD_FILE=', accounts.read_text())
         everything = result.stdout + ''.join(' '.join(c['args']) for c in self.logged())
         for value in [*PRODUCTION_KEYCLOAK.values(), secret['admin-password'], secret['anonymous-client-secret']]:
             if value != 'restored-db-password' and len(value) > 8:
@@ -486,6 +517,21 @@ class DeployRcToQaTest(unittest.TestCase):
         self.assertEqual([c['prog'] for c in self.logged() if c['prog'].endswith('.sh')],
                          ['recreate-kind-cluster.sh'])
 
+
+    def test_a_cluster_created_anew_runs_the_one_time_steps_again(self):
+        self.assertEqual(self.deploy().returncode, 0)
+        # Deleted behind the script's back: the rerun recreates it, with a new kube-system UID.
+        state = self.read_state()
+        state.update(cluster=False, owner='', users={})
+        self.write_state(state)
+        self.calls.write_text('')
+        result = self.deploy()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        progs = [c['prog'] for c in self.logged()]
+        self.assertEqual(progs.count('restore-kind-databases.sh'), 1)
+        self.assertEqual(sum('psql' in c['args'] for c in self.logged()), 1)
+        self.assertTrue(any(c['args'][-3:] == ['replace', '-f', '-'] for c in self.logged()))
+        self.assertTrue(any(' '.join(c['args']).endswith('keycloak-qa-admin.yaml') for c in self.logged()))
 
     # Nothing the script mounts or deletes as root can be outside its own subvolumes.
 
