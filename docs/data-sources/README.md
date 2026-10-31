@@ -100,7 +100,9 @@ its `"."` missing-value marker becomes `NULL`.
 [code](../../backend/crates/econ-graph-crawler/src/check_selection.rs)) downloads the catalog
 each adapter selects from and applies the current curated list or selection rules, read-only
 and without a database. `scripts/deploy/check-selection.sh --namespace NS` runs it in the
-cluster with the crawler's API keys.
+cluster with the crawler's API keys. A licence-gated source is left out of the default run, and
+naming one with `--source` is refused with exit status 64, as is naming a source with nothing to
+check.
 
 | Source | Catalog checked | Selection checked |
 |---|---|---|

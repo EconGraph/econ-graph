@@ -228,7 +228,7 @@ crawler check-selection --json                   # every source, as JSON
 | 1 | a source has a problem (missing, discontinued, restricted, over-broad, over-cap, over-quota) |
 | 2 | a source's check could not finish (download, parse or authentication failure) |
 | 3 | nothing worse, but a source was skipped because its API key is not set |
-| 64 | the command line was refused: a parse error, or a source `check-selection` doesn't check |
+| 64 | the command line was refused: a parse error, or a source `check-selection` doesn't check or that is licence-gated |
 
 The API keys live only in the cluster's `crawler-api-keys` Secret, so run the check there:
 
