@@ -130,6 +130,8 @@ case "$*" in
     "get certificate econ-graph-tls "*)
         [ "${STUB_CERT_ISSUER-}" != fail ] || exit 1
         printf '%s' "${STUB_CERT_ISSUER-econ-graph-selfsigned}" ;;
+    # Not a release lab (lib/cluster-role.sh, cluster_role_is_lab).
+    "get configmap econgraph-lab-owner"*) ;;
     "get configmap econgraph-cluster-role"*)
         # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
         case "${STUB_MARKER:-production}" in

@@ -50,6 +50,9 @@ if " get configmap econgraph-cluster-role " in joined:
     if "{.data.role}" in joined:
         done("production#")
     done("11111111-2222-3333-4444-555555555555#")
+if " get configmap econgraph-lab-owner " in joined:
+    # Not a release lab (lib/cluster-role.sh, cluster_role_is_lab).
+    done()
 if " get job keycloak-realm-import " in joined:
     state = os.environ.get("STUB_IMPORT", "")
     if state == "unreadable":

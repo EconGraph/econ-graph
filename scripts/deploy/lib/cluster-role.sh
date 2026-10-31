@@ -27,6 +27,9 @@
 
 CLUSTER_ROLE_NAMESPACE="kube-system"
 CLUSTER_ROLE_CONFIGMAP="econgraph-cluster-role"
+# The ownership marker of a release lab (scripts/deploy/release-lab.py). A lab never
+# carries a production marker: a cluster with both is reported as unknown (2).
+CLUSTER_ROLE_LAB_CONFIGMAP="econgraph-lab-owner"
 # Never taken from the environment: a stray CLUSTER_ROLE_DRY_RUN=true would make
 # kc print instead of run while child scripts run for real, and make every
 # cluster look production. Only deploy.sh --dry-run sets it, after sourcing.
@@ -165,11 +168,13 @@ cluster_role_show_identity() {
     [ -n "$server" ] || verified=1
     nodes="$(kc get nodes -o 'jsonpath={.items[*].metadata.name}' 2>/dev/null)" || { nodes="(unknown)"; verified=1; }
     uid="$(kube_system_uid 2>/dev/null)" || { uid="(unknown)"; verified=1; }
-    if cluster_is_marked_production; then
-        role="PRODUCTION (marked by mark-production-cluster.sh)"
-    else
-        role="not production: ${CLUSTER_ROLE_REASON}"
-    fi
+    local role_status=0
+    cluster_is_marked_production || role_status=$?
+    case "$role_status" in
+        0) role="PRODUCTION (marked by mark-production-cluster.sh)" ;;
+        1) role="not production: ${CLUSTER_ROLE_REASON}" ;;
+        *) role="unknown: ${CLUSTER_ROLE_REASON}" ;;
+    esac
     echo "  this host       $(hostname 2>/dev/null || echo '(unknown)')"
     echo "  kubectl         ${KUBECTL:-kubectl}"
     echo "  KUBECONFIG      ${KUBECONFIG:-(unset)}"
@@ -259,7 +264,8 @@ cluster_role_marker_text() {
 # marker made on this very cluster. Anything else, including a failure to ask
 # the cluster, is "not production" (fail closed); CLUSTER_ROLE_REASON then says
 # why. Returns 1 when the cluster answered and is not production, 2 when it
-# could not be asked.
+# could not be asked or carries conflicting markers (a valid production marker
+# and the release lab marker): unknown, which callers refuse on.
 # shellcheck disable=SC2034 # CLUSTER_ROLE_REASON is read by the callers.
 cluster_is_marked_production() {
     local uid
@@ -295,6 +301,31 @@ cluster_is_marked_production() {
         CLUSTER_ROLE_REASON="the production marker on context ${CLUSTER_ROLE_CONTEXT} was made on another cluster (${CLUSTER_ROLE_NAMESPACE} UID $(printf '%q' "${CLUSTER_ROLE_MARKER_UID:-missing}"), this cluster's is ${uid}); a copied or restored marker does not count"
         return 1
     fi
+    local lab=0
+    cluster_role_is_lab || lab=$?
+    case "$lab" in
+        0)
+            # Both markers: one of them is wrong, and which is unknown. Not "not
+            # production" (1): callers that skip their production safeguards on 1
+            # (teardown.sh's UID-prefix confirmation, say) must refuse instead.
+            CLUSTER_ROLE_REASON="context ${CLUSTER_ROLE_CONTEXT} carries both a production marker and the release lab marker ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_LAB_CONFIGMAP}; conflicting markers, so whether it is production is unknown. Find out which marker is wrong before going on"
+            return 2
+            ;;
+        2)
+            CLUSTER_ROLE_REASON="could not check context ${CLUSTER_ROLE_CONTEXT} for ConfigMap ${CLUSTER_ROLE_NAMESPACE}/${CLUSTER_ROLE_LAB_CONFIGMAP}, so whether it is production is unknown"
+            return 2
+            ;;
+    esac
+}
+
+# Whether the cluster on the pinned context is a release lab: 0 when it carries the
+# lab ownership marker (ConfigMap kube-system/econgraph-lab-owner), 1 when it answers
+# without one, 2 when it could not be asked.
+cluster_role_is_lab() {
+    local found
+    found="$(kc -n "$CLUSTER_ROLE_NAMESPACE" get configmap "$CLUSTER_ROLE_LAB_CONFIGMAP" \
+        --ignore-not-found -o name)" || return 2
+    [ -n "$found" ]
 }
 
 # cluster_role_marker_guards_delete EXISTS ROLE UID: for a script about to

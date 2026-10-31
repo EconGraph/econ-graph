@@ -346,6 +346,18 @@ jobs:
         export KUSTOMIZE_KUBECTL
         python3 scripts/deploy/test-branch-environments.py
 
+    # The release lab (docs/deployment/RELEASE_LAB.md) against stub kind, kubectl and
+    # docker: never marked production, no tunnel token or cloudflared, no host ports,
+    # teardown only of its own marked cluster, dumps never modified, crawler-worker at 0
+    # replicas, and the image-loading refusals.
+    - name: Check the release lab's safety properties
+      run: python3 scripts/deploy/test-release-lab.py
+
+    # Its restore, Keycloak clean-up and row counts on a scratch postgres:18 container
+    # (published on 127.0.0.1 only, removed afterwards) with synthetic dumps.
+    - name: Check the release lab's restore on PostgreSQL 18
+      run: python3 scripts/deploy/test-release-lab-restore.py
+
     # teardown.sh and released-pvs.sh refuse, before reaching a cluster, when a
     # confirmation they need can't be typed.
     - name: Check the teardown guards
