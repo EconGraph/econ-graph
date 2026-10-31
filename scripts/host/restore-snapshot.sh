@@ -128,8 +128,11 @@ fi
 # The backup lock, held until this script exits (fd 9 stays open).
 if [ "$DRY_RUN" = "false" ]; then
     exec 9>"$LOCK_FILE"
+    # Computed on its own line: a failed expansion stops the script here
+    # (set -e) instead of skipping flock.
+    lock_wait_seconds=$((10#$LOCK_WAIT))
     lock_status=0
-    flock -w "$((10#$LOCK_WAIT))" 9 || lock_status=$?
+    flock -w "$lock_wait_seconds" 9 || lock_status=$?
     if [ "$lock_status" -ne 0 ] && [ "$lock_status" -ne 1 ]; then
         echo "error: could not take the lock $LOCK_FILE (flock exited $lock_status); nothing changed" >&2
         exit 1
