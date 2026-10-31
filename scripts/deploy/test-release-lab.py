@@ -10,6 +10,7 @@ removed afterwards.
 Run: python3 scripts/deploy/test-release-lab.py [-v]
 """
 import contextlib
+import copy
 import hashlib
 import importlib.util
 import io
@@ -244,6 +245,12 @@ class Stubbed(unittest.TestCase):
                 args += [flag, str(value)]
         return args
 
+    def manifest_record(self):
+        return {'name': 'one', 'lab_id': '0' * 32, 'ports': dict.fromkeys(lab.PORT_NAMES, 40000), 'images': {
+            name: {'lab_tag': lab.lab_tag('one', name, IMAGE_ID),
+                   'reference': f'ghcr.io/econgraph/econ-graph-{name}:sha-{COMMIT}'}
+            for name in lab.IMAGE_NAMES}}
+
     def create(self, name='one', expect_ok=True, **override):
         result = self.lab_cli(*self.create_args(name, **override))
         if expect_ok:
@@ -316,9 +323,7 @@ class CreateTests(Stubbed):
                 self.assertNotIn('cloudflare', json.dumps(doc).lower(), doc['metadata']['name'])
         self.assertNotIn('cloudflare-tunnel', self.state()['secrets'])
         self.assertNotIn('crawler-api-keys', self.state()['secrets'])
-        record = {'name': 'one', 'lab_id': '0' * 32, 'ports': dict.fromkeys(lab.PORT_NAMES, 40000), 'images': {
-            n: {'lab_tag': lab.lab_tag('one', n, IMAGE_ID),
-                'reference': f'ghcr.io/econgraph/econ-graph-{n}:sha-{COMMIT}'} for n in lab.IMAGE_NAMES}}
+        record = self.manifest_record()
         docs = lab.render_manifests(record)
         cloudflared = {'apiVersion': 'apps/v1', 'kind': 'Deployment',
                        'metadata': {'name': 'cloudflared', 'namespace': 'econ-graph'},
@@ -396,29 +401,9 @@ class CreateTests(Stubbed):
         crawler = [d for d in self.state()['applied'] if d['kind'] == 'Deployment'
                    and d['metadata']['name'] == 'crawler-worker']
         self.assertEqual([d['spec']['replicas'] for d in crawler], [0])
-        container = crawler[0]['spec']['template']['spec']['containers'][0]
-        self.assertEqual(container['image'], lab.lab_tag('one', 'crawler-worker', IMAGE_ID))
-        self.assertEqual(container['imagePullPolicy'], 'Never')
         crawler[0]['spec']['replicas'] = 1
         with self.assertRaisesRegex(lab.LabError, '0 replicas'):
             lab.check_manifests([crawler[0]])
-
-    def test_source_repository_namespace_text_cannot_escape_the_loaded_lab_tag(self):
-        _, namespace = lab.renderer.identity('lab-one')
-        reference = f'ghcr.io/{namespace}/econ-graph-crawler-worker:sha-{COMMIT}'
-        images = self.state()['images']
-        images[reference] = images[f'ghcr.io/econgraph/econ-graph-crawler-worker:sha-{COMMIT}']
-        self.state(images=images)
-        self.create(**{'--crawler-image': reference})
-        containers = [c for d in self.state()['applied']
-                      if d['kind'] in ('Deployment', 'StatefulSet', 'Job')
-                      for c in d['spec']['template']['spec'].get('initContainers', []) +
-                      d['spec']['template']['spec']['containers']
-                      if c['name'] in ('crawler-worker', 'crawler-migrate')]
-        self.assertEqual({c['name'] for c in containers}, {'crawler-worker', 'crawler-migrate'})
-        for container in containers:
-            self.assertEqual(container['image'], lab.lab_tag('one', 'crawler-worker', IMAGE_ID))
-            self.assertEqual(container['imagePullPolicy'], 'Never')
 
     def test_inputs_never_modified(self):
         self.create()
@@ -791,6 +776,62 @@ class TeardownTests(Stubbed):
 
 
 class ImageTests(Stubbed):
+    def test_lab_rendering_validates_source_then_uses_private_crawler_tags(self):
+        record = self.manifest_record()
+        crawler = record['images']['crawler-worker']
+        docs = lab.render_manifests(record)
+        for kind, workload, container in [('Deployment', 'crawler-worker', 'crawler-worker'),
+                                            ('Job', 'crawler-migrate', 'crawler-migrate')]:
+            obj = next(d for d in docs if d['kind'] == kind and d['metadata']['name'] == workload)
+            actual = next(c for c in obj['spec']['template']['spec']['containers'] if c['name'] == container)
+            self.assertEqual(actual['image'], crawler['lab_tag'])
+            self.assertEqual(actual['imagePullPolicy'], 'Never')
+        # Mutable source input must fail before the private-tag handoff, even though
+        # the saved lab tag itself remains compatible with earlier lab records.
+        crawler['reference'] = 'ghcr.io/econgraph/econ-graph-crawler-worker:latest'
+        with self.assertRaisesRegex(ValueError, '--data-image requires'):
+            lab.render_manifests(record)
+
+    def test_lab_crawler_handoff_preserves_unrelated_roles_and_images(self):
+        record = self.manifest_record()
+        branch_namespace = lab.renderer.identity('lab-one')[1]
+        record['images']['crawler-worker']['reference'] = (
+            f'example.invalid/{branch_namespace}/crawler:sha-{COMMIT}')
+        source = record['images']['crawler-worker']['reference']
+        different = 'example.invalid/different-worker:v1.0.0'
+        render = lab.renderer.render
+        def with_shared_references(*args, **kwargs):
+            docs = render(*args, **kwargs)
+            worker = next(d for d in docs if d['kind'] == 'Deployment' and d['metadata']['name'] == 'crawler-worker')
+            worker['spec']['template']['spec']['containers'].append(
+                {'name': 'unrelated-sidecar', 'image': source, 'imagePullPolicy': 'Always'})
+            unrelated = copy.deepcopy(worker)
+            unrelated['metadata']['name'] = 'unrelated-workload'
+            docs.append(unrelated)
+            backend = next(d for d in docs if d['kind'] == 'Deployment' and d['metadata']['name'] == 'econ-graph-backend')
+            actual = next(c for c in backend['spec']['template']['spec']['containers'] if c['name'] == 'backend')
+            actual.update(image=source, imagePullPolicy='Always')
+            migrate = next(d for d in docs if d['kind'] == 'Job' and d['metadata']['name'] == 'crawler-migrate')
+            actual = next(c for c in migrate['spec']['template']['spec']['containers'] if c['name'] == 'crawler-migrate')
+            actual.update(image=different, imagePullPolicy='Always')
+            return docs
+        with patch.object(lab.renderer, 'render', side_effect=with_shared_references):
+            docs = lab.render_manifests(record)
+        worker = next(d for d in docs if d['kind'] == 'Deployment' and d['metadata']['name'] == 'crawler-worker')
+        actual = next(c for c in worker['spec']['template']['spec']['containers'] if c['name'] == 'crawler-worker')
+        self.assertEqual(actual['image'], record['images']['crawler-worker']['lab_tag'])
+        self.assertEqual(actual['imagePullPolicy'], 'Never')
+        for kind, workload, container, expected, policy in [
+            ('Deployment', 'crawler-worker', 'unrelated-sidecar', source, 'Always'),
+            ('Deployment', 'unrelated-workload', 'crawler-worker', source, 'IfNotPresent'),
+            ('Deployment', 'econ-graph-backend', 'backend', source, 'Always'),
+            ('Job', 'crawler-migrate', 'crawler-migrate', different, 'Always'),
+        ]:
+            obj = next(d for d in docs if d['kind'] == kind and d['metadata']['name'] == workload)
+            actual = next(c for c in obj['spec']['template']['spec']['containers'] if c['name'] == container)
+            self.assertEqual(actual['image'], expected)
+            self.assertEqual(actual['imagePullPolicy'], policy)
+
     def test_production_style_tags_need_exactly_their_release(self):
         prod = 'econ-graph-backend:v4.0.1'
         for release in (None, 'v4.0.0'):

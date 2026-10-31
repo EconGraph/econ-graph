@@ -239,6 +239,8 @@ const RAW_DATA_POINTS_SQL: &[(&str, bool)] = &[
     ("econ-graph-crawler/src/lifecycle.rs", false),
     // The crawler's change detection on write.
     ("econ-graph-crawler/src/persist.rs", false),
+    // Disposable fixture occupancy checks and deterministic IDs, without revision selection.
+    ("econ-graph-crawler/src/bin/seed_fixtures.rs", false),
 ];
 
 /// Lines of SOURCE outside `#[cfg(test)]` items, numbered from 1. The item an attribute marks
