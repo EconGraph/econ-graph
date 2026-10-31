@@ -803,8 +803,8 @@ jobs:
   # are picked up automatically. Tests read DATABASE_URL (see
   # econ-graph-core/src/test_utils.rs); when it is unset they fall back to
   # testcontainers, which also works here because ubuntu-latest has Docker.
-  # --test-threads=1: many DB tests drop/recreate the public schema of the shared
-  # database, so running them concurrently within one test binary is flaky.
+  # The suites run in parallel: each TestContainer test gets a scratch database of its
+  # own on that server, so a test that drops its schema drops no one else's.
   backend-workspace-tests:
     name: Backend Workspace Tests (all tests)
     runs-on: ubuntu-latest
@@ -1043,10 +1043,10 @@ jobs:
         cargo test -p econ-graph-core crawl_queue -- --test-threads=1
         cargo test -p econ-graph-core --lib models::dataset -- --test-threads=1
         cargo test -p econ-graph-graphql --lib graphql::datasets -- --test-threads=1
-        cargo test -p econ-graph-services queue_service -- --test-threads=1
-        cargo test -p econ-graph-services cross_section -- --test-threads=1
+        cargo test -p econ-graph-services queue_service
+        cargo test -p econ-graph-services cross_section
         cargo test -p econ-graph-graphql --lib cross_section -- --test-threads=1
-        cargo test -p econ-graph-services search_service -- --test-threads=1
+        cargo test -p econ-graph-services search_service
         cargo test -p econ-graph-graphql --lib graphql::search_filter_db_tests -- --test-threads=1
       working-directory: backend
 
@@ -1086,9 +1086,9 @@ jobs:
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         status=0
-        cargo test --workspace --no-fail-fast --lib --bins --tests -- --test-threads=1 || status=$?
+        cargo test --workspace --no-fail-fast --lib --bins --tests || status=$?
         # The XBRL integration tests need the xbrl-parser feature (required-features).
-        cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests -- --test-threads=1 || status=$?
+        cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests || status=$?
         exit $status
       working-directory: backend
 
