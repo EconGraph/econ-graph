@@ -5,7 +5,15 @@
 use std::str::FromStr;
 
 use super::*;
-use crate::testkit::{test_ctx, MockSource, Reply, Route, TEST_API_KEY};
+use crate::testkit::{MockSource, Reply, Route, TEST_API_KEY};
+
+/// The testkit context on a pool where nothing listens: discovery's best-effort label merge
+/// must never write to a shared test database, whatever `DATABASE_URL` says.
+fn test_ctx() -> CrawlCtx {
+    let mut ctx = crate::testkit::test_ctx();
+    ctx.pool = crate::testkit::unreachable_pool();
+    ctx
+}
 
 const INFO_EXPORTS: &str = include_str!("../../../tests/fixtures/wto/indicators_its_mtv_ax.json");
 const DATA_EXPORTS: &str = include_str!("../../../tests/fixtures/wto/data_its_mtv_ax.json");
@@ -831,7 +839,7 @@ async fn request_failures_fail_the_indicator_and_never_show_the_key() {
 mod contract {
     use super::{data_route, info_route, DATA_EXPORTS, INFO_EXPORTS};
     use crate::sources::wto::WtoAdapter;
-    use crate::testkit::{Reply, Route};
+    use crate::testkit::{MockSource, Reply, Route};
 
     crate::adapter_contract_tests! {
         adapter: |base_url: String| WtoAdapter::new(base_url),
@@ -843,10 +851,20 @@ mod contract {
             m.mount(&info_route("ITS_MTV_AX"), Reply::json_str(INFO_EXPORTS)).await;
             m.mount(&Route::get("/indicators"), Reply::json_str("[]")).await;
         },
-        discover: {
-            route: data_route("ITS_MTV_AX"),
-            reply: Reply::json_str(DATA_EXPORTS),
-            min_series: 5,
-        },
+    }
+
+    /// The macro's discovery contract, on the database-free context (see `super::test_ctx`):
+    /// discovery merges labels into the dataset, which must not touch a shared test database.
+    #[tokio::test]
+    async fn contract_discover_ok() {
+        let mock = MockSource::start().await;
+        mock.mount(&info_route("ITS_MTV_AX"), Reply::json_str(INFO_EXPORTS))
+            .await;
+        mock.mount(&Route::get("/indicators"), Reply::json_str("[]"))
+            .await;
+        mock.mount(&data_route("ITS_MTV_AX"), Reply::json_str(DATA_EXPORTS))
+            .await;
+        let adapter = WtoAdapter::new(mock.base_url());
+        crate::testkit::contract::assert_discover_ok(&adapter, &super::test_ctx(), &mock, 5).await;
     }
 }
