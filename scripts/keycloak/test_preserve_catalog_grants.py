@@ -288,7 +288,9 @@ class CatalogPolicyTests(unittest.TestCase):
         scope = next(e for e in self.realm["clientScopeMappings"]["econ-graph-api"]
                      if e["client"] == "econgraph-anonymous")
         self.assertEqual(set(scope["roles"]), expected)
-        self.assertEqual({r for r in self.realm_granted("user") if r.startswith("catalog.")}, expected)
+        self.assertEqual({r for r in self.realm_granted("user") if r.startswith("catalog.")},
+                         expected | {"catalog.sec:read"})
+        self.assertNotIn("catalog.sec:read", scope["roles"])
 
     def test_live_admin_only_catalog_survives_a_deploy(self):
         # The state scripts/keycloak/set-catalog-access.sh --admin-only leaves: FRED out of

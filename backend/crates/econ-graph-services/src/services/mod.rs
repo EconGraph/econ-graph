@@ -1,5 +1,6 @@
 pub mod collaboration_service;
 pub mod company_notes;
+pub mod company_research;
 pub mod cross_section_service;
 pub mod global_analysis_service;
 pub mod observation_store;

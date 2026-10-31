@@ -76,3 +76,30 @@ Executable examples in `models/company_fact.rs` verify exact decimal round trips
 economic-period/unit/taxonomy separation, amendment identities and shared note
 references. Database checks verify that instant duplicates conflict, durations
 remain distinct, and source numeric precision survives storage.
+
+## API access during rollout
+
+Company research reads require the explicit `catalog.sec:read` capability and the
+`financial_components` build flag. The source's exact catalog name is `SEC EDGAR`.
+A fresh realm grants SEC reads to signed-in users, while anonymous access remains
+ungranted. Existing realm imports preserve live catalog grants deliberately; they
+do not automatically expand a live user's privileges. After acceptance, an
+operator must explicitly grant `catalog.sec:read` to the intended existing realm
+role using the normal Keycloak catalog-grant tooling. Release builds keep the
+feature disabled until the full company-research acceptance gate passes.
+
+The same schema snapshot describes development and release builds. A disabled
+company resolver returns `FEATURE_DISABLED` before opening a pool; an enabled
+resolver checks the SEC catalog grant before reading the data database. Source
+facts, companies and filings use the data plane. Local authored notes use the app
+plane and validate new attachments through an authorized data-plane target check.
+The Train 4 operation classifier must admit all shipped company query roots before
+this surface can pass the independent HTTP data-plane boundary.
+
+Company fact queries select a revision before pagination. Clients may explicitly
+request `includeRevisions: true` to inspect all retained filings under the query's
+as-of/accession filter. Statement calculations retain all source revisions before
+selecting operands, allowing changed-value restatements to remain visible. Period
+and unit filters never interpret SEC fiscal focus or calendar-frame labels as the
+economic period's identity. SIC peer comparisons use the identical requested dates
+and expose missing inputs rather than substituting a nearby calendar period.

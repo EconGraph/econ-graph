@@ -1492,6 +1492,7 @@ dependencies = [
  "econ-graph-auth",
  "econ-graph-core",
  "econ-graph-crawler",
+ "econ-graph-flags-build",
  "econ-graph-services",
  "futures",
  "regex",
