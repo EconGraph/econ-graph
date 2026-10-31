@@ -1008,6 +1008,10 @@ impl Worker {
             .registry
             .get(source)
             .is_some_and(|a| a.tracks_catalog_lifecycle());
+        let checks_restriction_markers = self
+            .registry
+            .get(source)
+            .is_some_and(|a| a.checks_restriction_markers());
         // This pooled connection starts a fresh transaction. READ COMMITTED rechecks
         // the token after a lock wait; the queue row stays locked through commit.
         let outcome = conn
@@ -1052,6 +1056,27 @@ impl Worker {
                             tracks_lifecycle,
                         )
                         .await?;
+                        // This fetch read upstream after its claim and found no restriction
+                        // marker: a restriction an operator reviewed before then is lifted.
+                        if tracks_lifecycle
+                            && checks_restriction_markers
+                            && let Some(status) = crate::lifecycle::lift_reviewed_restriction_conn(
+                                conn,
+                                source,
+                                &item.series_id,
+                                item.locked_at,
+                            )
+                            .await?
+                        {
+                            transaction_metrics
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .push(crate::lifecycle::Reconciled {
+                                    transitions: 1,
+                                    transition_statuses: vec![status],
+                                    ..Default::default()
+                                });
+                        }
                         Ok(JobStats {
                             series_id: Some(write.series_id),
                             points_written: write.points_upserted,
