@@ -211,6 +211,98 @@ class CatalogPolicyTests(unittest.TestCase):
             preserve.complete_bootstrap(self.realm,self.state.get,lambda path,body:writes.append(body))
         self.assertEqual(writes,[])
 
+    def realm_granted(self, name):
+        """The econ-graph-api roles the realm file's role NAME grants, through nested composites."""
+        realm_roles = {role["name"]: role for role in self.realm["roles"]["realm"]}
+        found, pending = set(), [name]
+        while pending:
+            role = realm_roles.get(pending.pop())
+            if role is None:
+                continue
+            composites = role.get("composites") or {}
+            found.update((composites.get("client") or {}).get("econ-graph-api", []))
+            pending.extend(composites.get("realm") or [])
+        return found
+
+    def assert_not_public(self, role):
+        """No default grant reaches signed-in users or the anonymous reader."""
+        for name in ("catalog-public", "user", "support", self.realm["defaultRole"]["name"]):
+            self.assertNotIn(role, self.realm_granted(name), name)
+        reader = next(u for u in self.realm["users"] if u.get("serviceAccountClientId") == "econgraph-anonymous")
+        for name in reader.get("realmRoles", []):
+            self.assertNotIn(role, self.realm_granted(name), name)
+        self.assertNotIn(role, (reader.get("clientRoles") or {}).get("econ-graph-api", []))
+        scope = next(e for e in self.realm["clientScopeMappings"]["econ-graph-api"]
+                     if e["client"] == "econgraph-anonymous")
+        self.assertNotIn(role, scope["roles"])
+
+    def test_realm_file_makes_fred_admin_only(self):
+        self.assert_not_public("catalog.fred:read")
+        for name in ("admin", "super_admin"):
+            self.assertIn("catalog.fred:read", self.realm_granted(name), name)
+
+    def test_realm_file_grants_unreviewed_catalogs_to_nobody_by_default(self):
+        for source in ("imf", "ecb", "oecd", "boe", "boj", "rba", "snb", "unstats", "ilo"):
+            role = "catalog.%s:read" % source
+            self.assert_not_public(role)
+            for name in ("admin", "super_admin"):
+                self.assertNotIn(role, self.realm_granted(name), name)
+
+    def test_realm_file_restricts_the_world_trade_organization_catalog(self):
+        # Defined so it can be granted, but public to nobody by default.
+        self.assertIn("catalog.world_trade_organization:read",
+                      {r["name"] for r in self.realm["roles"]["client"]["econ-graph-api"]})
+        self.assert_not_public("catalog.world_trade_organization:read")
+
+    def test_realm_file_public_catalogs_are_exactly_the_reviewed_ones(self):
+        expected = {"catalog.%s:read" % source
+                    for source in ("bls", "bea", "census", "fhfa", "world_bank", "boc")}
+        public = self.role(self.realm, "catalog-public")["composites"]["client"]["econ-graph-api"]
+        self.assertEqual(set(public), expected)
+        self.assertEqual(len(public), len(expected))
+        scope = next(e for e in self.realm["clientScopeMappings"]["econ-graph-api"]
+                     if e["client"] == "econgraph-anonymous")
+        self.assertEqual(set(scope["roles"]), expected)
+        self.assertEqual({r for r in self.realm_granted("user") if r.startswith("catalog.")}, expected)
+
+    def test_live_admin_only_catalog_survives_a_deploy(self):
+        # The state scripts/keycloak/set-catalog-access.sh --admin-only leaves: FRED out of
+        # catalog-public and the anonymous scope, granted to admin. A deploy must keep it,
+        # whatever the realm file declares.
+        public = [{"name": n, "clientRole": True, "containerId": "api"}
+                  for n in ("catalog.bls:read", "catalog.bea:read")]
+        self.state[self.prefix + "/roles/catalog-public/composites"] = public
+        self.state[self.prefix + "/roles/user/composites"] = [{"name": "catalog-public", "clientRole": False}]
+        self.state[self.prefix + "/roles/admin/composites"] = [
+            {"name": "support", "clientRole": False},
+            {"name": "catalog.fred:read", "clientRole": True, "containerId": "api"}]
+        self.state[self.prefix + "/clients/anon/scope-mappings/clients/api"] = [{"name": "catalog.bls:read"}]
+        for realm in (self.realm, self.with_fred_public()):
+            merged = preserve.merge_catalog_policy(copy.deepcopy(realm), lambda path: copy.deepcopy(self.state.get(path)))
+            self.assertEqual(self.role(merged, "catalog-public")["composites"]["client"]["econ-graph-api"],
+                             ["catalog.bls:read", "catalog.bea:read"])
+            self.assertIn("catalog.fred:read", self.role(merged, "admin")["composites"]["client"]["econ-graph-api"])
+            scope = merged["clientScopeMappings"]["econ-graph-api"][0]["roles"]
+            self.assertEqual(scope, ["catalog.bls:read"])
+
+    def test_live_public_catalog_is_not_withdrawn_or_granted_to_admin_by_a_deploy(self):
+        # Until an operator runs set-catalog-access.sh, a cluster keeps its live grants: the
+        # realm file's admin-only FRED changes only a new realm.
+        self.state[self.prefix + "/roles/catalog-public/composites"] = [
+            {"name": "catalog.fred:read", "clientRole": True, "containerId": "api"}]
+        self.state[self.prefix + "/roles/admin/composites"] = [{"name": "support", "clientRole": False}]
+        merged = self.merge()
+        self.assertEqual(self.role(merged, "catalog-public")["composites"]["client"]["econ-graph-api"],
+                         ["catalog.fred:read"])
+        self.assertNotIn("catalog.fred:read", self.role(merged, "admin")["composites"]["client"]["econ-graph-api"])
+
+    def with_fred_public(self):
+        """The realm file as it was with FRED in catalog-public and the anonymous scope."""
+        realm = copy.deepcopy(self.realm)
+        self.role(realm, "catalog-public")["composites"]["client"]["econ-graph-api"].insert(0, "catalog.fred:read")
+        realm["clientScopeMappings"]["econ-graph-api"][0]["roles"].insert(0, "catalog.fred:read")
+        return realm
+
     def test_missing_relations_or_failed_api_never_fall_back_to_defaults(self):
         self.state[self.prefix + "/roles/catalog-public/composites"] = None
         with self.assertRaises(RuntimeError): self.merge()

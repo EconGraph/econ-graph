@@ -10,7 +10,7 @@ import type { SeededSeries } from './auth/helpers';
 
 /**
  * Helpers for driving the explore page and a series page (src/pages/SeriesDetail.tsx), shared by
- * the journey and the six-source sweep so a page change needs one edit.
+ * the journey and the source sweep so a page change needs one edit.
  */
 
 /**
@@ -146,7 +146,7 @@ export async function applyTransformation(page: Page, label: string) {
  * @param text - The raw field.
  * @returns The field as written.
  */
-function csvTextField(text: string) {
+export function csvTextField(text: string) {
   const field = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
   return /[",\r\n]/.test(field) ? `"${field.replace(/"/g, '""')}"` : field;
 }
