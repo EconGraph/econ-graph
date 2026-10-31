@@ -1,7 +1,7 @@
 # Gateway routing troubleshooting
 
 Traffic reaches the kind cluster through a Gateway API gateway run by Envoy Gateway. The objects,
-versions and routes are listed in the "Gateway" section of [k8s/README.md](../../k8s/README.md).
+versions and routes are listed in the [Gateway section of k8s/README.md](../../k8s/README.md#-gateway).
 This page is about finding out why a request does not arrive where it should.
 
 ```text
@@ -20,13 +20,20 @@ cloudflared ──> econ-graph-gateway-proxy:443 ─┘  Gateway econ-graph-gate
 
 ```bash
 ./scripts/deploy/test-gateway-routes.sh                 # http://localhost
-./scripts/deploy/test-gateway-routes.sh --rate-limit    # also the 429 behaviour
-ROUTE_HOST=econgraph.com ./scripts/deploy/test-gateway-routes.sh https://localhost   # the public host
+./scripts/deploy/test-gateway-routes.sh --rate-limit    # bursts test 429s and consume this client's tokens
+ROUTE_HOST=econgraph.com EXPECTED_ISSUER=https://econgraph.com/idp/realms/econ-graph \
+  ./scripts/deploy/test-gateway-routes.sh https://localhost   # the public host
 ./scripts/deploy/check-public-site.sh --host econgraph.com                         # and its redirects, spoofing
 ```
 
-Each line names the route and what was expected. To test the proxy without the host ports (for
-example while another controller still holds them), port-forward its Service:
+Each result names the route and what was expected. The URL selects the connection address;
+`ROUTE_HOST` independently sets the Host header. Set `EXPECTED_ISSUER` to Keycloak's configured
+issuer, regardless of either address: a public-host deployment needs the public issuer above
+even when testing localhost or the port-forward below. Without Keycloak, run
+`test-gateway-routes.sh` with `SKIP_KEYCLOAK=true`.
+
+To test the proxy without the host ports (for example while another controller still holds
+them), port-forward its Service:
 
 ```bash
 kubectl -n envoy-gateway-system port-forward svc/econ-graph-gateway-proxy 18080:80
@@ -41,28 +48,35 @@ kubectl -n envoy-gateway-system get pods -o wide
 
 # GatewayClass accepted, Gateway programmed, listeners and their attached routes.
 kubectl get gatewayclass econ-graph
+kubectl describe gatewayclass econ-graph
+kubectl -n econ-graph-gateway describe gateway econ-graph-gateway
 kubectl -n econ-graph-gateway get gateway econ-graph-gateway \
   -o jsonpath='{range .status.listeners[*]}{.name}: {.attachedRoutes} routes{"\n"}{end}'
 
 # Every route Accepted and ResolvedRefs (a missing Service shows here).
 kubectl -n econ-graph get httproute
-kubectl -n econ-graph describe httproute econ-graph-frontend
+kubectl -n econ-graph describe httproute
 
 # Rate-limit policies and the burst patch.
-kubectl -n econ-graph get backendtrafficpolicy
-kubectl -n econ-graph-gateway get envoypatchpolicy
+kubectl -n econ-graph describe backendtrafficpolicy
+kubectl -n econ-graph-gateway describe envoypatchpolicy
 ```
+
+Read the Gateway and listener conditions, then each relevant HTTPRoute parent's conditions,
+including their reasons and messages. The Gateway should be `Programmed: True`; routes should
+be `Accepted: True` and `ResolvedRefs: True` for the intended listener. Attached-route counts
+alone do not establish readiness.
 
 | Symptom | Likely cause |
 | --- | --- |
 | Connection refused or reset on `localhost:80` | The proxy pod is not running on the control-plane node, or another pod holds host port 80 (`kubectl get pods -A -o wide` on that node). The proxy pod stays `Pending` while the port is taken. |
-| 404 with an empty body for every path | No route matches the `Host` header. The routes match `localhost` (any port); other host names need to be added to the routes' `hostnames`. |
+| 404 with an empty body for every path | No route matches the request Host on that listener. Compare the Host and listener with the route's `hostnames` and `parentRefs`: `localhost` (any port) uses `http`; the configured public host uses `<name>-public` routes on `https`. For missing public configuration, follow the `PUBLIC_HOST` workflow in [Public site](../../k8s/README.md#-public-site-cloudflare-tunnel) and apply routes as described in [Gateway](../../k8s/README.md#-gateway). |
 | A route is `Accepted: False` | Its namespace lacks the label `econgraph.io/gateway-access: "true"` (`k8s/manifests/namespace.yaml`), or the route attaches to listener `https` from a namespace without `econgraph.io/env: production`. |
 | `ResolvedRefs: False` | The backend Service or port in the route does not exist. |
 | 503 `no healthy upstream` | The Service has no ready pods, or a NetworkPolicy blocks the proxy (it must allow pods `app.kubernetes.io/name: envoy` in `envoy-gateway-system`; see `k8s/manifests/network-policy.yaml`). |
 | 429 on `/graphql` or `/data/graphql` | The per-client limit: 20 a second, bursts of 100. Requests from the host itself share one client address. |
-| The EnvoyPatchPolicy is `Programmed: False` | No `econ-graph-graphql` or `econ-graph-data-graphql` route exists yet, so the bursts have nothing to patch; the limit is then 20 a second with bursts of 20. |
-| `/idp/...` sign-in pages fail | Only `/idp/realms/econ-graph` and `/idp/resources` are routed. The issuer is `KC_HOSTNAME` in `k8s/manifests/keycloak/deployment.yaml`. |
+| The EnvoyPatchPolicy is `Programmed: False` | Inspect the reason/message and the base `BackendTrafficPolicy`: a missing GraphQL route or rate-limit policy leaves nothing to patch. Only an active base limit without its burst patch falls back to 20 a second with bursts of 20; a missing base policy does not provide that limit. |
+| `/idp/...` sign-in pages fail | Only `/idp/realms/econ-graph` and `/idp/resources` are routed. The issuer is the configured `KC_HOSTNAME` plus `/realms/econ-graph`; `PUBLIC_HOST` sets the public value shown above. |
 
 ## Looking inside the proxy
 
