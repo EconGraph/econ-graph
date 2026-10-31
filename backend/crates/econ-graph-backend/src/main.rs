@@ -944,11 +944,10 @@ fn build_routes_for_plane(
                         Err(refusal) => return Ok::<_, Infallible>(refusal.into_response()),
                     };
 
-                    if service_plane == ServicePlane::Data {
-                        if let Err(message) = data_access::check_data_operation(&mut request) {
+                    if service_plane == ServicePlane::Data
+                        && let Err(message) = data_access::check_data_operation(&mut request) {
                             let body = warp::reply::json(&json!({"data":null,"errors":[{"message":message,"extensions":{"code":"DATA_READ_ONLY"}}]}));
                             return Ok(warp::reply::with_status(body, warp::http::StatusCode::FORBIDDEN).into_response());
-                        }
                     }
 
                     let data_plane = data_plane.map(|client| {

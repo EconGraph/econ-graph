@@ -285,7 +285,9 @@ impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
                                 date: row.date,
                                 value: row.value,
                                 revision_date: row.revision_date,
-                                attributes: row.attributes.map(crate::observation_json::ObservationJson),
+                                attributes: row
+                                    .attributes
+                                    .map(crate::observation_json::ObservationJson),
                             }),
                         )
                     })

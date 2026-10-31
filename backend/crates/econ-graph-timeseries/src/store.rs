@@ -170,9 +170,9 @@ pub fn select_page(
         .cloned()
         .collect();
     let context = if let (Some(context), Some(first)) = (req.context, points.as_slice().first()) {
-        let earlier = candidates.iter().take(offset as usize);
+        let mut earlier = candidates.iter().take(offset as usize);
         match context {
-            PageContext::PreviousPoint => earlier.last().cloned().into_iter().collect(),
+            PageContext::PreviousPoint => earlier.next_back().cloned().into_iter().collect(),
             PageContext::FirstPoint => earlier
                 .filter(|r| r.value.as_ref().is_some_and(|v| !v.is_zero()))
                 .take(1)
