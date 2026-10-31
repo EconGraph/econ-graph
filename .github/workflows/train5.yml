@@ -13,6 +13,8 @@ on:
       - 'backend/crates/econ-graph-graphql/src/graphql/mutation.rs'
       - 'backend/crates/econ-graph-auth/src/roles.rs'
       - 'backend/crates/econ-graph-crawler/src/http.rs'
+      - 'backend/crates/econ-graph-backend/src/data_access.rs'
+      - 'backend/crates/econ-graph-backend/src/independent_data_tests.rs'
   workflow_dispatch:
 
 permissions:
@@ -78,3 +80,9 @@ jobs:
             cargo test --locked -p econ-graph-graphql --lib company_research -- --test-threads=1
             cargo test --locked -p econ-graph-graphql --lib company_notes -- --test-threads=1
           '
+      - name: Verify enabled independent company data boundary
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          bash ../scripts/train5/with-company-api.sh cargo test --locked -p econ-graph-backend --bin econ-graph-backend independent_data_tests::independent_company_http_keeps_catalog_audience_and_app_content_boundaries -- --exact --test-threads=1 --nocapture | tee "$RUNNER_TEMP/company-data-boundary.log"
+          grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/company-data-boundary.log"
