@@ -94,6 +94,18 @@ class RecoveryContracts(unittest.TestCase):
                 r.backfill(self.source,self.root/'wrong-target.json',destination,2,'storage-bridge',str(uuid.uuid4()))
             process.assert_not_called()
 
+    def test_replay_refuses_foreign_snapshot_before_planning_or_database_access(self):
+        from unittest.mock import patch
+        # Shared dataset/series UUIDs cannot substitute for the snapshot's durable target.
+        fixture(self.source, target=str(uuid.uuid4()))
+        for confirmation in (None, T):
+            with self.subTest(confirmation=confirmation):
+                with patch.object(r.subprocess, 'run') as process, patch.object(r, 'database_url') as database:
+                    with self.assertRaisesRegex(r.Refused, 'snapshot target'):
+                        r.replay_postgres(self.source, T, TOKEN, 1, 'NOT_CONFIGURED', confirmation)
+                    process.assert_not_called()
+                    database.assert_not_called()
+
     def test_replay_uses_frontend_copy_eof_with_sql_separate_from_csv(self):
         import csv
         import io

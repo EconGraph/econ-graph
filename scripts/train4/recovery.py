@@ -558,6 +558,8 @@ def replay_postgres(source_path, target_id, token, epoch, database_variable='DAT
     if type(epoch) is not int or epoch < 0:
         raise Refused('replay needs the exact paused epoch')
     with Snapshot(source_path) as source:
+        if identity(source.header['target_id']) != target_id:
+            raise Refused('replay snapshot target does not match the intended target')
         if apply_target is None:
             return {'format': FORMAT, 'apply': False, 'target_id': target_id,
                     'source': source.inventory(), 'requires_pause_token': True,
