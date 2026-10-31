@@ -19,7 +19,7 @@ flowchart TD
     Talos --> Flux[ECO-437: Flux, SOPS and platform add-ons]
     Flux --> CNPG[ECO-438: replicated databases and restore rehearsal]
     Attributes --> Catalog[ECO-187: Iceberg schema and SQL catalog]
-    T3 --> Dependencies[Patched codec and XML dependency graph]
+    T3 --> Dependencies[Patched codec, XML and JavaScript dependencies]
     Dependencies --> Catalog
     Catalog --> Store[ECO-188: transactional writes and parity reads]
     Store --> Readers[Compatible GraphQL and cross-section reads]
@@ -67,10 +67,14 @@ lane after integration. Do not merge these changes into main or modify the Train
 branch as part of this work.
 
 Downstream integration work also uses isolated worktrees: `train4-readpaths` on
-`feat/train4-readpaths`, `train4-attribute-json` on `feat/train4-attribute-json`, and
-`train4-dependencies` on `fix/train4-compression-xml-security`. These consume the
-initial lane contracts and finish compatibility, lossless JSON and dependency
-validation before combined acceptance.
+`feat/train4-readpaths`, `train4-attribute-json` on `feat/train4-attribute-json`,
+`train4-dependencies` on `fix/train4-compression-xml-security`,
+`train4-npm-security` on `fix/train4-npm-security`, and `train4-migration-tests` on
+`fix/train4-migration-tests`. These consume the initial lane contracts and finish
+compatibility, lossless JSON, migration regression coverage and dependency
+validation before combined acceptance. The read-path lane also supplies a
+disposable real Keycloak acceptance harness; its local proof does not replace
+production issuer and deployment checks.
 
 ## Safety and acceptance boundaries
 
