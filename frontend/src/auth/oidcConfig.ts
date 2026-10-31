@@ -7,7 +7,9 @@
  *
  * An issuer that is a path (`/idp/realms/econ-graph`, what scripts/deploy/build-images.sh
  * sets) is resolved against the page's origin at runtime, so one image serves whatever host
- * Keycloak shares with the app (https://econgraph.com, http://localhost) without a rebuild.
+ * Keycloak shares with the app (https://www.econgraph.com, http://localhost) without a rebuild.
+ * Public host redirects run before the app loads, so both public entry names resolve to
+ * the configured main host's issuer. Changing that host requires users to sign in again.
  */
 
 import {

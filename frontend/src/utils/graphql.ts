@@ -434,6 +434,7 @@ export const QUERIES = {
           value
           revisionDate
           isOriginalRelease
+          revisedFromOriginal
         }
         totalCount
         pageInfo {
@@ -778,6 +779,11 @@ export interface DataPoint {
   value: string | null;
   revisionDate: string;
   isOriginalRelease: boolean;
+  /**
+   * Whether the value differs from its date's original release value; null when that original
+   * isn't known.
+   */
+  revisedFromOriginal: boolean | null;
 }
 
 export interface SeriesDataResponse {

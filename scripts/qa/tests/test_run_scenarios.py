@@ -15,7 +15,10 @@ import hashlib
 import io
 import json
 import os
+import errno
 import re
+import secrets
+import shutil
 import signal
 import stat
 import subprocess
@@ -24,6 +27,7 @@ import tempfile
 import threading
 import time
 import unittest
+import unittest.mock
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -35,6 +39,28 @@ import run_scenarios as runner  # noqa: E402
 
 SCENARIOS = runner.discover(runner.DEFAULT_SCENARIO_DIR)
 BY_NAME = {s.name: s for s in SCENARIOS}
+
+
+def assert_stopped(test: unittest.TestCase, pid: int, wait: float = 5) -> None:
+    """Fail unless PID has exited. A process orphaned when its parent died is reparented to the
+    nearest subreaper (init, or systemd) and stays a zombie until it is reaped, which can take a
+    moment after it has exited; a zombie has stopped running, so it counts as stopped. A live
+    process fails after WAIT seconds."""
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            os.kill(pid, 0)
+        except (ProcessLookupError, PermissionError):
+            return  # gone (PermissionError: the PID now belongs to another user's process)
+        try:
+            state = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[0]
+        except (OSError, IndexError):
+            state = None  # no /proc (macOS), or reaped while reading: poll again
+        if state in ('Z', 'X'):
+            return
+        if time.monotonic() >= deadline:
+            test.fail(f'process {pid} is still running (state {state})')
+        time.sleep(0.05)
 
 
 def write_scenario(directory: Path, name: str, header: str, body: str) -> Path:
@@ -368,9 +394,7 @@ class RunnerTest(unittest.TestCase):
                                       dict(self.env, QA_TIMEOUT_GRACE_SECONDS='2'))
         self.assertEqual(code, 1)
         self.assertEqual(report['scenarios'][0]['reason'], 'timed out after 1s')
-        child = int(pid_file.read_text())
-        with self.assertRaises(ProcessLookupError):
-            os.kill(child, 0)
+        assert_stopped(self, int(pid_file.read_text()))
 
     def test_an_overrunning_python_scenario_still_cleans_up(self):
         cleaned = self.dir / 'cleaned'
@@ -394,6 +418,185 @@ finally:
         self.assertEqual(code, 1)
         self.assertEqual(cleaned.read_text(), 'yes')
         self.assertLess(report['scenarios'][0]['duration_seconds'], 10)
+
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
+    def test_an_overrun_kills_and_reports_what_escaped_the_process_group(self):
+        # setsid moves the child out of the scenario's process group, so the group kill misses
+        # it; the runner finds it by the run's marker.
+        pid_file = self.dir / 'escaped.pid'
+        self.scenario('escaper', mutates='no',
+                      body=f'setsid sleep 300 >/dev/null 2>&1 & echo $! > "{pid_file}"; wait')
+        (self.scenarios / 'escaper').write_text((self.scenarios / 'escaper').read_text().replace(
+            '# qa-description', '# qa-timeout: 1\n# qa-description'))
+        code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'],
+                                      dict(self.env, QA_TIMEOUT_GRACE_SECONDS='2'))
+        self.assertEqual(code, 1)
+        pid = int(pid_file.read_text())
+        self.assertEqual(report['scenarios'][0]['reason'],
+                         f'timed out after 1s; left running, now killed: sleep ({pid})')
+        assert_stopped(self, pid)
+
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
+    def test_a_scenario_that_leaves_a_process_running_fails(self):
+        pid_file = self.dir / 'left.pid'
+        # Exit only once the child has its own session (its session id is its pid), so the
+        # group kill can't catch it before setsid has run.
+        self.scenario('leaver', mutates='no',
+                      body=f'setsid sleep 300 >/dev/null 2>&1 & echo $! > "{pid_file}"\n'
+                           'until [ "$(cut -d" " -f6 /proc/$!/stat)" = "$!" ]; do sleep 0.05; done')
+        code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
+        self.assertEqual(code, 1)
+        pid = int(pid_file.read_text())
+        self.assertEqual((report['scenarios'][0]['status'], report['scenarios'][0]['reason']),
+                         ('fail', f'left running, now killed: sleep ({pid})'))
+        assert_stopped(self, pid)
+
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
+    def test_leftovers_are_killed_without_pidfds(self):
+        # Python 3.8, Linux before 5.3, or a seccomp profile blocking pidfd_open: kill by PID.
+        pid_file = self.dir / 'left2.pid'
+        # Exit only once the child has its own session (its session id is its pid), so the
+        # group kill can't catch it before setsid has run.
+        self.scenario('leaver2', mutates='no',
+                      body=f'setsid sleep 300 >/dev/null 2>&1 & echo $! > "{pid_file}"\n'
+                           'until [ "$(cut -d" " -f6 /proc/$!/stat)" = "$!" ]; do sleep 0.05; done')
+        with unittest.mock.patch.object(os, 'pidfd_open', side_effect=OSError(errno.ENOSYS, 'no pidfd'),
+                                        create=True):
+            code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
+        self.assertEqual(code, 1)
+        pid = int(pid_file.read_text())
+        self.assertEqual((report['scenarios'][0]['status'], report['scenarios'][0]['reason']),
+                         ('fail', f'left running, now killed: sleep ({pid})'))
+        assert_stopped(self, pid)
+
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
+    def test_an_escapee_holding_the_output_doesnt_hold_up_the_scenario(self):
+        # It inherited the scenario's output pipe, so it would keep it open; the scenario has
+        # ended, so the runner kills it at once and keeps what the scenario printed.
+        pid_file = self.dir / 'holder.pid'
+        self.scenario('holder', mutates='no',
+                      body=f'echo before; setsid sleep 300 & echo $! > "{pid_file}"\n'
+                           'until [ "$(cut -d" " -f6 /proc/$!/stat)" = "$!" ]; do sleep 0.05; done\n'
+                           'echo after')
+        (self.scenarios / 'holder').write_text((self.scenarios / 'holder').read_text().replace(
+            '# qa-description', '# qa-timeout: 60\n# qa-description'))
+        code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
+        self.assertEqual(code, 1)
+        result = report['scenarios'][0]
+        pid = int(pid_file.read_text())
+        self.assertEqual(result['reason'], f'left running, now killed: sleep ({pid})')
+        self.assertEqual(result['exit_code'], 0)
+        self.assertEqual(result['output_tail'], ['before', 'after'])
+        self.assertLess(result['duration_seconds'], 10)
+        assert_stopped(self, pid)
+
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
+    def test_processes_forked_while_leftovers_are_killed_are_killed_too(self):
+        # An escapee that keeps forking: each pass stops all it finds before killing any.
+        name = f'forker-{secrets.token_hex(4)}'
+        self.scenario(name, mutates='no',
+                      body='setsid bash -c "while :; do sleep 300 & sleep 0.001; done" >/dev/null 2>&1 &\n'
+                           'sleep 0.5')
+        code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
+        self.assertEqual(code, 1)
+        self.assertIn('left running, now killed:', report['scenarios'][0]['reason'])
+        marker_left = []
+        for entry in Path('/proc').glob('[0-9]*'):
+            try:
+                carries = f'QA_RUN_MARKER={name}-'.encode() in (entry / 'environ').read_bytes()
+            except OSError:
+                continue
+            stat = runner._proc_stat(int(entry.name))
+            if carries and stat is not None and stat[2] not in 'ZX':
+                marker_left.append(entry.name)
+        self.assertEqual(marker_left, [])
+
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
+    def test_leftovers_keep_the_scenarios_own_reason(self):
+        self.scenario('skipper', mutates='no',
+                      body='setsid sleep 300 >/dev/null 2>&1 &\n'
+                           'until [ "$(cut -d" " -f6 /proc/$!/stat)" = "$!" ]; do sleep 0.05; done\n'
+                           'echo "nothing to do"; exit 77')
+        _, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
+        result = report['scenarios'][0]
+        self.assertEqual(result['status'], 'fail')
+        self.assertRegex(result['reason'], r'^nothing to do; left running, now killed: sleep \(\d+\)$')
+
+    @unittest.skipUnless(shutil.which('setsid') and shutil.which('env'), 'needs setsid')
+    def test_a_holder_the_sweep_cant_see_doesnt_hold_up_the_runner(self):
+        # env -i drops the run's marker, so the sweep can't find it, and it keeps the output open
+        # for 25s; the runner stops waiting for the output after 10s.
+        pid_file = self.dir / 'hidden.pid'
+        self.scenario('hidden-holder', mutates='no',
+                      body=f'echo hi; setsid env -i sleep 25 & echo $! > "{pid_file}"; echo bye')
+        started = time.monotonic()
+        code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'])
+        try:
+            self.assertLess(time.monotonic() - started, 20)
+            self.assertEqual((code, report['scenarios'][0]['status']), (0, 'pass'))
+            self.assertEqual(report['scenarios'][0]['output_tail'], ['hi', 'bye'])
+        finally:
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(pid_file.read_text()), signal.SIGKILL)
+
+    @unittest.skipUnless(Path('/proc').is_dir() and shutil.which('setsid'), 'needs /proc and setsid')
+    def test_a_cleanup_command_whose_child_holds_its_output_still_returns(self):
+        # A grandchild that left the command's group keeps its output pipe open; the cleanup
+        # goes on regardless, before the runner's SIGKILL.
+        done = self.dir / 'after-cleanup'
+        path = self.scenarios / 'held-cleanup'
+        path.write_text(f'''#!/usr/bin/env python3
+# qa-scenario: held-cleanup
+# qa-mutates: no
+# qa-profiles: ci
+# qa-timeout: 1
+# qa-description: held cleanup
+import subprocess
+import qa
+try:
+    qa.run(['sleep', '300'], timeout=600)
+finally:
+    try:
+        qa.run(['bash', '-c', 'setsid sleep 301 & sleep 302'], timeout=1200)
+    except subprocess.TimeoutExpired as error:
+        open({str(done)!r}, 'w').write(str(error.timeout))
+''')
+        path.chmod(0o755)
+        for grace in ('12', '4'):
+            with self.subTest(grace=grace):
+                done.unlink(missing_ok=True)
+                code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'],
+                                              dict(self.env, QA_TIMEOUT_GRACE_SECONDS=grace))
+                self.assertEqual(code, 1)
+                # The capped timeout, not the 1200 asked for, was what applied.
+                self.assertLess(float(done.read_text()), float(grace))
+                self.assertIn('left running, now killed: sleep (', report['scenarios'][0]['reason'])
+
+    def test_a_cleanup_command_ends_within_the_grace_period(self):
+        # qa.run starts commands in their own session, outside the group the runner kills, so
+        # one started in cleanup gets only what is left of the grace period.
+        pid_file = self.dir / 'cleanup.pid'
+        path = self.scenarios / 'slow-cleanup'
+        path.write_text(f'''#!/usr/bin/env python3
+# qa-scenario: slow-cleanup
+# qa-mutates: no
+# qa-profiles: ci
+# qa-timeout: 1
+# qa-description: slow cleanup
+import qa
+try:
+    qa.run(['sleep', '300'], timeout=600)
+finally:
+    qa.run(['sh', '-c', 'echo $$ > {str(pid_file)}; exec sleep 300'], timeout=1200)
+''')
+        path.chmod(0o755)
+        code, report, _ = self.report(['--target', 'http://localhost:1', '--profile', 'ci'],
+                                      dict(self.env, QA_TIMEOUT_GRACE_SECONDS='4'))
+        self.assertEqual(code, 1)
+        result = report['scenarios'][0]
+        self.assertEqual(result['reason'], 'timed out after 1s')
+        self.assertLess(result['duration_seconds'], 1 + 4 + 2)
+        assert_stopped(self, int(pid_file.read_text()))
 
     def test_stopping_the_runner_lets_the_running_scenario_clean_up(self):
         started, cleaned = self.dir / 'started', self.dir / 'cleaned'
@@ -433,8 +636,7 @@ finally:
                 runner_proc.communicate()
         self.assertEqual(runner_proc.returncode, 1)
         # The scenario's own command is gone too.
-        with self.assertRaises(ProcessLookupError):
-            os.kill(int(child_pid.read_text()), 0)
+        assert_stopped(self, int(child_pid.read_text()))
         # Cleanup ran, with half the grace period for its waits.
         self.assertAlmostEqual(float(cleaned.read_text()), 4.0, delta=0.5)
         self.assertEqual(self.ran(), [])
@@ -747,9 +949,9 @@ exit {exit_code}
 
     def test_public_site_calls_the_existing_check(self):
         for profile, route, route_args in (
-                ('production', None, '--host site.example --via-cloudflare'),
-                ('lab', None, '--host site.example --via-cloudflare'),
-                ('lab', 'gateway', '--host site.example')):
+                ('production', None, '--host site.example --main-host site.example --via-cloudflare'),
+                ('lab', None, '--host site.example --main-host site.example --via-cloudflare'),
+                ('lab', 'gateway', '--host site.example --main-host site.example')):
             with self.subTest(profile=profile, route=route):
                 extra = self.fake_check_public_site(0)
                 if route:
@@ -764,6 +966,13 @@ exit {exit_code}
                                               self.fake_check_public_site(1))
         self.assertEqual(code, 1)
         self.assertFalse(self.checks(results['public-site'])['/metrics not served (404)'])
+
+    def test_public_site_www_target_separates_base_and_main(self):
+        code, results, _ = self.run_scenarios('https://www.site.example', 'production',
+                                              'public-site', self.fake_check_public_site(0))
+        self.assertEqual(code, 0, results)
+        self.assertEqual((self.dir / 'args').read_text().strip(),
+                         '--host site.example --main-host www.site.example --via-cloudflare')
 
     def test_public_site_skips_a_plain_http_target(self):
         code, results, _ = self.run_scenarios('http://localhost:18081', 'ci', 'public-site',
@@ -826,8 +1035,7 @@ echo "end $QA_CRAWL_SOURCE" >> "{log}"
             'QA_CRAWL_SOURCES': 'FRED', 'QA_CRAWL_HOOK_TIMEOUT_SECONDS': '1'})
         self.assertEqual(code, 1)
         self.assertIn('overran', results['crawl-sample']['reason'])
-        with self.assertRaises(ProcessLookupError):
-            os.kill(int(pid_file.read_text()), 0)
+        assert_stopped(self, int(pid_file.read_text()))
 
     def test_lab_only_scenarios_are_not_run_outside_labs(self):
         # Asked for by name, they are an error; in a full run, the runner skips them.

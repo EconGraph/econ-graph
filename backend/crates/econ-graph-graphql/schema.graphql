@@ -444,6 +444,18 @@ type DataPoint {
 	value: BigDecimal
 	revisionDate: NaiveDate!
 	isOriginalRelease: Boolean!
+	"""
+	Whether this value differs from its date's original release value: the date's first
+	release, its earliest real original by revision date (synthetic legacy rows left out),
+	in every read mode. False for that first release itself and for a later release that
+	repeated its value; values compare as numbers, so `3.0` and `3.00` are the same. A later
+	row also tagged as an original release (a date with several, from before
+	compare-and-skip) is compared with the first one too, so an `originalOnly` read can
+	return an original that is revised. Null when the first release isn't known (no real
+	original, or one published after this row); use `isOriginalRelease` then. Filled by
+	`seriesData`, `EconomicSeries.dataPoints` and `EconomicSeries.recentDataPoints`.
+	"""
+	revisedFromOriginal: Boolean
 	createdAt: DateTime!
 	updatedAt: DateTime!
 }

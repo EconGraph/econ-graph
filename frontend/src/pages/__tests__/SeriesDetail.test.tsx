@@ -27,6 +27,7 @@ import {
   noObservations,
   page,
   seriesResponses,
+  releaseTypes,
   unrateLevels,
   unrateLogDifference,
   unrateYearOverYear,
@@ -297,6 +298,35 @@ describe('SeriesDetail', () => {
     const original = within(table).getByText('Original').closest('.MuiChip-root');
     expect(original).toHaveClass('MuiChip-colorDefault');
     expect(original).not.toHaveClass('MuiChip-colorSecondary');
+  });
+
+  // ECO-826: "Revised" means the value changed, not just that a later release exists.
+  test('labels a point Revised only when its value differs from the original release', async () => {
+    serve({ NONE: releaseTypes });
+    renderPage(UNRATE_ID);
+    await screen.findByTestId('line-chart');
+
+    const rows = within(screen.getByRole('table', { name: 'Recent observations' })).getAllByRole(
+      'row'
+    );
+    const typeOf = (row: HTMLElement) => {
+      const cells = within(row).getAllByRole('cell');
+      return cells[cells.length - 1].textContent;
+    };
+    // Newest first: Jun (a later original with another value), May (the original), Apr
+    // (re-released, same value), Mar (changed value), then Feb and Jan without
+    // revisedFromOriginal, labelled from isOriginalRelease.
+    expect(rows.slice(1).map(typeOf)).toEqual([
+      'Revised',
+      'Original',
+      'Original',
+      'Revised',
+      'Original',
+      'Revised',
+    ]);
+    const chip = (row: HTMLElement) => within(row).getByText(typeOf(row)!).closest('.MuiChip-root');
+    expect(chip(rows[3])).toHaveClass('MuiChip-colorDefault');
+    expect(chip(rows[4])).toHaveClass('MuiChip-colorPrimary');
   });
 
   test('asks the backend for the latest revision of each date, untransformed', async () => {

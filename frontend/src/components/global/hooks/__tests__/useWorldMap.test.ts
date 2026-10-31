@@ -115,14 +115,21 @@ describe('useWorldMap', () => {
       expect(result.current.isTransformed).toBe(false);
     });
 
-    it('keeps zoom between the whole world and eight times', () => {
+    it('zooms beyond eight times for microstates, clamps at 1024 times, and resets', () => {
       const { result } = renderHook(() => useWorldMap(REF, 'naturalEarth', [960, 500]));
 
       act(() => result.current.zoomBy(0.5));
       expect(result.current.zoomLevel).toBe(1);
 
-      act(() => result.current.zoomBy(100));
-      expect(result.current.zoomLevel).toBe(8);
+      act(() => result.current.zoomBy(16));
+      expect(result.current.zoomLevel).toBe(16);
+
+      act(() => result.current.zoomBy(1000));
+      expect(result.current.zoomLevel).toBe(1024);
+
+      act(() => result.current.resetZoom());
+      expect(result.current.zoomLevel).toBe(1);
+      expect(d3.zoomTransform(REF.current)).toEqual(d3.zoomIdentity);
     });
 
     it('does nothing without an SVG', () => {

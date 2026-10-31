@@ -22,9 +22,10 @@ export interface MapProjection {
   defaultCenter: [number, number];
 }
 
-/** Zoom scale limits: the whole world at most, eight times closer at least. */
+/** Fit the whole world, or inspect microstates such as Vatican City at country scale. */
 export const MIN_ZOOM = 1;
-export const MAX_ZOOM = 8;
+// The smallest bundled outline (Vatican) is ~9 px wide at 1024× on a 320 px map.
+export const MAX_ZOOM = 1024;
 
 /** Equal-area default for comparing country and continent sizes. */
 export const DEFAULT_PROJECTION = 'equalEarth';

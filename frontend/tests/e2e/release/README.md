@@ -120,6 +120,12 @@ In this mode ([environment and user mapping](env.ts)):
   those series with current catalog metadata, including the Census BDS titles.
   The sweep searches by the expected title and checks the title on the series
   page.
+- The dashboard spec (`series-ui/dashboard.spec.ts`) reads each card's series
+  anonymously and requires an observation for it. The deployed database must
+  contain BEA `bea_nipa/T10105.1.Q` and BLS `LNS14000000`, `CUSR0000SA0` and
+  `CES0000000001` with at least one observation each, and the realm must grant
+  BEA and BLS to the anonymous reader (`DASHBOARD_CARDS` in
+  [fixture expectations](fixtures.ts)).
   If metadata or observations are missing or stale, use the
   [crawler discovery and fetch guidance](../../../../docs/technical/CRAWLER_DEPLOYMENT_GUIDE.md)
   to populate them before running the sweep.

@@ -59,7 +59,7 @@ trap 'rm -rf "$log" "$log.ctx" "$out" "$path_log" "$stub_dir"' EXIT
 # (apply-host-storage.sh and the other deploy helpers) is a stub wherever deploy.sh runs.
 export HOME="$stub_dir/home" XDG_CACHE_HOME="$stub_dir/xdg-cache" ECONGRAPH_BACKUP_ROOT="$stub_dir/backups"
 # The deploy config (lib/deploy-config.sh) too: never the operator's ~/.config/econgraph.
-unset ECONGRAPH_DEPLOY_ENV XDG_CONFIG_HOME GATEWAY_TLS_ISSUER
+unset ECONGRAPH_DEPLOY_ENV XDG_CONFIG_HOME GATEWAY_TLS_ISSUER MAIN_HOST MAIN_HOST_PERMANENT
 export ECONGRAPH_CONFIG_DIR="$stub_dir/config"
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT" "$ECONGRAPH_CONFIG_DIR"
 
@@ -71,7 +71,8 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT" "$ECONGRAPH_CONFIG_D
 #   STUB_CLUSTER_FAILS=1 the kube-system lookup fails; STUB_EMPTY_UID=1 it answers nothing
 #   STUB_NO_CONTEXT=1    there is no current context
 #   STUB_ROUTE_HOST      the host the public HTTPRoutes serve; STUB_NO_GATEWAY_API=1 the
-#                        cluster has no HTTPRoute CRD
+#                        cluster has no HTTPRoute CRD; STUB_GATEWAY_API_FAILS=1 the CRD
+#                        lookup fails
 #   STUB_PUBLIC_HOST     the host the public Ingresses serve; STUB_SSL_HOSTS the retired one's
 #   STUB_SECRET=1        cloudflare-tunnel exists (with a fake token); STUB_SECRET_FAILS=1
 #                        looking it up fails
@@ -114,7 +115,14 @@ case "$*" in
     [ "${STUB_NO_NAMESPACE:-0}" = 1 ] || echo namespace/econ-graph ;;
   *"get crd certificates.cert-manager.io"*) [ -z "${STUB_CERT_ISSUER+x}" ] || echo customresourcedefinition/certificates.cert-manager.io ;;
   *"get certificate econ-graph-tls"*) [ "${STUB_CERT_FAILS:-0}" != 1 ] || exit 1; printf '%s' "${STUB_CERT_ISSUER:-}" ;;
-  *"get crd httproutes.gateway.networking.k8s.io"*) [ "${STUB_NO_GATEWAY_API:-0}" != 1 ] || exit 1 ;;
+  *"get crd httproutes.gateway.networking.k8s.io"*)
+    [ "${STUB_GATEWAY_API_FAILS:-0}" != 1 ] || exit 1
+    if [ "${STUB_NO_GATEWAY_API:-0}" = 1 ]; then
+      # Without the CRD: --ignore-not-found answers nothing, a plain get fails.
+      case "$*" in *--ignore-not-found*) exit 0 ;; *) exit 1 ;; esac
+    fi
+    echo customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io ;;
+  *"get httproute econ-graph-frontend-public"*) printf '%s' "${STUB_MAIN_HOST:-}" ;;
   *"get httproute -l"*) printf '%s' "${STUB_ROUTE_HOST:-}" ;;
   *"get ingress -l"*) printf '%s' "${STUB_PUBLIC_HOST:-}" ;;
   *"get ingress econ-graph-ssl-ingress"*) printf '%s' "${STUB_SSL_HOSTS:-}" ;;
@@ -166,7 +174,7 @@ cp scripts/deploy/lib/public-host.sh scripts/deploy/lib/cluster-role.sh scripts/
   "$lib_root/scripts/deploy/lib/"
 cp scripts/deploy/render-public-host.py "$lib_root/scripts/deploy/"
 cp k8s/manifests/cloudflared.yaml "$lib_root/k8s/manifests/"
-printf '#!/usr/bin/env bash\necho "apply-gateway-routes.sh PUBLIC_HOST=${PUBLIC_HOST-<unset>} $*" >>"$STUB_LOG"\n' \
+printf '#!/usr/bin/env bash\necho "apply-gateway-routes.sh PUBLIC_HOST=${PUBLIC_HOST-<unset>} MAIN_HOST=${MAIN_HOST-<unset>} $*" >>"$STUB_LOG"\n' \
   >"$lib_root/scripts/deploy/apply-gateway-routes.sh"
 chmod +x "$lib_root/scripts/deploy/apply-gateway-routes.sh"
 run_lib() {
@@ -200,6 +208,16 @@ if (unset PUBLIC_HOST; STUB_NO_GATEWAY_API=1 STUB_PUBLIC_HOST=econgraph.com run_
   fail "PUBLIC_HOST unset on a cluster without the gateway, serving econgraph.com, did not stop"
 fi
 grep -q 'get httproute' "$log" && fail "HTTPRoutes looked up without their CRD"
+# The HTTPRoute CRD lookup fails: stop (fail closed) rather than read "no gateway",
+# which would skip the public routes and the main-host guard.
+if PUBLIC_HOST=econgraph.com STUB_GATEWAY_API_FAILS=1 STUB_PUBLIC_HOST=econgraph.com run_lib public_host_init; then
+  fail "a failed HTTPRoute CRD lookup did not stop"
+fi
+grep -q "Could not read the cluster's routes" "$out" || fail "a failed HTTPRoute CRD lookup did not say why it stopped"
+grep -q 'delete ingress' "$log" && fail "a failed HTTPRoute CRD lookup changed cluster resources"
+if STUB_GATEWAY_API_FAILS=1 run_lib 'public_main_host_in_cluster econgraph.com'; then
+  fail "public_main_host_in_cluster read a failed CRD lookup as no gateway"
+fi
 # Unset on a legacy cluster whose retired econ-graph-ssl-ingress serves the public host: stop.
 if (unset PUBLIC_HOST; STUB_SSL_HOSTS=$'www.econgraph.com\necongraph.com' run_lib public_host_init); then
   fail "PUBLIC_HOST unset on a cluster with econ-graph-ssl-ingress did not stop"
@@ -218,6 +236,53 @@ fi
 if PUBLIC_HOST="not a host" run_lib public_host_init; then
   fail "a bad PUBLIC_HOST was accepted"
 fi
+
+# MAIN_HOST resolves before any changes and supports a persistent apex rollback.
+PUBLIC_HOST=econgraph.com run_lib 'public_host_init; [ "$MAIN_HOST" = www.econgraph.com ]' ||
+  fail "MAIN_HOST did not default to www"
+PUBLIC_HOST=econgraph.com MAIN_HOST=econgraph.com run_lib 'public_host_init; [ "$MAIN_HOST" = econgraph.com ]' ||
+  fail "explicit apex MAIN_HOST was refused"
+PUBLIC_HOST='' MAIN_HOST=www.econgraph.com run_lib 'public_host_init; [ -z "$MAIN_HOST" ]' ||
+  fail "localhost-only deploy retained MAIN_HOST"
+for main in '' wrong.example.org www.www.econgraph.com; do
+  if PUBLIC_HOST=econgraph.com MAIN_HOST="$main" run_lib public_host_init; then
+    fail "bad MAIN_HOST '$main' was accepted"
+  fi
+  grep -q 'delete ingress' "$log" && fail "bad MAIN_HOST changed cluster resources"
+done
+printf 'PUBLIC_HOST=econgraph.com\nMAIN_HOST=econgraph.com\n' >"$ECONGRAPH_CONFIG_DIR/deploy.env"
+PUBLIC_HOST=econgraph.com run_lib 'main_host_init; [ "$MAIN_HOST" = econgraph.com ]' ||
+  fail "deploy config MAIN_HOST rollback was not honored"
+PUBLIC_HOST=econgraph.com MAIN_HOST=www.econgraph.com run_lib 'main_host_init; [ "$MAIN_HOST" = www.econgraph.com ]' ||
+  fail "explicit MAIN_HOST did not override deploy config"
+PUBLIC_HOST=example.org run_lib 'main_host_init; [ "$MAIN_HOST" = www.example.org ]' ||
+  fail "another domain inherited the main host from stale config"
+# MAIN_HOST_PERMANENT: empty by default, from the deploy config for the same base domain,
+# overridden by the environment, and validated.
+(unset MAIN_HOST_PERMANENT; PUBLIC_HOST=econgraph.com run_lib 'main_host_init; [ -z "$MAIN_HOST_PERMANENT" ] && [ "$(main_host_redirect_status econgraph.com econgraph.com)" = 301 ]') ||
+  fail "MAIN_HOST_PERMANENT was not empty by default, or the apex redirect not permanent"
+printf 'PUBLIC_HOST=econgraph.com\nMAIN_HOST=www.econgraph.com\nMAIN_HOST_PERMANENT=WWW.econgraph.com\n' >"$ECONGRAPH_CONFIG_DIR/deploy.env"
+(unset MAIN_HOST_PERMANENT; PUBLIC_HOST=econgraph.com run_lib 'main_host_init; [ "$MAIN_HOST_PERMANENT" = www.econgraph.com ] && [ "$(main_host_redirect_status econgraph.com www.econgraph.com)" = 301 ]') ||
+  fail "deploy config MAIN_HOST_PERMANENT was not honored"
+PUBLIC_HOST=econgraph.com MAIN_HOST_PERMANENT='' run_lib 'main_host_init; [ "$(main_host_redirect_status econgraph.com www.econgraph.com)" = 302 ]' ||
+  fail "an empty MAIN_HOST_PERMANENT in the environment did not override the deploy config"
+(unset MAIN_HOST_PERMANENT; PUBLIC_HOST=example.org run_lib 'main_host_init; [ -z "$MAIN_HOST_PERMANENT" ]') ||
+  fail "another domain inherited MAIN_HOST_PERMANENT from stale config"
+if PUBLIC_HOST=econgraph.com MAIN_HOST_PERMANENT=other.example.org run_lib main_host_init; then
+  fail "a MAIN_HOST_PERMANENT for another domain was accepted"
+fi
+rm -f "$ECONGRAPH_CONFIG_DIR/deploy.env"
+
+# A regular deploy must not bypass the operator's session-invalidating switch.
+if PUBLIC_HOST=econgraph.com STUB_ROUTE_HOST=econgraph.com STUB_MAIN_HOST=econgraph.com run_lib public_host_init; then
+  fail "deploy silently changed the canonical host and issuer"
+fi
+grep -q 'switch-main-host.sh' "$out" || fail "canonical switch refusal did not name the operator command"
+grep -q 'delete ingress' "$log" && fail "canonical switch refusal changed cluster resources"
+PUBLIC_HOST=econgraph.com STUB_ROUTE_HOST=www.econgraph.com STUB_MAIN_HOST=www.econgraph.com \
+  run_lib public_host_init || fail "regular deploy refused the current canonical host"
+MAIN_HOST=www.other.example.org PUBLIC_HOST=econgraph.com run_lib 'read_configured_public_host' ||
+  fail "configured base-name validation inherited an unrelated MAIN_HOST"
 
 # The certificate issuer is chosen in public_host_init, before anything is applied, and
 # only with a public host (tls_issuer_choose, lib/deploy-config.sh).
@@ -270,14 +335,14 @@ fi
 # With a public host: apply-gateway-routes.sh gets it, on the pinned context.
 PUBLIC_HOST=econgraph.com run_lib 'public_host_init; apply_public_edge' ||
   fail "public host: deploy failed: $(cat "$out")"
-grep -qx 'apply-gateway-routes.sh PUBLIC_HOST=econgraph.com --context kind-test' "$log" ||
+grep -qx 'apply-gateway-routes.sh PUBLIC_HOST=econgraph.com MAIN_HOST=www.econgraph.com --context kind-test' "$log" ||
   fail "public host: apply-gateway-routes.sh not given it: $(grep apply-gateway "$log" || true)"
 grep -q 'delete ingress econ-graph-ssl-ingress' "$log" || fail "public host: econ-graph-ssl-ingress not deleted"
 
 # Without one: `none`, so a public host served before is removed.
 PUBLIC_HOST='' run_lib 'public_host_init; apply_public_edge' ||
   fail "no public host: deploy failed: $(cat "$out")"
-grep -qx 'apply-gateway-routes.sh PUBLIC_HOST=none --context kind-test' "$log" ||
+grep -qx 'apply-gateway-routes.sh PUBLIC_HOST=none MAIN_HOST= --context kind-test' "$log" ||
   fail "no public host: apply-gateway-routes.sh not told none: $(grep apply-gateway "$log" || true)"
 grep -q 'delete ingress econ-graph-ssl-ingress' "$log" || fail "no public host: econ-graph-ssl-ingress not deleted"
 # Nothing patches ingress-nginx any more.
@@ -734,6 +799,18 @@ if [ "$have_script" = true ]; then
     fail "set-crawler-keys --google failed with a public host: $(cat "$out")"
   grep -A1 'stdin: .*name: KC_WEB_BASE_URL$' "$log" | grep -q 'stdin: .*value: https://econgraph.com' ||
     fail "Google mode did not render the realm import for the public host"
+  # Secret refresh preserves the observed www issuer, instead of guessing from
+  # the base domain. Explicit mismatches are rejected before prompting or writing.
+  run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=www.econgraph.com STUB_MAIN_HOST=www.econgraph.com' "$google_args" "$google_input" ||
+    fail "Google mode refused the current www canonical host: $(cat "$out")"
+  grep -A1 'stdin: .*name: KC_WEB_BASE_URL$' "$log" | grep -q 'stdin: .*value: https://www.econgraph.com' ||
+    fail "Google mode reset the canonical realm from www to apex"
+  keys_env=(MAIN_HOST=econgraph.com)
+  if run_keys 'STUB_MARKER=production STUB_ROUTE_HOST=www.econgraph.com STUB_MAIN_HOST=www.econgraph.com' '--google --dry-run'; then
+    fail "Google mode accepted MAIN_HOST differing from the current canonical host"
+  fi
+  grep -Eq 'create secret|apply|rollout|delete job' "$log" && fail "Google MAIN_HOST mismatch changed the cluster"
+  keys_env=()
   # A realm ConfigMap older than this checkout: refused before the prompt, nothing written.
   for realm in stale missing; do
     if run_keys "STUB_MARKER=none STUB_REALM=$realm" "$google_args" "$google_input"; then

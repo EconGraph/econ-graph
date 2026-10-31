@@ -46,7 +46,17 @@ fi
 # Load port configuration
 if [ -f "ports.env" ]; then
     echo "📋 Loading port configuration from ports.env..."
+    caller_public_host_set="${PUBLIC_HOST+set}"
+    caller_public_host="${PUBLIC_HOST-}"
+    caller_main_host_set="${MAIN_HOST+set}"
+    caller_main_host="${MAIN_HOST-}"
     source ports.env
+    if [ "$caller_public_host_set" = set ]; then
+        export PUBLIC_HOST="$caller_public_host"
+    fi
+    if [ "$caller_main_host_set" = set ]; then
+        export MAIN_HOST="$caller_main_host"
+    fi
 else
     echo "⚠️  ports.env not found, using default ports"
     BACKEND_NODEPORT=30080
@@ -230,7 +240,8 @@ kubectl apply -f k8s/manifests/namespace.yaml
 # Every manifest goes through the same public-host step as deploy.sh
 # (scripts/deploy/lib/public-host.sh): applied as committed, they would put
 # Keycloak's issuer and the backend back on localhost and drop the public host.
-# PUBLIC_HOST must therefore be given when the cluster serves one.
+# PUBLIC_HOST must therefore be given when the cluster serves one; MAIN_HOST
+# selects its main name (default www.PUBLIC_HOST, or the persisted deploy config).
 # shellcheck source=scripts/deploy/lib/public-host.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
 public_host_init
@@ -410,8 +421,9 @@ echo "📊 Current deployment status:"
 kubectl get pods -n econ-graph -o wide
 echo ""
 echo "🌐 Application URLs:"
-echo "  🌍 Production (SSL): https://www.econgraph.com"
-echo "  🌍 Production (SSL): https://econgraph.com"
+if [ -n "$PUBLIC_HOST" ]; then
+    echo "  🌍 Production (SSL): https://${MAIN_HOST} (the other public name redirects to it)"
+fi
 echo "  🏠 Local Development:"
 echo "    Frontend: http://localhost:${FRONTEND_NODEPORT}"
 echo "    Backend:  http://localhost:${BACKEND_NODEPORT}"
@@ -460,20 +472,11 @@ else
     echo "  ❌ Main Entry Point: http://localhost - Not accessible (the gateway may be missing: scripts/deploy/install-gateway.sh)"
 fi
 
-# Test HTTPS Termination (www.econgraph.com)
-echo ""
-echo "🔒 Testing HTTPS termination..."
-if curl -s -o /dev/null -w "%{http_code}" -k https://www.econgraph.com | grep -q "200\|302"; then
-    echo "  ✅ HTTPS Production: https://www.econgraph.com - Accessible"
-else
-    echo "  ❌ HTTPS Production: https://www.econgraph.com - Not accessible (SSL certificate may not be ready)"
-fi
-
-# Test HTTPS Termination (econgraph.com)
-if curl -s -o /dev/null -w "%{http_code}" -k https://econgraph.com | grep -q "200\|302"; then
-    echo "  ✅ HTTPS Production: https://econgraph.com - Accessible"
-else
-    echo "  ❌ HTTPS Production: https://econgraph.com - Not accessible (SSL certificate may not be ready)"
+# The main public address, and the other name's redirect to it (lib/public-host.sh).
+if [ -n "$PUBLIC_HOST" ]; then
+    echo ""
+    echo "🔒 Testing HTTPS termination..."
+    check_public_host_urls "$PUBLIC_HOST" "$MAIN_HOST"
 fi
 
 # Test SSL Certificate Status

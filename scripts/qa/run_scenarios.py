@@ -33,6 +33,7 @@ import datetime as dt
 import json
 import os
 import re
+import secrets
 import signal
 import subprocess
 import sys
@@ -307,12 +308,25 @@ _stopping = False
 _grace = float(DEFAULT_GRACE)
 
 
+_stop_timer: threading.Timer | None = None
+
+
 def _stop_group(group: int) -> None:
     """SIGTERM a scenario's group so it cleans up, and SIGKILL it after the grace period."""
+    global _stop_timer
     _signal_group(group, signal.SIGTERM)
-    timer = threading.Timer(_grace, _signal_group, (group, signal.SIGKILL))
-    timer.daemon = True
-    timer.start()
+    _stop_timer = threading.Timer(_grace, _signal_group, (group, signal.SIGKILL))
+    _stop_timer.daemon = True
+    _stop_timer.start()
+
+
+def _cancel_stop_timer() -> None:
+    """Once the scenario has ended its group is gone; its number may be reused, so the pending
+    SIGKILL must not fire."""
+    global _stop_timer
+    if _stop_timer is not None:
+        _stop_timer.cancel()
+        _stop_timer = None
 
 
 def _on_sigterm(signum, frame):
@@ -337,47 +351,186 @@ def _signal_group(pgid: int, sig: int) -> None:
         pass
 
 
+# Set to a value unique to each scenario run in its environment. Every process the scenario starts
+# inherits it, whatever process group or session it moves to, so the runner can find whatever is
+# left once the scenario has ended.
+RUN_MARKER = 'QA_RUN_MARKER'
+
+
+def _proc_stat(pid: int) -> tuple[str, int, str] | None:
+    """(command name, process group, state) of a process, or None once it has gone."""
+    try:
+        stat = Path(f'/proc/{pid}/stat').read_text()
+    except OSError:
+        return None
+    fields = stat[stat.rindex(')') + 2:].split()
+    return stat[stat.index('(') + 1:stat.rindex(')')], int(fields[2]), fields[0]
+
+
+def _carries(pid: int, needle: bytes) -> bool:
+    """Whether a process's environment holds NEEDLE. A process that rewrote its environment
+    (a browser, PostgreSQL), or one this user can't read (setuid, non-dumpable), is not found."""
+    try:
+        return needle in Path(f'/proc/{pid}/environ').read_bytes().split(b'\0')
+    except OSError:
+        return False
+
+
+def _marked(needle: bytes, group: int) -> dict[int, str]:
+    """Live processes carrying NEEDLE outside process group GROUP: pid to command name."""
+    found = {}
+    for entry in Path('/proc').glob('[0-9]*'):
+        pid = int(entry.name)
+        if pid == os.getpid() or not _carries(pid, needle):
+            continue
+        stat = _proc_stat(pid)
+        if stat is not None and stat[1] != group and stat[2] not in 'ZX':
+            found[pid] = stat[0]
+    return found
+
+
+class _Handle:
+    """A process to signal: through a pidfd, so a PID reused since it was found is never
+    signalled; where pidfds are missing (Python 3.8, Linux before 5.3, a seccomp profile that
+    blocks them), by PID after checking the marker again."""
+
+    def __init__(self, pid: int, needle: bytes):
+        self.pid = pid
+        self.fd = None
+        try:
+            self.fd = os.pidfd_open(pid)
+        except (AttributeError, OSError) as error:
+            if isinstance(error, ProcessLookupError):
+                raise
+        if not _carries(pid, needle):
+            self.close()
+            raise ProcessLookupError(pid)
+        self.needle = needle
+
+    def signal(self, sig: int) -> None:
+        if self.fd is not None:
+            signal.pidfd_send_signal(self.fd, sig)
+        elif _carries(self.pid, self.needle):
+            os.kill(self.pid, sig)
+        else:
+            raise ProcessLookupError(self.pid)
+
+    def close(self) -> None:
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+
+
+def stop_leftovers(marker: str, group: int) -> list[str]:
+    """Kill every process still carrying this run's marker (see RUN_MARKER) outside the
+    scenario's process group, which run_bounded has already killed: commands started in their
+    own session, such as qa.run's, or with setsid. Returns them as `name (pid)`.
+
+    Processes ending on their own get a second to do so. Each pass stops every match before
+    killing any, so none can fork past the pass, and passes repeat until one finds nothing.
+    Without /proc (macOS), or for processes whose environment can't be read, it finds nothing.
+    """
+    if not Path('/proc').is_dir():
+        return []
+    needle = f'{RUN_MARKER}={marker}'.encode()
+    deadline = time.monotonic() + 1
+    while _marked(needle, group) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    killed: dict[int, str] = {}
+    unkillable: dict[int, str] = {}
+    for _ in range(20):
+        found = _marked(needle, group)
+        if not found or set(found) <= set(unkillable):
+            break
+        stopped = []
+        for pid in found:
+            try:
+                handle = _Handle(pid, needle)
+                handle.signal(signal.SIGSTOP)
+            except ProcessLookupError:
+                continue
+            except OSError:
+                unkillable[pid] = found[pid]
+                continue
+            stopped.append(handle)
+        for handle in stopped:
+            try:
+                handle.signal(signal.SIGKILL)
+                killed[handle.pid] = found[handle.pid]
+            except ProcessLookupError:
+                pass
+            except OSError:
+                unkillable[handle.pid] = found[handle.pid]
+            finally:
+                handle.close()
+        time.sleep(0.05)
+    return ([f'{name} ({pid})' for pid, name in killed.items()]
+            + [f'{name} ({pid}, could not be killed)' for pid, name in unkillable.items()
+               if pid not in killed])
+
+
 def run_bounded(command: list[str], env: dict[str, str], timeout: float,
-                grace: float) -> tuple[int, bytes, bool]:
-    """Run a scenario in its own process group: its exit status, output, and whether it overran.
+                grace: float) -> tuple[int, bytes, bool, list[str]]:
+    """Run a scenario in its own process group: its exit status, output, whether it overran, and
+    what it left running (see stop_leftovers).
 
     On overrunning, the group gets SIGTERM (Python scenarios then stop their own commands and run
-    their cleanup), and after `grace` seconds SIGKILL, so nothing it started keeps running.
+    their cleanup), and after `grace` seconds SIGKILL, so nothing it started keeps running. Once
+    the scenario has ended, so has its group, and whatever carries its RUN_MARKER outside it.
+    Output is read alongside, so a process holding the pipe can't hold the scenario up.
     """
     global _current_group
     proc = subprocess.Popen(command, env=env, cwd=REPO_ROOT, stdin=subprocess.DEVNULL,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=True)
     _current_group = proc.pid
+    chunks: list[bytes] = []
+    reader = threading.Thread(target=_read_all, args=(proc.stdout, chunks), daemon=True)
+    reader.start()
     if _stopping:
         _stop_group(proc.pid)
     try:
-        return _wait_bounded(proc, timeout, grace)
+        code, timed_out = _wait_bounded(proc, timeout, grace)
     finally:
+        # The scenario has ended: a stop request from now on has no group to signal.
         _current_group = None
+        _cancel_stop_timer()
+    # Whatever of the group outlived the scenario itself, then whatever left the group.
+    _signal_group(proc.pid, signal.SIGKILL)
+    marker = env.get(RUN_MARKER)
+    leftovers = stop_leftovers(marker, proc.pid) if marker else []
+    # The pipe closes once the last process holding it has gone; something the sweep can't see
+    # (docs/release/qa-scenarios.md) may still hold it, so don't wait for ever. Closing the
+    # stream while the reader is blocked in it would block too, so then leave both to the
+    # daemon thread: one file descriptor until that process exits.
+    reader.join(timeout=10)
+    if not reader.is_alive():
+        proc.stdout.close()
+    return code, b''.join(chunks), timed_out, leftovers
 
 
-def _wait_bounded(proc: subprocess.Popen, timeout: float, grace: float) -> tuple[int, bytes, bool]:
+def _read_all(stream, chunks: list[bytes]) -> None:
+    for block in iter(lambda: stream.read1(65536), b''):
+        chunks.append(block)
+
+
+def _wait_bounded(proc: subprocess.Popen, timeout: float, grace: float) -> tuple[int, bool]:
+    """Wait for the scenario process itself: its exit status and whether it overran."""
     try:
-        output, _ = proc.communicate(timeout=timeout)
-        _signal_group(proc.pid, signal.SIGKILL)
-        return proc.returncode, output, False
+        proc.wait(timeout=timeout)
+        return proc.returncode, False
     except subprocess.TimeoutExpired:
         pass
     _signal_group(proc.pid, signal.SIGTERM)
     try:
-        output, _ = proc.communicate(timeout=grace)
+        proc.wait(timeout=grace)
     except subprocess.TimeoutExpired:
         _signal_group(proc.pid, signal.SIGKILL)
         try:
-            output, _ = proc.communicate(timeout=10)
+            proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            # Something outside the group still holds the output pipe.
-            proc.kill()
-            output = b''
-    # Whatever of the group outlived the scenario itself.
-    _signal_group(proc.pid, signal.SIGKILL)
-    return -1, output or b'', True
+            pass  # Unkillable (uninterruptible sleep): report the overrun and go on.
+    return -1, True
 
 
 def run_scenario(
@@ -402,12 +555,14 @@ def run_scenario(
         QA_WORK_DIR=str(work),
         # How long the scenario has to clean up after SIGTERM.
         QA_TIMEOUT_GRACE_SECONDS=str(_grace),
+        **{RUN_MARKER: f'{scenario.name}-{secrets.token_hex(8)}'},
         PYTHONPATH=os.pathsep.join(
             p for p in (str(Path(__file__).resolve().parent / 'lib'), env.get('PYTHONPATH', '')) if p
         ),
     )
     started = time.monotonic()
-    code, raw, timed_out = run_bounded([str(scenario.path)], child_env, scenario.timeout, _grace)
+    code, raw, timed_out, leftovers = run_bounded(
+        [str(scenario.path)], child_env, scenario.timeout, _grace)
     output = raw.decode('utf-8', errors='replace')
     duration = round(time.monotonic() - started, 2)
 
@@ -434,6 +589,11 @@ def run_scenario(
             if failures
             else f'exited {code}' + (f': {tail[-1]}' if tail else '')
         )
+    if leftovers:
+        # A scenario must stop everything it starts, also when stopped for overrunning.
+        shown = ', '.join(leftovers[:10]) + (f' and {len(leftovers) - 10} more' if len(leftovers) > 10 else '')
+        left = f'left running, now killed: {shown}'
+        status, reason = 'fail', f'{reason}; {left}' if reason else left
     return redact.deep(
         {
             'name': scenario.name,

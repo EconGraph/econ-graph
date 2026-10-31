@@ -68,11 +68,17 @@ export const seriesResponses: Record<string, { series: typeof unrate | null }> =
   },
 };
 
-const node = (date: string, value: string | null, isOriginalRelease = false) => ({
+const node = (
+  date: string,
+  value: string | null,
+  isOriginalRelease = false,
+  revisedFromOriginal: boolean | null = null
+) => ({
   date,
   value,
   revisionDate: '2024-04-05',
   isOriginalRelease,
+  revisedFromOriginal,
 });
 
 type Node = ReturnType<typeof node>;
@@ -91,6 +97,23 @@ export const page = (
 export const unrateLevels = page(
   [node('2024-01-01', '3.7'), node('2024-02-01', '3.9'), node('2024-03-01', '3.8', true)],
   3
+);
+
+/**
+ * Each case of the Type column: the original release; a later release that repeated its value
+ * and one that changed it; and, without `revisedFromOriginal`, a later release and an original;
+ * and a later row tagged original whose value differs from the first release.
+ */
+export const releaseTypes = page(
+  [
+    node('2024-01-01', '1.0', false, null),
+    node('2024-02-01', '2.0', true, null),
+    node('2024-03-01', '3.0', false, true),
+    node('2024-04-01', '4.0', false, false),
+    node('2024-05-01', '5.0', true, false),
+    node('2024-06-01', '6.0', true, true),
+  ],
+  6
 );
 
 /** Quarterly GDP levels in dollars: whole numbers of 14 digits. */

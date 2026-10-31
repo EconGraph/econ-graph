@@ -19,6 +19,7 @@ import AuthCallback from './pages/AuthCallback';
 import { CALLBACK_PATH } from './auth/oidcConfig';
 import ResetQueriesOnUserChange from './auth/ResetQueriesOnUserChange';
 import ReturnAfterSignOut from './auth/ReturnAfterSignOut';
+import CanonicalLink from './components/CanonicalLink';
 
 // Build-time flag pattern (docs/build-flags.md): read `__FLAGS__.<name>` in the condition
 // and import the page lazily, so a release build without the flag contains none of its code.
@@ -59,6 +60,7 @@ function App() {
 
   return (
     <AuthProvider>
+      <CanonicalLink />
       <ResetQueriesOnUserChange />
       <ReturnAfterSignOut />
       <ThemeProvider>

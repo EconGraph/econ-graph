@@ -21,7 +21,7 @@ cloudflared ──> econ-graph-gateway-proxy:443 ─┘  Gateway econ-graph-gate
 ```bash
 ./scripts/deploy/test-gateway-routes.sh                 # http://localhost
 ./scripts/deploy/test-gateway-routes.sh --rate-limit    # also the 429 behaviour
-ROUTE_HOST=econgraph.com ./scripts/deploy/test-gateway-routes.sh https://localhost   # the public host
+ROUTE_HOST=www.econgraph.com ./scripts/deploy/test-gateway-routes.sh https://localhost   # the public host
 ./scripts/deploy/check-public-site.sh --host econgraph.com                         # and its redirects, spoofing
 ```
 

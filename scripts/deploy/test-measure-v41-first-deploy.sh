@@ -15,7 +15,11 @@
 #   - the BEA rules come from bea.toml and the query applies SeriesKey::parse's rules; the FRED
 #     check runs only with FRED_API_KEY, with --count-uncapped and without any database URL, and
 #     a report without a count is a failed measurement; table values escape |; the script's
-#     synthetic-row SQL matches data_point.rs.
+#     synthetic-row SQL matches data_point.rs;
+#   - ECO-738: the relabel and twin counts run in the same session, the run-time and WAL
+#     estimates are reported against the crawler-migrate Job's deadline (flagged when over
+#     it), twins are flagged, a database where it is already applied says so, and one
+#     without the World Bank source fails.
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$ROOT/scripts/deploy/measure-v41-first-deploy.sh"
@@ -62,6 +66,8 @@ for line in script.splitlines():
     elif 'is_active' in sql:
         rules = sql.count('count(*) FILTER') - 2
         print(sep.join(['7', '2', '2'] + ['1'] * rules))
+    elif 'ROW_NUMBER' in sql:
+        print(sep.join(os.environ.get('STUB_ECO_738', '0,1,3600000,0').split(',')))
     elif 'other_original' in sql:
         print(sep.join(['Federal Reserve Economic Data (FRED)', '3']))
         print(sep.join(['A | piped source', '1']))
@@ -257,9 +263,9 @@ for call in calls:
     assert "SET LOCAL statement_timeout = '42s';" in script, script[:200]
     assert "SET LOCAL lock_timeout = '5s';" in script, script[:250]
     assert script.rstrip().endswith('COMMIT;'), script[-40:]
-    # BEGIN, SET TRANSACTION, two SET LOCAL, four queries, COMMIT: nothing else.
-    assert script.count(';') == 9, script.count(';')
-    assert script.count('\\echo @@measure-v41:') == 5, script
+    # BEGIN, SET TRANSACTION, two SET LOCAL, five queries, COMMIT: nothing else.
+    assert script.count(';') == 10, script.count(';')
+    assert script.count('\\echo @@measure-v41:') == 6, script
     env = call['env']
     assert env['PGPASSWORD'] == 'pw-S3CRET-1', env
     assert 'default_transaction_read_only=on' in env['PGOPTIONS'], env
@@ -289,6 +295,13 @@ assert "~ '^[0-9]{2}000$'" in bea, 'state-level area check missing'
 assert "IN ('A', 'Q')" in bea, 'NIPA frequencies missing'
 PY
 grep -qF "one synthetic legacy row, and no other row: **4**" "$scratch/out" || fail "ECO-807 count missing"
+grep -qF "World Bank rows to relabel as revisions: **3600000**" "$scratch/out" || fail "ECO-738 count missing"
+grep -qF "Revision twins (the migration refuses while any exist): **0**" "$scratch/out" || fail "ECO-738 twins missing"
+grep -qF "Estimated run time: about 90 s at 25 s per million rows; the crawler-migrate Job allows 1800 s" "$scratch/out" ||
+    fail "ECO-738 run-time estimate missing"
+grep -qF "Estimated WAL: about 3.1 GB" "$scratch/out" || fail "ECO-738 WAL estimate missing"
+grep -q "ROW_NUMBER" <<<"$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).readline())["script"])' "$STUB_LOG")" ||
+    fail "ECO-738 query not in the one read-only session"
 grep -qF '| A \| piped source | 1 |' "$scratch/out" || fail "a | in a table value is not escaped"
 grep -qF "skipped: needs FRED_API_KEY" "$scratch/out" || fail "FRED not reported as skipped"
 [ ! -e "$scratch/home/crawler.log" ] || fail "the crawler ran without FRED_API_KEY"
@@ -306,6 +319,22 @@ STUB_FAIL_ON='FROM series_metadata sm' run --database-url "postgresql://measure@
 [ "$status" = 1 ] || fail "a failed BEA query: exit $status"
 grep -qF "FAILED: not run: bea_metadata failed first" "$scratch/out" ||
     fail "a query after the failure is not reported as not run: $(cat "$scratch/out")"
+
+# --- ECO-738: past the Job's deadline, twins, and no World Bank source ---
+STUB_ECO_738=0,1,80000000,2 run --database-url "postgresql://measure@127.0.0.1:${port}/rehearsal"
+[ "$status" = 0 ] || fail "ECO-738 over the deadline: exit $status"
+grep -qF "about 2000 s at 25 s per million rows; the crawler-migrate Job allows 1800 s for every pending data migration (OVER it)" \
+    "$scratch/out" || fail "an estimate past the deadline is not flagged: $(grep -A5 ECO-738 "$scratch/out")"
+grep -qF "The migration refuses this database until the twins are resolved" "$scratch/out" ||
+    fail "twins are not flagged"
+STUB_ECO_738=1,1,0,0 run --database-url "postgresql://measure@127.0.0.1:${port}/rehearsal"
+[ "$status" = 0 ] || fail "ECO-738 already applied: exit $status"
+grep -qF "Already applied here (20261101000100 in __diesel_schema_migrations): nothing is left to relabel" \
+    "$scratch/out" || fail "an applied migration is not reported as such"
+STUB_ECO_738=0,0,0,0 run --database-url "postgresql://measure@127.0.0.1:${port}/rehearsal"
+[ "$status" = 1 ] || fail "no World Bank source: exit $status"
+grep -qF "FAILED: unexpected query output: expected one data_sources row named World Bank Open Data, found 0" \
+    "$scratch/out" || fail "a missing World Bank source is not a failed measurement: $(grep -A3 ECO-738 "$scratch/out")"
 
 # --- FRED with a key: the crawler gets the key and no database URL; secrets stay hidden ---
 FRED_API_KEY=fred-K3Y-secret DATABASE_URL=postgres://x:db-PW@h/d \

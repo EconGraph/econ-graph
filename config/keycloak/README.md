@@ -204,9 +204,17 @@ k -n econ-graph patch secret econ-graph-keycloak --type=json -p='[
 k -n econ-graph rollout restart deployment/keycloak
 k -n econ-graph rollout status deployment/keycloak --timeout=600s
 k -n econ-graph delete job keycloak-realm-import --ignore-not-found
-# On the production cluster, rendered for its public host; elsewhere apply the file as it is.
-scripts/deploy/render-public-host.py econgraph.com k8s/manifests/keycloak/realm-import-job.yaml | k apply -f -
-k -n econ-graph wait --for=condition=complete job/keycloak-realm-import --timeout=600s
+# On the production cluster, rendered for its public host and the main host Keycloak
+# serves now (from its KC_HOSTNAME, which the issuer follows; render-public-host.py
+# refuses without MAIN_HOST); elsewhere apply the file as it is. Rendered first, so a
+# refused render stops here instead of leaving the wait below with no Job.
+kc_hostname="$(k -n econ-graph get deployment keycloak \
+    -o 'jsonpath={.spec.template.spec.containers[?(@.name=="keycloak")].env[?(@.name=="KC_HOSTNAME")].value}')"
+main_host="${kc_hostname#https://}"
+realm_import="$(MAIN_HOST="${main_host%/idp}" \
+    scripts/deploy/render-public-host.py econgraph.com k8s/manifests/keycloak/realm-import-job.yaml)" &&
+    k apply -f - <<<"$realm_import" &&
+    k -n econ-graph wait --for=condition=complete job/keycloak-realm-import --timeout=600s
 ```
 
 Use this on a cluster whose Secret holds either key. Without both keys the realm
@@ -381,7 +389,10 @@ through its realm composites. Remove those scope mappings, and make a catalog pu
 realm default client scope admitting catalog reads is named with a warning: a recreated anonymous
 client would be assigned it.
 
-When a role leaves the realm file, the import deletes it if config-cli created it. config-cli
+When a role leaves the realm file, the import deletes it if config-cli created it. Dropping a
+client's block under `roles.client` deletes the roles config-cli created for it. Dropping a client
+config-cli created deletes the client with every role on it, including roles made in Keycloak;
+Keycloak's own clients, such as `account`, are never deleted. config-cli
 records those in the realm's `de.adorsys.keycloak.config.state-default-*` attributes, and when that
 list shrinks it leaves an old chunk behind, which both it and the import ignore (the import names it
 in a warning). The role's live grants are then left out of the import, each named with a warning,
