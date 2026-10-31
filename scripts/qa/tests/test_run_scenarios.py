@@ -38,20 +38,21 @@ BY_NAME = {s.name: s for s in SCENARIOS}
 
 
 def assert_stopped(test: unittest.TestCase, pid: int, wait: float = 5) -> None:
-    """Fail unless PID has exited. A process orphaned when its parent died is reparented to init
-    and stays a zombie until init reaps it, which can take a moment after it has exited; a zombie
-    has stopped running, so it counts as stopped. A live process fails after WAIT seconds."""
+    """Fail unless PID has exited. A process orphaned when its parent died is reparented to the
+    nearest subreaper (init, or systemd) and stays a zombie until it is reaped, which can take a
+    moment after it has exited; a zombie has stopped running, so it counts as stopped. A live
+    process fails after WAIT seconds."""
     deadline = time.monotonic() + wait
     while True:
         try:
             os.kill(pid, 0)
-        except ProcessLookupError:
-            return
+        except (ProcessLookupError, PermissionError):
+            return  # gone (PermissionError: the PID now belongs to another user's process)
         try:
             state = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[0]
-        except (FileNotFoundError, IndexError):
-            state = None  # no /proc (macOS), or gone meanwhile: keep polling
-        if state == 'Z':
+        except (OSError, IndexError):
+            state = None  # no /proc (macOS), or reaped while reading: poll again
+        if state in ('Z', 'X'):
             return
         if time.monotonic() >= deadline:
             test.fail(f'process {pid} is still running (state {state})')
