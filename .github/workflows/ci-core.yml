@@ -1007,6 +1007,27 @@ jobs:
         python3 ../scripts/data-access/test_real_keycloak_harness.py
       working-directory: backend
 
+    - name: Run lossless observation attribute contracts (required)
+      run: |
+        set -euo pipefail
+        : "${DATABASE_URL:?DATABASE_URL is required for attribute contracts}"
+        export DATA_DATABASE_URL="$DATABASE_URL"
+        for target in observation_attributes_contract observation_attributes_migration_test; do
+          log="$RUNNER_TEMP/$target.log"
+          cargo test -p econ-graph-core --test "$target" -- --test-threads=1 --nocapture | tee "$log"
+          grep -Eq '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' "$log"
+        done
+        log="$RUNNER_TEMP/observation-attribute-api.log"
+        cargo test -p econ-graph-graphql --test data_api_contract observation_attributes -- --test-threads=1 --nocapture | tee "$log"
+        grep -Eq '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' "$log"
+        log="$RUNNER_TEMP/observation-attribute-scalar.log"
+        cargo test -p econ-graph-graphql --lib observation_json::tests -- --test-threads=1 --nocapture | tee "$log"
+        grep -Eq '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' "$log"
+        log="$RUNNER_TEMP/observation-attribute-write.log"
+        cargo test -p econ-graph-crawler --lib observation_attributes_update_without_value_changes_and_share_transaction_fencing -- --test-threads=1 --nocapture | tee "$log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$log"
+      working-directory: backend
+
     # Fail closed: only the focused user-admin regressions become required, while
     # the unrelated full GraphQL/workspace suite below remains advisory.
     - name: Run user administration authorization regressions (required)

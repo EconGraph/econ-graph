@@ -511,7 +511,7 @@ async fn synthetic_vintages_cannot_hide_an_earlier_real_release() {
             .await
             .total_count,
             0
-);
+        );
     }
 }
 
