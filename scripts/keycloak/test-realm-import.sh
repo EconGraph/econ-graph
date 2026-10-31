@@ -9,10 +9,10 @@
 # render-realm.sh and realm file, then keycloak-config-cli). Then this tree's import Job steps,
 # as k8s/manifests/keycloak/realm-import-job.yaml runs them: render-realm.sh,
 # preserve-catalog-grants.py, keycloak-config-cli, then preserve-catalog-grants.py --complete.
-# That first import's realm file also declares a client, temp-x, and ten roles
-# catalog.retired_<n>:read. The script checks it seeds the realm file's catalog policy, then
-# makes the changes an operator makes and imports the realm file without temp-x, the retired
-# roles and catalog.ilo:read, checking:
+# That first import's realm file also declares a client, temp-x, with a client role
+# temp-role, and ten roles catalog.retired_<n>:read. The script checks it seeds the realm
+# file's catalog policy, then makes the changes an operator makes and imports the realm file
+# without temp-x, the retired roles and catalog.ilo:read, checking:
 #
 #   - catalog reads granted through the scope mappings of a client the realm file doesn't
 #     declare, of a client scope, and of a declared client survive the import;
@@ -26,13 +26,17 @@
 #     does catalog-public mapped there, which hands an anonymous token (checked) a catalog
 #     taken off the reader's own scope;
 #   - temp-x, which config-cli created and now deletes, doesn't fail the import although
-#     it held a catalog read;
+#     it held a catalog read and the anonymous service account holds its roles directly,
+#     temp-role and op-role, which an operator added;
 #   - neither do catalog.ilo:read and the retired roles, deleted the same way although granted
 #     (one directly to the anonymous service account): their grants are named and dropped,
 #     and a catalog role an operator made keeps its grants;
 #   - an anonymous token carries exactly the anonymous scope's catalogs;
 #   - a further import changes nothing and warns only that config-cli's role state, now a
-#     chunk shorter, has a chunk left over, which it ignores as config-cli does.
+#     chunk shorter, has a chunk left over, which it ignores as config-cli does;
+#   - scripts/deploy/switch-main-host.sh's kcadm query reads the realm frontendUrl an
+#     import with KC_REALM_FRONTEND_URL sets, and the discovery issuer follows it; an import
+#     without it clears frontendUrl, so the issuer is the request's own again.
 #
 # The previous release's files come from PREVIOUS_RELEASE_DIR when set (CI checks the tag
 # out there), otherwise from the tag in this repository. Needs docker, python3, curl and
@@ -137,6 +141,7 @@ path, patch = sys.argv[1:]
 realm = json.load(open(path))
 if patch == "extra-client":
     realm["clients"].append({"clientId": "temp-x", "publicClient": False, "fullScopeAllowed": False})
+    realm["roles"]["client"]["temp-x"] = [{"name": "temp-role"}]
     realm["roles"]["client"]["econ-graph-api"] += [{"name": "catalog.retired_%d:read" % n} for n in range(10)]
 if patch == "drop-ilo":
     roles = realm["roles"]["client"]["econ-graph-api"]
@@ -202,6 +207,10 @@ api POST "/client-scopes/$SCOPE_ID/scope-mappings/realm" "[$PUBLIC]" >/dev/null
 # A retired role held directly by the anonymous service account.
 READER_ID="$(api GET "/clients/$ANON_ID/service-account-user" | json 'd["id"]')"
 api POST "/users/$READER_ID/role-mappings/clients/$API_ID" "[$(role catalog.retired_0:read)]" >/dev/null
+TEMP_ID="$(client_id temp-x)"
+api POST "/clients/$TEMP_ID/roles" '{"name":"op-role"}' >/dev/null
+api POST "/users/$READER_ID/role-mappings/clients/$TEMP_ID" \
+    "[$(api GET "/clients/$TEMP_ID/roles/temp-role"),$(api GET "/clients/$TEMP_ID/roles/op-role")]" >/dev/null
 # A catalog read on `basic`, which anonymous tokens are built with.
 api POST "/client-scopes/$BASIC_ID/scope-mappings/clients/$API_ID" "[$FRED]" >/dev/null
 # What set-catalog-access.sh does, through its helper.
@@ -283,7 +292,8 @@ for target in "client partner-x: api:mcp" "client scope catalog-extra: api:mcp" 
     "catalog.ilo:read is no longer in the realm file, so the import deletes it and its grant on role catalog-public" \
     "catalog.ilo:read is no longer in the realm file, so the import deletes it and its grant on client partner-x" \
     "catalog.ilo:read is no longer in the realm file, so the import deletes it and its grant on client econgraph-anonymous" \
-    "catalog.retired_0:read is no longer in the realm file, so the import deletes it and its grant on the econgraph-anonymous service account"; do
+    "catalog.retired_0:read is no longer in the realm file, so the import deletes it and its grant on the econgraph-anonymous service account" \
+    "client temp-x is no longer in the realm file, so the import deletes it with its roles"; do
     grep -qF "$target" "$WORK/warnings-second" || fail "no warning for $target: $(cat "$WORK/warnings-second")"
 done
 [ "$(grep -v 'is no longer in the realm file' "$WORK/warnings-second" | grep -c 'catalog\.\|temp-x')" = 0 ] ||
@@ -298,6 +308,40 @@ grep -q "^warning: ignoring [0-9]* characters after the keycloak-config-cli stat
     "$WORK/warnings-third" || fail "the role state didn't shrink by a chunk; the leftover-chunk check is vacuous"
 [ "$(grep -vc '^warning: ignoring' "$WORK/warnings-third")" = 0 ] ||
     fail "a further import warned: $(cat "$WORK/warnings-third")"
+
+# scripts/deploy/switch-main-host.sh's realm frontendUrl query, exactly as it runs it
+# (keycloak_admin and realm_frontend_url, taken from the script), with its kubectl exec
+# into the Keycloak pod replaced by docker exec into this container. Then the discovery
+# issuer, after an import with and without KC_REALM_FRONTEND_URL.
+sed -n '/^keycloak_admin() {$/,/^}$/p; /^realm_frontend_url() {$/,/^}$/p' \
+    "$REPO/scripts/deploy/switch-main-host.sh" >"$WORK/switch-functions.sh"
+grep -q "^realm_frontend_url() {" "$WORK/switch-functions.sh" ||
+    { echo "switch-main-host.sh has no realm_frontend_url; update this test" >&2; exit 1; }
+kc() { # -n econ-graph exec deployment/keycloak -- COMMAND...
+    [ "$1 $2 $3 $4 $5" = "-n econ-graph exec deployment/keycloak --" ] || { echo "unexpected kc $*" >&2; return 1; }
+    shift 5
+    docker exec -e KC_BOOTSTRAP_ADMIN_USERNAME="$ADMIN" -e KC_BOOTSTRAP_ADMIN_PASSWORD="$PASS" "$KC" "$@"
+}
+# shellcheck source=/dev/null
+source "$WORK/switch-functions.sh"
+issuer() {
+    curl -sf "$BASE/realms/$REALM/.well-known/openid-configuration" | json 'd["issuer"]'
+}
+PUBLIC_IDP="https://www.example.test/idp"
+KC_REALM_FRONTEND_URL="$PUBLIC_IDP" import_realm public drop-ilo
+[ "$(realm_frontend_url)" = "$PUBLIC_IDP" ] ||
+    fail "switch-main-host.sh's query read the frontendUrl as '$(realm_frontend_url)', not $PUBLIC_IDP"
+[ "$(issuer)" = "$PUBLIC_IDP/realms/$REALM" ] || fail "with KC_REALM_FRONTEND_URL the issuer is $(issuer)"
+# The trap the query avoids: on this Keycloak, `--fields attributes` leaves frontendUrl out.
+plain="$(keycloak_admin get "realms/$REALM" --fields attributes | json '(d.get("attributes") or {}).get("frontendUrl", "")')"
+[ -z "$plain" ] || echo "note: --fields attributes now returns frontendUrl ($plain)" >&2
+import_realm local drop-ilo
+if ! cleared="$(realm_frontend_url)"; then
+    fail "switch-main-host.sh's query failed after an import without KC_REALM_FRONTEND_URL"
+elif [ -n "$cleared" ]; then
+    fail "an import without KC_REALM_FRONTEND_URL left frontendUrl '$cleared'"
+fi
+[ "$(issuer)" = "$BASE/realms/$REALM" ] || fail "without KC_REALM_FRONTEND_URL the issuer is $(issuer), not $BASE/realms/$REALM"
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures check(s) failed" >&2

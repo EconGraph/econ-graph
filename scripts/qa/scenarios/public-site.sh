@@ -9,11 +9,14 @@
 # ok/FAIL lines as a check.
 #
 # Inputs: QA_TARGET, an https origin on the default port (skipped otherwise: the script checks
-# a public HTTPS host with its www redirect and Keycloak under /idp). QA_PUBLIC_SITE_ROUTE is
+# a public HTTPS host with its alternate-host redirect and Keycloak under /idp). QA_PUBLIC_SITE_ROUTE is
 # `dns` (real DNS, the way a visitor arrives; --via-cloudflare) or `gateway` (curl
 # --connect-to the gateway on this host, with LOCAL_INGRESS_IP, LOCAL_HTTPS_PORT and
 # LOCAL_HTTP_PORT passed through), for a runner on the host whose gateway serves the target. It
-# defaults to `dns`. QA_CHECK_PUBLIC_SITE overrides the script's path.
+# defaults to `dns`. QA_CHECK_PUBLIC_SITE overrides the script's path. MAIN_HOST_PERMANENT
+# reaches the script as it is (else the script reads the host's deploy config): set it to
+# the target's host when the redirects to it are permanent (301;
+# scripts/deploy/switch-main-host.sh --finalize), else they must be 302s.
 set -euo pipefail
 
 repo="${QA_REPO_ROOT:?run through scripts/qa/run-scenarios.sh}"
@@ -36,7 +39,9 @@ print(u.scheme, u.hostname or "-", u.port or "-", u.path.strip("/") or "-")
 [ "$path" = - ] || skip "check-public-site.sh checks a host's root; the target has the path /${path}"
 
 route="${QA_PUBLIC_SITE_ROUTE:-dns}"
-args=(--host "$host")
+# The target is the canonical origin; --host is independently the base domain.
+# An apex target explicitly checks an apex rollback instead of guessing www.www.
+args=(--host "${host#www.}" --main-host "$host")
 case "$route" in
     dns) args+=(--via-cloudflare) ;;
     gateway) ;;

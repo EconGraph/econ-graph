@@ -72,6 +72,7 @@ mod tests {
             dataset_id,
             dimensions: Default::default(),
             default_measure: None,
+            units_source: None,
         };
 
         let created_series = EconomicSeries::create(&pool, &new_series)
@@ -146,6 +147,7 @@ mod tests {
             dataset_id,
             dimensions: Default::default(),
             default_measure: None,
+            units_source: None,
         };
 
         // This should fail due to foreign key constraint

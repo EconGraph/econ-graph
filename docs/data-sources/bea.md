@@ -43,6 +43,13 @@ any request.
   requested areas comma-separated, batched up to 64 series. Always the whole history (`Year`
   `X` or `ALL`), since revisions reach back years. Values are scaled by `UNIT_MULT`;
   suppressed or unavailable cells (`(D)`, `(NA)`, ...) become points with no value.
+- **Units**: `CL_UNIT`, or `METRIC_NAME` when `CL_UNIT` is `Level`. The stored `units` drops
+  a `Thousands of` / `Millions of` / `Billions of` prefix that `UNIT_MULT` already applied
+  (`Millions of current dollars` with `UNIT_MULT` 6 is stored as `Current dollars`), and
+  `units_raw` keeps BEA's text. The adapter's structured scale comes from `UNIT_MULT`, which
+  is treated as authoritative: since the values are multiplied by `10^UNIT_MULT`, they are in
+  base units. A stored units text that disagrees with that scale raises `CrawlerUnitsMismatch`
+  (see [Units](README.md#units)). Bare `dollars` are US dollars.
 - **Errors**: BEA answers HTTP 200 with an error object. A `UserId` error is `Auth`, a rejected
   parameter (invalid, not valid, does not exist, missing, required) is `Permanent`, and
   anything else is `Transient`. The rate policy is 30 requests a minute.

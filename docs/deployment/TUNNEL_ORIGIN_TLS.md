@@ -128,7 +128,7 @@ and [HTTPS-origin troubleshooting](https://developers.cloudflare.com/tunnel/trou
 Before the production change, prove cloudflared itself enforces these settings using an
 operator-approved, access-restricted temporary test hostname/tunnel. Send its authenticated
 requests through a test connector with the same public CA mount to this HTTPS origin;
-only that test route may override HTTP Host to `econgraph.com` for routing. Require a
+only that test route may override HTTP Host to `www.econgraph.com` for routing. Require a
 successful origin response with the correct name and trust bundle. Then set only the
 test route's Origin Server Name to `wrong.invalid`, keep Match SNI to host false, and
 require an origin TLS failure plus a connector x509 hostname error. Restore the correct

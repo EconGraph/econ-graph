@@ -245,6 +245,7 @@ impl HpiSeries {
             units: Some(self.units().into()),
             frequency: Some(title_case(&self.frequency)),
             seasonal_adjustment: Some(self.seasonal_adjustment.into()),
+            ..NewSeriesMetadataLite::default()
         }
     }
 

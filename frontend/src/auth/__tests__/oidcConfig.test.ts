@@ -31,10 +31,13 @@ describe('readOidcConfig', () => {
   it('resolves a path-only issuer against the page origin, so one build serves any host', () => {
     expect(
       readOidcConfig({ VITE_OIDC_ISSUER: '/idp/realms/econ-graph/' }, 'https://econgraph.com')
-    ).toEqual({ issuer: 'https://econgraph.com/idp/realms/econ-graph', clientId: 'econ-graph-web' });
-    expect(readOidcConfig({ VITE_OIDC_ISSUER: '/idp/realms/econ-graph' }, 'http://localhost')).toEqual(
-      { issuer: 'http://localhost/idp/realms/econ-graph', clientId: 'econ-graph-web' }
-    );
+    ).toEqual({
+      issuer: 'https://econgraph.com/idp/realms/econ-graph',
+      clientId: 'econ-graph-web',
+    });
+    expect(
+      readOidcConfig({ VITE_OIDC_ISSUER: '/idp/realms/econ-graph' }, 'http://localhost')
+    ).toEqual({ issuer: 'http://localhost/idp/realms/econ-graph', clientId: 'econ-graph-web' });
   });
 
   it('leaves an absolute issuer alone whatever the origin', () => {
@@ -42,6 +45,22 @@ describe('readOidcConfig', () => {
       readOidcConfig({ VITE_OIDC_ISSUER: 'https://kc.test/realms/x' }, 'https://econgraph.com')
     ).toEqual({ issuer: 'https://kc.test/realms/x', clientId: 'econ-graph-web' });
   });
+
+  it.each(['https://www.econgraph.com', 'https://www.example.test', 'https://econgraph.com'])(
+    'keeps discovery and every sign-in round-trip URL on the canonical origin %s',
+    origin => {
+      // The gateway has already redirected alternate-host entries to this origin.
+      // The apex case covers an operator rollback of MAIN_HOST.
+      const config = readOidcConfig({ VITE_OIDC_ISSUER: '/idp/realms/econ-graph' }, origin);
+      expect(config).not.toBeNull();
+      expect(buildUserManagerSettings(config!, origin)).toMatchObject({
+        authority: `${origin}/idp/realms/econ-graph`,
+        redirect_uri: `${origin}/auth/callback`,
+        silent_redirect_uri: `${origin}/silent-callback.html`,
+        post_logout_redirect_uri: `${origin}/`,
+      });
+    }
+  );
 
   it('disables sign-in when a path-only issuer has no origin to resolve against', () => {
     expect(readOidcConfig({ VITE_OIDC_ISSUER: '/idp/realms/econ-graph' }, null)).toBeNull();

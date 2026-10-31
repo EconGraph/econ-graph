@@ -4,6 +4,8 @@ import copy
 import io
 import importlib.util
 import json
+import os
+from unittest.mock import patch
 from pathlib import Path
 import unittest
 
@@ -178,9 +180,52 @@ class CatalogPolicyTests(unittest.TestCase):
     def test_realm_attributes_survive_without_premature_completion(self):
         self.state[self.prefix]["attributes"]={"frontendUrl":"https://custom.test","cli-state":"existing-state"}
         merged=self.merge()
-        self.assertEqual(merged["attributes"]["frontendUrl"],"https://custom.test")
+        # Without KC_REALM_FRONTEND_URL a stored frontendUrl is cleared; see below.
+        self.assertEqual(merged["attributes"]["frontendUrl"],"")
         self.assertEqual(merged["attributes"]["cli-state"],"existing-state")
         self.assertNotIn(preserve.INITIALIZED,merged["attributes"])
+
+    def test_import_without_public_frontend_url_clears_a_stale_one(self):
+        # A localhost-only deploy after a public one, or a production dump restored on
+        # another cluster: the stored public frontendUrl would keep being issued.
+        for stored in ("https://econgraph.com/idp", "https://www.econgraph.com/idp"):
+            for unset in ({}, {"KC_REALM_FRONTEND_URL": ""}):
+                with self.subTest(stored=stored, environment=unset), patch.dict(os.environ, unset, clear=False):
+                    if not unset:
+                        os.environ.pop("KC_REALM_FRONTEND_URL", None)
+                    self.state[self.prefix]["attributes"].update({
+                        "frontendUrl": stored, "cli-state": "existing-state"})
+                    merged = self.merge()
+                    self.assertEqual(merged["attributes"]["frontendUrl"], "")
+                    self.assertEqual(merged["attributes"]["cli-state"], "existing-state")
+                    self.assertEqual(merged["attributes"][preserve.INITIALIZED], "true")
+
+    def test_import_without_frontend_url_adds_none(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("KC_REALM_FRONTEND_URL", None)
+            self.state[self.prefix]["attributes"].pop("frontendUrl", None)
+            self.assertNotIn("frontendUrl", self.merge()["attributes"])
+            self.state[self.prefix]["attributes"]["frontendUrl"] = ""
+            self.assertEqual(self.merge()["attributes"]["frontendUrl"], "")
+            self.state[self.prefix] = None
+            self.assertNotIn("frontendUrl", self.merge()["attributes"])
+
+    def test_public_import_sets_frontend_url_on_a_realm_without_one(self):
+        self.state[self.prefix]["attributes"].pop("frontendUrl", None)
+        with patch.dict(os.environ, {"KC_REALM_FRONTEND_URL": "https://www.econgraph.com/idp"}):
+            self.assertEqual(self.merge()["attributes"]["frontendUrl"], "https://www.econgraph.com/idp")
+
+    def test_public_import_overrides_old_frontend_url_and_preserves_policy(self):
+        self.state[self.prefix]["attributes"].update({
+            "frontendUrl": "https://econgraph.com/idp", "cli-state": "existing-state"})
+        for origin in ("https://www.econgraph.com/idp", "https://econgraph.com/idp"):
+            with self.subTest(origin=origin), patch.dict(os.environ, {"KC_REALM_FRONTEND_URL": origin}):
+                merged = self.merge()
+                self.assertEqual(merged["attributes"]["frontendUrl"], origin)
+                self.assertEqual(merged["attributes"]["cli-state"], "existing-state")
+                self.assertEqual(merged["attributes"][preserve.INITIALIZED], "true")
+                self.assertEqual(self.role(merged, "catalog-public")["composites"],
+                                 {"realm": [], "client": {}})
 
     def test_interrupted_old_realm_bootstrap_retries_only_originally_missing_resources(self):
         self.state[self.prefix]["attributes"]={}
@@ -593,9 +638,68 @@ class CatalogPolicyTests(unittest.TestCase):
             "clientMappings": {"econ-graph-web": {"mappings": [{"name": "web-only"}]}}}
         merged, warnings = self.merge_with_warnings()
         self.assertEqual(merged["users"][0]["realmRoles"], ["custom-public-policy"])
-        # No econ-graph-web roles in the realm file: config-cli manages none, so none is dropped.
+        # config-cli recorded creating no econ-graph-web role, so it deletes none.
         self.assertEqual(merged["users"][0]["clientRoles"], {"econ-graph-web": ["web-only"]})
         self.assertIn("retired-policy is no longer in the realm file", warnings)
+
+    def test_roles_of_a_client_the_realm_file_drops_are_dropped_from_the_reader(self):
+        # config-cli 6.5.1 deletes every role it created for a client missing from roles.client,
+        # and a client it created, once the realm file drops it, with every role on it.
+        attributes = self.state[self.prefix]["attributes"]
+        attributes["de.adorsys.keycloak.config.state-default-roles-client-temp-x-0"] = '["temp-role"]'
+        self.state[self.prefix + "/users/reader/role-mappings"] = {
+            "realmMappings": [{"name": "custom-public-policy"}],
+            "clientMappings": {"temp-x": {"mappings": [{"name": "temp-role"}, {"name": "op-role"}]}}}
+        merged, warnings = self.merge_with_warnings()
+        # The client stays: only the roles config-cli made go; an operator's stays.
+        self.assertEqual(merged["users"][0]["clientRoles"], {"temp-x": ["op-role"]})
+        self.assertIn("temp-x role temp-role is no longer in the realm file", warnings)
+        # The client goes too: every role on it goes with it, whoever made it.
+        attributes["de.adorsys.keycloak.config.state-default-clients-0"] = json.dumps(
+            [c["clientId"] for c in self.realm["clients"]] + ["temp-x"])
+        merged, warnings = self.merge_with_warnings()
+        self.assertEqual(merged["users"][0]["clientRoles"], {"temp-x": []})
+        self.assertIn("client temp-x is no longer in the realm file, so the import deletes it with its roles, "
+                      "dropping grants of temp-role, op-role", warnings)
+        # Keycloak's own clients are never deleted, whatever the state says.
+        attributes["de.adorsys.keycloak.config.state-default-clients-0"] = '["account"]'
+        self.assertEqual(preserve.clients_config_cli_deletes(self.realm, attributes), set())
+        # Without roles.client config-cli deletes no client role.
+        del self.realm["roles"]["client"]
+        self.assertEqual(preserve.roles_config_cli_deletes(self.realm, attributes, "temp-x"), set())
+
+    def test_a_scope_the_realm_file_newly_assigns_to_the_reader_is_read(self):
+        self.add_target("clientScope", "extra", "catalog-extra", [])
+        self.state[self.prefix + "/client-scopes/extra/scope-mappings/clients/api/composite"] = [
+            {"name": "catalog.bls:read"}]
+        self.merge()  # Not assigned to the reader: nothing reaches its tokens.
+        realm = copy.deepcopy(self.realm)
+        next(c for c in realm["clients"] if c["clientId"] == "econgraph-anonymous")[
+            "optionalClientScopes"] = ["catalog-extra"]
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge_with_warnings(realm)
+        self.assertIn("client scope catalog-extra (catalog.bls:read)", str(raised.exception))
+
+    def test_catalog_reads_the_import_deletes_are_not_refused(self):
+        self.state[self.prefix]["attributes"]["de.adorsys.keycloak.config.state-default-roles-client-econ-graph-api-0"] = \
+            json.dumps([r["name"] for r in self.realm["roles"]["client"]["econ-graph-api"]])
+        self.realm["roles"]["client"]["econ-graph-api"] = [
+            r for r in self.realm["roles"]["client"]["econ-graph-api"] if r["name"] != "catalog.ilo:read"]
+        self.add_target("clientScope", "basic", "basic", ["catalog.ilo:read"])
+        merged, warnings = self.merge_with_warnings()
+        self.assertIn("client scope basic admits catalog.ilo:read to econgraph-anonymous tokens until the "
+                      "import deletes it", warnings)
+        self.state[self.prefix + "/client-scopes/basic/scope-mappings/clients/api"] = [
+            {"name": "catalog.ilo:read"}, {"name": "catalog.bls:read"}]
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertNotIn("catalog.ilo:read", str(raised.exception))
+        # The same through the reader's own scope, by a realm role mapped there.
+        self.state[self.prefix + "/client-scopes/basic/scope-mappings/clients/api"] = []
+        self.state[self.prefix + "/clients/anon/scope-mappings/clients/api/composite"] = [{"name": "catalog.ilo:read"}]
+        merged, warnings = self.merge_with_warnings()
+        self.assertIn("its own scope admits catalog.ilo:read to econgraph-anonymous tokens until the import "
+                      "deletes it", warnings)
 
     def test_scope_mapping_entries_naming_both_a_client_and_a_scope_fail_the_deploy(self):
         self.realm["clientScopeMappings"]["econ-graph-api"].append(

@@ -1,0 +1,46 @@
+{
+  "status": "REQUEST_SUCCEEDED",
+  "responseTime": 151,
+  "message": [],
+  "Results": {
+    "series": [
+      {
+        "seriesID": "CUSR0000SA0",
+        "catalog": {
+          "series_title": "All items in U.S. city average, all urban consumers, seasonally adjusted",
+          "series_id": "CUSR0000SA0",
+          "seasonality": "Seasonally Adjusted",
+          "survey_name": "CPI for All Urban Consumers (CPI-U)",
+          "survey_abbreviation": "CU",
+          "measure_data_type": "Index 1982-1984=100",
+          "area": "U.S. city average",
+          "item": "All items"
+        },
+        "data": [
+          {
+            "year": "2024",
+            "period": "M03",
+            "periodName": "March",
+            "latest": "true",
+            "value": "312.230",
+            "footnotes": [{}]
+          },
+          {
+            "year": "2024",
+            "period": "M02",
+            "periodName": "February",
+            "value": "311.054",
+            "footnotes": [{}]
+          },
+          {
+            "year": "2024",
+            "period": "M01",
+            "periodName": "January",
+            "value": "309.685",
+            "footnotes": [{}]
+          }
+        ]
+      }
+    ]
+  }
+}

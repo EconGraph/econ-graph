@@ -9,8 +9,11 @@
 # then enables the timer. The script is copied (root-owned, 0755) rather
 # than run from the checkout, so root never executes a file that the
 # the operator account can change; re-run this installer after merging changes
-# to backup-snapshots.sh. Safe to re-run. Nothing it installs deletes
-# anything.
+# to backup-snapshots.sh (restore-snapshot.sh, delete-snapshots.sh and
+# snapshot-now.sh refuse to run while the installed copy takes an older
+# lock). It stops the timer (and starts it again however it ends), and
+# refuses to replace the script while a backup run is in progress.
+# Safe to re-run. Nothing it installs deletes anything.
 #
 # --run-now also starts one run immediately instead of waiting for the timer.
 #
@@ -76,7 +79,29 @@ install_file() {
 if root_owned "$BIN" 0755 && cmp -s "$SRC" "$BIN"; then
     echo "= $BIN already up to date"
 else
-    run install -o root -g root -m 0755 "$SRC" "$BIN"
+    # A run in progress keeps the lock its own copy takes, which a newer
+    # copy may not share (the lock moved to /run/econgraph/). Stop the timer
+    # so it starts none, then go on only if no run is in progress (a oneshot
+    # run is "activating" until it ends, never "active"); the timer is
+    # started again below, or now if this stops.
+    if [ "$(systemctl show -p LoadState --value "$UNIT.timer")" = loaded ]; then
+        run systemctl stop "$UNIT.timer"
+        # Whatever stops this script from here on, the timer runs again.
+        if [ "$DRY_RUN" = "false" ]; then
+            trap 'systemctl start "$UNIT.timer" || echo "error: could not start $UNIT.timer again; start it by hand" >&2' EXIT
+        fi
+    fi
+    state="$(systemctl show -p ActiveState --value "$UNIT.service")" || state="unknown"
+    case "$state" in
+        inactive | failed) ;;
+        *)
+            echo "error: $UNIT.service is $state (a backup run may be in progress); re-run this when it has finished" >&2
+            exit 1
+            ;;
+    esac
+    # A new file renamed into place, so the timer never runs a half-written one.
+    run install -o root -g root -m 0755 "$SRC" "$BIN.tmp"
+    run mv -f "$BIN.tmp" "$BIN"
 fi
 
 install_file "[Unit]
@@ -103,6 +128,7 @@ WantedBy=timers.target" "$UNIT_DIR/$UNIT.timer" 0644
 
 run systemctl daemon-reload
 run systemctl enable --now "$UNIT.timer"
+trap - EXIT
 if [ "$RUN_NOW" = "true" ]; then
     run systemctl start "$UNIT.service"
 fi

@@ -16,6 +16,7 @@ pub mod lifecycle;
 pub mod mutation;
 pub mod query;
 pub mod schema;
+pub mod units;
 
 /// Serializes this crate's DB-backed tests, so migrations and table cleanups don't race.
 #[cfg(test)]
@@ -32,9 +33,13 @@ mod error_sanitizing_db_tests;
 #[cfg(test)]
 mod latest_observation_tests;
 #[cfg(test)]
+mod latest_readers_agree_tests;
+#[cfg(test)]
 pub mod n_plus_one_tests;
 #[cfg(test)]
 mod original_only_db_tests;
+#[cfg(test)]
+mod revised_from_original_db_tests;
 #[cfg(test)]
 mod search_filter_db_tests;
 #[cfg(test)]

@@ -1,7 +1,8 @@
 # The public host's part of the gateway: listener https of Gateway
 # econ-graph-gateway (gateway.yaml), its certificate, and the rate-limit
 # bursts for it. Applied by scripts/deploy/apply-gateway-routes.sh only for a
-# public host (PUBLIC_HOST); the script fills in the placeholders, and removes
+# base public host (PUBLIC_HOST), regardless of MAIN_HOST; both names remain
+# covered when the canonical address is switched. The script fills placeholders and removes
 # all of it again for PUBLIC_HOST=none.
 #
 # The listener is a second server-side-apply field manager's part of the
