@@ -37,6 +37,47 @@
             "disk_evidence": "exact POSIX filename comparison"
           },
           "seconds": 19.946
+        },
+        "crawler_sql_catalog": {
+          "status": "passed",
+          "evidence": {
+            "canonical_columns": [
+              "id",
+              "series_id",
+              "date",
+              "revision_date",
+              "value",
+              "is_original_release",
+              "attributes"
+            ],
+            "requires_conditional_create": false,
+            "rows": 5,
+            "sha256": "5fe77ac4440649b58a4dc25f7ae6fcaaa117bb39c606cd36c7ddf06fd27502c6",
+            "sql_catalog_commit": true,
+            "status": "passed"
+          },
+          "seconds": 0.204
+        },
+        "independent_readers": {
+          "status": "passed",
+          "evidence": {
+            "rows": 5,
+            "sha256": "5fe77ac4440649b58a4dc25f7ae6fcaaa117bb39c606cd36c7ddf06fd27502c6",
+            "readers": [
+              "PyIceberg",
+              "DuckDB"
+            ]
+          },
+          "seconds": 0.371
+        },
+        "btrfs_restore": {
+          "status": "passed",
+          "evidence": {
+            "readonly": true,
+            "restored": true,
+            "table_reread_sha256": "5fe77ac4440649b58a4dc25f7ae6fcaaa117bb39c606cd36c7ddf06fd27502c6"
+          },
+          "seconds": 1.23
         }
       },
       "conditional_create_probe": {
@@ -55,7 +96,8 @@
         "iceberg_gate": "not_run_requires_actual_crawler_table",
         "readonly": true,
         "restored": true
-      }
+      },
+      "crawler_source_commit": "847d7db64"
     },
     {
       "store": "garage",
@@ -90,6 +132,47 @@
             "disk_evidence": "17 block files plus all logical-object byte checks"
           },
           "seconds": 36.887
+        },
+        "crawler_sql_catalog": {
+          "status": "passed",
+          "evidence": {
+            "canonical_columns": [
+              "id",
+              "series_id",
+              "date",
+              "revision_date",
+              "value",
+              "is_original_release",
+              "attributes"
+            ],
+            "requires_conditional_create": false,
+            "rows": 5,
+            "sha256": "3f67247ffbc3a752356d256941cb14f14c3faa8830078a8e3a04a603eac22346",
+            "sql_catalog_commit": true,
+            "status": "passed"
+          },
+          "seconds": 0.283
+        },
+        "independent_readers": {
+          "status": "passed",
+          "evidence": {
+            "rows": 5,
+            "sha256": "3f67247ffbc3a752356d256941cb14f14c3faa8830078a8e3a04a603eac22346",
+            "readers": [
+              "PyIceberg",
+              "DuckDB"
+            ]
+          },
+          "seconds": 0.115
+        },
+        "btrfs_restore": {
+          "status": "passed",
+          "evidence": {
+            "readonly": true,
+            "restored": true,
+            "table_reread_sha256": "3f67247ffbc3a752356d256941cb14f14c3faa8830078a8e3a04a603eac22346"
+          },
+          "seconds": 22.702
         }
       },
       "conditional_create_probe": {
@@ -102,13 +185,11 @@
         "iceberg_gate": "not_run_requires_actual_crawler_table",
         "readonly": true,
         "restored": true
-      }
+      },
+      "crawler_source_commit": "847d7db64"
     }
   ],
   "remaining_acceptance": [
-    "Actual crawler writes and SQL catalog commit",
-    "PyIceberg and DuckDB exact row parity",
-    "CNPG base backup plus WAL archive and point-in-time recovery",
-    "Iceberg table reread after btrfs restore (filesystem marker already verified)"
+    "CNPG base backup plus WAL archive and point-in-time recovery against each actual store remains unavailable; no seven-gate acceptance claimed"
   ]
 }
