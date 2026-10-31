@@ -215,7 +215,7 @@ async fn a_later_release_is_revised_only_when_its_value_changed() {
         ]
     );
 
-    // `EconomicSeries.dataPoints` gives the same answer.
+    // `EconomicSeries.dataPoints` and `recentDataPoints` give the same answer.
     let data = run(
         &pool,
         format!(
@@ -225,6 +225,55 @@ async fn a_later_release_is_revised_only_when_its_value_changed() {
     )
     .await;
     assert_eq!(flags(&data["series"]["dataPoints"]), latest);
+    let data = run(
+        &pool,
+        format!(
+            r#"{{ series(id: "{series}") {{ recentDataPoints {{
+                date revisionDate isOriginalRelease revisedFromOriginal }} }} }}"#
+        ),
+    )
+    .await;
+    let mut recent = flags(&data["series"]["recentDataPoints"]);
+    recent.reverse();
+    assert_eq!(recent, latest);
+}
+
+/// A date with several real originals (stored before compare-and-skip) is compared with the
+/// first of them, in every read mode: an `originalOnly` read can return an original that is
+/// revised. (Two originals can't share a revision date: the unique key includes it.)
+#[tokio::test]
+async fn a_later_original_is_compared_with_the_first_one() {
+    let Some(pool) = db().await else { return };
+    let series = series_with(
+        &pool,
+        &[
+            ("2005-01-01", Some("3.0"), "2021-07-01", true),
+            ("2005-01-01", Some("3.5"), "2022-07-01", true),
+            ("2005-01-01", Some("3.5"), "2023-07-01", false),
+            ("2006-01-01", Some("4.0"), "2021-07-01", true),
+            ("2006-01-01", Some("4.0"), "2022-07-01", true),
+        ],
+    )
+    .await;
+    assert_eq!(
+        series_data(&pool, series, "filter: { latestRevisionOnly: true }").await,
+        [
+            row("2005-01-01", "2023-07-01", false, Some(true)),
+            row("2006-01-01", "2022-07-01", true, Some(false)),
+        ]
+    );
+    assert_eq!(
+        series_data(
+            &pool,
+            series,
+            "filter: { originalOnly: true, latestRevisionOnly: true }"
+        )
+        .await,
+        [
+            row("2005-01-01", "2022-07-01", true, Some(true)),
+            row("2006-01-01", "2022-07-01", true, Some(false)),
+        ]
+    );
 }
 
 /// A FRED-style vintage history: a revision is revised while its value differs from the first
@@ -289,6 +338,21 @@ async fn synthetic_rows_are_not_originals_and_a_date_without_one_is_unknown() {
         [
             row("2010-01-01", "2022-07-01", false, Some(false)),
             row("2011-01-01", "2010-10-01", true, Some(false)),
+            row("2012-01-01", "2021-07-01", false, Some(true)),
+            row("2013-01-01", "2021-07-01", false, None),
+        ]
+    );
+    // Every row: the synthetic 2010 row predates its date's first release, so it has no known
+    // original (null); the 2011 synthetic row is newer than the projection and differs from it.
+    assert_eq!(
+        series_data(&pool, series, "").await,
+        [
+            row("2010-01-01", "2010-01-01", true, None),
+            row("2010-01-01", "2021-07-01", true, Some(false)),
+            row("2010-01-01", "2022-07-01", false, Some(false)),
+            row("2011-01-01", "2010-10-01", true, Some(false)),
+            row("2011-01-01", "2011-01-01", true, Some(true)),
+            row("2012-01-01", "2012-01-01", true, Some(false)),
             row("2012-01-01", "2021-07-01", false, Some(true)),
             row("2013-01-01", "2021-07-01", false, None),
         ]

@@ -257,19 +257,35 @@ impl EconomicSeriesType {
         use econ_graph_core::schema::data_points::dsl;
 
         let mut conn = pool.get().await?;
-        let data_points = dsl::data_points
-            .filter(dsl::series_id.eq(series_uuid))
-            .filter(crate::graphql::dataloaders::public_data_points_predicate())
-            .filter(models::exclude_synthetic_legacy_rows())
-            .filter(models::revision_filter_excluding_synthetic(None, false))
-            .order(dsl::date.desc())
-            .limit(limit as i64)
-            .load::<models::DataPoint>(&mut conn)
+        // One snapshot for the points and their dates' original releases.
+        let (data_points, revised) = conn
+            .build_transaction()
+            .repeatable_read()
+            .read_only()
+            .run(async |conn| {
+                let data_points = dsl::data_points
+                    .filter(dsl::series_id.eq(series_uuid))
+                    .filter(crate::graphql::dataloaders::public_data_points_predicate())
+                    .filter(models::exclude_synthetic_legacy_rows())
+                    .filter(models::revision_filter_excluding_synthetic(None, false))
+                    .order(dsl::date.desc())
+                    .limit(limit as i64)
+                    .load::<models::DataPoint>(conn)
+                    .await?;
+                let revised = econ_graph_services::services::series_service::revised_from_original(
+                    conn,
+                    series_uuid,
+                    &data_points,
+                )
+                .await?;
+                Ok::<_, diesel::result::Error>((data_points, revised))
+            })
             .await?;
 
-        let limited_points = data_points.into_iter().map(DataPointType::from).collect();
-
-        Ok(limited_points)
+        Ok(data_points
+            .into_iter()
+            .map(|point| DataPointType::with_revised(point, &revised))
+            .collect())
     }
 
     /// Get data point count using direct database query
@@ -368,17 +384,26 @@ impl EconomicSeriesType {
             ));
         }
 
-        let data_points = query
-            .order(dsl::date.asc())
-            .load::<models::DataPoint>(&mut conn)
+        // One snapshot for the points and their dates' original releases; from the stored
+        // values, before any transformation.
+        let (data_points, revised) = conn
+            .build_transaction()
+            .repeatable_read()
+            .read_only()
+            .run(async |conn| {
+                let data_points = query
+                    .order(dsl::date.asc())
+                    .load::<models::DataPoint>(conn)
+                    .await?;
+                let revised = econ_graph_services::services::series_service::revised_from_original(
+                    conn,
+                    series_uuid,
+                    &data_points,
+                )
+                .await?;
+                Ok::<_, diesel::result::Error>((data_points, revised))
+            })
             .await?;
-        // From the stored values, before any transformation.
-        let revised = econ_graph_services::services::series_service::revised_from_original(
-            &mut conn,
-            series_uuid,
-            &data_points,
-        )
-        .await?;
 
         // Apply transformation if requested
         let data_points = match transformation {
@@ -461,11 +486,15 @@ pub struct DataPointType {
     pub value: Option<BigDecimal>,
     pub revision_date: NaiveDate,
     pub is_original_release: bool,
-    /// Whether this value differs from its date's original release value (the earliest
-    /// real original, synthetic legacy rows left out). False for the original release itself
-    /// and for a later release that repeated its value; values compare as numbers, so `3.0`
-    /// and `3.00` are the same. Null when the date's original release isn't known; use
-    /// `isOriginalRelease` then.
+    /// Whether this value differs from its date's original release value: the date's first
+    /// release, its earliest real original by revision date (synthetic legacy rows left out),
+    /// in every read mode. False for that first release itself and for a later release that
+    /// repeated its value; values compare as numbers, so `3.0` and `3.00` are the same. A later
+    /// row also tagged as an original release (a date with several, from before
+    /// compare-and-skip) is compared with the first one too, so an `originalOnly` read can
+    /// return an original that is revised. Null when the first release isn't known (no real
+    /// original, or one published after this row); use `isOriginalRelease` then. Filled by
+    /// `seriesData`, `EconomicSeries.dataPoints` and `EconomicSeries.recentDataPoints`.
     pub revised_from_original: Option<bool>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

@@ -101,7 +101,8 @@ export const unrateLevels = page(
 
 /**
  * Each case of the Type column: the original release; a later release that repeated its value
- * and one that changed it; and, without `revisedFromOriginal`, a later release and an original.
+ * and one that changed it; and, without `revisedFromOriginal`, a later release and an original;
+ * and a later row tagged original whose value differs from the first release.
  */
 export const releaseTypes = page(
   [
@@ -110,8 +111,9 @@ export const releaseTypes = page(
     node('2024-03-01', '3.0', false, true),
     node('2024-04-01', '4.0', false, false),
     node('2024-05-01', '5.0', true, false),
+    node('2024-06-01', '6.0', true, true),
   ],
-  5
+  6
 );
 
 /** Quarterly GDP levels in dollars: whole numbers of 14 digits. */

@@ -313,9 +313,11 @@ describe('SeriesDetail', () => {
       const cells = within(row).getAllByRole('cell');
       return cells[cells.length - 1].textContent;
     };
-    // Newest first: May (the original), Apr (re-released, same value), Mar (changed value),
-    // then Feb and Jan without revisedFromOriginal, labelled from isOriginalRelease.
+    // Newest first: Jun (a later original with another value), May (the original), Apr
+    // (re-released, same value), Mar (changed value), then Feb and Jan without
+    // revisedFromOriginal, labelled from isOriginalRelease.
     expect(rows.slice(1).map(typeOf)).toEqual([
+      'Revised',
       'Original',
       'Original',
       'Revised',
@@ -323,8 +325,8 @@ describe('SeriesDetail', () => {
       'Revised',
     ]);
     const chip = (row: HTMLElement) => within(row).getByText(typeOf(row)!).closest('.MuiChip-root');
-    expect(chip(rows[2])).toHaveClass('MuiChip-colorDefault');
-    expect(chip(rows[3])).toHaveClass('MuiChip-colorPrimary');
+    expect(chip(rows[3])).toHaveClass('MuiChip-colorDefault');
+    expect(chip(rows[4])).toHaveClass('MuiChip-colorPrimary');
   });
 
   test('asks the backend for the latest revision of each date, untransformed', async () => {
