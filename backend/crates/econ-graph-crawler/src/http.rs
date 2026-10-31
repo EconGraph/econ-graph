@@ -139,8 +139,10 @@ pub enum ConditionalText {
 ///   [`CrawlError::Parse`] (never retried);
 /// - records `CRAWLER_METRICS` (crawler type = lowercase source id, source = URL host), and
 ///   redacts the values of `api_key`, `apikey`, `registrationkey`, `userid`, `key`, `token` and
-///   `subscription-key` query parameters (case-insensitive) from anything it logs or puts in an
-///   error.
+///   `subscription-key` query parameters (case-insensitive), and of the same keys in a JSON
+///   request body, from anything it logs or puts in an error. A value a server echoes back is
+///   found decoded, percent-encoded (either hex case, in any mix) or form-encoded (`+` for a
+///   space).
 #[derive(Clone, Debug)]
 pub struct HttpFetcher {
     inner: Arc<Inner>,
@@ -172,7 +174,8 @@ struct Target {
     extra_attempts: u32,
     /// The URL with secret query values replaced; the only form that may be logged.
     redacted: String,
-    /// Secret values sent in the query or a JSON body, scrubbed from quoted response bodies too.
+    /// Secret values sent in the query or a JSON body (decoded), scrubbed from every error
+    /// message in any form a server may echo them in (see [`scrub`]).
     secrets: Vec<String>,
     /// Metrics labels.
     crawler_type: String,
@@ -577,6 +580,7 @@ impl HttpFetcher {
             } else {
                 format!("{}: {}", target.context(), snippet(&body, &target.secrets))
             };
+            let context = scrub(&context, &target.secrets);
             let err = CrawlError::from_status(status, retry_after, context);
             self.record_request(target, status.as_str(), start);
             if status == StatusCode::TOO_MANY_REQUESTS
@@ -623,8 +627,9 @@ impl HttpFetcher {
     fn transport_error(&self, target: &Target, e: reqwest::Error, start: Instant) -> CrawlError {
         let is_timeout = e.is_timeout();
         let permanent = e.is_builder() || e.is_redirect();
-        // reqwest's Display includes the full URL (query string and all); strip it.
-        let detail = error_chain(&e.without_url());
+        // reqwest's Display includes the full URL (query string and all); strip it, and scrub
+        // what is left in case a source error quotes a URL or a value carrying a secret.
+        let detail = scrub(&error_chain(&e.without_url()), &target.secrets);
         let err = if is_timeout {
             CrawlError::Transient(format!(
                 "{}: timed out after {:?}: {detail}",
@@ -649,25 +654,28 @@ impl HttpFetcher {
 /// Deserializes a JSON body, mapping failure to `Parse` with a short, scrubbed body snippet.
 fn decode<T: DeserializeOwned>(target: &Target, text: &str) -> Result<T, CrawlError> {
     serde_json::from_str(text).map_err(|e| {
-        let err = CrawlError::Parse(format!(
-            "{}: invalid JSON ({e}); body starts: {:?}",
-            target.context(),
-            snippet(text, &target.secrets)
+        // serde quotes the value it rejected ("invalid type: string \"...\""), which may be an
+        // echoed secret: scrub the whole message, not only the body snippet.
+        let err = CrawlError::Parse(scrub(
+            &format!(
+                "{}: invalid JSON ({e}); body starts: {:?}",
+                target.context(),
+                snippet(text, &target.secrets)
+            ),
+            &target.secrets,
         ));
         target.record_error(&err);
         err
     })
 }
 
-/// `text` with any `secrets` scrubbed, then cut to its first [`SNIPPET_CHARS`] characters.
+/// `text` with any `secrets` scrubbed (see [`scrub`]), then cut to its first [`SNIPPET_CHARS`]
+/// characters.
 ///
 /// Scrubbing happens on the whole text *before* truncating: truncating first would leave the
 /// prefix of a secret that straddles the cut unmatched (and so leaked).
 fn snippet(text: &str, secrets: &[String]) -> String {
-    let mut scrubbed = text.to_owned();
-    for secret in secrets.iter().filter(|s| !s.is_empty()) {
-        scrubbed = scrubbed.replace(secret.as_str(), REDACTED);
-    }
+    let mut scrubbed = scrub(text, secrets);
     match scrubbed.char_indices().nth(SNIPPET_CHARS) {
         Some((cut, _)) => {
             scrubbed.truncate(cut);
@@ -675,6 +683,58 @@ fn snippet(text: &str, secrets: &[String]) -> String {
             scrubbed
         }
         None => scrubbed,
+    }
+}
+
+/// `text` with every occurrence of each secret replaced by `REDACTED`, in any form a server may
+/// echo it in: each byte of the secret may appear as itself, percent-encoded (`%2B`, `%2b`) or,
+/// for a space, form-encoded as `+`, in any mix. So a key `a+b/c=` is found as `a+b/c=`,
+/// `a%2Bb%2Fc%3D`, `a%2bb%2fc%3d` or `a%2Bb/c%3d`, and `a b` also as `a+b`.
+fn scrub(text: &str, secrets: &[String]) -> String {
+    let mut out = text.to_owned();
+    for secret in secrets.iter().filter(|s| !s.is_empty()) {
+        out = scrub_one(&out, secret.as_bytes());
+    }
+    out
+}
+
+fn scrub_one(text: &str, secret: &[u8]) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match encoded_match(&bytes[i..], secret) {
+            Some(len) => {
+                out.extend_from_slice(REDACTED.as_bytes());
+                i += len;
+            }
+            None => {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    // A match starts on an ASCII or leading byte (the secret is UTF-8) and ends after a whole
+    // character or an ASCII escape, so the result stays UTF-8; lossy only as a safeguard.
+    String::from_utf8(out).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
+}
+
+/// The length of the text at the start of `text` that spells `secret` in any of the forms
+/// [`scrub`] accepts, if it does. Each byte is tried literally, then as an escape: a `%` in the
+/// secret may appear as `%` itself or as `%25`, so both readings are tried.
+fn encoded_match(text: &[u8], secret: &[u8]) -> Option<usize> {
+    let Some((&want, rest)) = secret.split_first() else {
+        return Some(0);
+    };
+    let hex = |b: u8| char::from(b).to_digit(16);
+    let then = |used: usize| encoded_match(&text[used..], rest).map(|n| used + n);
+    let literal = text.first() == Some(&want) || (want == b' ' && text.first() == Some(&b'+'));
+    if let Some(n) = literal.then(|| then(1)).flatten() {
+        return Some(n);
+    }
+    match text {
+        [b'%', hi, lo, ..] if hex(*hi)? * 16 + hex(*lo)? == u32::from(want) => then(3),
+        _ => None,
     }
 }
 
@@ -950,6 +1010,34 @@ mod tests {
         // Non-JSON bodies and non-string or empty values contribute nothing.
         assert!(body_secrets(b"not json").is_empty());
         assert!(body_secrets(br#"{"registrationkey":"","api_key":7}"#).is_empty());
+    }
+
+    #[test]
+    fn scrub_finds_every_encoding_of_a_secret() {
+        let key = "a+b/c=d&e%f g";
+        let secrets = [key.to_owned()];
+        for echoed in [
+            "a+b/c=d&e%f g",                         // as sent, decoded
+            "a%2Bb%2Fc%3Dd%26e%25f%20g",             // percent-encoded, upper-case hex
+            "a%2bb%2fc%3dd%26e%25f%20g",             // lower-case hex
+            "a%2Bb/c%3dd&e%25f+g",                   // mixed, space form-encoded
+            "%61%2B%62%2F%63%3D%64%26%65%25%66+%67", // every byte escaped
+        ] {
+            let text = format!("bad key [{echoed}] for user");
+            assert_eq!(
+                scrub(&text, &secrets),
+                "bad key [REDACTED] for user",
+                "{echoed}"
+            );
+        }
+        // Near misses stay: another byte, a truncated escape, a space where the key has '+'.
+        for other in ["a+b/c=d&e%f h", "a%2Bb%2Fc%3Dd%26e%2", "a b/c=d&e%f g"] {
+            assert_eq!(scrub(other, &secrets), other, "{other}");
+        }
+        // Non-ASCII text around and inside a secret stays valid.
+        assert_eq!(scrub("é‰ cléf ü", &["cléf".into()]), "é‰ REDACTED ü");
+        assert_eq!(scrub("cl%C3%A9f", &["cléf".into()]), "REDACTED");
+        assert_eq!(scrub("abc", &[String::new()]), "abc");
     }
 
     #[test]
@@ -1308,6 +1396,107 @@ mod tests {
         let msg = err.to_string();
         assert!(matches!(err, CrawlError::Transient(_)), "{err:?}");
         assert!(!msg.contains("SUPERSECRET"), "{msg}");
+    }
+
+    /// A key with characters that URL-encode, sent as the request encodes it.
+    const ENCODED_KEY: &str = "k+y/1=2&3%4 5";
+
+    /// Every form the tests below make the server echo `ENCODED_KEY` in.
+    fn echoed_forms() -> Vec<String> {
+        let form: String = url::form_urlencoded::byte_serialize(ENCODED_KEY.as_bytes()).collect();
+        vec![
+            ENCODED_KEY.to_owned(),
+            form.clone(),
+            form.to_lowercase(),
+            "k%2By%2F1%3D2%263%254%205".to_owned(),
+        ]
+    }
+
+    fn assert_no_key(msg: &str) {
+        for leaked in echoed_forms() {
+            assert!(!msg.contains(&leaked), "{leaked} leaked: {msg}");
+        }
+        for fragment in ["k+y", "k%2By", "k%2by", "%254"] {
+            assert!(!msg.contains(fragment), "{fragment} leaked: {msg}");
+        }
+    }
+
+    #[tokio::test]
+    async fn encoded_keys_are_scrubbed_from_status_errors() {
+        let server = MockServer::start().await;
+        let echoed = echoed_forms().join(" | ");
+        Mock::given(path("/status"))
+            .respond_with(ResponseTemplate::new(403).set_body_string(format!("bad key: {echoed}")))
+            .mount(&server)
+            .await;
+        let err = fetcher()
+            .get_text(
+                SourceId::Fred,
+                &format!("{}/status", server.uri()),
+                &[("api_key", ENCODED_KEY)],
+            )
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.matches("REDACTED").count() >= 4, "{msg}");
+        assert_no_key(&msg);
+    }
+
+    #[tokio::test]
+    async fn encoded_keys_are_scrubbed_from_parse_errors() {
+        #[derive(Debug, serde::Deserialize)]
+        struct Typed {
+            #[allow(dead_code)]
+            value: u32,
+        }
+        // The key echoed where a number belongs: serde quotes the string it rejects.
+        let server = MockServer::start().await;
+        for echoed in echoed_forms() {
+            let body = serde_json::json!({ "value": echoed }).to_string();
+            Mock::given(path("/parse"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(body))
+                .up_to_n_times(1)
+                .mount(&server)
+                .await;
+            let err = fetcher()
+                .get_json::<Typed>(
+                    SourceId::Fred,
+                    &format!("{}/parse", server.uri()),
+                    &[("api_key", ENCODED_KEY)],
+                )
+                .await
+                .unwrap_err();
+            let msg = err.to_string();
+            assert!(matches!(err, CrawlError::Parse(_)), "{err:?}");
+            assert!(
+                msg.contains("invalid type: string"),
+                "serde quoted the value: {msg}"
+            );
+            assert_no_key(&msg);
+        }
+    }
+
+    #[tokio::test]
+    async fn encoded_keys_are_scrubbed_from_redirect_errors() {
+        // A redirect loop that carries the key, encoded, in every Location.
+        let server = MockServer::start().await;
+        let form: String = url::form_urlencoded::byte_serialize(ENCODED_KEY.as_bytes()).collect();
+        Mock::given(path("/loop"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("Location", format!("{}/loop?api_key={form}", server.uri())),
+            )
+            .mount(&server)
+            .await;
+        let err = fetcher()
+            .get_text(
+                SourceId::Fred,
+                &format!("{}/loop", server.uri()),
+                &[("api_key", ENCODED_KEY)],
+            )
+            .await
+            .unwrap_err();
+        assert_no_key(&err.to_string());
     }
 
     #[tokio::test]
