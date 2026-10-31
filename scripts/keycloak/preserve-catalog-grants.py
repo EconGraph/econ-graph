@@ -121,6 +121,42 @@ def check_catalog_reads_are_plain(realm, get, prefix, api_id):
                            "roles in Keycloak before deploying: " + ", ".join(live))
 
 
+def warn(message):
+    """Report on stderr; stdout carries the merged import."""
+    print("warning: " + message, file=sys.stderr)
+
+
+def preserve_scope_mappings(realm, get, prefix, api_id):
+    """Keep live catalog reads in the scope mappings of every client and client scope.
+
+    config-cli replaces all scope mappings of the API client's roles with the realm file's
+    clientScopeMappings, on every client and client scope, declared or not. Catalog reads
+    there are operator policy: each target's live ones are written into the import, and a
+    target's declared ones only seed a target that doesn't exist yet. Other API roles stay
+    configuration as code; a live one the file doesn't declare is named before the import
+    removes it. The anonymous reader is handled with its service account below.
+    """
+    entries = realm.setdefault("clientScopeMappings", {}).setdefault(API_CLIENT, [])
+    targets = [("client", c["id"], c["clientId"], "/clients/")
+               for c in required(get(prefix + "/clients")) if c["clientId"] != ANONYMOUS_CLIENT]
+    targets += [("clientScope", s["id"], s["name"], "/client-scopes/")
+                for s in required(get(prefix + "/client-scopes"))]
+    for kind, target_id, name, path in sorted(targets, key=lambda t: (t[0], t[2])):
+        live = [r["name"] for r in required(get(prefix + path + target_id + "/scope-mappings/clients/" + api_id))]
+        entry = next((e for e in entries if e.get(kind) == name), None)
+        declared = entry.get("roles", []) if entry else []
+        removed = sorted(r for r in live if not catalog_read(r) and r not in declared)
+        if removed:
+            warn("the realm import removes %s scope mappings the realm file doesn't declare on %s %s: %s; "
+                 "declare them in clientScopeMappings to keep them"
+                 % (API_CLIENT, "client" if kind == "client" else "client scope", name, ", ".join(removed)))
+        roles = [r for r in declared if not catalog_read(r)] + [r for r in live if catalog_read(r)]
+        if entry:
+            entry["roles"] = roles
+        elif roles:
+            entries.append({kind: name, "roles": roles})
+
+
 def merge_catalog_policy(realm, get):
     """Merge current operator policy into a rendered import, seeding defaults only once."""
     for role in realm.get("roles", {}).get("realm", []):
@@ -210,6 +246,9 @@ def merge_catalog_policy(realm, get):
             api_edges = desired.setdefault("client", {}).get(API_CLIENT, [])
             declared = api_edges if seed_defaults else [r for r in api_edges if not catalog_read(r)]
             desired["client"][API_CLIENT] = list(dict.fromkeys(declared + live_catalog))
+
+    if api_id:
+        preserve_scope_mappings(realm, get, prefix, api_id)
 
     if seed["reader"]:
         return realm  # The reader was absent at bootstrap; retry its declared defaults.
