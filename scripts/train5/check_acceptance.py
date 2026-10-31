@@ -8,6 +8,7 @@ from fractions import Fraction
 import hashlib
 import json
 from pathlib import Path
+import posixpath
 import re
 import sys
 from uuid import UUID
@@ -73,6 +74,21 @@ class Evidence:
         require(SHA.fullmatch(str(reference.get("sha256", ""))) is not None and digest == reference["sha256"],
                 f"artifact SHA-256 mismatch: {name}")
         return load_json(path) if json_document else path.read_text()
+
+
+def workflow_spec_matches(root_dir, file_name):
+    """Playwright records spec.file relative to config.rootDir, not the repo root."""
+    if not isinstance(file_name, str) or not file_name:
+        return False
+    if root_dir is not None and not isinstance(root_dir, str):
+        return False
+    # Reporter paths use forward slashes even on Windows. Normalize both inputs
+    # so a same-named spec under a different suite cannot satisfy this gate.
+    relative = file_name.replace("\\", "/")
+    root = (root_dir or "").replace("\\", "/")
+    resolved = posixpath.normpath(posixpath.join(root, relative))
+    expected = "tests/e2e/train5/company-research.spec.ts"
+    return resolved == expected or resolved.endswith("/" + expected)
 
 
 def validate(directory, candidate, now):
@@ -188,7 +204,7 @@ def validate(directory, candidate, now):
     matching = []
     def visit(suite):
         for spec in suite.get("specs", []):
-            if spec.get("file", "").replace("\\", "/").endswith("train5/company-research.spec.ts"):
+            if workflow_spec_matches(workflow.get("config", {}).get("rootDir"), spec.get("file")):
                 matching.append(spec)
         for child in suite.get("suites", []):
             visit(child)

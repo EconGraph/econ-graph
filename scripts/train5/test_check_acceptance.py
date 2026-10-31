@@ -195,6 +195,41 @@ class AcceptanceTest(unittest.TestCase):
         self.mutate("alert_drill", lambda data: data["events"][0].update(notification_id=""))
         self.rejected("delivered notification")
 
+    def test_actual_playwright_root_relative_report_is_accepted(self):
+        # Recorded with installed Playwright using a synthetic test with no page
+        # fixture. This is reporter compatibility, not company acceptance evidence.
+        report = checker.load_json(Path(__file__).with_name("testdata") / "playwright-relative-report.json")
+        self.assertEqual(report["suites"][0]["specs"][0]["file"], "company-research.spec.ts")
+        report["config"]["metadata"].update(candidate_sha=SHA, backend_mode="real", authenticated=True)
+        self.manifest["workflow_report"] = self.save("workflow.json", report)
+        self.assertTrue(self.check()["accepted"])
+
+    def test_bare_spec_name_without_root_association_rejects(self):
+        self.mutate("workflow_report", lambda data: data["suites"][0]["suites"][0]["specs"][0].update(file="company-research.spec.ts"))
+        self.rejected("does not include the Train 5")
+
+    def test_bare_spec_name_from_other_root_rejects(self):
+        def change(data):
+            data["config"]["rootDir"] = "/recorded/frontend/tests/e2e/other"
+            data["suites"][0]["suites"][0]["specs"][0]["file"] = "company-research.spec.ts"
+        self.mutate("workflow_report", change)
+        self.rejected("does not include the Train 5")
+
+    def test_same_named_file_in_other_suite_does_not_match(self):
+        self.assertFalse(checker.workflow_spec_matches("/recorded/frontend/tests/e2e/train5", "../other/company-research.spec.ts"))
+        self.assertFalse(checker.workflow_spec_matches("/recorded/frontend/tests/e2e/train5", "nested/company-research.spec.ts"))
+
+    def test_repo_relative_absolute_and_windows_report_paths_remain_compatible(self):
+        for root, file in [
+            (None, "frontend/tests/e2e/train5/company-research.spec.ts"),
+            ("/recorded/frontend", "tests/e2e/train5/company-research.spec.ts"),
+            ("/recorded/frontend/tests/e2e/train5", "company-research.spec.ts"),
+            (None, "/recorded/frontend/tests/e2e/train5/company-research.spec.ts"),
+            (r"C:\recorded\frontend\tests\e2e\train5", "company-research.spec.ts"),
+        ]:
+            with self.subTest(root=root, file=file):
+                self.assertTrue(checker.workflow_spec_matches(root, file))
+
     def test_mock_or_anonymous_workflow_rejects(self):
         self.mutate("workflow_report", lambda data: data["config"]["metadata"].update(backend_mode="mock"))
         self.rejected("real backend")

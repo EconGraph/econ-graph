@@ -157,7 +157,11 @@ chart, attributed CSV values, ratios/compatible peers and note permissions.
 
 Retain the Playwright JSON reporter output. Its `config.metadata` must include
 `candidate_sha`, `backend_mode: "real"` and `authenticated: true`. The checker
-requires the `company research workflow` test from that spec and rejects global
+resolves each spec's `file` relative to the report's `config.rootDir`, as the
+Playwright JSON reporter does. A bare filename without the Train 5 root association
+cannot satisfy the gate. Repository-relative and absolute spec paths remain
+supported. The checker requires the `company research workflow` test from that
+spec and rejects global
 errors, failed specs, skipped/expected-failure tests, retries and flaky outcomes.
 Metadata describes collection intent; the test assertions and environment review
 establish that real requests and sign-in occurred.
