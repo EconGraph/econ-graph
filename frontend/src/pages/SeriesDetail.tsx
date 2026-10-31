@@ -28,6 +28,7 @@ import {
   Download as DownloadIcon,
 } from '@mui/icons-material';
 
+import SeriesLifecycleNotice from '../components/SeriesLifecycleNotice';
 import SeriesChart, { SeriesChartAnnotation } from '../components/charts/SeriesChart';
 import SeriesAnnotationsPanel from '../components/charts/SeriesAnnotationsPanel';
 import {
@@ -344,6 +345,8 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
           )}
         </Box>
       </Box>
+
+      <SeriesLifecycleNotice lifecycle={series.lifecycle} sourceName={series.source?.name} />
 
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, lg: 8 }}>

@@ -36,9 +36,7 @@ import {
 vi.mock('../../hooks/useSeriesData', async () => vi.importActual('../../hooks/useSeriesData'));
 
 vi.mock('../../utils/graphql', async () => {
-  const actual = await vi.importActual<typeof import('../../utils/graphql')>(
-    '../../utils/graphql'
-  );
+  const actual = await vi.importActual<typeof import('../../utils/graphql')>('../../utils/graphql');
   return { ...actual, executeGraphQL: vi.fn() };
 });
 
@@ -139,6 +137,39 @@ async function chooseTransformation(label: string) {
 }
 
 describe('SeriesDetail', () => {
+  test('keeps retained history visible with the confirmed publication date and successor', async () => {
+    serve();
+    const original = mockExecute.getMockImplementation()!;
+    mockExecute.mockImplementation(async request => {
+      if (request.query === QUERIES.GET_SERIES_DETAIL) {
+        return {
+          data: {
+            series: {
+              ...seriesResponses[UNRATE_ID].series,
+              lifecycle: {
+                status: 'superseded',
+                since: '2026-10-25T00:00:00Z',
+                successorId: GDP_Q_ID,
+                proposedSuccessorId: null,
+              },
+            },
+          },
+        };
+      }
+      return original(request);
+    });
+    renderPage(UNRATE_ID);
+    expect(
+      await screen.findByText(/Superseded series from .* since 2026-10-25/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Superseded by another series' })).toHaveAttribute(
+      'href',
+      `/series/${GDP_Q_ID}`
+    );
+    await screen.findByTestId('line-chart');
+    expect(plottedPoints()).toHaveLength(3);
+  });
+
   beforeEach(() => {
     mockExecute.mockReset();
     router.state = null;
@@ -252,9 +283,9 @@ describe('SeriesDetail', () => {
 
     expect(screen.getByText('Last Fetched')).toBeInTheDocument();
     expect(screen.queryByText('Last Updated')).not.toBeInTheDocument();
-    expect(screen.getByTitle('When EconGraph last fetched this series from FRED')).toHaveTextContent(
-      'Apr 5, 2024'
-    );
+    expect(
+      screen.getByTitle('When EconGraph last fetched this series from FRED')
+    ).toHaveTextContent('Apr 5, 2024');
   });
 
   test('marks an original release in a neutral colour, not the red accent', async () => {
@@ -317,7 +348,9 @@ describe('SeriesDetail', () => {
 
     await chooseTransformation(label);
 
-    await waitFor(() => expect(dataRequests().slice(-1)[0]?.variables?.transformation).toBe(enumValue));
+    await waitFor(() =>
+      expect(dataRequests().slice(-1)[0]?.variables?.transformation).toBe(enumValue)
+    );
     await waitFor(() => expect(plottedPoints()).toContainEqual(['2024-02-01', 5.4054]));
   });
 
@@ -417,7 +450,9 @@ describe('SeriesDetail', () => {
     expect(
       await screen.findByText(/Could not load observations for this series/)
     ).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Unemployment Rate', level: 1 })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Unemployment Rate', level: 1 })
+    ).toBeInTheDocument();
   });
 
   test('a failed transformation can go back to levels', async () => {

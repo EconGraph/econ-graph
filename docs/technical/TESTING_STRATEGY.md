@@ -80,34 +80,24 @@ setup, and troubleshooting; the
 [core helpers](../../backend/crates/econ-graph-core/src/test_utils.rs) define the
 actual lifecycle.
 
-`TestContainer::new()` exposes its pool through `pool()` but does not apply
-migrations or create fixtures. In core unit tests it starts a PostgreSQL 18
-container even when `DATABASE_URL` supplies an external pool, so Docker is still
-required. When core is compiled as a dependency, including for other crates and
-integration-test targets, it connects to `DATABASE_URL`, falling back to
-`postgres://localhost/econ_graph_test`, without starting a container.
+`TestContainer::new()` gives each test a migrated scratch database of its own on the
+server `DATABASE_URL` names (falling back to `postgres://localhost/econ_graph_test`),
+dropped with it, so the role needs `CREATEDB`. Only core's own unit tests without
+`DATABASE_URL` start a PostgreSQL 18 container instead, unmigrated.
 
-`get_test_db()` and the compatibility function `db_test()` return a shared
-`Arc<TestContainer>` from a `OnceCell` per test binary. Sharing the helper does not
-give each test its own database or transaction. Follow the target module's migration,
-fixture, and locking convention. For example, the dataset tests apply migrations
-once and create a unique data source per test without dropping the schema.
+`get_test_db()` and the compatibility function `db_test()` share one database per
+test binary, the one `DATABASE_URL` names, with a pool per call. Tests using it must
+not drop the schema; they create unique rows. For example, the dataset tests apply
+migrations once and create a unique data source per test.
 
 `clean_database()` must be called explicitly and its `Result` checked. It drops the
-pool connection's entire `public` schema with `CASCADE`, recreates the schema, and
-runs migrations. The migration URL comes from `DATABASE_URL` or the localhost
-fallback, rather than from the pool's mapped container port. Set `DATABASE_URL` to
-the disposable database used by the pool before using this cleanup path so both
-operations target the same database. The
+test database's entire `public` schema with `CASCADE`, recreates it, and migrates that
+same database; no other test's database is affected, so tests run in parallel. The
 [queue service tests](../../backend/crates/econ-graph-services/src/services/queue_service.rs)
-show explicit cleanup followed by fixture creation, with `#[serial]` on tests that
-share the database.
-
-Coordinate destructive cleanup with every test using the same database. A module's
-lock or `serial_test` group does not protect unrelated code that does not acquire
-it. `--test-threads=1` serializes functions within a test binary; it does not
-coordinate separate Cargo processes. Cleanup is neither an automatic after-test
-hook nor a rollback transaction.
+show explicit cleanup followed by fixture creation. Cleanup is neither an automatic
+after-test hook nor a rollback transaction. See
+[database testing](../testing/DATABASE_TESTING.md#testcontainer-lifecycle) for the
+full lifecycle.
 
 For tests needing an empty database or separate app and data databases,
 `ScratchDatabase::create(tag)` creates a uniquely named database on the
@@ -163,9 +153,8 @@ package and target examples.
 
 [Core CI](../../.github/workflows/ci-core.yml) runs workspace library, binary,
 integration, and documentation tests, plus feature-specific checks such as the
-SEC crawler's `xbrl-parser` tests. The workspace's database-backed test invocation
-uses `--test-threads=1` because tests can drop and recreate the shared schema.
-Other database groups receive separate databases. The
+SEC crawler's `xbrl-parser` tests. The workspace's database-backed tests run in
+parallel: each `TestContainer` test has a database of its own. The
 [CI/CD guide](../development/CI_CD_PIPELINE.md) explains job selection and required
 checks; use the workflow's service setup and feature flags when reproducing a CI
 failure.

@@ -5,6 +5,9 @@
 #
 # Usage:
 #   [VAR=value ...] scripts/deploy/create-secrets.sh [--dry-run] [--prompt-tunnel-token]
+#   [APP_DATABASE=shared|separate] scripts/deploy/create-secrets.sh --app-database-only [--dry-run]
+#   writes only app-database-url (see APP_DATABASE below), from the passwords
+#   already in the cluster.
 #   CLOUDFLARE_API_TOKEN from a secure environment source, with --cloudflare-dns-only,
 #   writes only cert-manager/cloudflare-api-token-secret (key api-token).
 #   setup-letsencrypt-cloudflare.sh provides hidden terminal input for this mode.
@@ -35,9 +38,11 @@
 #   (the data database)            app-password              APP_DB_PASSWORD (generated)
 #   econ-graph-app-postgres        postgres-password         APP_POSTGRES_PASSWORD (generated)
 #   (the app database)             app-password              APP_POSTGRES_APP_PASSWORD (generated)
-#   crawler-api-keys               fred-api-key, bls-api-key, bea-api-key, census-api-key
+#   crawler-api-keys               fred-api-key, bls-api-key, bea-api-key, census-api-key,
+#                                  wto-api-key
 #                                                            FRED_API_KEY, BLS_API_KEY,
-#                                                            BEA_API_KEY, CENSUS_API_KEY (optional)
+#                                                            BEA_API_KEY, CENSUS_API_KEY,
+#                                                            WTO_API_KEY (optional)
 #   econ-graph-keycloak            admin-username            KEYCLOAK_ADMIN_USERNAME (default admin)
 #                                  admin-password            KEYCLOAK_ADMIN_PASSWORD (generated)
 #                                  db-password               KEYCLOAK_DB_PASSWORD (generated)
@@ -79,9 +84,20 @@
 #   - APP_DATABASE=separate points app-database-url at the app database;
 #     APP_DATABASE=shared points it at the data database (one database holding
 #     both, as in a cluster deployed before the app database existed). Unset,
-#     the cluster's current choice is kept, and a new Secret gets separate.
-#     Switching an existing cluster to separate is part of moving the app rows
-#     into the app database; the script only rewrites the URL.
+#     the cluster's current choice is kept (so is an APP_DATABASE equal to
+#     it), a cluster without econ-graph-secrets gets separate, and an existing
+#     Secret without the key needs APP_DATABASE. Refused, before anything is
+#     written (lib/app-database-guard.sh, docs/deployment/APP_DATA_CONVERSION.md):
+#     shared, on every run of an existing cluster, once the app tables are only
+#     in the app database; separate, when it changes, while the data database
+#     still holds them, and on a Secret without the key unless the data
+#     database answers that it holds none; and a kept separate while the data
+#     database still holds app tables. A database that can't be checked refuses
+#     the change unless ALLOW_UNCHECKED_APP_DATABASE=1, except that a kept
+#     shared passes when the app database answers it holds no app tables or does
+#     not exist, and is refused even with the override when the data database
+#     answers it holds none but the app database can't be asked. scripts/deploy/convert-app-data.sh rewrites the key with
+#     --app-database-only when it moves the app tables, so it records where they are.
 #   - Likewise, if grafana-admin/admin-password would be generated but a
 #     Grafana volume (PVC grafana-storage-grafana-*) exists, the script stops
 #     unless GRAFANA_ADMIN_PASSWORD is given (and set in Grafana) or
@@ -129,12 +145,14 @@ CLOUDFLARE_DNS_ONLY=false
 PROMPT_TUNNEL_TOKEN=false
 DRY_RUN=false
 CONTEXT_ARG=""
+APP_DATABASE_ONLY=false
 for arg in "$@"; do
     case "$arg" in
         --context=?*) CONTEXT_ARG="${arg#--context=}" ;;
         --cloudflare-dns-only) CLOUDFLARE_DNS_ONLY=true ;;
         --prompt-tunnel-token) PROMPT_TUNNEL_TOKEN=true ;;
         --dry-run | -n) DRY_RUN=true ;;
+        --app-database-only) APP_DATABASE_ONLY=true ;;
         -h | --help)
             sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
@@ -161,6 +179,10 @@ fi
 source "$(dirname "${BASH_SOURCE[0]}")/lib/agent-access.sh"
 require_operator_session
 
+if [[ "$APP_DATABASE_ONLY" == true && ( "$CLOUDFLARE_DNS_ONLY" == true || "$PROMPT_TUNNEL_TOKEN" == true ) ]]; then
+    echo "create-secrets: error: --app-database-only runs on its own" >&2
+    exit 2
+fi
 if [[ "$CLOUDFLARE_DNS_ONLY" == true && "$PROMPT_TUNNEL_TOKEN" == true ]]; then
     echo "create-secrets: error: DNS-only mode cannot prompt for a tunnel token" >&2
     exit 2
@@ -490,10 +512,115 @@ fi
 kc get namespace "$NAMESPACE" >/dev/null 2>&1 ||
     die "namespace $NAMESPACE not found; apply k8s/manifests/namespace.yaml first"
 
+# --- app database guard ----------------------------------------------------
+# resolve_app_database: which database app-database-url names, in app_database
+# (shared or separate) and app_database_how (kept, new or from APP_DATABASE);
+# also sets current_app_url and secrets_present. Exits if that is refused.
+# What the cluster's current URL names is
+# kept, and so is an APP_DATABASE equal to it. A Secret that exists without the
+# key comes from a release before the app database existed: its app records are
+# in the data database, so APP_DATABASE must say which one to use. Only a
+# cluster without econ-graph-secrets at all is a new install and gets separate.
+resolve_app_database() {
+    current_app_url="$(existing econ-graph-secrets app-database-url)" || exit 1
+    current_app_database=""
+    if [[ -n "$current_app_url" ]]; then
+        if [[ "$current_app_url" == *"@${APP_DB_HOST}:"* ]]; then
+            current_app_database=separate
+        else
+            current_app_database=shared
+        fi
+    fi
+    secrets_present=false
+    if [[ -n "$current_app_url" ]] || secret_exists econ-graph-secrets; then
+        secrets_present=true
+    fi
+    app_database="${APP_DATABASE-}"
+    if [[ -n "$app_database" ]]; then
+        if [[ "$app_database" == "$current_app_database" ]]; then
+            app_database_how="kept"
+        else
+            app_database_how="from APP_DATABASE"
+        fi
+    elif [[ -n "$current_app_database" ]]; then
+        app_database="$current_app_database"
+        app_database_how="kept"
+    elif [[ "$secrets_present" == false ]]; then
+        app_database=separate
+        app_database_how="new"
+    else
+        die "econ-graph-secrets has no app-database-url: the cluster was deployed before" \
+            "the app database existed, so its app records are in the data database. Set" \
+            "APP_DATABASE=shared until docs/deployment/APP_DATA_CONVERSION.md has moved them" \
+            "(APP_DATABASE=separate afterwards); nothing more was written"
+    fi
+    # Pointing the backend at a database that does not hold the app records would
+    # serve it no accounts, and it would create empty app tables there
+    # (lib/app-database-guard.sh). Checked before any Secret is written. shared
+    # is checked on every run of an existing cluster, kept or not: the conversion
+    # removes the app tables from the data database. separate is checked when it
+    # changes; on a Secret without app-database-url (its app records are in the
+    # data database) only a data database that answers that it has no app tables
+    # lets it through. A kept separate is refused while the data database still
+    # holds app tables (left by a rollback that stopped before switching back).
+    # shellcheck source=scripts/deploy/lib/app-database-guard.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/lib/app-database-guard.sh"
+    if [[ "$app_database" == shared && "$secrets_present" == true ]]; then
+        require_app_tables_not_moved
+    elif [[ "$app_database" == separate && "$app_database_how" != kept ]]; then
+        if [[ "$secrets_present" == true && -z "$current_app_url" ]]; then
+            require_app_tables_moved strict
+        else
+            require_app_tables_moved
+        fi
+    elif [[ "$app_database" == separate ]]; then
+        require_app_tables_not_left_behind
+    fi
+}
+
+# --app-database-only: only app-database-url, through the same decision and
+# guards. The URL is built from the app-password already in the cluster (never
+# generated) and written with a JSON merge patch from a private file, so no other
+# key, Secret or credential from the environment is read or written. With
+# --dry-run it only checks. scripts/deploy/convert-app-data.sh uses it after
+# moving the app tables; release-deploy.sh runs it with --dry-run before any step.
+if [[ "$APP_DATABASE_ONLY" == true ]]; then
+    resolve_app_database
+    if [[ "$secrets_present" != true ]]; then
+        [[ "$DRY_RUN" == true ]] ||
+            die "econ-graph-secrets does not exist; run create-secrets.sh without --app-database-only first"
+        log "app-database-url: $app_database ($app_database_how; econ-graph-secrets does not exist yet) (dry run: not written)"
+        exit 0
+    fi
+    if [[ "$app_database" == separate ]]; then
+        app_db_secret=econ-graph-app-postgres app_db_host="$APP_DB_HOST" app_db_name="$APP_DB_NAME"
+    else
+        app_db_secret=econ-graph-postgres app_db_host="$DATA_DB_HOST" app_db_name="$DATA_DB_NAME"
+    fi
+    app_db_password="$(existing "$app_db_secret" app-password)" || exit 1
+    [[ -n "$app_db_password" ]] ||
+        die "Secret $app_db_secret has no app-password; run create-secrets.sh without --app-database-only"
+    app_url="postgresql://${APP_DB_USER}:$(urlencode "$app_db_password")@${app_db_host}:${DB_PORT}/${app_db_name}"
+    if [[ "$app_url" == "$current_app_url" ]]; then
+        log "app-database-url: $app_db_name on $app_db_host ($app_database_how), unchanged"
+        exit 0
+    fi
+    if [[ "$DRY_RUN" == true ]]; then
+        log "app-database-url: $app_db_name on $app_db_host ($app_database_how) (dry run: not written)"
+        exit 0
+    fi
+    printf '{"data":{"app-database-url":"%s"}}' "$(printf '%s' "$app_url" | base64 -w0)" >"$WORKDIR/app-database-url.json"
+    kc -n "$NAMESPACE" patch secret econ-graph-secrets --type=merge \
+        --patch-file="$WORKDIR/app-database-url.json" >/dev/null ||
+        die "could not write app-database-url into econ-graph-secrets"
+    log "app-database-url: $app_db_name on $app_db_host ($app_database_how)"
+    exit 0
+fi
+
 # Validate every supplied value before anything is written, so a bad input
 # never leaves the Secrets half updated.
 for var in POSTGRES_PASSWORD APP_DB_PASSWORD APP_POSTGRES_PASSWORD APP_POSTGRES_APP_PASSWORD \
-    FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY KEYCLOAK_ADMIN_USERNAME \
+    FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY WTO_API_KEY KEYCLOAK_ADMIN_USERNAME \
     KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_GOOGLE_CLIENT_ID \
     KEYCLOAK_GOOGLE_CLIENT_SECRET KEYCLOAK_FACEBOOK_CLIENT_ID \
     KEYCLOAK_FACEBOOK_CLIENT_SECRET GRAFANA_ADMIN_PASSWORD MONITORING_BASIC_AUTH \
@@ -533,6 +660,9 @@ guard_db_volume() {
 }
 guard_db_volume econ-graph-postgres postgresql-data-postgresql-
 guard_db_volume econ-graph-app-postgres app-postgres-data-app-postgres-
+
+# --- app database guard ----------------------------------------------------
+resolve_app_database
 
 # --- Grafana volume guard ---------------------------------------------------
 # Grafana reads GF_SECURITY_ADMIN_PASSWORD only when its volume is first
@@ -609,23 +739,6 @@ esac
 begin_secret econ-graph-secrets
 DATA_URL="postgresql://${APP_DB_USER}:$(urlencode "$APP_PASSWORD")@${DATA_DB_HOST}:${DB_PORT}/${DATA_DB_NAME}"
 SEPARATE_APP_URL="postgresql://${APP_DB_USER}:$(urlencode "$APP_DB_APP_PASSWORD")@${APP_DB_HOST}:${DB_PORT}/${APP_DB_NAME}"
-# Which database app-database-url names: APP_DATABASE if given, else what the
-# cluster's current URL names, else (a new Secret) the app database.
-app_database="${APP_DATABASE-}"
-app_database_how="from APP_DATABASE"
-if [[ -z "$app_database" ]]; then
-    current_app_url="$(existing econ-graph-secrets app-database-url)" || exit 1
-    if [[ -z "$current_app_url" ]]; then
-        app_database=separate
-        app_database_how="new"
-    elif [[ "$current_app_url" == *"@${APP_DB_HOST}:"* ]]; then
-        app_database=separate
-        app_database_how="kept"
-    else
-        app_database=shared
-        app_database_how="kept"
-    fi
-fi
 if [[ "$app_database" == separate ]]; then
     put app-database-url "$SEPARATE_APP_URL" "$APP_DB_NAME on $APP_DB_HOST, $app_database_how"
 else
@@ -647,6 +760,7 @@ add_optional FRED_API_KEY fred-api-key
 add_optional BLS_API_KEY bls-api-key
 add_optional BEA_API_KEY bea-api-key
 add_optional CENSUS_API_KEY census-api-key
+add_optional WTO_API_KEY wto-api-key
 apply_secret
 
 # --- econ-graph-keycloak ---------------------------------------------------

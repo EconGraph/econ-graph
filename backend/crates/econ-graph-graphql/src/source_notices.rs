@@ -35,19 +35,7 @@ pub struct SourceNotice {
 /// notice. A test requires the public sources without a notice to be exactly these, so making
 /// another source public without one fails, as does leaving a source here once it has a notice
 /// or is no longer public.
-pub const PUBLIC_WITHOUT_NOTICE: &[SourceId] = &[
-    SourceId::Imf,
-    SourceId::Ecb,
-    SourceId::Oecd,
-    SourceId::Boe,
-    SourceId::Boj,
-    SourceId::Boc,
-    SourceId::Rba,
-    SourceId::Snb,
-    SourceId::UnStats,
-    SourceId::Ilo,
-    SourceId::Wto,
-];
+pub const PUBLIC_WITHOUT_NOTICE: &[SourceId] = &[];
 
 /// The notice for `source`, if it has one.
 pub fn notice(source: SourceId) -> Option<SourceNotice> {

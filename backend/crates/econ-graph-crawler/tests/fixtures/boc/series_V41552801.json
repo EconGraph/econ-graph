@@ -1,0 +1,11 @@
+{
+    "terms": {
+        "url": "https://www.bankofcanada.ca/terms/"
+    },
+    "seriesDetails": {
+        "name": "V41552801",
+        "label": "M2++ (gross) (Seasonally adjusted)",
+        "description": "M2++ (gross)",
+        "dateFormat": "monthly",        "metadata": {}
+    }
+}

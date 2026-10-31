@@ -29,3 +29,4 @@ econ-graph-metrics = { path = "../econ-graph-metrics" }
 reqwest.workspace = true
 diesel.workspace = true
 diesel-async.workspace = true
+uuid.workspace = true

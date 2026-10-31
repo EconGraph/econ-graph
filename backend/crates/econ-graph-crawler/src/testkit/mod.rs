@@ -380,6 +380,7 @@ pub fn test_keys() -> ApiKeys {
         bls: Some(TEST_API_KEY.into()),
         bea: Some(TEST_API_KEY.into()),
         census: Some(TEST_API_KEY.into()),
+        wto: Some(TEST_API_KEY.into()),
     }
 }
 

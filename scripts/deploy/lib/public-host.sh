@@ -8,7 +8,8 @@
 # PUBLIC_HOST decides what the cluster serves:
 #   PUBLIC_HOST=econgraph.com  http://localhost and https://econgraph.com
 #                              (www.econgraph.com redirects there), reached
-#                              through the cloudflared tunnel;
+#                              through the cloudflared tunnel; sign-in returns
+#                              to https://econgraph.com only;
 #   PUBLIC_HOST= (empty)       http://localhost only; every public-host piece
 #                              left by an earlier deploy is removed;
 #   unset                      the same as empty on a cluster that serves no

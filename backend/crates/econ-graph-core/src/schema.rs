@@ -145,6 +145,28 @@ diesel::table! {
 }
 
 diesel::table! {
+    catalog_lifecycle_scopes (source_id) {
+        source_id -> Uuid,
+        fingerprint -> Text,
+        last_refresh_at -> Timestamptz,
+        guarded_snapshot -> Nullable<Jsonb>,
+        guarded_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    catalog_reference_snapshots (source, url, content_sha256) {
+        #[max_length = 32]
+        source -> Varchar,
+        url -> Text,
+        #[max_length = 64]
+        content_sha256 -> Varchar,
+        codes -> Jsonb,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::AnnotationVisibility;
 
@@ -384,6 +406,47 @@ diesel::table! {
         default_measure -> Varchar,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    discovery_run_chunks (run_id, chunk_index) {
+        run_id -> Uuid,
+        chunk_index -> Int4,
+        #[max_length = 20]
+        state -> Varchar,
+        units -> Jsonb,
+        result -> Nullable<Jsonb>,
+        error_message -> Nullable<Text>,
+        finished_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    discovery_runs (id) {
+        id -> Uuid,
+        #[max_length = 50]
+        source -> Varchar,
+        #[max_length = 20]
+        state -> Varchar,
+        started_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        finished_at -> Nullable<Timestamptz>,
+        enumerated_at -> Nullable<Timestamptz>,
+        chunks_total -> Int4,
+        chunks_done -> Int4,
+        chunks_failed -> Int4,
+        catalog_scope -> Nullable<Text>,
+        reference_ok -> Bool,
+        observed_at -> Timestamptz,
+        discovery_job_id -> Nullable<Uuid>,
+        deferred_discovery_job_ids -> Array<Nullable<Uuid>>,
+        priority -> Int4,
+        validator -> Nullable<Jsonb>,
+        curated_missing -> Jsonb,
+        lifecycle -> Jsonb,
+        catalog_unchanged -> Bool,
+        error_message -> Nullable<Text>,
     }
 }
 
@@ -690,6 +753,25 @@ diesel::table! {
 }
 
 diesel::table! {
+    series_lifecycle (source_id, external_id) {
+        source_id -> Uuid,
+        external_id -> Text,
+        status -> Text,
+        since -> Nullable<Timestamptz>,
+        missing_refreshes -> Int4,
+        fetch_not_found_count -> Int4,
+        fetch_absent_count -> Int4,
+        fetch_retired -> Bool,
+        last_seen_at -> Nullable<Timestamptz>,
+        proposed_successor_id -> Nullable<Uuid>,
+        successor_id -> Nullable<Uuid>,
+        scope_fingerprint -> Text,
+        in_accepted_catalog -> Bool,
+        listed_in_accepted_catalog -> Bool,
+    }
+}
+
+diesel::table! {
     series_metadata (id) {
         id -> Uuid,
         source_id -> Uuid,
@@ -936,10 +1018,12 @@ diesel::joinable!(annotation_comments -> chart_annotations (annotation_id));
 diesel::joinable!(annotation_comments -> users (user_id));
 diesel::joinable!(annotation_replies -> financial_annotations (annotation_id));
 diesel::joinable!(audit_logs -> users (user_id));
+diesel::joinable!(catalog_lifecycle_scopes -> data_sources (source_id));
 diesel::joinable!(chart_annotations -> users (user_id));
 diesel::joinable!(crawl_attempts -> economic_series (series_id));
 diesel::joinable!(data_points -> economic_series (series_id));
 diesel::joinable!(datasets -> data_sources (source_id));
+diesel::joinable!(discovery_run_chunks -> discovery_runs (run_id));
 diesel::joinable!(economic_series -> data_sources (source_id));
 diesel::joinable!(event_country_impacts -> countries (country_id));
 diesel::joinable!(event_country_impacts -> global_economic_events (event_id));
@@ -951,6 +1035,7 @@ diesel::joinable!(global_economic_indicators -> countries (country_id));
 diesel::joinable!(global_indicator_data -> global_economic_indicators (indicator_id));
 diesel::joinable!(reference_file_cache -> data_sources (source_id));
 diesel::joinable!(series_fetch_validators -> economic_series (series_id));
+diesel::joinable!(series_lifecycle -> data_sources (source_id));
 diesel::joinable!(series_metadata -> data_sources (source_id));
 diesel::joinable!(user_data_source_preferences -> users (user_id));
 diesel::joinable!(user_sessions -> users (user_id));
@@ -966,6 +1051,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     annotation_replies,
     annotation_templates,
     audit_logs,
+    catalog_lifecycle_scopes,
+    catalog_reference_snapshots,
     chart_annotations,
     chart_collaborators,
     companies,
@@ -976,6 +1063,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     data_points,
     data_sources,
     datasets,
+    discovery_run_chunks,
+    discovery_runs,
     economic_series,
     event_country_impacts,
     financial_annotations,
@@ -989,6 +1078,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     reference_file_cache,
     security_events,
     series_fetch_validators,
+    series_lifecycle,
     series_metadata,
     trade_relationships,
     user_data_source_preferences,

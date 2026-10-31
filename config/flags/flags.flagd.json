@@ -60,6 +60,46 @@
         "owner": "ECO-142",
         "remove_by": "unscheduled"
       }
+    },
+    "crawl_imf": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "ECO-175",
+        "remove_by": "unscheduled"
+      }
+    },
+    "crawl_boj": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "ECO-743",
+        "remove_by": "unscheduled"
+      }
+    },
+    "crawl_snb": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "ECO-742",
+        "remove_by": "unscheduled"
+      }
+    },
+    "crawl_un_stats": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "ECO-182",
+        "remove_by": "unscheduled"
+      }
     }
   }
 }

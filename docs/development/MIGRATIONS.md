@@ -15,7 +15,7 @@ and how to squash app plane migrations before tagging a release.
 
 | Plane | Migration directory | Tables |
 |-----|-----------|--------|
-| data | `backend/migrations/data` | Crawled and reference data: `data_sources`, `datasets`, `economic_series`, `data_points`, `series_metadata`, `crawl_queue`, `crawl_attempts`, `reference_file_cache`, `series_fetch_validators`, the global indicator tables (`countries`, `global_economic_indicators`, `global_indicator_data`, `country_correlations`, `trade_relationships`, `global_economic_events`, `event_country_impacts`, `leading_indicators`), and SEC/XBRL data (`companies`, `financial_statements`, `financial_line_items`, `financial_ratios`, `xbrl_taxonomy_schemas`, `xbrl_taxonomy_linkbases`, `xbrl_dts_dependencies`, `xbrl_instance_dts_references`, `xbrl_taxonomy_concepts`). |
+| data | `backend/migrations/data` | Crawled and reference data: `data_sources`, `datasets`, `economic_series`, `data_points`, `series_metadata`, `crawl_queue`, `crawl_attempts`, `reference_file_cache`, `series_fetch_validators`, chunked discovery runs (`discovery_runs`, `discovery_run_chunks`), publication lifecycle state (`series_lifecycle`, `catalog_lifecycle_scopes`, `catalog_reference_snapshots`), the global indicator tables (`countries`, `global_economic_indicators`, `global_indicator_data`, `country_correlations`, `trade_relationships`, `global_economic_events`, `event_country_impacts`, `leading_indicators`), and SEC/XBRL data (`companies`, `financial_statements`, `financial_line_items`, `financial_ratios`, `xbrl_taxonomy_schemas`, `xbrl_taxonomy_linkbases`, `xbrl_dts_dependencies`, `xbrl_instance_dts_references`, `xbrl_taxonomy_concepts`). |
 | app | `backend/migrations/app` | Users and everything they create: `users`, `user_sessions`, `chart_annotations`, `annotation_comments`, `chart_collaborators`, `user_data_source_preferences`, `audit_logs`, `security_events`, `financial_annotations`, `annotation_assignments`, `annotation_replies`, `annotation_templates`, and the annotation enums. |
 
 On a database built from the two baselines, no app table has a foreign key to a data table.
@@ -176,17 +176,30 @@ crawler-worker image it is `/app/crawler migrate`.
 
 In Kubernetes, `scripts/deploy/deploy.sh` runs it as the Job `crawler-migrate`
 (`k8s/manifests/crawler-migrate-job.yaml`, from the crawler-worker image) before it applies the
-backend and the crawler-worker, and stops the deploy if the Job fails. It runs the Job only in a
-namespace that owns a data database: one whose Secret `econ-graph-secrets` has the key
-`data-database-url`. Without that key it skips the Job. `deploy.sh --dry-run` lists the Job with
-the rest of the deploy.
+backend and the crawler-worker, and stops the deploy if the Job fails. It needs a namespace
+that owns a data database: one whose Secret `econ-graph-secrets` has the key
+`data-database-url`. Without that key the deploy stops, since the backend would refuse to start.
+
+Before that Job, `deploy.sh` runs `crawler migrate --dry-run` in the Job `crawler-migrate-check`
+(the same manifest, changing nothing; `scripts/deploy/lib/data-migrations.sh`):
+
+- **Some pending:** it stops the old crawler-worker with
+  `scripts/deploy/precheck-db-migration.sh --stop-crawler`, so the worker doesn't write while
+  the migrations run. The worker comes back on the new image when `deploy.sh` applies
+  `crawler-worker.yaml` after `crawler-migrate` completes, and stays stopped if the Job fails.
+  The precheck refuses while a `postgres-backup` or `crawler-migrate` Job is running or a
+  long transaction holds the data database, and then the deploy stops before the migrations.
+- **None pending:** the worker keeps running.
+
+`deploy.sh --dry-run` lists both Jobs with the rest of the deploy.
 
 A data migration that bounds its table locks (`lock_timeout`, `statement_timeout`) fails its
 run, changing nothing, when other transactions hold its tables. The Job gives it one more pod
 (`backoffLimit: 1`) and then fails, and `deploy.sh` stops before the backend and the
-crawler-worker are applied. `scripts/deploy/precheck-db-migration.sh`, run immediately before
-`deploy.sh`, checks the data database for such transactions and can stop the crawler-worker
-first; see
+crawler-worker are applied. `scripts/deploy/precheck-db-migration.sh` checks the data database
+for such transactions and stops the crawler-worker. `deploy.sh` runs it when migrations are
+pending, and running it by hand before `deploy.sh` finds the same problems before anything is
+applied; see
 [Deploying the migration](../technical/OBSERVATION_PRECISION_REFETCH.md#deploying-the-migration)
 for the observation-values migration, which does this.
 

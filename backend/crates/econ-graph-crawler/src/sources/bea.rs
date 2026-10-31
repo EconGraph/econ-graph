@@ -2,16 +2,18 @@
 // Licensed under the Microsoft Reference Source License (MS-RSL).
 // See LICENSE file for complete terms and conditions.
 
-//! BEA (Bureau of Economic Analysis) adapter: curated NIPA and Regional tables, one series per
-//! table line, with BEA's own table names, line numbers and area codes as ids.
+//! BEA (Bureau of Economic Analysis) adapter: NIPA and Regional table families selected from
+//! BEA's current upstream catalog, one series per table line and area/frequency.
 //!
-//! # Tables
+//! `catalog_selection/bea.toml` supplies dataset, table-prefix/title rules and frequencies.
+//! A renamed or newly published table in a selected family needs no curated-id update. Selection
+//! has explicit table and expanded-series limits; exceeding either fails the whole discovery
+//! before any series are persisted or enqueued.
 //!
-//! The tables are reference data in `bea_tables.csv` ([`TABLES_FILE`], in the
-//! [reference data directory](crate::reference::data_dir)): BEA dataset (`NIPA` or `Regional`),
-//! `TableName` and the frequencies crawled. See [`tables`]. Each table's title comes from BEA's
-//! own `GetParameterValues(TableName)`, refreshed each crawl (see
-//! [`BeaAdapter::refresh_table_titles`]), not from a curated column.
+//! `GetParameterValues(TableName)` is refreshed before discovery. Exact membership is stored in
+//! immutable, body-hash keyed shared snapshots, so conditional responses and other worker
+//! processes cannot reuse a stale in-memory catalog. The accumulated dataset dimension labels
+//! retain the last known titles of tables the source removed; they never decide membership.
 //!
 //! # Datasets and ids
 //!
@@ -36,20 +38,10 @@
 //!   areas kept are the nation, states and BEA regions (five digits ending in `000`). One series
 //!   per line and area.
 //!
-//! Discovery is all or nothing: any failed request, or a table and frequency with no rows (for
-//! example a table BEA renamed), fails the whole discovery. A successful discovery therefore lists
-//! every series the adapter crawls ([`discovery_is_complete`](SourceAdapter::discovery_is_complete)),
-//! so the worker retires series it no longer lists: lines or areas BEA dropped, and the made-up
-//! ids (`NIPA_GDP_TOTAL`, ...) of the old hard-coded catalog.
-//!
-//! The one exception is a curated table missing from BEA's `TableName` list after a successful
-//! title refresh (see [`BeaAdapter::refresh_table_titles`]): BEA no longer publishes it under that
-//! name, so it is skipped with a warning naming it and the other tables are still discovered.
-//! The skipped tables are reported through
-//! [`curated_missing`](SourceAdapter::curated_missing), so the worker sets
-//! `crawler_curated_missing{source="BEA"}` and retires nothing for that discovery: the skipped
-//! table's stored series are kept as they are. If the title refresh failed or returned nothing,
-//! a missing title is a `Transient` error instead, so a BEA outage retries discovery.
+//! Discovery is all or nothing: failed/empty catalog refreshes, failed table requests or empty
+//! table/frequency responses fail the discovery. Only a complete successful selected catalog can
+//! supply lifecycle absence evidence. Missing series keep their stored history and titles; the
+//! shared lifecycle reconciliation requires repeated absence and guards mass disappearance.
 //!
 //! Titles are the line description, the table's short title and, for NIPA, the frequency. NIPA
 //! tables repeat descriptions (`Goods` and `Services` under consumption, exports and imports), so
@@ -67,8 +59,18 @@
 //! Every fetch asks for the whole history (`Year` `X` for NIPA, `ALL` for Regional) and ignores
 //! `since`: BEA's annual updates revise several years and comprehensive updates revise (and
 //! re-base) the whole history, so an incremental window would keep stale values. A table's full
-//! history is still one modest request. A requested series with no rows in the response is
-//! `NotFound`.
+//! history is still one modest request. A requested series with no rows in a successful
+//! response is `Absent`, not `NotFound`: omitting a line or area is weaker evidence than an
+//! explicit "does not exist". That includes an empty response: a Regional request is filtered
+//! to the batch's areas, so it is empty when every requested area is gone (legacy counties),
+//! and BEA answers a NIPA table it no longer publishes at that frequency with no rows. A
+//! briefly empty table during a BEA update cannot retire anything: six misses about ten
+//! refresh intervals apart are needed, and listed series are not counted.
+//! It isn't retried (each retry would request the whole table again); the scheduler tries again
+//! after the same long backoff as NotFound. For a series the current accepted catalog lists,
+//! `Absent` is not counted at all: catalog discovery alone decides whether it was removed. For
+//! an unlisted or legacy series, six consecutive `Absent` results retire it from fetching (see
+//! [`lifecycle`](crate::lifecycle)), and it is then probed on a slow schedule.
 //!
 //! `DataValue` has thousands separators and is scaled by `10^UNIT_MULT`, so values are in base
 //! units (dollars, not millions of dollars). Units come from `CL_UNIT`, or `METRIC_NAME` when
@@ -117,8 +119,6 @@
 //! series.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
-use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use bigdecimal::BigDecimal;
@@ -130,13 +130,14 @@ use crate::adapter::{
     ApiKeys, BatchFetch, CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries,
     NewSeriesMetadataLite, SourceAdapter,
 };
+use crate::catalog_selection::{bea_rules, BeaSelection};
 use crate::dataset::{DatasetDef, SeriesDataset};
 use crate::error::CrawlError;
+use crate::http::scrub_error;
 use crate::persist;
-use crate::reference::{data_dir, DATA_DIR_ENV};
 #[cfg(test)]
 use crate::reference_file::{download_seed_entries, seed_migration_sql};
-use crate::reference_file::{labels_only, refresh_code_list_with, CodeList};
+use crate::reference_file::{labels_only, CodeList};
 use crate::source::SourceId;
 use crate::value::{check_observation_value, parse_observation_value};
 use econ_graph_core::error::AppError;
@@ -149,9 +150,6 @@ pub const NIPA_DATASET: &str = "bea_nipa";
 
 /// Dataset code of Regional table lines by area.
 pub const REGIONAL_DATASET: &str = "bea_regional";
-
-/// File name of the curated tables in the reference data directory.
-pub const TABLES_FILE: &str = "bea_tables.csv";
 
 /// Years of NIPA data (the current one included) discovery requests to list a table's lines.
 pub const DISCOVERY_YEARS: i32 = 3;
@@ -183,6 +181,13 @@ impl BeaDataset {
             BeaDataset::Nipa => NIPA_DATASET,
             BeaDataset::Regional => REGIONAL_DATASET,
         }
+    }
+
+    /// The dataset whose [`code`](Self::code) is `code`.
+    pub fn from_code(code: &str) -> Option<Self> {
+        [BeaDataset::Nipa, BeaDataset::Regional]
+            .into_iter()
+            .find(|d| d.code() == code)
     }
 }
 
@@ -227,102 +232,12 @@ impl Frequency {
     }
 }
 
-/// One curated table from [`TABLES_FILE`]. Its title, used in series titles, is not here: it
-/// comes from BEA's own `GetParameterValues(TableName)` on each crawl (see
-/// [`BeaAdapter::refresh_table_titles`]), not from a curated column.
+/// A table selected from the current upstream catalog and its configured frequencies.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BeaTable {
-    /// BEA dataset.
     pub dataset: BeaDataset,
-    /// BEA `TableName`, e.g. `T10105` or `SAGDP2`.
     pub table_name: String,
-    /// Frequencies crawled, in file order. Regional tables are annual.
     pub frequencies: Vec<Frequency>,
-}
-
-/// The curated tables from [`TABLES_FILE`] in the reference data directory, read on first use
-/// and cached. A missing or malformed file is a `Permanent` error with the path in the message.
-pub fn tables() -> Result<&'static [BeaTable], CrawlError> {
-    static TABLES: OnceLock<Result<Vec<BeaTable>, String>> = OnceLock::new();
-    TABLES
-        .get_or_init(|| load_tables(&data_dir().join(TABLES_FILE)))
-        .as_deref()
-        .map_err(|e| CrawlError::Permanent(e.clone()))
-}
-
-fn load_tables(path: &Path) -> Result<Vec<BeaTable>, String> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| format!("reading {}: {e} (set {DATA_DIR_ENV})", path.display()))?;
-    parse_tables(&text).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-/// Parses `dataset,table_name,frequencies` rows after a header line. Blank lines and `#`
-/// comments are skipped. Table names must be unique, and at least one table is required.
-fn parse_tables(text: &str) -> Result<Vec<BeaTable>, String> {
-    const HEADER: &str = "dataset,table_name,frequencies";
-    let mut lines = text
-        .lines()
-        .enumerate()
-        .map(|(i, l)| (i + 1, l.trim()))
-        .filter(|(_, l)| !l.is_empty() && !l.starts_with('#'));
-    match lines.next() {
-        Some((_, HEADER)) => {}
-        Some((n, other)) => {
-            return Err(format!("line {n}: expected header {HEADER}, got {other:?}"))
-        }
-        None => return Err("no header line".into()),
-    }
-    let mut tables = Vec::new();
-    let mut seen = HashSet::new();
-    for (n, line) in lines {
-        let mut cols = line.splitn(3, ',').map(str::trim);
-        let (Some(dataset), Some(table_name), Some(frequencies)) =
-            (cols.next(), cols.next(), cols.next())
-        else {
-            return Err(format!("line {n}: expected {HEADER}, got {line:?}"));
-        };
-        let dataset = match dataset {
-            "NIPA" => BeaDataset::Nipa,
-            "Regional" => BeaDataset::Regional,
-            other => {
-                return Err(format!(
-                    "line {n}: unknown dataset {other:?} (NIPA or Regional)"
-                ))
-            }
-        };
-        if table_name.is_empty() || !table_name.bytes().all(|b| b.is_ascii_alphanumeric()) {
-            return Err(format!(
-                "line {n}: table name {table_name:?} is not alphanumeric"
-            ));
-        }
-        if !seen.insert(table_name) {
-            return Err(format!("line {n}: table {table_name} is listed twice"));
-        }
-        let frequencies = frequencies
-            .split_whitespace()
-            .map(|f| {
-                Frequency::from_code(f)
-                    .ok_or_else(|| format!("line {n}: unknown frequency {f:?} (A, Q or M)"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        if frequencies.is_empty() {
-            return Err(format!("line {n}: table {table_name} has no frequency"));
-        }
-        if dataset == BeaDataset::Regional && frequencies != [Frequency::Annual] {
-            return Err(format!(
-                "line {n}: Regional table {table_name} must be annual (A)"
-            ));
-        }
-        tables.push(BeaTable {
-            dataset,
-            table_name: table_name.to_string(),
-            frequencies,
-        });
-    }
-    if tables.is_empty() {
-        return Err("no tables".into());
-    }
-    Ok(tables)
 }
 
 /// A BEA series id, parsed.
@@ -419,6 +334,15 @@ fn regional_dimensions(table: &str, line: &str, geo: &str) -> SeriesDataset {
     )
 }
 
+/// What discovery's error says when BEA serves no rows (NIPA) or no line codes or areas
+/// (Regional) for a table it lists.
+const EMPTY_TABLE: &str = "BEA serves no data for this listed table";
+
+/// Whether `error` is discovery finding a listed table empty (see [`EMPTY_TABLE`]).
+pub(crate) fn is_empty_table(error: &CrawlError) -> bool {
+    matches!(error, CrawlError::Permanent(message) if message.contains(EMPTY_TABLE))
+}
+
 /// BEA adapter. See the module docs.
 #[derive(Debug)]
 pub struct BeaAdapter {
@@ -435,17 +359,14 @@ pub struct BeaAdapter {
     /// Labels merged into the database accumulate, so a table BEA has dropped can keep its last
     /// known title here.
     titles: tokio::sync::RwLock<HashMap<BeaDataset, HashMap<String, String>>>,
-    /// The `TableName`s BEA currently lists, for each dataset whose most recent
-    /// [`refresh_table_titles`](Self::refresh_table_titles) succeeded: the codes that refresh
-    /// parsed, or, after an unchanged conditional refresh, the set an earlier refresh in this
-    /// process parsed (the first refresh is unconditional, so there always is one). Never the
-    /// stored labels, which keep tables BEA has dropped. `discover` skips a curated table missing
-    /// from it as one BEA no longer lists. A dataset with no entry (no refresh yet, or the last one failed)
-    /// makes a table with no known title `Transient`, so discovery retries once BEA is reachable.
+    /// Exact names from each dataset's most recent successful current-catalog refresh. Never
+    /// populated from additive historical labels; cleared when its refresh fails.
     listed: tokio::sync::RwLock<HashMap<BeaDataset, HashSet<String>>>,
-    /// The curated tables the last successful `discover` skipped (`Regional SAGDP2`, ...), for
-    /// [`curated_missing`](SourceAdapter::curated_missing).
-    skipped_tables: std::sync::Mutex<Vec<String>>,
+    selection: Option<BeaSelection>,
+    /// Series-id prefixes of tables the last successful discovery saw listed upstream but
+    /// did not select: their tracked series are still published (see
+    /// [`CatalogLifecycle::unselected_prefixes`](crate::lifecycle::CatalogLifecycle::unselected_prefixes)).
+    unselected_prefixes: std::sync::Mutex<Vec<String>>,
 }
 
 impl BeaAdapter {
@@ -456,7 +377,8 @@ impl BeaAdapter {
             current_year: None,
             titles: tokio::sync::RwLock::new(HashMap::new()),
             listed: tokio::sync::RwLock::new(HashMap::new()),
-            skipped_tables: std::sync::Mutex::new(Vec::new()),
+            selection: None,
+            unselected_prefixes: std::sync::Mutex::default(),
         }
     }
 
@@ -529,9 +451,16 @@ impl BeaAdapter {
             .http
             .get_json(SourceId::Bea, &format!("{}/", self.base_url), &query)
             .await?;
-        let results = decode_results(body, method)?;
-        serde_json::from_value(results)
-            .map_err(|e| CrawlError::Parse(format!("BEA {method}: unexpected Results: {e}")))
+        // BEA's in-body error text and serde's quoted values come from the response body: scrub
+        // the key from them in case BEA echoes it.
+        let secret = [key.to_owned()];
+        let results = decode_results(body, method).map_err(|e| scrub_error(e, &secret))?;
+        serde_json::from_value(results).map_err(|e| {
+            scrub_error(
+                CrawlError::Parse(format!("BEA {method}: unexpected Results: {e}")),
+                &secret,
+            )
+        })
     }
 
     async fn get_data<R: DeserializeOwned>(
@@ -566,111 +495,60 @@ impl BeaAdapter {
         Ok(values.param_value)
     }
 
-    /// Conditionally re-fetches BEA's own titles for every `TableName` of `list`'s dataset
-    /// (`GetParameterValues`, `ParameterName=TableName`; its `ParamValue` rows are named after
-    /// the parameter itself, `TableName`/`Description`, for NIPA, or the generic `Key`/`Desc`
-    /// every other `GetParameterValues*` call on Regional uses — [`TableNameValue`] accepts
-    /// either), merges them into the dataset's `table_name` dimension
-    /// ([`refresh_code_list`](crate::reference_file::refresh_code_list), so `bea_tables.csv` doesn't need a curated title column and the
-    /// GraphQL code list carries them too — a response with no rows is a `Parse` error, same as
-    /// any other empty code list, never a silent no-op) and refreshes the in-process cache
-    /// [`table_titles`](Self::table_titles) reads. The only method that touches the database or
-    /// fetches titles over the network; called by
-    /// [`refresh_reference_data`](SourceAdapter::refresh_reference_data), so its failure (BEA or
-    /// the database) never fails a `discover` or `fetch_*` already in flight — it still reloads
-    /// the cache from the database either way (below), so only a database that truly has nothing
-    /// yet leaves the cache as it was.
-    ///
-    /// Reloads the in-process cache from the database after every refresh attempt, applied or
-    /// not (a `304`, or an `apply` that found nowhere to merge into), rather than trusting
-    /// whatever this process instance already has in memory, so a fresh worker process picks up
-    /// another instance's last merge instead of placeholder titles.
-    ///
-    /// The first refresh of a dataset in this process (and the first after a failed one) is an
-    /// unconditional GET, sending no stored validators, so it always parses a real body into
-    /// [`listed`](Self::listed): a conditional refresh would usually be `Unchanged` (a `304`, or
-    /// a `200` with the stored body hash) right after a restart and leave nothing to tell which
-    /// tables BEA still lists. Later refreshes are conditional and keep that parsed set.
+    /// Refresh exact current membership through the versioned shared catalog snapshot. Historic
+    /// dimension labels stay additive, so old tables retain titles without staying selected.
     async fn refresh_table_titles(
         &self,
         ctx: &CrawlCtx,
         list: &CodeList,
         dataset: BeaDataset,
     ) -> Result<(), CrawlError> {
-        // Capture the codes this refresh parses: BEA's current list, unlike the stored labels,
-        // which keep every table BEA ever listed. A truncated but non-empty TableName response
-        // would make the tables it lacks look dropped, so discovery would skip them; the
-        // `crawler_curated_missing` gauge and its alert are the backstop for that.
-        let parsed: Arc<std::sync::Mutex<Option<HashSet<String>>>> = Arc::default();
-        let capturing = CodeList {
-            parse: {
-                let parse = Arc::clone(&list.parse);
-                let parsed = Arc::clone(&parsed);
-                Arc::new(move |body| {
-                    let codes = parse(body)?;
-                    *parsed
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                        Some(codes.iter().map(|c| c.code.clone()).collect());
-                    Ok(codes)
-                })
-            },
-            ..list.clone()
-        };
-        let conditional = self.listed.read().await.contains_key(&dataset);
-        // `refresh_code_list`'s own HTTP layer already counts a transport/status error; a `parse`
-        // error (BEA answered 200 with an in-body error envelope) comes from `apply`, after that,
-        // so it needs its own record here or it's silently dropped from `crawler_errors_total`.
-        let refreshed = refresh_code_list_with(ctx, SourceId::Bea, &capturing, conditional)
-            .await
-            .inspect_err(|e| {
-                if e.kind() == "parse" {
+        let refreshed = crate::catalog_reference::current_codes(ctx, SourceId::Bea, list).await;
+        match &refreshed {
+            Ok(codes) => {
+                self.listed
+                    .write()
+                    .await
+                    .insert(dataset, codes.iter().map(|c| c.code.clone()).collect());
+            }
+            Err(error) => {
+                self.listed.write().await.remove(&dataset);
+                if error.kind() == "parse" {
                     ctx.http
-                        .record_response_error(SourceId::Bea, list.request_url(), e);
+                        .record_response_error(SourceId::Bea, list.request_url(), error);
                 }
-            });
-        // Updated before the database reload below, which can return early: a stale set kept
-        // past a refresh that parsed a new list would survive later `304`s.
-        let parsed = parsed
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-            .filter(|codes| !codes.is_empty());
-        {
-            let mut listed = self.listed.write().await;
-            let current = match (&refreshed, parsed) {
-                (Err(_), _) => None,
-                (Ok(_), Some(codes)) => Some(codes),
-                // Unchanged: only a conditional refresh can be, and that needs a set this process
-                // already parsed, which stays BEA's list.
-                (Ok(_), None) => listed.get(&dataset).cloned(),
-            };
-            match current {
-                Some(codes) => listed.insert(dataset, codes),
-                None => listed.remove(&dataset),
-            };
+            }
         }
-        let dataset_code = dataset.code();
-        // Reload from the database either way, even on a failed refresh (BEA down, rate
-        // limited, a bad body): a prior process instance's merge, or this process's own earlier
-        // one, may already be there, and skipping the reload would otherwise blank the
-        // in-process cache (and so fail every subsequent `discover`) on a single transient BEA
-        // error. After a successful merge this is the dataset's canonical (sorted, deduplicated)
-        // code list rather than just this fetch's rows; after a no-op (304, or nothing to merge
-        // into), it's the best available titles. Keep whatever this process already has only if
-        // the database truly has nothing yet.
-        let from_db =
-            persist::dataset_dimension_labels(&ctx.pool, SourceId::Bea, dataset_code, "table_name")
-                .await
-                .map_err(db_err)?;
-        let titles = if from_db.is_empty() {
-            self.table_titles(dataset).await
-        } else {
-            from_db
-        };
-        self.titles.write().await.insert(dataset, titles);
+        // Fetches can keep serving stored history even when current catalog discovery failed.
+        let from_db = persist::dataset_dimension_labels(
+            &ctx.pool,
+            SourceId::Bea,
+            dataset.code(),
+            "table_name",
+        )
+        .await
+        .map_err(db_err)?;
+        if !from_db.is_empty() {
+            self.titles.write().await.insert(dataset, from_db);
+        }
         refreshed?;
         Ok(())
+    }
+
+    /// The selection rules: the ones a test gave with `with_selection`, else
+    /// `catalog_selection/bea.toml`.
+    pub(crate) fn selection(&self) -> Result<&BeaSelection, CrawlError> {
+        match self.selection.as_ref() {
+            Some(selection) => Ok(selection),
+            None => bea_rules(),
+        }
+    }
+
+    /// Uses `selection` instead of `catalog_selection/bea.toml`.
+    #[cfg(test)]
+    pub(crate) fn with_selection(mut self, selection: BeaSelection) -> Self {
+        self.selection = Some(selection);
+        self
     }
 
     /// The `TableName`s BEA listed in `dataset`'s last successful refresh, or `None` when the
@@ -690,6 +568,93 @@ impl BeaAdapter {
             .get(&dataset)
             .cloned()
             .unwrap_or_default()
+    }
+
+    /// Positively enroll existing histories matching the current configured selection scope.
+    /// This also finds a table renamed before the first catalog-driven crawl. It never treats
+    /// every BEA series as selected, and a title predicate requires a retained upstream title.
+    async fn stored_scope_members(&self, ctx: &CrawlCtx) -> Result<Vec<String>, CrawlError> {
+        use diesel::sql_types::{Array, Text, Uuid as SqlUuid};
+        use diesel_async::RunQueryDsl;
+        use futures::TryStreamExt;
+
+        #[derive(diesel::QueryableByName)]
+        struct StoredId {
+            #[diesel(sql_type = Text)]
+            external_id: String,
+        }
+
+        let rules = self.selection()?;
+        let mut titles = HashMap::new();
+        for dataset in [BeaDataset::Nipa, BeaDataset::Regional] {
+            titles.insert(
+                dataset,
+                persist::dataset_dimension_labels(
+                    &ctx.pool,
+                    SourceId::Bea,
+                    dataset.code(),
+                    "table_name",
+                )
+                .await
+                .map_err(db_err)?,
+            );
+        }
+        let source_id = persist::data_source_id(&ctx.pool, SourceId::Bea)
+            .await
+            .map_err(db_err)?;
+        // Prefixes are validated alphanumeric, so these SQL LIKE patterns contain only the
+        // intended suffix wildcard. Apply them before loading histories from either store.
+        let patterns: Vec<String> = rules
+            .rule
+            .iter()
+            .map(|rule| {
+                let code = if rule.dataset == "NIPA" {
+                    NIPA_DATASET
+                } else {
+                    REGIONAL_DATASET
+                };
+                format!("{}/{}%", code.replace('_', "\\_"), rule.prefix)
+            })
+            .collect();
+        let mut conn = ctx
+            .pool
+            .get()
+            .await
+            .map_err(|e| CrawlError::Transient(format!("BEA scope membership: {e}")))?;
+        let query = diesel::sql_query(
+            "SELECT external_id FROM economic_series WHERE source_id = $1 AND external_id LIKE ANY($2) \
+             UNION SELECT external_id FROM series_metadata WHERE source_id = $1 AND external_id LIKE ANY($2) \
+             ORDER BY external_id"
+        ).bind::<SqlUuid, _>(source_id).bind::<Array<Text>, _>(patterns);
+        let mut rows = query
+            .load_stream::<StoredId>(&mut conn)
+            .await
+            .map_err(|e| CrawlError::Transient(format!("BEA scope membership: {e}")))?;
+        let mut members = Vec::new();
+        while let Some(row) = rows
+            .try_next()
+            .await
+            .map_err(|e| CrawlError::Transient(format!("BEA scope membership: {e}")))?
+        {
+            let Some(key) = SeriesKey::parse(&row.external_id) else {
+                continue;
+            };
+            let (dataset, table, frequency) = match &key {
+                SeriesKey::Nipa {
+                    table, frequency, ..
+                } => (BeaDataset::Nipa, table, *frequency),
+                SeriesKey::Regional { table, geo, .. } if is_state_level_geo(geo) => {
+                    (BeaDataset::Regional, table, Frequency::Annual)
+                }
+                SeriesKey::Regional { .. } => continue,
+            };
+            let title = titles[&dataset].get(table).map(String::as_str);
+            if rules.includes_stored_series(dataset, table, frequency, title) {
+                rules.check_series_count(members.len().saturating_add(1))?;
+                members.push(row.external_id);
+            }
+        }
+        Ok(members)
     }
 
     async fn discover_nipa(
@@ -721,7 +686,7 @@ impl BeaAdapter {
                 // frequency. Fail rather than skip: discovery is complete, so skipping would
                 // retire the table's series.
                 return Err(CrawlError::Permanent(format!(
-                    "BEA NIPA {} ({}): GetData returned no rows; fix {TABLES_FILE}",
+                    "BEA NIPA {} ({}): {EMPTY_TABLE}; check the upstream catalog and catalog_selection/bea.toml",
                     table.table_name,
                     frequency.code()
                 )));
@@ -732,6 +697,8 @@ impl BeaAdapter {
                 if !seen.insert(row.line_number.as_str()) {
                     continue;
                 }
+                self.selection()?
+                    .check_series_count(found.len().saturating_add(1))?;
                 let dataset = nipa_dimensions(&table.table_name, &row.line_number, frequency);
                 let external_id = def
                     .external_id(&dataset.dimensions)
@@ -772,11 +739,13 @@ impl BeaAdapter {
         // Discovery is complete, so an empty list would retire every series of the table.
         if lines.is_empty() || geos.is_empty() {
             return Err(CrawlError::Permanent(format!(
-                "BEA Regional {}: no line codes or areas; fix {TABLES_FILE}",
+                "BEA Regional {}: {EMPTY_TABLE}; check the upstream catalog and catalog_selection/bea.toml",
                 table.table_name
             )));
         }
-        let mut found = Vec::with_capacity(lines.len() * geos.len());
+        let count = lines.len().saturating_mul(geos.len());
+        self.selection()?.check_series_count(count)?;
+        let mut found = Vec::with_capacity(count);
         for line in &lines {
             let line_desc = line_description(&line.desc);
             for geo in &geos {
@@ -796,6 +765,29 @@ impl BeaAdapter {
             }
         }
         Ok(found)
+    }
+
+    /// The series one selected table publishes now: `GetData` per frequency for a NIPA table,
+    /// its line codes and areas for a Regional one (see [Discovery](self#discovery)). `title`
+    /// is the table's current upstream title. Reads and writes no database.
+    pub(crate) async fn discover_table(
+        &self,
+        ctx: &CrawlCtx,
+        table: &BeaTable,
+        title: &str,
+    ) -> Result<Vec<DiscoveredSeries>, CrawlError> {
+        let key = self.api_key(ctx)?;
+        let code = table.dataset.code();
+        let def = crate::reference::datasets(SourceId::Bea)?
+            .iter()
+            .find(|d| d.code == code)
+            .ok_or_else(|| {
+                CrawlError::Permanent(format!("BEA dataset {code} has no definition"))
+            })?;
+        match table.dataset {
+            BeaDataset::Nipa => self.discover_nipa(ctx, key, def, table, title).await,
+            BeaDataset::Regional => self.discover_regional(ctx, key, def, table, title).await,
+        }
     }
 
     /// Fetches one batch group (ids sharing a [`SeriesKey::batch_key`]). `titles` is this
@@ -864,7 +856,8 @@ impl BeaAdapter {
                 continue;
             };
             let result = match by_line.get(line.as_str()) {
-                None => Err(CrawlError::NotFound(format!(
+                // Weaker than NotFound (see the module docs).
+                None => Err(CrawlError::Absent(format!(
                     "BEA {id}: no line {line} in {table_name} ({})",
                     frequency.code()
                 ))),
@@ -946,7 +939,8 @@ impl BeaAdapter {
                 continue;
             };
             let result = match by_geo.get(geo.as_str()) {
-                None => Err(CrawlError::NotFound(format!(
+                // Weaker than NotFound (see the module docs).
+                None => Err(CrawlError::Absent(format!(
                     "BEA {id}: no data for area {geo} in {table_name} line {line}"
                 ))),
                 Some(rows) => regional_series(
@@ -988,97 +982,86 @@ impl SourceAdapter for BeaAdapter {
     }
 
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
-        let key = self.api_key(ctx)?;
-        let tables = tables()?;
-        let defs = crate::reference::datasets(SourceId::Bea)?;
-        let def = |code: &str| {
-            defs.iter().find(|d| d.code == code).ok_or_else(|| {
-                CrawlError::Permanent(format!("BEA dataset {code} has no definition"))
+        self.api_key(ctx)?;
+        let rules = self.selection()?;
+        let mut current_catalogs = HashMap::new();
+        for dataset in [BeaDataset::Nipa, BeaDataset::Regional] {
+            let listed = self.listed_tables(dataset).await.ok_or_else(|| CrawlError::Transient(format!(
+                "BEA {}: current table catalog unavailable; title not yet known; refresh_reference_data must succeed", dataset.api_name()
+            )))?;
+            let titles = self.table_titles(dataset).await;
+            let mut current = HashMap::new();
+            for name in listed {
+                let title = titles.get(&name).ok_or_else(|| {
+                    CrawlError::Transient(format!(
+                        "BEA {} {name}: title not yet known",
+                        dataset.api_name()
+                    ))
+                })?;
+                current.insert(name, title.clone());
+            }
+            current_catalogs.insert(dataset, current);
+        }
+        let tables = rules.select(&current_catalogs)?;
+        let selected: HashSet<(BeaDataset, &str)> = tables
+            .iter()
+            .map(|t| (t.dataset, t.table_name.as_str()))
+            .collect();
+        let mut unselected_prefixes: Vec<String> = current_catalogs
+            .iter()
+            .flat_map(|(dataset, catalog)| {
+                catalog
+                    .keys()
+                    .filter(|name| !selected.contains(&(*dataset, name.as_str())))
+                    .map(|name| format!("{}/{name}.", dataset.code()))
             })
-        };
-        let (nipa, regional) = (def(NIPA_DATASET)?, def(REGIONAL_DATASET)?);
-        let nipa_titles = self.table_titles(BeaDataset::Nipa).await;
-        let regional_titles = self.table_titles(BeaDataset::Regional).await;
-        let nipa_listed = self.listed_tables(BeaDataset::Nipa).await;
-        let regional_listed = self.listed_tables(BeaDataset::Regional).await;
-
+            .collect();
+        unselected_prefixes.sort_unstable();
+        *self
+            .unselected_prefixes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = unselected_prefixes;
         let mut found = Vec::new();
-        let mut skipped: Vec<String> = Vec::new();
-        for table in tables {
-            let (titles, listed) = match table.dataset {
-                BeaDataset::Nipa => (&nipa_titles, &nipa_listed),
-                BeaDataset::Regional => (&regional_titles, &regional_listed),
-            };
-            // After a successful refresh, a table BEA no longer lists (renamed or dropped) is
-            // skipped and the rest of BEA is still discovered, even if its last known title is
-            // still stored.
-            if listed
-                .as_ref()
-                .is_some_and(|listed| !listed.contains(&table.table_name))
-            {
-                skipped.push(format!("{} {}", table.dataset.api_name(), table.table_name));
-                continue;
-            }
-            let (title, known) = title_for(titles, &table.table_name);
-            // A table whose title isn't known is never discovered with the bare-table-name
-            // placeholder as every one of its series' titles: `persist_discovered` writes
-            // `DiscoveredSeries::title` unconditionally, so that would overwrite real stored
-            // titles on the very next fetch, defeating the staleness protection
-            // `fetch_nipa`/`fetch_regional` rely on. With no successful refresh behind the
-            // titles (refresh_reference_data never ran, or failed), they may just not be synced
-            // yet, so discovery fails `Transient` and retries.
-            if !known {
-                return Err(CrawlError::Transient(format!(
-                    "BEA {} {}: title not yet known; refresh_reference_data hasn't synced it",
-                    table.dataset.api_name(),
-                    table.table_name
-                )));
-            }
-            let series = match table.dataset {
-                BeaDataset::Nipa => self.discover_nipa(ctx, key, nipa, table, &title).await,
-                BeaDataset::Regional => {
-                    self.discover_regional(ctx, key, regional, table, &title)
-                        .await
-                }
-            }?;
-            tracing::debug!(table = %table.table_name, series = series.len(), "BEA table");
+        for table in &tables {
+            let title = &current_catalogs[&table.dataset][&table.table_name];
+            let series = self.discover_table(ctx, table, title).await?;
+            rules.check_series_count(found.len().saturating_add(series.len()))?;
             found.extend(series);
         }
-        if !skipped.is_empty() {
-            let sample: Vec<&str> = skipped.iter().take(5).map(String::as_str).collect();
-            tracing::warn!(
-                skipped = skipped.len(),
-                sample = ?sample,
-                "BEA discovery: some curated tables are not in BEA's TableName list"
-            );
-        }
         tracing::info!(
-            tables = tables.len() - skipped.len(),
-            skipped_tables = skipped.len(),
+            tables = tables.len(),
             series = found.len(),
-            "BEA discovery finished"
+            "BEA catalog-driven discovery finished"
         );
-        *self
-            .skipped_tables
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = skipped;
         Ok(found)
     }
 
-    /// Discovery fails whole on any error (see the module docs), so a successful one is complete,
-    /// unless it skipped curated tables BEA no longer lists (then the worker retires nothing; see
-    /// [`curated_missing`](SourceAdapter::curated_missing)).
+    /// Successful discovery is a complete listing of the configured selection scope.
     fn discovery_is_complete(&self) -> bool {
         true
     }
 
-    /// The curated tables the last successful `discover` skipped because BEA's `TableName` list
-    /// no longer has them (see the module docs).
-    fn curated_missing(&self) -> Vec<String> {
-        self.skipped_tables
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+    fn tracks_catalog_lifecycle(&self) -> bool {
+        true
+    }
+
+    fn catalog_scope(&self) -> Option<String> {
+        self.selection().ok().map(BeaSelection::fingerprint)
+    }
+
+    fn catalog_lifecycle(&self) -> crate::lifecycle::CatalogLifecycle {
+        crate::lifecycle::CatalogLifecycle {
+            unselected_prefixes: self
+                .unselected_prefixes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+            ..Default::default()
+        }
+    }
+
+    async fn catalog_scope_members(&self, ctx: &CrawlCtx) -> Result<Vec<String>, CrawlError> {
+        self.stored_scope_members(ctx).await
     }
 
     /// BEA's titles for every NIPA and Regional `TableName`, one [`CodeList`] per dataset.
@@ -1110,7 +1093,7 @@ impl SourceAdapter for BeaAdapter {
     }
 
     /// Fetches BEA's own titles for every NIPA and Regional `TableName` and merges them into
-    /// `bea_tables.csv`'s curated tables' `table_name` dimension (see
+    /// each dataset's additive `table_name` dimension (see
     /// [`refresh_table_titles`](Self::refresh_table_titles)). No key: the same `Permanent` error
     /// [`api_key`](Self::api_key) always gives BEA requests without one, since
     /// [`code_lists`](Self::code_lists) returns nothing to refresh.
@@ -1121,11 +1104,7 @@ impl SourceAdapter for BeaAdapter {
         }
         let mut errors = Vec::new();
         for list in &lists {
-            let dataset = if list.dataset == NIPA_DATASET {
-                BeaDataset::Nipa
-            } else {
-                BeaDataset::Regional
-            };
+            let dataset = BeaDataset::from_code(list.dataset).unwrap_or(BeaDataset::Regional);
             if let Err(e) = self.refresh_table_titles(ctx, list, dataset).await {
                 errors.push(format!("{}: {e}", dataset.api_name()));
             }
@@ -1134,7 +1113,7 @@ impl SourceAdapter for BeaAdapter {
             Ok(())
         } else {
             Err(CrawlError::Transient(format!(
-                "BEA table titles (used by {TABLES_FILE}'s curated tables): {}",
+                "BEA table catalog refresh: {}",
                 errors.join("; ")
             )))
         }
@@ -1749,7 +1728,7 @@ mod tests {
     const REGIONAL_TABLE_TITLES: &str =
         include_str!("../../tests/fixtures/bea/regional_table_titles.json");
 
-    /// Every NIPA table and frequency in `bea_tables.csv`, with its fixture.
+    /// Every default NIPA table family and frequency, with its fixture.
     const NIPA_FIXTURES: &[(&str, &str, &str)] = &[
         (
             "T10101",
@@ -1819,6 +1798,8 @@ mod tests {
                 BeaDataset::Regional,
                 &[("SAGDP2", "Gross domestic product (GDP) by state")],
             )
+            .with_refreshed_titles(BeaDataset::Nipa)
+            .with_refreshed_titles(BeaDataset::Regional)
     }
 
     fn get_data() -> Route {
@@ -1956,54 +1937,6 @@ mod tests {
             BeaAdapter::default().datasets(),
             [NIPA_DATASET, REGIONAL_DATASET]
         );
-    }
-
-    #[test]
-    fn curated_tables_file() {
-        let tables = tables().unwrap();
-        let names: Vec<&str> = tables.iter().map(|t| t.table_name.as_str()).collect();
-        assert_eq!(
-            names,
-            ["T10101", "T10105", "T10106", "T20100", "T20600", "T20804", "SAGDP2"]
-        );
-        let gdp = &tables[1];
-        assert_eq!(gdp.dataset, BeaDataset::Nipa);
-        assert_eq!(gdp.frequencies, [Frequency::Annual, Frequency::Quarterly]);
-        assert_eq!(tables[6].dataset, BeaDataset::Regional);
-        // Every NIPA table and frequency has a discovery fixture.
-        let listed: usize = tables
-            .iter()
-            .filter(|t| t.dataset == BeaDataset::Nipa)
-            .map(|t| t.frequencies.len())
-            .sum();
-        assert_eq!(listed, NIPA_FIXTURES.len());
-    }
-
-    #[test]
-    fn parse_tables_rejects_bad_rows() {
-        let header = "dataset,table_name,frequencies\n";
-        let ok = parse_tables(&format!("# c\n{header}NIPA,T1,A Q\n")).unwrap();
-        assert_eq!(ok[0].table_name, "T1");
-        for (body, err) in [
-            ("", "no header"),
-            ("x,y\n", "expected header"),
-            (header, "no tables"),
-            ("NIPA,T1\n", "expected dataset"),
-            ("ITA,T1,A\n", "unknown dataset"),
-            ("NIPA,T-1,A\n", "not alphanumeric"),
-            ("NIPA,T1,A\nNIPA,T1,Q\n", "listed twice"),
-            ("NIPA,T1,W\n", "unknown frequency"),
-            ("NIPA,T1, \n", "no frequency"),
-            ("Regional,S1,Q\n", "must be annual"),
-        ] {
-            let text = if body.starts_with("dataset") || body.is_empty() || body.starts_with("x,") {
-                body.to_string()
-            } else {
-                format!("{header}{body}")
-            };
-            let e = parse_tables(&text).unwrap_err();
-            assert!(e.contains(err), "{body:?}: {e}");
-        }
     }
 
     #[test]
@@ -2180,14 +2113,17 @@ mod tests {
         assert!(mock.received_requests().await.is_empty());
     }
 
-    /// Regional titles from a successful refresh that no longer list the curated `SAGDP2`.
+    /// Regional titles from a successful refresh that no longer list the curated `SAGDP2`; the
+    /// one table still listed matches no selection rule.
     const REGIONAL_WITHOUT_SAGDP2: &[(&str, &str)] = &[(
-        "SAINC1",
-        "SAINC1 Personal income summary: personal income, population, per capita personal income",
+        "SAINC4",
+        "SAINC4 Personal income and employment by major component",
     )];
 
-    /// After a successful title refresh, a curated table BEA no longer lists is skipped (and
-    /// reported through `curated_missing`) while every other table is still discovered.
+    /// After a successful title refresh, a table BEA no longer lists is not selected while every
+    /// other table is still discovered. BEA has no curated list, so `curated_missing` stays
+    /// empty; the rule that selected the table reports zero matches through
+    /// `crawler_catalog_rule_matches` (see `catalog_selection::record_rule_matches`).
     #[tokio::test]
     async fn discover_skips_a_curated_table_missing_from_a_successful_refresh() {
         let mock = MockSource::start().await;
@@ -2201,7 +2137,7 @@ mod tests {
         let found = a.discover(&test_ctx()).await.unwrap();
         assert_eq!(found.len(), 2 * (26 + 26 + 27 + 35) + 35 + 29);
         assert!(found.iter().all(|s| s.external_id.starts_with("bea_nipa/")));
-        assert_eq!(a.curated_missing(), ["Regional SAGDP2"]);
+        assert!(a.curated_missing().is_empty());
         // Only the NIPA tables were requested: nothing for the skipped Regional table.
         assert_eq!(mock.received_requests().await.len(), NIPA_FIXTURES.len());
     }
@@ -2220,7 +2156,7 @@ mod tests {
             .with_table_titles(BeaDataset::Regional, REGIONAL_WITHOUT_SAGDP2);
         let e = a.discover(&test_ctx()).await.unwrap_err();
         assert_eq!(e.kind(), "transient", "{e}");
-        assert!(e.to_string().contains("Regional SAGDP2"), "{e}");
+        assert!(e.to_string().contains("Regional"), "{e}");
         assert!(a.curated_missing().is_empty());
     }
 
@@ -2471,11 +2407,43 @@ mod tests {
             "Personal consumption expenditures (GDP, current dollars, quarterly)"
         );
         assert_eq!(out["bea_nipa/T10105.1.Q"].as_ref().unwrap().points.len(), 4);
+        // A line the response omits is weaker evidence than NotFound.
         assert_eq!(
             out["bea_nipa/T10105.99.Q"].as_ref().unwrap_err().kind(),
-            "not_found"
+            "absent"
         );
         mock.server().verify().await;
+    }
+
+    /// An empty response (every requested Regional area gone, or a NIPA table BEA no longer
+    /// publishes at that frequency) is `Absent` for each requested id, which lifecycle counts
+    /// only for series the accepted catalog does not list.
+    #[tokio::test]
+    async fn fetch_batch_marks_every_id_of_an_empty_response_absent() {
+        const EMPTY: &str = r#"{"BEAAPI":{"Results":{"Data":[]}}}"#;
+        let mock = MockSource::start().await;
+        mock.mount(&nipa_route("T10105", "Q"), Reply::json_str(EMPTY))
+            .await;
+        mock.mount(&regional_data(), Reply::json_str(EMPTY)).await;
+        mock.mount(
+            &regional_params("LineCode"),
+            Reply::json_str(REGIONAL_LINES),
+        )
+        .await;
+        for ids in [
+            vec!["bea_nipa/T10105.1.Q", "bea_nipa/T10105.2.Q"],
+            vec!["bea_regional/SAGDP2.1.09001", "bea_regional/SAGDP2.1.09003"],
+        ] {
+            let ids: Vec<String> = ids.into_iter().map(String::from).collect();
+            let out = adapter(&mock)
+                .fetch_batch(&test_ctx(), &ids, None)
+                .await
+                .unwrap();
+            assert_eq!(out.len(), ids.len());
+            for id in &ids {
+                assert_eq!(out[id].as_ref().unwrap_err().kind(), "absent", "{id}");
+            }
+        }
     }
 
     #[tokio::test]
@@ -2524,12 +2492,13 @@ mod tests {
         let wy = out["bea_regional/SAGDP2.1.56000"].as_ref().unwrap();
         assert_eq!(wy.points.len(), 1);
         assert_eq!(wy.points[0].value, None);
+        // An area the response omits is weaker evidence than NotFound.
         assert_eq!(
             out["bea_regional/SAGDP2.1.72000"]
                 .as_ref()
                 .unwrap_err()
                 .kind(),
-            "not_found"
+            "absent"
         );
         mock.server().verify().await;
     }
@@ -2754,6 +2723,30 @@ mod tests {
         assert_eq!(e.kind(), "transient", "{e}");
     }
 
+    #[tokio::test]
+    async fn an_in_body_error_echoing_an_encoded_key_is_scrubbed() {
+        let key = "k+y/1=2&3%4 5";
+        let form: String = url::form_urlencoded::byte_serialize(key.as_bytes()).collect();
+        let mut ctx = test_ctx();
+        ctx.keys.bea = Some(key.to_owned());
+        for echoed in [key.to_owned(), form.clone(), form.to_lowercase()] {
+            let mock = MockSource::start().await;
+            let body = serde_json::json!({"BEAAPI": {"Error": {
+                "APIErrorCode": "3", "APIErrorDescription": format!("Invalid API UserId {echoed}.")}}});
+            mock.mount(&Route::get("/"), Reply::json(body)).await;
+            let e = adapter(&mock)
+                .fetch_series(&ctx, "bea_nipa/T10105.1.Q", None)
+                .await
+                .unwrap_err();
+            let msg = e.to_string();
+            assert_eq!(e.kind(), "auth", "{msg}");
+            assert!(msg.contains("Invalid API UserId REDACTED."), "{msg}");
+            for leaked in [key, form.as_str(), "k%2b", "k+y"] {
+                assert!(!msg.contains(leaked), "{leaked} leaked: {msg}");
+            }
+        }
+    }
+
     #[test]
     fn classify_bea_error_by_description() {
         for (desc, kind) in [
@@ -2925,124 +2918,257 @@ mod tests {
         db.drop().await;
     }
 
-    /// After a restart, BEA's TableName list usually hasn't changed, so a conditional refresh
-    /// would be `Unchanged` and parse nothing; the stored labels would then still list a table BEA
-    /// has dropped. A fresh adapter's first refresh therefore sends no validators and parses the
-    /// real body, so it still skips the dropped table, while later refreshes are conditional.
+    /// The first catalog-driven crawl can already be missing an old table. Enroll only
+    /// positively matched retained histories from either store; don't adopt the whole source.
     #[tokio::test]
-    async fn fresh_adapter_first_refresh_is_unconditional_and_skips_a_dropped_table() {
+    async fn initial_scope_enrolls_matching_retained_series_from_both_stores_and_bounds_them() {
         let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
             return;
         };
         let db = crate::persist::stable_id_tests::FreshDb::create(
             &admin_url,
-            "econgraph_bea_fresh_adapter_unconditional_refresh",
+            "econgraph_bea_initial_rule_scope",
         )
         .await;
         let mut catalog = crate::dataset::DatasetCatalog::empty();
-        catalog
-            .insert(
+        catalog.load_adapter(&BeaAdapter::default()).unwrap();
+        persist::sync_datasets(&db.pool, &catalog).await.unwrap();
+        persist::merge_dataset_dimension_codes(
+            &db.pool,
+            SourceId::Bea,
+            REGIONAL_DATASET,
+            "table_name",
+            &[
+                ("SAGDP2N".into(), "Historic GDP by state".into()),
+                ("SAGDP2EXCLUDED".into(), "GDP excluded".into()),
+                ("SAGDP2BADTITLE".into(), "Personal income".into()),
+            ],
+        )
+        .await
+        .unwrap();
+        persist::merge_dataset_dimension_codes(
+            &db.pool,
+            SourceId::Bea,
+            NIPA_DATASET,
+            "table_name",
+            &[("T10105".into(), "Gross Domestic Product".into())],
+        )
+        .await
+        .unwrap();
+        let metadata = |id: &str| {
+            let key = SeriesKey::parse(id).unwrap();
+            DiscoveredSeries {
+                external_id: id.into(),
+                title: "Stored history".into(),
+                description: None,
+                units: None,
+                frequency: Some("Annual".into()),
+                data_url: None,
+                dataset: key.dataset(),
+            }
+        };
+        let ids = [
+            "bea_regional/SAGDP2N.1.06000", // a table removed before rollout
+            "bea_regional/SAINC1.1.06000",  // unselected table family
+            "bea_regional/SAGDP2UNTITLED.1.06000", // cannot establish title predicate
+            "bea_regional/SAGDP2EXCLUDED.1.06000",
+            "bea_regional/SAGDP2BADTITLE.1.06000",
+            "bea_regional/SAGDP2N.1.06037", // counties are outside state-level discovery
+            "bea_nipa/T10105.1.A",          // unselected frequency
+            "bea_nipa/T10105.1.Q",
+        ];
+        persist::persist_discovered(
+            &db.pool,
+            SourceId::Bea,
+            &ids.iter().map(|id| metadata(id)).collect::<Vec<_>>(),
+        )
+        .await
+        .unwrap();
+        // A history may exist without a metadata row; a duplicated id in both stores is one
+        // membership entry. Neither case may lose a user's retained history on first rollout.
+        for id in [
+            "bea_regional/SAGDP2N.1.06000",
+            "bea_regional/SAGDP2N.2.00000",
+        ] {
+            persist::persist_series(
+                &db.pool,
                 SourceId::Bea,
-                &[NIPA_DATASET, REGIONAL_DATASET],
-                crate::dataset::parse_dataset_file(
-                    &std::fs::read_to_string(
-                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                            .join("data/datasets/bea.toml"),
-                    )
-                    .unwrap(),
-                )
-                .unwrap(),
+                id,
+                &FetchedSeries {
+                    metadata: Some(NewSeriesMetadataLite {
+                        title: "Stored history".into(),
+                        frequency: Some("Annual".into()),
+                        ..Default::default()
+                    }),
+                    points: Vec::new(),
+                    dataset: SeriesKey::parse(id).unwrap().dataset(),
+                    validators: None,
+                },
             )
-            .unwrap();
-        crate::persist::sync_datasets(&db.pool, &catalog)
             .await
             .unwrap();
+        }
+        let config = "max_tables=8\nmax_series=3\nexclude=['SAGDP2EXCLUDED']\n[[rule]]\ndataset='Regional'\nprefix='SAGDP2'\ntitle_contains='GDP'\nfrequencies=['A']\n[[rule]]\ndataset='NIPA'\nprefix='T10105'\ntitle_contains='Gross Domestic Product'\nfrequencies=['Q']";
         let mut ctx = test_ctx();
         ctx.pool = db.pool.clone();
-        let without_sagdp2 = serde_json::json!({"BEAAPI": {"Results": {"ParamValue": [
-            {"Key": "SAINC1", "Desc": "SAINC1 Personal income summary"}
-        ]}}});
-        let mock = MockSource::start().await;
-
-        // A prior process: BEA still listed SAGDP2, then dropped it. Its title and the dropped
-        // list's validators (ETag and body hash) are stored.
-        let prior = BeaAdapter::new(mock.base_url());
-        let regional_list = table_titles_code_list(&prior, BeaDataset::Regional);
-        for body in [
-            serde_json::json!({"BEAAPI": {"Results": {"ParamValue": [
-                {"Key": "SAGDP2", "Desc": "SAGDP2 Gross domestic product (GDP) by state"}
-            ]}}}),
-            without_sagdp2.clone(),
-        ] {
-            mock.reset().await;
-            mock.mount(
-                &table_titles_route("Regional"),
-                Reply::json(body).header("ETag", "\"r1\""),
-            )
-            .await;
-            prior
-                .refresh_table_titles(&ctx, &regional_list, BeaDataset::Regional)
-                .await
-                .unwrap();
-        }
-        assert!(
-            persist::url_validators(&db.pool, SourceId::Bea, &regional_list.url)
-                .await
-                .unwrap()
-                .is_some()
+        let adapter = BeaAdapter::default().with_selection(BeaSelection::parse(config).unwrap());
+        let members = adapter.catalog_scope_members(&ctx).await.unwrap();
+        assert_eq!(
+            members,
+            [
+                "bea_nipa/T10105.1.Q",
+                "bea_regional/SAGDP2N.1.06000",
+                "bea_regional/SAGDP2N.2.00000"
+            ]
         );
+        // The same rules are still bounded when enrolling pre-existing histories.
+        let adapter = BeaAdapter::default().with_selection(
+            BeaSelection::parse(&config.replace("max_series=3", "max_series=2")).unwrap(),
+        );
+        assert!(adapter
+            .catalog_scope_members(&ctx)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("volume guard"));
+        db.drop().await;
+    }
 
-        // A restarted process gets the same body. A conditional request would be `Unchanged`.
+    /// One worker may update the shared HTTP validator while another still holds old names.
+    /// A 304 must load the exact shared version, while historical dimension labels stay additive.
+    #[tokio::test]
+    async fn another_worker_updated_catalog_is_loaded_on_304_and_old_labels_are_preserved() {
+        let Some(admin_url) = crate::persist::stable_id_tests::database_url() else {
+            return;
+        };
+        let db = crate::persist::stable_id_tests::FreshDb::create(
+            &admin_url,
+            "econgraph_bea_shared_membership",
+        )
+        .await;
+        let mut catalog = crate::dataset::DatasetCatalog::empty();
+        catalog.load_adapter(&BeaAdapter::default()).unwrap();
+        persist::sync_datasets(&db.pool, &catalog).await.unwrap();
+        let mut ctx = test_ctx();
+        ctx.pool = db.pool.clone();
+        let mock = MockSource::start().await;
+        let a = BeaAdapter::new(mock.base_url());
+        let b = BeaAdapter::new(mock.base_url());
+        let list = table_titles_code_list(&a, BeaDataset::Regional);
+        let body = |name: &str| serde_json::json!({"BEAAPI":{"Results":{"ParamValue":[{"Key":name,"Desc":format!("{name} GDP by state")} ]}}});
+        mock.mount(
+            &table_titles_route("Regional"),
+            Reply::json(body("SAGDP2N")).header("ETag", "\"v1\""),
+        )
+        .await;
+        a.refresh_table_titles(&ctx, &list, BeaDataset::Regional)
+            .await
+            .unwrap();
+        // An unchanged response in the second worker reads the shared parsed snapshot.
         mock.reset().await;
         mock.mount(
             &table_titles_route("Regional"),
-            Reply::json(without_sagdp2).header("ETag", "\"r1\""),
+            Reply::status(304).header("ETag", "\"v1\""),
         )
         .await;
-        mount_discovery(&mock).await;
-        let fresh = BeaAdapter::new(mock.base_url())
-            .with_current_year(2024)
-            .with_table_titles(BeaDataset::Nipa, NIPA_TEST_TITLES)
-            .with_refreshed_titles(BeaDataset::Nipa);
-        fresh
-            .refresh_table_titles(&ctx, &regional_list, BeaDataset::Regional)
+        b.refresh_table_titles(&ctx, &list, BeaDataset::Regional)
             .await
             .unwrap();
-        let first = mock.received_requests().await;
-        assert_eq!(first.len(), 1);
-        assert!(first[0].headers.get("If-None-Match").is_none());
-        assert!(first[0].headers.get("If-Modified-Since").is_none());
-        assert!(fresh
-            .table_titles(BeaDataset::Regional)
+        assert!(b
+            .listed_tables(BeaDataset::Regional)
             .await
-            .contains_key("SAGDP2"));
-
-        let found = fresh.discover(&ctx).await.unwrap();
-        assert!(found.iter().all(|s| s.external_id.starts_with("bea_nipa/")));
-        assert_eq!(fresh.curated_missing(), ["Regional SAGDP2"]);
-        assert!(!mock.received_requests().await.iter().any(|r| r
-            .url
-            .query()
-            .unwrap_or_default()
-            .contains("TableName=SAGDP2")));
-
-        // The next refresh in the same process is conditional.
-        fresh
-            .refresh_table_titles(&ctx, &regional_list, BeaDataset::Regional)
+            .unwrap()
+            .contains("SAGDP2N"));
+        // The first worker sees a rename and updates the shared snapshot and validators.
+        mock.reset().await;
+        mock.mount(
+            &table_titles_route("Regional"),
+            Reply::json(body("SAGDP2")).header("ETag", "\"v2\""),
+        )
+        .await;
+        a.refresh_table_titles(&ctx, &list, BeaDataset::Regional)
+            .await
+            .unwrap();
+        mock.reset().await;
+        mock.mount(
+            &table_titles_route("Regional"),
+            Reply::status(304).header("ETag", "\"v2\""),
+        )
+        .await;
+        b.refresh_table_titles(&ctx, &list, BeaDataset::Regional)
             .await
             .unwrap();
         assert_eq!(
-            mock.received_requests()
-                .await
-                .last()
-                .unwrap()
+            b.listed_tables(BeaDataset::Regional).await.unwrap(),
+            HashSet::from(["SAGDP2".to_string()])
+        );
+        let labels = persist::dataset_dimension_labels(
+            &db.pool,
+            SourceId::Bea,
+            REGIONAL_DATASET,
+            "table_name",
+        )
+        .await
+        .unwrap();
+        assert!(
+            labels.contains_key("SAGDP2N"),
+            "upstream removal must never erase an old title"
+        );
+        assert!(labels.contains_key("SAGDP2"));
+        assert_eq!(
+            mock.received_requests().await[0]
                 .headers
                 .get("If-None-Match")
                 .unwrap(),
-            "\"r1\"",
+            "\"v2\""
         );
-
         db.drop().await;
+    }
+
+    /// A rename is picked up by the unchanged family rule and flows through real discovery,
+    /// with BEA's new name as the id. The previous name does not survive via cached titles.
+    #[tokio::test]
+    async fn discover_follows_an_upstream_table_family_rename_without_config_changes() {
+        let mock = MockSource::start().await;
+        let rules = BeaSelection::parse("max_tables=2\nmax_series=10\n[[rule]]\ndataset='Regional'\nprefix='SAGDP2'\nfrequencies=['A']").unwrap();
+        for table in ["SAGDP2N", "SAGDP2"] {
+            mock.reset().await;
+            for (target, value) in [("LineCode", "1"), ("GeoFips", "06000")] {
+                mock.mount(&Route::get("/").query("method", "GetParameterValuesFiltered").query("TableName", table).query("TargetParameter", target),
+                    Reply::json(serde_json::json!({"BEAAPI":{"Results":{"ParamValue":[{"Key":value,"Desc":"GDP"}]}}}))).await;
+            }
+            let a = BeaAdapter::new(mock.base_url())
+                .with_selection(rules.clone())
+                .with_table_titles(BeaDataset::Nipa, NIPA_TEST_TITLES)
+                .with_refreshed_titles(BeaDataset::Nipa)
+                // A retained title for the old name must not cause it to be discovered.
+                .with_table_titles(BeaDataset::Regional, &[(table, "GDP by state")])
+                .with_refreshed_titles(BeaDataset::Regional);
+            let found = a.discover(&test_ctx()).await.unwrap();
+            assert_eq!(found.len(), 1);
+            assert_eq!(
+                found[0].external_id,
+                format!("bea_regional/{table}.1.06000")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn table_volume_guard_stops_before_any_table_requests() {
+        let mock = MockSource::start().await;
+        let rules = BeaSelection::parse("max_tables=1\nmax_series=10\n[[rule]]\ndataset='Regional'\nprefix='SAGDP2'\nfrequencies=['A']").unwrap();
+        let a = BeaAdapter::new(mock.base_url())
+            .with_selection(rules)
+            .with_table_titles(BeaDataset::Nipa, NIPA_TEST_TITLES)
+            .with_refreshed_titles(BeaDataset::Nipa)
+            .with_table_titles(
+                BeaDataset::Regional,
+                &[("SAGDP2N", "GDP"), ("SAGDP2", "GDP")],
+            )
+            .with_refreshed_titles(BeaDataset::Regional);
+        let error = a.discover(&test_ctx()).await.unwrap_err();
+        assert!(error.to_string().contains("volume guard"), "{error}");
+        assert!(mock.received_requests().await.is_empty());
     }
 
     /// A BEA error envelope for the title fetch classifies like any other BEA error and doesn't
@@ -3218,7 +3344,7 @@ mod tests {
                 .unwrap_err();
             let e = a.discover(&ctx).await.unwrap_err();
             assert_eq!(e.kind(), "transient", "{e}");
-            assert!(e.to_string().contains("Regional SAGDP2"), "{e}");
+            assert!(e.to_string().contains("Regional"), "{e}");
         }
 
         // An earlier refresh stored SAGDP2's title; it stays after BEA stops listing the table.
@@ -3238,7 +3364,7 @@ mod tests {
         mock.mount(
             &table_titles_route("Regional"),
             Reply::json(serde_json::json!({"BEAAPI": {"Results": {"ParamValue": [
-                {"Key": "SAINC1", "Desc": "SAINC1 Personal income summary"}
+                {"Key": "SAINC4", "Desc": "SAINC4 Personal income and employment by major component"}
             ]}}}))
             .header("ETag", "\"r1\""),
         )
@@ -3254,7 +3380,7 @@ mod tests {
         let found = a.discover(&ctx).await.unwrap();
         assert!(!found.is_empty());
         assert!(found.iter().all(|s| s.external_id.starts_with("bea_nipa/")));
-        assert_eq!(a.curated_missing(), ["Regional SAGDP2"]);
+        assert!(a.curated_missing().is_empty());
         assert!(!mock.received_requests().await.iter().any(|r| r
             .url
             .query()
@@ -3273,7 +3399,7 @@ mod tests {
             .await
             .unwrap();
         a.discover(&ctx).await.unwrap();
-        assert_eq!(a.curated_missing(), ["Regional SAGDP2"]);
+        assert!(a.curated_missing().is_empty());
 
         db.drop().await;
     }

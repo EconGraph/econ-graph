@@ -174,6 +174,11 @@ pub const MAX_SERIES_WITHOUT_KEY: usize = 25;
 /// The batch key every BLS series shares: any series can go in one request.
 const BATCH_KEY: &str = "timeseries";
 
+/// BLS's daily request limit with a registration key (see [Request budget](self#request-budget)).
+pub const DAILY_QUOTA_WITH_KEY: u32 = 500;
+/// BLS's daily request limit without a registration key.
+pub const DAILY_QUOTA_WITHOUT_KEY: u32 = 25;
+
 const STATUS_SUCCEEDED: &str = "REQUEST_SUCCEEDED";
 
 /// Prefix of BLS's per-series "does not exist" message; the series id follows it.
@@ -337,6 +342,15 @@ impl BlsAdapter {
     fn current_year(&self) -> i32 {
         self.current_year.unwrap_or_else(|| Utc::now().year())
     }
+
+    /// Each survey prefix discovery reads a series file for (see [`SERIES_FILES`]), with that
+    /// file's URL and where its titles come from (for [`parse_series_file`]).
+    pub(crate) fn series_files(&self) -> Vec<(&'static str, String, TitleFrom)> {
+        SERIES_FILES
+            .iter()
+            .map(|spec| (spec.survey, self.series_file_url(spec.survey), spec.title))
+            .collect()
+    }
 }
 
 impl Default for BlsAdapter {
@@ -345,11 +359,17 @@ impl Default for BlsAdapter {
     }
 }
 
-/// The BLS policy: the built-in one with `max_batch` at BLS's per-request series limit, which
-/// depends on whether a registration key is configured.
+/// The BLS policy: the built-in one with `max_batch` at BLS's per-request series limit and
+/// `daily_quota` at its daily request limit, both of which depend on whether a registration key
+/// is configured.
 pub fn policy(keyed: bool) -> SourcePolicy {
     SourcePolicy {
         max_batch: max_series_per_request(keyed),
+        daily_quota: Some(if keyed {
+            DAILY_QUOTA_WITH_KEY
+        } else {
+            DAILY_QUOTA_WITHOUT_KEY
+        }),
         ..SourcePolicy::default_for(SourceId::Bls)
     }
 }
@@ -715,7 +735,7 @@ enum UnitsFrom {
 
 /// Where discovery takes a survey's titles from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TitleFrom {
+pub(crate) enum TitleFrom {
     /// The file's `series_title` column.
     File,
     /// The stored labels of the series' own values of these dataset dimensions, in this order,
@@ -809,7 +829,7 @@ struct SeriesFilePayload {
 
 /// One series' row in a survey series file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct SeriesFileRow {
+pub(crate) struct SeriesFileRow {
     /// `series_title`; empty for a survey whose titles aren't in its file
     /// ([`TitleFrom::Dimensions`]).
     #[serde(default)]
@@ -821,6 +841,22 @@ struct SeriesFileRow {
     /// `December 2020=100`).
     #[serde(default)]
     base_period: Option<String>,
+    /// The year of the latest period BLS publishes for the series (`end_year`), which
+    /// `crawler check-selection` compares with the current year to find discontinued series.
+    #[serde(default)]
+    end_year: Option<i32>,
+}
+
+impl SeriesFileRow {
+    /// The year of the latest period BLS publishes for the series, if the file says.
+    pub(crate) fn end_year(&self) -> Option<i32> {
+        self.end_year
+    }
+
+    /// The series' frequency, from its latest period (`Monthly`, `Annual`, ...).
+    pub(crate) fn frequency(&self) -> Option<&str> {
+        self.frequency.as_deref()
+    }
 }
 
 /// Parses a BLS flat reference file: a header row naming tab-delimited columns, then one data
@@ -861,7 +897,7 @@ fn parse_bls_code_file(
 /// published today even if its history starts at another frequency; `begin_period` only when
 /// there is no `end_period`. With [`TitleFrom::File`], rows with an empty title are skipped;
 /// otherwise every row's title is left empty. `Err` only if a required column is missing.
-fn parse_series_file(
+pub(crate) fn parse_series_file(
     text: &str,
     wanted: &BTreeSet<String>,
     title_from: TitleFrom,
@@ -885,6 +921,7 @@ fn parse_series_file(
     let begin_idx = find("begin_period");
     let end_idx = find("end_period");
     let base_idx = find("base_period");
+    let end_year_idx = find("end_year");
     let mut rows = BTreeMap::new();
     for line in lines {
         let fields: Vec<&str> = line.split('\t').map(str::trim).collect();
@@ -912,6 +949,7 @@ fn parse_series_file(
                     .and_then(|p| determine_frequency([p.as_str()]))
                     .map(str::to_string),
                 base_period: field(base_idx),
+                end_year: field(end_year_idx).and_then(|y| y.parse().ok()),
             },
         );
     }
@@ -1300,6 +1338,8 @@ fn scrub_error(e: CrawlError, key: Option<&str>) -> CrawlError {
     match e {
         CrawlError::Transient(m) => CrawlError::Transient(scrub(&m, key)),
         CrawlError::NotFound(m) => CrawlError::NotFound(scrub(&m, key)),
+        CrawlError::Absent(m) => CrawlError::Absent(scrub(&m, key)),
+        CrawlError::Restricted(m) => CrawlError::Restricted(scrub(&m, key)),
         CrawlError::Auth(m) => CrawlError::Auth(scrub(&m, key)),
         CrawlError::Parse(m) => CrawlError::Parse(scrub(&m, key)),
         CrawlError::Permanent(m) => CrawlError::Permanent(scrub(&m, key)),
@@ -2507,6 +2547,7 @@ mod tests {
                         .into(),
                 frequency: Some("Monthly".into()),
                 base_period: Some("1982-84=100".into()),
+                end_year: Some(2024),
             }
         );
         // No base_period column: none; frequency from end_period, else begin_period; blank title:
@@ -2563,6 +2604,7 @@ mod tests {
                 title: String::new(),
                 frequency: Some("Monthly".into()),
                 base_period: None,
+                end_year: Some(2024),
             }
         );
 
@@ -2632,6 +2674,7 @@ mod tests {
             title: "t".into(),
             frequency: None,
             base_period: Some("1982-84=100".into()),
+            end_year: None,
         };
         let none = BTreeMap::new();
         assert_eq!(
@@ -3205,10 +3248,13 @@ mod tests {
     fn policy_batches_50_with_key_25_without() {
         assert_eq!(policy(true).max_batch, 50);
         assert_eq!(policy(false).max_batch, 25);
+        assert_eq!(policy(true).daily_quota, Some(500));
+        assert_eq!(policy(false).daily_quota, Some(25));
         let base = SourcePolicy::default_for(SourceId::Bls);
         assert_eq!(
             SourcePolicy {
                 max_batch: base.max_batch,
+                daily_quota: base.daily_quota,
                 ..policy(true)
             },
             base

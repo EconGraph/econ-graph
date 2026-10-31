@@ -19,7 +19,10 @@ concurrency limits per source and applies the following policies:
   defer the job.
   Reference-file downloads make no extra attempts, avoiding repeated long downloads within
   one discovery job. Errors returned to the worker follow the queue retry rules below.
-- **Secrets**: `api_key`, `registrationkey` and `UserID` query parameters are redacted in logs and errors.
+- **Secrets**: the values of the `api_key`, `apikey`, `registrationkey`, `userid`, `key`, `token`
+  and `subscription-key` query parameters (case-insensitive), and of those keys in a JSON request
+  body, are redacted from logs and errors. A value a server echoes back is redacted whether it
+  comes back decoded, percent-encoded (either hex case) or form-encoded (`+` for a space).
 
 ## Per-source policy
 
