@@ -16,6 +16,11 @@ import { failGraphQL, QUERY_ERROR_TIMEOUT } from './faults';
 // (src/pages/__tests__/SeriesDetail.test.tsx, SeriesExplorer.test.tsx). Live QA: the same
 // specs run against a deployed build; only the fixture values are skipped there.
 
+// A public series: BLS CPI.
+const series = SEEDED.blsCpi;
+// Its quarter-over-quarter change, which its five months can compute (year-over-year can't).
+const quarterly = series.transformations[1];
+
 const searchBox = (page: Page) =>
   page.getByPlaceholder('Search economic series (e.g., GDP, unemployment, inflation)');
 const searchButton = (page: Page) => page.getByRole('button', { name: 'Search', exact: true });
@@ -26,7 +31,7 @@ test.describe('search failures', () => {
     test.slow();
     const fault = await failGraphQL(page, 'SearchSeries');
     await page.goto('/explore');
-    await searchBox(page).fill(SEEDED.fredGdp.title);
+    await searchBox(page).fill(series.title);
     await searchButton(page).click();
 
     await expect(page.getByRole('alert').filter({ hasText: 'Search failed' })).toBeVisible({
@@ -40,7 +45,7 @@ test.describe('search failures', () => {
 
     fault.heal();
     await searchButton(page).click();
-    await expect(page.getByText(SEEDED.fredGdp.title, { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(series.title, { exact: true }).first()).toBeVisible();
     await expect(page.getByRole('alert').filter({ hasText: 'Search failed' })).toHaveCount(0);
   });
 
@@ -59,7 +64,7 @@ test.describe('search failures', () => {
     const fault = await failGraphQL(page, 'GetSeriesList');
     await page.goto('/sources');
     await page
-      .getByRole('region', { name: SEEDED.fredGdp.sourceName })
+      .getByRole('region', { name: series.sourceName })
       .getByRole('link', { name: 'Browse Series' })
       .click();
     const alert = page.getByRole('alert').filter({ hasText: 'Could not list series' });
@@ -67,7 +72,7 @@ test.describe('search failures', () => {
 
     fault.heal();
     await alert.getByRole('button', { name: 'Retry' }).click();
-    await expect(page.getByText(SEEDED.fredGdp.title, { exact: true })).toBeVisible();
+    await expect(page.getByText(series.title, { exact: true })).toBeVisible();
     await expect(alert).toHaveCount(0);
     expect(fault.failed()).toBeGreaterThan(0);
   });
@@ -78,7 +83,7 @@ test.describe('series page failures', () => {
   let seriesPath: string;
 
   test.beforeAll(async ({ request }) => {
-    seriesPath = `/series/${await seededSeriesId(request, SEEDED.fredGdp)}`;
+    seriesPath = `/series/${await seededSeriesId(request, series)}`;
   });
 
   test('a series that fails to load offers Retry, which recovers', async ({ page }) => {
@@ -92,14 +97,14 @@ test.describe('series page failures', () => {
 
     fault.heal();
     await alert.getByRole('button', { name: 'Retry' }).click();
-    await expect(page.getByRole('heading', { name: SEEDED.fredGdp.title })).toBeVisible();
+    await expect(page.getByRole('heading', { name: series.title })).toBeVisible();
     await expect(alert).toHaveCount(0);
   });
 
   test('observations that fail to load show no values, and Retry recovers', async ({ page }) => {
     const fault = await failGraphQL(page, 'GetSeriesData', 'graphql-error');
     await page.goto(seriesPath);
-    await expect(page.getByRole('heading', { name: SEEDED.fredGdp.title })).toBeVisible();
+    await expect(page.getByRole('heading', { name: series.title })).toBeVisible();
 
     const alert = page
       .getByRole('alert')
@@ -113,15 +118,12 @@ test.describe('series page failures', () => {
     fault.heal();
     await alert.getByRole('button', { name: 'Retry' }).click();
     await expect(recentRows(page).first()).toBeVisible();
-    if (!DEPLOYED) expect(await latestShown(page)).toEqual(SEEDED.fredGdp.latestShown);
+    if (!DEPLOYED) expect(await latestShown(page)).toEqual(series.latestShown);
   });
 
   test('a failed transformation never labels the levels as transformed', async ({ page }) => {
-    const levelsHeader = page.getByRole('columnheader', { name: SEEDED.fredGdp.units, exact: true });
-    const yoyHeader = page.getByRole('columnheader', {
-      name: 'Year-over-Year % Change',
-      exact: true,
-    });
+    const levelsHeader = page.getByRole('columnheader', { name: series.units, exact: true });
+    const qoqHeader = page.getByRole('columnheader', { name: quarterly.description, exact: true });
     await page.goto(seriesPath);
     await expect(levelsHeader).toBeVisible();
     const levels = await latestShown(page);
@@ -130,16 +132,16 @@ test.describe('series page failures', () => {
       page,
       'GetSeriesData',
       'http-503',
-      variables => variables.transformation === 'YEAR_OVER_YEAR'
+      variables => variables.transformation === 'QUARTER_OVER_QUARTER'
     );
     await page.getByRole('combobox', { name: 'Transformation' }).click();
-    await page.getByRole('option', { name: 'Year-over-Year', exact: true }).click();
+    await page.getByRole('option', { name: quarterly.label, exact: true }).click();
 
-    // Wait until the switch has happened: Year-over-Year is selected and its request has failed
+    // Wait until the switch has happened: Quarter-over-Quarter is selected and its request has failed
     // at least once. The app then retries for about 7 seconds (1, 2 and 4 s backoff) before
     // giving up, keeping the previous data behind a "Loading transformation" bar.
     await expect(page.getByRole('combobox', { name: 'Transformation' })).toHaveText(
-      'Year-over-Year'
+      quarterly.label
     );
     await expect.poll(() => fault.failed()).toBeGreaterThan(0);
 
@@ -149,12 +151,12 @@ test.describe('series page failures', () => {
       .filter({ hasText: 'Could not load observations for this series' });
     await expect(page.getByRole('progressbar', { name: 'Loading transformation' })).toBeVisible();
     await expect(levelsHeader).toBeVisible();
-    await expect(yoyHeader).toHaveCount(0);
+    await expect(qoqHeader).toHaveCount(0);
 
     // Once it fails, no values are shown at all, under either label.
     await expect(alert).toBeVisible({ timeout: QUERY_ERROR_TIMEOUT });
     await expect(page.getByRole('table', { name: 'Recent observations' })).toHaveCount(0);
-    await expect(yoyHeader).toHaveCount(0);
+    await expect(qoqHeader).toHaveCount(0);
 
     // "Show levels" goes back to the levels, still failing nothing else.
     await alert.getByRole('button', { name: 'Show levels' }).click();
@@ -163,13 +165,13 @@ test.describe('series page failures', () => {
 
     // And once the backend answers, the transformation shows its own values.
     fault.heal();
-    await applyTransformation(page, 'Year-over-Year');
-    await expect(yoyHeader).toBeVisible();
+    await applyTransformation(page, quarterly.label);
+    await expect(qoqHeader).toBeVisible();
     await expect(levelsHeader).toHaveCount(0);
     if (!DEPLOYED) {
       await expect
         .poll(() => latestShown(page))
-        .toEqual(SEEDED.fredGdp.transformations[0].latestShown);
+        .toEqual(quarterly.latestShown);
     }
   });
 });

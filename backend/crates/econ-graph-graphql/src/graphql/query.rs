@@ -117,6 +117,7 @@ impl Query {
             .inner_join(data_sources::table)
             .filter(data_sources::name.eq(&source_name))
             .filter(economic_series::external_id.eq(&external_id))
+            .filter(series_service::public_series_predicate())
             .select(EconomicSeries::as_select())
             .first::<EconomicSeries>(&mut conn)
             .await
@@ -240,11 +241,13 @@ impl Query {
         let sources = data_sources::table
             .filter(data_sources::id.eq_any(allowed))
             .filter(exists(
-                economic_series::table.filter(
-                    economic_series::source_id
-                        .eq(data_sources::id)
-                        .and(economic_series::end_date.is_not_null()),
-                ),
+                economic_series::table
+                    .filter(series_service::public_series_predicate())
+                    .filter(
+                        economic_series::source_id
+                            .eq(data_sources::id)
+                            .and(economic_series::end_date.is_not_null()),
+                    ),
             ))
             .order_by(data_sources::name.asc())
             .select(DataSource::as_select())
@@ -256,7 +259,8 @@ impl Query {
 
     /// List datasets, optionally only one source's, grouped by source id (in no particular
     /// order across sources) and by code within a source. Unpaginated: sources publish a
-    /// handful of datasets each.
+    /// handful of datasets each. A `sourceId` that isn't a UUID is rejected with a
+    /// `BAD_USER_INPUT` error.
     async fn datasets(
         &self,
         ctx: &Context<'_>,
@@ -272,8 +276,7 @@ impl Query {
             .filter(datasets::source_id.eq_any(allowed))
             .into_boxed();
         if let Some(source_id) = source_id {
-            let source_id = Uuid::parse_str(&source_id)
-                .map_err(|_| async_graphql::Error::new("invalid data source id"))?;
+            let source_id = parse_id_argument("sourceId", &source_id)?;
             query = query.filter(datasets::source_id.eq(source_id));
         }
 
@@ -290,15 +293,14 @@ impl Query {
             .collect())
     }
 
-    /// Get a dataset by ID
+    /// Get a dataset by ID. An `id` that isn't a UUID is rejected with a `BAD_USER_INPUT` error.
     async fn dataset(
         &self,
         ctx: &Context<'_>,
         id: ID,
     ) -> Result<Option<crate::graphql::datasets::DatasetType>> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
-        let id =
-            Uuid::parse_str(&id).map_err(|_| async_graphql::Error::new("invalid dataset id"))?;
+        let id = parse_id_argument("id", &id)?;
         let dataset = models::Dataset::find_by_id(pool, id).await?;
         // A dataset in a catalog the caller can't read is null, exactly like an unknown id.
         let Some(dataset) = dataset else {

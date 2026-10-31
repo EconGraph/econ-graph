@@ -19,6 +19,10 @@
 #     after a typed confirmation (or --yes)
 # Each restore is one transaction, so a failure leaves the database as it was.
 #
+# The bootstrap runs scripts/deploy/create-secrets.sh. When the restored Secrets come from a
+# cluster deployed before the app database existed (econ-graph-secrets without
+# app-database-url), set APP_DATABASE=shared (docs/deployment/APP_DATA_CONVERSION.md).
+#
 # --expect-series N / --expect-data-points N: also require counts.env to say
 # exactly that before anything is restored (guards against the wrong backup).
 #

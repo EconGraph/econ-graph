@@ -117,6 +117,9 @@ export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
 # sign-in issuer against the page's origin.
 # shellcheck source=scripts/deploy/lib/public-host.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
+# stop_crawler_for_pending_migrations, before the crawler-migrate Job (ECO-802).
+# shellcheck source=scripts/deploy/lib/data-migrations.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/data-migrations.sh"
 CLUSTER_ROLE_DRY_RUN="$DRY_RUN"
 if ! cluster_role_use_context "kind-${KIND_CLUSTER}"; then
     echo "❌ ${KUBECTL} has no context kind-${KIND_CLUSTER}"
@@ -258,13 +261,17 @@ fi
 # the backend would refuse to start. See k8s/manifests/crawler-migrate-job.yaml.
 # create-secrets.sh has just written the Secret, so a failed read stops the deploy (set -e)
 # rather than skipping the migrations.
-# crawler-worker.yaml is applied only after this Job completes, so a worker stopped for the
-# deploy (scripts/deploy/precheck-db-migration.sh --stop-crawler) stays stopped while the data
-# migrations run, and stays stopped if the Job fails (a migration that gave up on its table
-# locks, say): the deploy stops here.
+# When any data migration is pending, the old crawler-worker is stopped first
+# (stop_crawler_for_pending_migrations, scripts/deploy/lib/data-migrations.sh: crawler
+# migrate --dry-run, then precheck-db-migration.sh --stop-crawler), so it doesn't write
+# while they run; with none pending it keeps running. crawler-worker.yaml is applied only
+# after this Job completes, so a stopped worker stays stopped while the data migrations run,
+# and stays stopped if the Job fails (a migration that gave up on its table locks, say): the
+# deploy stops here.
 has_data_database="$(kubectl -n econ-graph get secret econ-graph-secrets \
   -o jsonpath='{.data.data-database-url}')"
 if [ "$DRY_RUN" = true ] || [ -n "$has_data_database" ]; then
+  stop_crawler_for_pending_migrations || exit 1
   echo "🗄️  Applying data migrations (crawler-migrate Job)..."
   # A Job cannot be re-run in place, so the previous one goes first.
   kubectl -n econ-graph delete job crawler-migrate --ignore-not-found
@@ -402,7 +409,8 @@ kubectl wait --for=condition=available --timeout=180s deployment/cert-manager-ca
 # The gateway's routes, and for PUBLIC_HOST its https listener, certificate and
 # public routes, or their removal without one (scripts/deploy/lib/public-host.sh).
 if [ "$DRY_RUN" = true ]; then
-  echo "[dry-run] scripts/deploy/apply-gateway-routes.sh (PUBLIC_HOST=${PUBLIC_HOST:-none})"
+  echo "[dry-run] scripts/deploy/apply-gateway-routes.sh (PUBLIC_HOST=${PUBLIC_HOST:-none};" \
+    "certificate issuer: GATEWAY_TLS_ISSUER, else the host's deploy config, else the current one)"
 else
   apply_public_edge
 fi

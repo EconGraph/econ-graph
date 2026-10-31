@@ -1,5 +1,5 @@
 import React from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -28,6 +28,7 @@ import {
   Download as DownloadIcon,
 } from '@mui/icons-material';
 
+import SeriesLifecycleNotice from '../components/SeriesLifecycleNotice';
 import SeriesChart, { SeriesChartAnnotation } from '../components/charts/SeriesChart';
 import SeriesAnnotationsPanel from '../components/charts/SeriesAnnotationsPanel';
 import {
@@ -47,16 +48,30 @@ import {
 } from '../utils/transformations';
 import { formatObservationDate } from '../utils/dates';
 import { buildSeriesCsv, downloadCsv, seriesCsvFileName } from '../utils/seriesCsv';
+import { SourceNoticePanel } from '../components/common/SourceNoticePanel';
 
 /**
  * Series page: one economic series' metadata, chart and latest observations, read from
  * the GraphQL API. Transformations are computed by the backend.
  */
 
+/**
+ * Where links back to the explorer go: the explorer results this series was opened from (its
+ * URL, query, filters and page included, which the explorer puts in the history state), or the
+ * explorer itself when the series was reached any other way.
+ * @returns A path under /explore.
+ */
+const useExplorerUrl = (): string => {
+  const state = useLocation().state as { explorerUrl?: unknown } | null;
+  const url = state?.explorerUrl;
+  return typeof url === 'string' && /^\/explore(\?|$)/.test(url) ? url : '/explore';
+};
+
 const BackToExplorer: React.FC = () => {
   const navigate = useNavigate();
+  const explorerUrl = useExplorerUrl();
   return (
-    <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/explore')}>
+    <Button startIcon={<ArrowBackIcon />} onClick={() => navigate(explorerUrl)}>
       Back to Explorer
     </Button>
   );
@@ -98,6 +113,7 @@ const todayIso = () => {
 
 const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
   const navigate = useNavigate();
+  const explorerUrl = useExplorerUrl();
   const [transformation, setTransformation] = React.useState<DataTransformation>('NONE');
   // Owned here (rather than inside SeriesChart) so the CSV download writes exactly the
   // range the chart shows. This also means the range now survives a chart remount (an
@@ -222,6 +238,8 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
         units: transformedUnits(shownTransformation, units),
         transformation: transformationLabel,
         retrievedAt: data.dataUpdatedAt ? new Date(data.dataUpdatedAt) : null,
+        notice: series.source?.notice,
+        fetchedFromSource: series.lastUpdated,
         points: exportedPoints,
       });
       downloadCsv(seriesCsvFileName(series.externalId, shownTransformation), csv);
@@ -283,13 +301,13 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
 
   return (
     <Box>
-      <Breadcrumbs sx={{ mb: 2 }}>
+      <Breadcrumbs aria-label='breadcrumb' sx={{ mb: 2 }}>
         <Link
           color='inherit'
-          href='/explore'
+          href={explorerUrl}
           onClick={e => {
             e.preventDefault();
-            navigate('/explore');
+            navigate(explorerUrl);
           }}
         >
           Explore
@@ -328,8 +346,21 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
         </Box>
       </Box>
 
+      <SeriesLifecycleNotice lifecycle={series.lifecycle} sourceName={series.source?.name} />
+
       <Grid container spacing={3}>
-        <Grid size={{ xs: 12, lg: 8 }}>{chart}</Grid>
+        <Grid size={{ xs: 12, lg: 8 }}>
+          {chart}
+          <SourceNoticePanel
+            sourceName={series.source?.name ?? ''}
+            notice={series.source?.notice}
+            lastUpdated={series.lastUpdated}
+            // Only values on screen are described as derived: none while loading or failed.
+            transformationLabel={
+              data.data && !data.isError ? describeTransformation(data.data.transformation) : ''
+            }
+          />
+        </Grid>
 
         <Grid size={{ xs: 12, lg: 4 }}>
           <Box sx={{ mb: 3 }}>

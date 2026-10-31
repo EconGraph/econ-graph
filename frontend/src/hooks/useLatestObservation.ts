@@ -4,12 +4,23 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { executeGraphQL } from '../utils/graphql';
+import type { SourceNotice } from './useSeriesData';
 
 export const GET_SERIES_LATEST_OBSERVATION = `
   query GetSeriesLatestObservation($sourceName: String!, $externalId: String!) {
     seriesByExternalId(sourceName: $sourceName, externalId: $externalId) {
       id
       units
+      lastUpdated
+      source {
+        name
+        notice {
+          citation
+          notice
+          termsUrl
+          retrievalDateRequired
+        }
+      }
       latestObservation {
         date
         value
@@ -31,6 +42,10 @@ export interface LatestObservation {
 export interface SeriesWithLatestObservation {
   id: string;
   units: string | null;
+  /** When EconGraph last retrieved the series from its source; null when unknown. */
+  lastUpdated?: string | null;
+  /** The source, with the notice its terms require (null for a source without one). */
+  source?: { name: string; notice: SourceNotice | null } | null;
   /** Null when the series has no data points. */
   latestObservation: LatestObservation | null;
 }

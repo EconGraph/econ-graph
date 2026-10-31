@@ -57,7 +57,9 @@ Kubernetes: `k8s/manifests/crawler-worker.yaml` (one replica, `Recreate`, image
 `scripts/deploy/build-images.sh` and `scripts/deploy/deploy.sh` build and apply it. The worker
 does not run migrations. Before applying it, `deploy.sh` runs the Job `crawler-migrate`
 (`k8s/manifests/crawler-migrate-job.yaml`, `/app/crawler migrate` from the same image), which
-applies the data migrations and must complete; see
+applies the data migrations and must complete. When any data migration is pending, `deploy.sh`
+first stops the running worker (`precheck-db-migration.sh --stop-crawler`), so it doesn't write
+while they run; see
 [database migrations](../development/MIGRATIONS.md#applying-the-data-set-crawler-migrate).
 
 Configuration (flags or environment):
@@ -80,16 +82,17 @@ Configuration (flags or environment):
 
 The crawler reads its selection files and dataset definitions from `CRAWLER_DATA_DIR`,
 which defaults to `backend/crates/econ-graph-crawler/data/` in a source checkout.
-`bls_series.csv` and `fred_series.csv` select series to crawl; BLS supplies its series’ titles,
-units and frequency. `wdi_indicators.csv` selects World Bank indicators and their units, and
-`bea_tables.csv` selects BEA tables. Dataset definitions live in `datasets/<source>.toml`;
+`bls_series.csv` selects BLS series to crawl; BLS supplies their titles, units and frequency.
+`wdi_indicators.csv` selects World Bank indicators and their units.
+`catalog_selection/fred.toml` and `catalog_selection/bea.toml` hold the rules that select FRED
+and BEA series from the upstream catalogs. Dataset definitions live in `datasets/<source>.toml`;
 the production adapters use `fred.toml`, `bls.toml`, `bea.toml`, `census.toml`, `fhfa.toml` and
 `world_bank.toml`.
 
-Before processing jobs, the worker loads the BLS and FRED lists and validates dataset
-definitions for every registered adapter. Missing or invalid files in these startup checks
-stop the worker. The World Bank indicator list and BEA table list are loaded when their
-adapters first need them. These loaders cache their results, including errors, for the
+Before processing jobs, the worker loads the BLS list and the FRED and BEA selection rules,
+and validates dataset definitions for every registered adapter. Missing or invalid files in
+these startup checks stop the worker. The World Bank indicator list is loaded when its
+adapter first needs it. These loaders cache their results, including errors, for the
 process lifetime; restart the worker after correcting a file.
 
 `REFERENCE_DATA_DIR` defaults to `backend/crates/econ-graph-core/data/` in a source checkout.
@@ -120,7 +123,7 @@ fetching still goes through the same worker loop as a manual `crawler enqueue`. 
    A series that has never been crawled is due immediately. A series whose `crawl_status`
    is `failed` backs off to twice its interval, measured from the latest of its last crawl
    and its last attempt. A persisted series marked `not_found` backs off to ten times its
-   interval instead.
+   interval instead, as does one marked `absent` (a complete BEA response omitted it).
 
    A discovered series without an `economic_series` row has no attempt history, so its last
    failed `fetch_series` queue row supplies the failure time. Finished queue rows are purged
@@ -129,6 +132,13 @@ fetching still goes through the same worker loop as a manual `crawler enqueue`. 
    twice-the-interval backoff applies. If the provider reports a metadata-only series as
    not found, the worker deactivates its `series_metadata` row instead; it becomes a candidate
    again only when catalog discovery lists that id again.
+
+   Sources that track publication lifecycle (FRED and BEA) keep the row active instead and
+   count confirmed NotFound results (and, separately, BEA responses that omit the series). A
+   series with a publication state other than active is not a candidate, except one retired
+   only by those fetch results (three NotFound, or six omissions in a row): it is
+   probed once every 12 intervals, and a successful fetch makes it active again (see the
+   [crawler coverage runbook](../monitoring/crawler-coverage-runbook.md#catalog-selection-and-retained-series)).
 
    Only sources in `CRAWLER_SOURCES` (default: all) are considered, and only series whose
    `data_sources` row is enabled and whose own `is_active` flag is set; for Census, only ids

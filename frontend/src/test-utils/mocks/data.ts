@@ -77,6 +77,7 @@ export const mockDataSources: DataSource[] = [
     seriesCount: 3,
     createdAt: '2023-01-01T00:00:00Z',
     updatedAt: '2024-01-01T00:00:00Z',
+    notice: null,
   },
   {
     id: 'bls',
@@ -88,6 +89,7 @@ export const mockDataSources: DataSource[] = [
     seriesCount: 1,
     createdAt: '2023-01-01T00:00:00Z',
     updatedAt: '2024-01-01T00:00:00Z',
+    notice: null,
   },
 ];
 
