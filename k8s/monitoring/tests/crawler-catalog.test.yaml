@@ -1,0 +1,190 @@
+# Catalog guards and publication changes: firing, recovery and ordinary refreshes.
+rule_files:
+- crawler.rules.yml
+evaluation_interval: 1m
+tests:
+- interval: 1m
+  input_series:
+  - series: crawler_catalog_guard_rejections_total{source="BEA",reason="volume"}
+    values: 0x5 1x120
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: CrawlerCatalogGuardRejected
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CrawlerCatalogGuardRejected
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: BEA
+        reason: volume
+      exp_annotations:
+        summary: BEA catalog rejected by volume guard
+        description: A catalog exceeded its configured selection limit or disappearance
+          threshold. The worker retained stored histories; inspect its catalog warning
+          and upstream completeness before changing selection rules or retrying. For
+          mass_disappearance, review and accept a correct snapshot with
+          `crawler accept-guarded-catalog` (crawler coverage runbook).
+  - eval_time: 2h
+    alertname: CrawlerCatalogGuardRejected
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: crawler_catalog_guard_rejections_total{source="FRED",reason="mass_disappearance"}
+    values: 0x5 1x120
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: CrawlerCatalogGuardRejected
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CrawlerCatalogGuardRejected
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: FRED
+        reason: mass_disappearance
+      exp_annotations:
+        summary: FRED catalog rejected by mass_disappearance guard
+        description: A catalog exceeded its configured selection limit or disappearance
+          threshold. The worker retained stored histories; inspect its catalog warning
+          and upstream completeness before changing selection rules or retrying. For
+          mass_disappearance, review and accept a correct snapshot with
+          `crawler accept-guarded-catalog` (crawler coverage runbook).
+  - eval_time: 2h
+    alertname: CrawlerCatalogGuardRejected
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: crawler_series_lifecycle_transitions_total{source="FRED",status="retired"}
+    values: 0x5 1x120
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: CrawlerSeriesPublicationChanged
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CrawlerSeriesPublicationChanged
+    exp_alerts:
+    - exp_labels:
+        severity: info
+        source: FRED
+        status: retired
+      exp_annotations:
+        summary: FRED series publication changed to retired
+        description: Retained series changed publication status. Review lifecycle
+          counts on Data Sources and candidate successors; histories are never merged
+          automatically.
+  - eval_time: 2h
+    alertname: CrawlerSeriesPublicationChanged
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: crawler_series_lifecycle_transitions_total{source="FRED",status="active"}
+    values: 0+1x20
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CrawlerSeriesPublicationChanged
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: crawler_catalog_rule_matches{kubernetes_namespace="econ-graph",pod="w1",source="BEA",rule="6:Regional:SAGDP2"}
+    values: 4x10 0x60
+  - series: crawler_catalog_rule_matches{kubernetes_namespace="econ-graph",pod="w1",source="BEA",rule="0:NIPA:T10101"}
+    values: 1x70
+  - series: crawler_catalog_rule_matches{kubernetes_namespace="econ-graph-branch",pod="b1",source="BEA",rule="1:NIPA:T10105"}
+    values: 0x70
+  - series: crawler_catalog_rule_configured{kubernetes_namespace="econ-graph",pod="w1",source="BEA",rule="6:Regional:SAGDP2"}
+    values: 1x70
+  - series: crawler_catalog_rule_configured{kubernetes_namespace="econ-graph",pod="w1",source="BEA",rule="0:NIPA:T10101"}
+    values: 1x70
+  - series: crawler_catalog_rule_configured{kubernetes_namespace="econ-graph-branch",pod="b1",source="BEA",rule="1:NIPA:T10105"}
+    values: 1x70
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CrawlerCatalogRuleMatchesNothing
+    exp_alerts: []
+  - eval_time: 40m
+    alertname: CrawlerCatalogRuleMatchesNothing
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: BEA
+        rule: 6:Regional:SAGDP2
+      exp_annotations:
+        summary: BEA selection rule 6:Regional:SAGDP2 matches nothing upstream
+        description: The last BEA discovery found no catalog entries for selection
+          rule 6:Regional:SAGDP2 (position:catalog in data/catalog_selection/). Its
+          previously selected series may be counted as absent; check whether upstream
+          renamed the table or release and update the rule.
+# Fixing the rule renames its label. The old label's last zero lingers in last_over_time,
+# but the alert clears once the restarted worker no longer reports that rule as configured.
+- interval: 1m
+  input_series:
+  - series: crawler_catalog_rule_matches{kubernetes_namespace="econ-graph",pod="w1",source="BEA",rule="6:Regional:SAGDP2"}
+    values: 0x30
+  - series: crawler_catalog_rule_configured{kubernetes_namespace="econ-graph",pod="w1",source="BEA",rule="6:Regional:SAGDP2"}
+    values: 1x30
+  - series: crawler_catalog_rule_matches{kubernetes_namespace="econ-graph",pod="w2",source="BEA",rule="6:Regional:SAGDP2N"}
+    values: _x30 3x60
+  - series: crawler_catalog_rule_configured{kubernetes_namespace="econ-graph",pod="w2",source="BEA",rule="6:Regional:SAGDP2N"}
+    values: _x30 1x60
+  alert_rule_test:
+  - eval_time: 25m
+    alertname: CrawlerCatalogRuleMatchesNothing
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: BEA
+        rule: 6:Regional:SAGDP2
+      exp_annotations:
+        summary: BEA selection rule 6:Regional:SAGDP2 matches nothing upstream
+        description: The last BEA discovery found no catalog entries for selection
+          rule 6:Regional:SAGDP2 (position:catalog in data/catalog_selection/). Its
+          previously selected series may be counted as absent; check whether upstream
+          renamed the table or release and update the rule.
+  - eval_time: 80m
+    alertname: CrawlerCatalogRuleMatchesNothing
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: crawler_catalog_unselected_series{kubernetes_namespace="econ-graph",pod="w1",source="FRED"}
+    values: 0x10 3x60
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CrawlerCatalogSeriesUnselected
+    exp_alerts: []
+  - eval_time: 40m
+    alertname: CrawlerCatalogSeriesUnselected
+    exp_alerts:
+    - exp_labels:
+        severity: info
+        source: FRED
+      exp_annotations:
+        summary: 3 tracked FRED series no longer match the selection rules
+        description: The last complete FRED catalog still lists these series upstream,
+          so they keep their publication state and are still fetched. The worker log's
+          catalog warning counts them; review whether the rules in data/catalog_selection/
+          should follow the upstream change.
+- interval: 1m
+  input_series:
+  - series: crawler_catalog_guarded_snapshot_pending{kubernetes_namespace="econ-graph",pod="w1",source="BEA"}
+    values: 0x10 1x30 0x30
+  - series: crawler_catalog_guarded_snapshot_pending{kubernetes_namespace="econ-graph-branch",pod="b1",source="FRED"}
+    values: 1x70
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CrawlerCatalogGuardedSnapshotPending
+    exp_alerts: []
+  - eval_time: 35m
+    alertname: CrawlerCatalogGuardedSnapshotPending
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: BEA
+      exp_annotations:
+        summary: BEA has a guarded catalog snapshot waiting for review
+        description: A BEA catalog lost more than 20% of the last accepted catalog and was
+          not applied. Review it with `crawler accept-guarded-catalog --source BEA` and
+          accept it only if the upstream change is real (crawler coverage runbook).
+  - eval_time: 65m
+    alertname: CrawlerCatalogGuardedSnapshotPending
+    exp_alerts: []

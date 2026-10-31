@@ -1300,6 +1300,8 @@ fn scrub_error(e: CrawlError, key: Option<&str>) -> CrawlError {
     match e {
         CrawlError::Transient(m) => CrawlError::Transient(scrub(&m, key)),
         CrawlError::NotFound(m) => CrawlError::NotFound(scrub(&m, key)),
+        CrawlError::Absent(m) => CrawlError::Absent(scrub(&m, key)),
+        CrawlError::Restricted(m) => CrawlError::Restricted(scrub(&m, key)),
         CrawlError::Auth(m) => CrawlError::Auth(scrub(&m, key)),
         CrawlError::Parse(m) => CrawlError::Parse(scrub(&m, key)),
         CrawlError::Permanent(m) => CrawlError::Permanent(scrub(&m, key)),

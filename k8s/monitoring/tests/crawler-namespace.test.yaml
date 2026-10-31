@@ -123,7 +123,7 @@ tests:
       exp_annotations:
         summary: 1 curated FRED entries are missing upstream
         description: The last FRED discovery skipped curated entries the source no longer lists (renamed or dropped
-          upstream). The worker log's discovery warning for FRED names them; update the curated list (for BEA, data/bea_tables.csv).
+          upstream). The worker log's discovery warning for FRED names them; review the selection rules and explicit overrides in data/catalog_selection/.
   - eval_time: 30m
     alertname: CrawlerHighErrorRate
     exp_alerts:

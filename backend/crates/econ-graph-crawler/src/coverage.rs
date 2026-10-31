@@ -14,8 +14,8 @@
 //!
 //! - **discovered**: distinct external ids among its active `series_metadata` rows (catalog
 //!   discovery) and active `economic_series` rows (fetched series), except a series the source has
-//!   confirmed doesn't exist (`crawl_status = 'not_found'`) and that never got any data (`end_date
-//!   IS NULL`): that series is excluded entirely rather than counted as discovered-but-empty,
+//!   confirmed doesn't exist (`crawl_status = 'not_found'`), or whose complete response omitted
+//!   it (`crawl_status = 'absent'`), and that never got any data (`end_date IS NULL`): that series is excluded entirely rather than counted as discovered-but-empty,
 //!   whether it surfaces through its `series_metadata` row, its `economic_series` row, or (the
 //!   usual case once both exist) both. A `series_metadata` row for a series the source confirmed
 //!   NotFound before any `economic_series` row existed is deactivated at crawl time instead (see
@@ -115,15 +115,22 @@ static COVERAGE_SQL: LazyLock<String> = LazyLock::new(|| {
              SELECT src.code, sm.external_id::text AS external_id \
              FROM src JOIN series_metadata sm ON sm.source_id = src.ds_id \
              WHERE sm.is_active \
+               AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
+                   WHERE lc.source_id = sm.source_id AND lc.external_id = sm.external_id \
+                     AND lc.status <> 'active') \
                AND NOT EXISTS ( \
                      SELECT 1 FROM economic_series es \
                      WHERE es.source_id = sm.source_id AND es.external_id = sm.external_id \
-                       AND es.crawl_status = 'not_found' AND es.end_date IS NULL) \
+                       AND es.crawl_status IN ('not_found', 'absent') AND es.end_date IS NULL) \
              UNION \
              SELECT src.code, es.external_id::text \
              FROM src JOIN economic_series es ON es.source_id = src.ds_id \
              WHERE es.is_active \
-               AND (es.crawl_status IS DISTINCT FROM 'not_found' OR es.end_date IS NOT NULL) \
+               AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
+                   WHERE lc.source_id = es.source_id AND lc.external_id = es.external_id \
+                     AND lc.status <> 'active') \
+               AND (es.crawl_status IS NULL OR es.crawl_status NOT IN ('not_found', 'absent') \
+                    OR es.end_date IS NOT NULL) \
          ), discovered AS ( \
              SELECT code, COUNT(*) AS n FROM ids \
              WHERE code <> '{census}' OR external_id ~ $3 \
@@ -133,12 +140,15 @@ static COVERAGE_SQL: LazyLock<String> = LazyLock::new(|| {
                     COUNT(*) FILTER (WHERE es.end_date IS NOT NULL) AS with_data, \
                     COUNT(*) FILTER (WHERE es.end_date IS NOT NULL \
                         AND COALESCE(es.last_crawled_at, '-infinity') \
-                            <= NOW() - (CASE WHEN es.crawl_status = 'not_found' THEN 10 ELSE 2 END) \
+                            <= NOW() - {backoff} \
                                * make_interval(days => ({days}))) \
                         AS overdue, \
                     MIN(es.last_crawled_at) AS oldest_success \
              FROM src JOIN economic_series es ON es.source_id = src.ds_id \
              WHERE es.is_active \
+               AND NOT EXISTS (SELECT 1 FROM series_lifecycle lc \
+                   WHERE lc.source_id = es.source_id AND lc.external_id = es.external_id \
+                     AND lc.status <> 'active') \
                AND (src.code <> '{census}' OR es.external_id ~ $3) \
              GROUP BY src.code \
          ) \
@@ -153,6 +163,7 @@ static COVERAGE_SQL: LazyLock<String> = LazyLock::new(|| {
          ORDER BY src.code",
         days = frequency_days_sql("lower(btrim(es.frequency))"),
         census = SourceId::Census.as_str(),
+        backoff = crate::scheduler::failure_backoff_sql("es.crawl_status"),
     )
 });
 
@@ -465,6 +476,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retained_public_histories_do_not_distort_live_coverage_or_freshness() {
+        let Some((url, _guard)) = crate::testkit::lock_test_db("coverage").await else {
+            return;
+        };
+        let pool = econ_graph_core::create_pool(&url).await.unwrap();
+        let src = source(&pool, "t_cov lifecycle", true).await;
+        series(&pool, src, "current", "Monthly", true, Some(0.1)).await;
+        for status in [
+            "discontinued",
+            "missing_from_catalog",
+            "retired",
+            "restricted",
+            "superseded",
+        ] {
+            discovered(&pool, src, status, true).await;
+            series(&pool, src, status, "Monthly", true, Some(365.0)).await;
+            let mut conn = pool.get().await.unwrap();
+            diesel::sql_query("INSERT INTO series_lifecycle(source_id,external_id,status,since,scope_fingerprint,successor_id) VALUES($1,$2,$2,NOW(),'test',CASE WHEN $2='superseded' THEN gen_random_uuid() END)")
+                .bind::<diesel::sql_types::Uuid,_>(src).bind::<Text,_>(status)
+                .execute(&mut conn).await.unwrap();
+        }
+        let got = coverage_for(&pool, &[pair("A", "t_cov lifecycle")], "")
+            .await
+            .unwrap();
+        assert_eq!(
+            (got[0].discovered, got[0].with_data, got[0].overdue),
+            (1, 1, 0)
+        );
+        // Exclusion is a reporting policy, not deletion or deactivation of public history.
+        #[derive(QueryableByName)]
+        struct Count {
+            #[diesel(sql_type = BigInt)]
+            n: i64,
+        }
+        let mut conn = pool.get().await.unwrap();
+        let row: Count = diesel::sql_query(
+            "SELECT count(*) AS n FROM economic_series WHERE source_id=$1 AND is_active",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(src)
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+        assert_eq!(row.n, 6);
+        drop(conn);
+        exec(
+            &pool,
+            "DELETE FROM data_sources WHERE name='t_cov lifecycle'",
+        )
+        .await;
+    }
+
+    #[tokio::test]
     async fn not_found_series_excluded_unless_it_has_data() {
         let Some((url, _guard)) = crate::testkit::lock_test_db("coverage").await else {
             return;
@@ -492,6 +555,13 @@ mod tests {
         // series actually gets, matching how long the scheduler waits before retrying it.
         series(&pool, a, "n5", "Monthly", true, Some(20.0)).await;
         set_crawl_status(&pool, a, "n5", "not_found").await;
+        // a1: omitted from a complete response and never got data: excluded like n1.
+        discovered(&pool, a, "a1", true).await;
+        series(&pool, a, "a1", "Monthly", false, Some(0.1)).await;
+        set_crawl_status(&pool, a, "a1", "absent").await;
+        // a2: had data, now absent, crawled 20 days ago: counted, not overdue (same multiplier).
+        series(&pool, a, "a2", "Monthly", true, Some(20.0)).await;
+        set_crawl_status(&pool, a, "a2", "absent").await;
 
         let got = coverage_for(&pool, &[pair("A", "t_cov notfound")], "")
             .await
@@ -499,8 +569,8 @@ mod tests {
         let a = &got[0];
         assert_eq!(
             (a.discovered, a.with_data, a.overdue),
-            (3, 3, 0),
-            "n1 and n4 excluded; n2, n3, n5 counted; n5 not overdue at the not_found multiplier"
+            (4, 4, 0),
+            "n1, n4 and a1 excluded; n2, n3, n5, a2 counted; n5 and a2 not overdue"
         );
 
         exec(

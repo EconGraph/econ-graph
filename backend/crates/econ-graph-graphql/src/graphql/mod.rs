@@ -12,6 +12,7 @@ pub mod dataloaders;
 pub mod datasets;
 pub mod errors;
 pub mod global_analysis;
+pub mod lifecycle;
 pub mod mutation;
 pub mod query;
 pub mod schema;
@@ -46,3 +47,6 @@ mod datasets_db_tests;
 pub use mutation::Mutation;
 pub use query::Query;
 pub use schema::{create_schema, create_schema_with_data, sdl, SchemaResources};
+
+#[cfg(test)]
+mod lifecycle_visibility_tests;

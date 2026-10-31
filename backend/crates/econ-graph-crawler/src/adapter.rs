@@ -266,6 +266,35 @@ pub trait SourceAdapter: Send + Sync {
         false
     }
 
+    /// Whether confirmed upstream NotFound results can accumulate publication lifecycle
+    /// evidence. Opt in only when this adapter implements scoped catalog reconciliation,
+    /// which can later reactivate a recovered series. This capability is independent of
+    /// whether a worker has already cached its first successful catalog.
+    fn tracks_catalog_lifecycle(&self) -> bool {
+        false
+    }
+
+    /// Verified publication facts from the last complete successful catalog. Facts are kept
+    /// separate from fetch health, so a successful history fetch cannot revive a retired id.
+    fn catalog_lifecycle(&self) -> crate::lifecycle::CatalogLifecycle {
+        crate::lifecycle::CatalogLifecycle::default()
+    }
+
+    /// Retained source ids positively matched by the current declarative rules, including
+    /// tables removed before rules-driven discovery was introduced. Called by the worker
+    /// only after a complete successful scoped discovery. It must never return every stored
+    /// source id without applying the dataset, family, frequency and exclusion rules.
+    async fn catalog_scope_members(&self, _ctx: &CrawlCtx) -> Result<Vec<String>, CrawlError> {
+        Ok(Vec::new())
+    }
+
+    /// Stable fingerprint of the declarative catalog selection rules. Only adapters that
+    /// return this opt into conservative publication lifecycle tracking. Changing the rules
+    /// establishes a new baseline rather than treating deselected series as upstream removals.
+    fn catalog_scope(&self) -> Option<String> {
+        None
+    }
+
     /// Curated or configured entries (BEA tables, FRED series ids, ...) that the last successful
     /// [`discover`](Self::discover) on this adapter instance skipped because the source no longer
     /// lists them, each named as the skip warning names it. The worker reads this after each

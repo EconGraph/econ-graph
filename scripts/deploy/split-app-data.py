@@ -18,12 +18,18 @@ CODES = {'FRED', 'BLS', 'BEA', 'CENSUS', 'WORLD_BANK', 'IMF', 'ECB', 'OECD',
 
 
 def inventory(plane):
-    """Read baseline table/type inventories and all checked-in migration versions."""
+    """Read the table/type inventories every checked-in migration of the plane creates (the
+    baseline and any later migration), all migration versions, and the baseline's SQL."""
     directory = ROOT / 'backend/migrations' / plane
     baseline = next(directory.glob('*baseline/up.sql'))
     content = baseline.read_text()
-    return (re.findall(r'^CREATE TABLE (\w+) ', content, re.M),
-            re.findall(r'^CREATE TYPE (\w+) AS ENUM', content, re.M),
+    every = '\n'.join(p.read_text() for p in sorted(directory.glob('*/up.sql')))
+
+    def created(pattern):
+        return list(dict.fromkeys(re.findall(pattern, every, re.M)))
+
+    return (created(r'^CREATE TABLE (\w+) '),
+            created(r'^CREATE TYPE (\w+) AS ENUM'),
             {p.name.split('_', 1)[0].replace('-', '') for p in directory.iterdir() if p.is_dir()},
             content)
 

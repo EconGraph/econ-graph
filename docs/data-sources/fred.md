@@ -15,13 +15,31 @@ dashboard value. Admins read it as usual. An operator changes this on a running 
 
 ## What we fetch today
 
-Discovery looks up metadata with `GET /fred/series?series_id=ID` for each of the 182 IDs in
-the [curated series list](../../backend/crates/econ-graph-crawler/data/fred_series.csv),
-covering GDP, employment, inflation, rates, the NBER recession indicator (`USREC`) and other
-headline measures. It excludes series whose `notes` match known copyright or
-reproduction-restriction phrases, such as those on Coinbase and S&P/Case-Shiller series. The
-curated list bounds discovery; the earlier `/series/search` crawl had no bound on how many
-series it could find.
+Discovery reads bounded release and category catalogs selected by
+`backend/crates/econ-graph-crawler/data/catalog_selection/fred.toml`. Rules can constrain
+title, id prefix and frequency. All pages must agree on count and ordering before the
+snapshot supplies absence evidence; failed, truncated or changing pages fail discovery.
+Separate scan and selected-series bounds stop unexpected expansion before observation
+jobs are enqueued. A small include/exclude list handles explicit exceptions.
+The default scope is GDP release series plus headline overrides, including the NBER
+recession indicator (`USREC`) and probes for two previously curated retired ids. `expected_missing` explicitly exempts those known retired
+probes from the unexpected-missing warning, while keeping their lifecycle evidence. An
+ordinary included id that disappears still raises the warning. Existing stored series
+outside that scope stay retained and scheduled; changing the discovery scope does not
+deactivate them. This is not a full FRED catalog crawl. Defaults are fixture-tested, not
+validated against the live API.
+
+Series whose `notes` match known copyright or reproduction-restriction phrases, such as
+those on Coinbase and S&P/Case-Shiller series, are recorded as restricted and are not
+fetched. Complete catalogs track repeated absences separately from fetch failures.
+Absence counts only for ids the walked release or category no longer lists: a series
+retitled or re-frequencied out of a rule stays published and scheduled, and is reported for
+rule review. A `/series` response with no series is a failed fetch, not removal evidence.
+Restricted series are retained internally and hidden from public reads. Discontinued,
+missing and retired histories stay publicly reachable with a badge and lower search
+priority. Successor candidates require operator confirmation; histories are never merged.
+See the
+[catalog runbook](../monitoring/crawler-coverage-runbook.md#catalog-selection-and-retained-series).
 
 Each fetch requests series metadata. When observations are needed, it lists vintage dates with
 `GET /fred/series/vintagedates?series_id=ID&realtime_start=..&realtime_end=9999-12-31&limit=10000[&offset=...]`.
