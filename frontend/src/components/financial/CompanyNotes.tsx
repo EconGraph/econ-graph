@@ -68,7 +68,16 @@ function SignedInCompanyNotes({
       void refresh();
     },
   });
-  const remove = useMutation({ mutationFn: deleteCompanyNote, onSuccess: refresh });
+  const remove = useMutation({
+    mutationFn: deleteCompanyNote,
+    onSuccess: (_deleted, id) => {
+      if (editing === id) {
+        setEditing(null);
+        setDraft('');
+      }
+      void refresh();
+    },
+  });
   const busy = save.isPending || remove.isPending;
   const invalid = draft.trim().length === 0 || charCount(draft) > ANNOTATION_NOTE_MAX_CHARS;
 
@@ -117,10 +126,28 @@ function SignedInCompanyNotes({
       </Stack>
       <Stack direction='row' spacing={1} sx={{ mb: 2 }}>
         {offset > 0 && (
-          <Button onClick={() => setOffset(Math.max(0, offset - 100))}>Newer notes</Button>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              setEditing(null);
+              setDraft('');
+              setOffset(Math.max(0, offset - 100));
+            }}
+          >
+            Newer notes
+          </Button>
         )}
         {notes.data?.length === 100 && (
-          <Button onClick={() => setOffset(offset + 100)}>Older notes</Button>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              setEditing(null);
+              setDraft('');
+              setOffset(offset + 100);
+            }}
+          >
+            Older notes
+          </Button>
         )}
       </Stack>
       <Box

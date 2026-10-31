@@ -22,18 +22,29 @@ vi.mock('../../../graphql/companyNotes', async () => {
 });
 const CIK = '0000320193';
 const note: operations.CompanyNote = {
-  id: 'note-alice', cik: CIK, anchor: operations.companyNoteAnchor(CIK),
-  content: 'Original research', createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-02T00:00:00Z', targetStatus: 'found',
+  id: 'note-alice',
+  cik: CIK,
+  anchor: operations.companyNoteAnchor(CIK),
+  content: 'Original research',
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-02T00:00:00Z',
+  targetStatus: 'found',
 };
 function auth(id: string | null) {
-  vi.mocked(useAuth).mockReturnValue({ user: id ? { id, name: id } : null, isAuthenticated: !!id } as ReturnType<typeof useAuth>);
+  vi.mocked(useAuth).mockReturnValue({
+    user: id ? { id, name: id } : null,
+    isAuthenticated: !!id,
+  } as ReturnType<typeof useAuth>);
 }
 function fixture() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return {
     client,
-    wrapper: ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    wrapper: ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
   };
 }
 beforeEach(() => {
@@ -57,12 +68,19 @@ it('creates company notes and edits/deletes only IDs supplied by its own listing
   await screen.findByText('Original research');
   await user.type(screen.getByLabelText('New private note'), 'New evidence');
   await user.click(screen.getByRole('button', { name: 'Save note' }));
-  await waitFor(() => expect(operations.createCompanyNote).toHaveBeenCalledWith(operations.companyNoteAnchor(CIK), 'New evidence'));
+  await waitFor(() =>
+    expect(operations.createCompanyNote).toHaveBeenCalledWith(
+      operations.companyNoteAnchor(CIK),
+      'New evidence'
+    )
+  );
   await user.click(screen.getByRole('button', { name: 'Edit note' }));
   await user.clear(screen.getByLabelText('Edit private note'));
   await user.type(screen.getByLabelText('Edit private note'), 'Revised evidence');
   await user.click(screen.getByRole('button', { name: 'Save changes' }));
-  await waitFor(() => expect(operations.updateCompanyNote).toHaveBeenCalledWith('note-alice', 'Revised evidence'));
+  await waitFor(() =>
+    expect(operations.updateCompanyNote).toHaveBeenCalledWith('note-alice', 'Revised evidence')
+  );
   await user.click(screen.getByRole('button', { name: 'Delete note' }));
   await waitFor(() => expect(operations.deleteCompanyNote).toHaveBeenCalled());
   expect(vi.mocked(operations.deleteCompanyNote).mock.calls[0][0]).toBe('note-alice');
@@ -82,18 +100,48 @@ it('clears prior account content and drafts when the account changes', async () 
   await screen.findByText('No notes for this target yet.');
 });
 it('preserves note content and explains unavailable source targets', async () => {
-  vi.mocked(operations.getCompanyNotes).mockResolvedValue([{ ...note, targetStatus: 'unavailable' }]);
+  vi.mocked(operations.getCompanyNotes).mockResolvedValue([
+    { ...note, targetStatus: 'unavailable' },
+  ]);
   render(<CompanyNotes cik={CIK} />, { wrapper: fixture().wrapper });
   await screen.findByText('Original research');
-  expect(screen.getByText('Original target is currently unavailable. Your note is preserved.')).toBeInTheDocument();
+  expect(
+    screen.getByText('Original target is currently unavailable. Your note is preserved.')
+  ).toBeInTheDocument();
 });
 it('uses the selected immutable anchor for a new fact note', async () => {
   const user = userEvent.setup();
-  const anchor = JSON.stringify({ version: '1', target: { kind: 'filed_fact', accession: 'immutable' } });
+  const anchor = JSON.stringify({
+    version: '1',
+    target: { kind: 'filed_fact', accession: 'immutable' },
+  });
   vi.mocked(operations.getCompanyNotes).mockResolvedValue([]);
-  render(<CompanyNotes cik={CIK} anchor={anchor} targetLabel="Original filing" />, { wrapper: fixture().wrapper });
+  render(<CompanyNotes cik={CIK} anchor={anchor} targetLabel='Original filing' />, {
+    wrapper: fixture().wrapper,
+  });
   await screen.findByText('No notes for this target yet.');
   await user.type(screen.getByLabelText('New private note'), 'Pinned evidence');
   await user.click(screen.getByRole('button', { name: 'Save note' }));
-  await waitFor(() => expect(operations.createCompanyNote).toHaveBeenCalledWith(anchor, 'Pinned evidence'));
+  await waitFor(() =>
+    expect(operations.createCompanyNote).toHaveBeenCalledWith(anchor, 'Pinned evidence')
+  );
+});
+
+it('returns to new-note mode after deleting the note being edited', async () => {
+  const user = userEvent.setup();
+  render(<CompanyNotes cik={CIK} />, { wrapper: fixture().wrapper });
+  await screen.findByText('Original research');
+  await user.click(screen.getByRole('button', { name: 'Edit note' }));
+  expect(screen.getByLabelText('Edit private note')).toHaveValue('Original research');
+  await user.click(screen.getByRole('button', { name: 'Delete note' }));
+  await waitFor(() => expect(screen.getByLabelText('New private note')).toHaveValue(''));
+  await user.type(screen.getByLabelText('New private note'), 'Fresh note');
+  await user.click(screen.getByRole('button', { name: 'Save note' }));
+  await waitFor(() =>
+    expect(operations.createCompanyNote).toHaveBeenCalledWith(
+      operations.companyNoteAnchor(CIK),
+      'Fresh note'
+    )
+  );
+  expect(operations.updateCompanyNote).not.toHaveBeenCalled();
 });
