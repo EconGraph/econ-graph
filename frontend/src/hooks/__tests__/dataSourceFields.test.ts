@@ -18,11 +18,14 @@ const DATA_SOURCE_FIELDS = {
   seriesCount: true,
   createdAt: true,
   updatedAt: true,
+  notice: true,
 } satisfies Record<keyof DataSource, true>;
 
 describe('DataSource', () => {
   it('has exactly the fields GET_DATA_SOURCES selects', () => {
-    const body = QUERIES.GET_DATA_SOURCES.match(/dataSources\s*{([^}]*)}/)?.[1] ?? '';
+    // Collapse nested selections such as `notice { ... }` to their field name first.
+    const query = QUERIES.GET_DATA_SOURCES.replace(/(\w+)\s*{[^{}]*}(?=[^{}]*})/g, '$1');
+    const body = query.match(/dataSources\s*{([^}]*)}/)?.[1] ?? '';
     const selected = body.split(/\s+/).filter(Boolean).sort();
 
     expect(selected).toEqual(Object.keys(DATA_SOURCE_FIELDS).sort());

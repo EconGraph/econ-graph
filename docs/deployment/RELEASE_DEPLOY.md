@@ -129,7 +129,10 @@ the run: before any step, or at the step whose result it was recording. A record
 
 `PUBLIC_HOST` comes from the host's deploy config, never from memory:
 `~/.config/econgraph/deploy.env` (`$XDG_CONFIG_HOME/econgraph/deploy.env`;
-`ECONGRAPH_DEPLOY_ENV` names another file), one line:
+`ECONGRAPH_CONFIG_DIR` names another directory; `ECONGRAPH_DEPLOY_ENV` names another file
+and wins over both). `ECONGRAPH_CONFIG_DIR` is also the backup scripts' variable
+(`scripts/backup/lib.sh`), so exporting it for a backup run redirects this lookup too. One
+line:
 
 ```sh
 PUBLIC_HOST=econgraph.com
@@ -141,6 +144,7 @@ the name is lowercased (`ECONGRAPH.COM` deploys `econgraph.com`). When there are
 production host it holds `econgraph.com`; a test cluster's host has no file, or
 `PUBLIC_HOST=` (empty), and serves localhost only. Before any step it refuses:
 
+- a deploy config that exists but cannot be read, or an `export PUBLIC_HOST=` line;
 - a `PUBLIC_HOST` line with a carriage return (a file saved with CRLF endings), a value
   with blanks in it (an inline comment, spaces inside the quotes), or one that is not a
   public DNS name, by the check `deploy.sh` makes too (`render-public-host.py`);
@@ -153,8 +157,36 @@ production host it holds `econgraph.com`; a test cluster's host has no file, or
   cluster whose routes can't be read is refused too;
 - a cluster not marked production with a `PUBLIC_HOST` configured (`deploy.sh` would refuse
   it too, but only after the load and the backups);
+- a cluster not marked production, with no `PUBLIC_HOST` configured, that serves a public
+  host now (or whose routes can't be read). A deploy without `PUBLIC_HOST` would remove
+  its public routes: it is the production cluster missing its marker and config. Mark it
+  and configure its host, or, on a cluster that should not serve it, delete its public
+  routes first;
 - a cluster whose marker can't be read;
 - a `PUBLIC_HOST` in the environment that differs from the config.
+
+## GATEWAY_TLS_ISSUER
+
+With a public host, the same file may hold the ClusterIssuer of the gateway's https
+certificate, read the same way:
+
+```sh
+GATEWAY_TLS_ISSUER=econ-graph-origin-ca
+```
+
+`GATEWAY_TLS_ISSUER` in the environment wins over the line, but an environment value that
+differs from the certificate's current issuer is refused unless `--change-tls-issuer` is
+given, as for `PUBLIC_HOST`: a shell left over from an earlier change must not re-issue
+the certificate. Otherwise the line is used when it matches the certificate's current
+issuer or the cluster has no certificate (a recreated cluster); a line that differs from
+the current issuer is refused unless `--change-tls-issuer` is given, which passes it to
+`deploy.sh` as an explicit choice. With neither, the certificate keeps its current issuer, else
+`econ-graph-selfsigned`. The plan shows the current and the chosen issuer. A value that
+is not a resource name, an `export GATEWAY_TLS_ISSUER=` line or a config file that exists
+but cannot be read is refused before any step. `deploy.sh` (before it applies anything)
+and `apply-gateway-routes.sh` choose the issuer the same way
+(`scripts/deploy/lib/deploy-config.sh`); without a public host none of them reads the
+line. See [Tunnel origin TLS](TUNNEL_ORIGIN_TLS.md) for the CA issuer.
 
 ## Dry run
 
@@ -175,15 +207,23 @@ scripts/deploy/rollback-release-images.sh --to pre-vX.Y.Z-rc.N --dry-run   # the
 
 with `--cluster NAME` on a cluster other than `econ-graph`.
 
-- **backup**: no image was loaded and the databases are unchanged. When the backup Job
-  timed out but is still running, it says so, with the command to wait for it: run again
-  only once it has finished, since a run starts another backup Job. After a Ctrl-C during
+- **backup**: no image was loaded and the databases are unchanged. The backup step waits
+  up to an hour for the Job (`BACKUP_WAIT_TIMEOUT` in seconds changes it), and starts no
+  Job while one of the `postgres-backup` CronJob is still running. When the Job outlasts
+  the wait, or one was already running, it says so, with the command to wait for it: run
+  again only once it has finished. After a Ctrl-C during
   the backup, it says the Job may still be running in the cluster, with the commands to
   check it. A backup step that succeeds without naming the dumps it wrote (no
   `Backup OK ... in PATH` line), or a Keycloak backup without its verified dump, stops
   the run there.
 - **load**: a load that refuses (an earlier load of the tag under another image name, a
   digest or label mismatch) changes nothing first, as its last line says.
+- **load, keycloak, precheck, and deploy not started**: no migration has run, but the new
+  images may be on the nodes, and a backend pod that restarts runs the new one, which
+  migrates `econ_graph_app` when it starts. It says that only `econ_graph_app` can have
+  changed, how to check for a restarted backend pod, and which `econ_graph_app` dump to
+  restore from if one did (the last complete backup before the tag's first deploy on
+  this cluster); nothing is reported to restore.
 - **keycloak, precheck, deploy**: Keycloak may be stopped (the keycloak step scales it to
   0, and only `deploy.sh` applies it again). It prints the command that starts it at the
   replicas it ran before the tag's first run on this cluster, from the record. When it was
@@ -195,8 +235,9 @@ with `--cluster NAME` on a cluster other than `econ-graph`.
   earliest record), or says it was already at 0, with the manifest's replicas. The nodes
   hold the new crawler image under the name it runs, so it says to start it only after
   the rollback, or once a deploy has applied the migrations.
-- **deploy, verify**: if the data migrations ran, or Keycloak started on a new version,
-  the databases need restoring. It names the backups to restore from, with the run's id
+- **deploy, verify** (once `deploy.sh` started): if the data migrations ran, a backend pod
+  restarted on the new image, or Keycloak started on a new version, the databases need
+  restoring. It names the backups to restore from, with the run's id
   and date: the last complete backup of the data databases, and the last verified
   Keycloak dump, recorded before the first `deploy_started` of the tag on this cluster.
   They hold the state just before the tag's migrations, without losing the writes that
@@ -213,7 +254,7 @@ with `--cluster NAME` on a cluster other than `econ-graph`.
 - one line per step, `step=NAME status=ok|failed|dry-run`, with `unchecked=N` on a verify
   that left N things unchecked;
 - the backups taken, `backup=PATH` and `keycloak_backup=DIR`;
-- after a failed deploy or verify, the backups to restore from, `restore_backup=PATH` and
+- after a deploy or verify that failed once `deploy.sh` started, the backups to restore from, `restore_backup=PATH` and
   `restore_keycloak_backup=DIR`, and, when the tag was first deployed before this run,
   the later ones to use only if the databases were restored to before the tag since,
   `restore_backup_if_restored=PATH` and `restore_keycloak_backup_if_restored=DIR`;

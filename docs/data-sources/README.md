@@ -137,6 +137,11 @@ again) in
 unparsed text next to structured units, `debug` for other unparsed text. The
 `CrawlerUnitsMismatch` alert fires for a day after any mismatch.
 
+## Attribution
+
+The citation and notice each source's terms require, and where they appear, are in
+[Source notices](source-notices.md).
+
 ## Related notes
 
 - [BLS API experimental findings](../technical/BLS_API_EXPERIMENTAL_FINDINGS.md)

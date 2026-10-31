@@ -1,5 +1,6 @@
 //! DB-backed tests for `searchSeries`'s `totalCount` (ECO-508) and for rejecting a malformed
-//! source id on `searchSeries` and `seriesList` rather than dropping the filter (ECO-509).
+//! source id on `searchSeries`, `seriesList` and `datasets` rather than dropping the filter
+//! (ECO-509).
 //!
 //! They need `DATABASE_URL` naming a test database. Every test seeds its own sources, with a
 //! title word no other test uses, so rows from other tests can't change the counts. Rows an
@@ -199,7 +200,8 @@ async fn search_total_count_counts_every_match() {
 }
 
 /// A source id that isn't a UUID (or is empty) is a `BAD_USER_INPUT` error naming the
-/// argument, on both fields, and never a result set without the filter.
+/// argument, on `searchSeries`, `seriesList` and `datasets`, and never a result set without
+/// the filter. So is a malformed `dataset(id:)`.
 #[tokio::test]
 #[serial]
 async fn malformed_source_id_is_rejected() {
@@ -233,6 +235,18 @@ async fn malformed_source_id_is_rejected() {
             r#"{ seriesList(filter: { sourceId: "", frequency: MONTHLY }) { totalCount } }"#
                 .to_string(),
             "`filter.sourceId`",
+        ),
+        (
+            r#"{ datasets(sourceId: "not-a-uuid") { id } }"#.to_string(),
+            "`sourceId`",
+        ),
+        (
+            r#"{ datasets(sourceId: "") { id } }"#.to_string(),
+            "`sourceId`",
+        ),
+        (
+            r#"{ dataset(id: "not-a-uuid") { id } }"#.to_string(),
+            "`id`",
         ),
     ] {
         let response = run(&pool, &query).await;
@@ -283,4 +297,67 @@ async fn valid_source_id_filters() {
     let listed = data(&pool, &list(unknown.to_string())).await;
     assert_eq!(listed["seriesList"]["totalCount"], 0);
     assert_eq!(listed["seriesList"]["nodes"].as_array().unwrap().len(), 0);
+}
+
+/// A source id narrows along with the other filters, never instead of them, on both fields;
+/// with no source id, every source's matches are counted.
+#[tokio::test]
+#[serial]
+async fn source_id_combines_with_other_filters() {
+    let pool = pool().await;
+    let word = "Vexmordial";
+    let source = new_source(&pool).await;
+    let other = new_source(&pool).await;
+    add_series(&pool, &source, word, "Monthly", 2, true).await;
+    add_series(&pool, &source, word, "Quarterly", 1, true).await;
+    add_series(&pool, &other, word, "Monthly", 3, true).await;
+    let unknown = Uuid::new_v4();
+
+    for (args, expected) in [
+        (String::new(), 6),
+        (", frequency: MONTHLY".to_string(), 5),
+        (format!(r#", source: "{}""#, source.id), 3),
+        (
+            format!(r#", source: "{}", frequency: MONTHLY"#, source.id),
+            2,
+        ),
+        (
+            format!(r#", source: "{}", frequency: QUARTERLY"#, other.id),
+            0,
+        ),
+        (format!(r#", source: "{unknown}", frequency: MONTHLY"#), 0),
+    ] {
+        let (total, ids) = search(&pool, word, &args).await;
+        assert_eq!(
+            (total, ids.len()),
+            (expected, expected as usize),
+            "searchSeries{args}"
+        );
+    }
+
+    for (filter, expected) in [
+        (String::new(), 6),
+        (", frequency: MONTHLY".to_string(), 5),
+        (format!(r#", sourceId: "{}""#, source.id), 3),
+        (
+            format!(r#", sourceId: "{}", frequency: MONTHLY"#, source.id),
+            2,
+        ),
+        (
+            format!(r#", sourceId: "{}", frequency: QUARTERLY"#, other.id),
+            0,
+        ),
+        (format!(r#", sourceId: "{unknown}", frequency: MONTHLY"#), 0),
+    ] {
+        let query = format!(
+            r#"{{ seriesList(filter: {{ searchQuery: "{word}"{filter} }}) {{ totalCount nodes {{ id }} }} }}"#
+        );
+        let listed = data(&pool, &query).await;
+        assert_eq!(listed["seriesList"]["totalCount"], expected, "{query}");
+        assert_eq!(
+            listed["seriesList"]["nodes"].as_array().unwrap().len(),
+            expected as usize,
+            "{query}"
+        );
+    }
 }

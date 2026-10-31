@@ -234,6 +234,8 @@ fn census_and_fhfa_phrases() {
         "Census, FHFA",
         &[
             ("Count", Some(unit(UnitKind::Count, Scale::Units))),
+            // Census BDS rates (a float variable).
+            ("Percent", percent()),
             (
                 "Index (January 1991 = 100)",
                 Some(index(Some("January 1991=100"))),

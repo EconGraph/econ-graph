@@ -34,6 +34,7 @@ vi.mock('../../utils/graphql', async () => {
 vi.mock('react-router-dom', () => ({
   useParams: vi.fn(),
   useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: '/series', search: '', hash: '', state: null }),
 }));
 
 // Chart.js needs a canvas. Render the annotations the chart would draw instead, each as a

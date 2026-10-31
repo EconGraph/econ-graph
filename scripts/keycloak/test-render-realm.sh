@@ -65,6 +65,38 @@ got = json.loads(sys.argv[1])
 assert got == {"secret": "back\bspace\x1bescape"}, got
 EOF
 
+# Exercise the actual Kubernetes render command: absent or partial Facebook
+# credentials must never expose a login button; complete credentials are escaped
+# and use the same account-linking flow as Google.
+python3 - "$repo_root" "$scratch" <<'PYTEST' || fail "Facebook Kubernetes realm rendering failed"
+import json, os, pathlib, re, subprocess, sys
+root, scratch = map(pathlib.Path, sys.argv[1:])
+manifest = (root / "k8s/manifests/keycloak/realm-import-job.yaml").read_text()
+command = re.search(r"        - \|\n(.*?)        env:", manifest, re.S).group(1)
+command = command.replace("/config/", str(root / "config/keycloak") + "/")
+command = command.replace(str(root / "config/keycloak/render-realm.sh"), str(root / "scripts/keycloak/render-realm.sh"))
+command = command.replace("/rendered/", str(scratch) + "/")
+# The catalog-grant merge reads a live Keycloak and leaves identity providers alone;
+# check the rendered template it receives.
+command, merges = re.subn(r"^.*preserve-catalog-grants\.py.*\n", "", command, flags=re.M)
+assert merges == 1, "realm import no longer merges catalog grants after rendering"
+base = {"PATH": os.environ["PATH"], "KC_WEB_BASE_URL": "http://localhost", "KC_WEB_E2E_BASE_URL": "http://localhost"}
+for values, enabled in [({}, False), ({"KC_FACEBOOK_CLIENT_ID": "test-app"}, False),
+                        ({"KC_FACEBOOK_CLIENT_SECRET": "test-secret"}, False),
+                        ({"KC_FACEBOOK_CLIENT_ID": "test-app", "KC_FACEBOOK_CLIENT_SECRET": 'test-"secret\\'}, True)]:
+    subprocess.run(["bash", "-c", command], env=base | values, check=True)
+    realm = json.loads((scratch / "realm-template.json").read_text())
+    providers = {p["alias"]: p for p in realm["identityProviders"]}
+    facebook = providers["facebook"]
+    assert facebook["enabled"] == str(enabled).lower(), facebook
+    assert facebook["firstBrokerLoginFlowAlias"] == providers["google"]["firstBrokerLoginFlowAlias"]
+    assert facebook["config"]["defaultScope"] == "email,public_profile"
+    assert facebook["storeToken"] is False
+    assert facebook["trustEmail"] is False  # An upstream email is not proof of verification.
+    if enabled:
+        assert facebook["config"]["clientSecret"] == values["KC_FACEBOOK_CLIENT_SECRET"]
+PYTEST
+
 if [ "$failures" -ne 0 ]; then
   echo "${failures} render-realm test(s) failed"
   exit 1

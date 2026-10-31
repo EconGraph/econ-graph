@@ -17,16 +17,17 @@ import {
   searchAndOpen,
 } from '../seriesPage';
 
-// Live QA: REL-QA check 3's per-source sweep on the deployed build. For each release source
-// (FRED, BLS, Census BDS, BEA, FHFA, WDI), search for one of its series, open it, check the
+// Live QA: REL-QA check 3's per-source sweep on the deployed build. For each public release
+// source (BLS, Census BDS, BEA, FHFA, WDI), search for one of its series, open it, check the
 // chart's newest point, apply every transformation, and download the CSV. In fixture mode every
 // value is the seeded one; deployed, the newest point must be within the source's publication
 // cadence (`liveMaxAgeDays`) and the other checks are structural.
 //
-// The journey (journey.spec.ts) and the series-ui specs go deep on FRED GDP and BLS CPI; this
-// checks the same pages hand off for every source, since each source has its own adapter,
-// frequency and units, and a page that works for FRED can still break for an annual Census
-// series.
+// The journey (journey.spec.ts) and the series-ui specs go deep on BLS CPI; this checks the same
+// pages hand off for every source, since each source has its own adapter, frequency and units,
+// and a page that works for a monthly series can still break for an annual Census series. FRED,
+// the sixth release source, is admin-only: catalog-access.spec.ts opens its series page as an
+// admin.
 
 /** The value column's header for each transformation (TRANSFORMATION_OPTIONS' descriptions). */
 const TRANSFORMATION_DESCRIPTIONS: Record<string, string> = {
@@ -37,7 +38,7 @@ const TRANSFORMATION_DESCRIPTIONS: Record<string, string> = {
   'Log difference': 'Log Difference',
 };
 
-test.describe('six-source sweep', () => {
+test.describe('public-source sweep', () => {
   // Search, six transformations and a download per test.
   test.slow();
 
