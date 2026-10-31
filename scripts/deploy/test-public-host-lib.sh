@@ -25,6 +25,7 @@
 #   - scripts/deploy/mark-production-cluster.sh changes nothing without a terminal and the
 #     typed kube-system UID prefix, leaves a marked cluster alone, and with --unmark stops
 #     cloudflared before removing the marker and deletes the token only when told to;
+#   - scripts/deploy/set-crawler-keys.sh passes APP_DATABASE on to create-secrets.sh;
 #   - scripts/deploy/set-crawler-keys.sh --tunnel refuses an unmarked cluster before it
 #     asks for the token, and on a marked one starts cloudflared only through
 #     apply_cloudflared, with the kind kubectl and context (lib/kind-env.sh) throughout.
@@ -116,6 +117,8 @@ case "$*" in
   *"get secret cloudflare-tunnel"*)
     [ "${STUB_SECRET_FAILS:-0}" != 1 ] || exit 1
     [ "${STUB_SECRET:-0}" != 1 ] || echo secret/cloudflare-tunnel ;;
+  *"get secret econ-graph-secrets --ignore-not-found -o name"*)
+    [ "${STUB_KEYLESS_SECRET:-0}" != 1 ] || echo secret/econ-graph-secrets ;;
   *"get job keycloak-realm-import"*) echo Complete ;;
   *"get configmap keycloak-realm"*)
     case "${STUB_REALM:-current}" in
@@ -630,7 +633,7 @@ keys=scripts/deploy/set-crawler-keys.sh
 # run_keys STUB-SETTINGS ARGS [INPUT]: set-crawler-keys.sh under a terminal, with KUBECTL
 # and CLUSTER_ROLE_CONTEXT in the environment pointing elsewhere (they must be replaced).
 # The host's deploy config is $keys_deploy_env (absent unless a test writes it), and
-# keys_env adds settings such as PUBLIC_HOST to the script's environment.
+# keys_env adds settings such as PUBLIC_HOST or APP_DATABASE to the script's environment.
 keys_deploy_env="$stub_dir/config/econgraph/deploy.env"
 keys_env=()
 run_keys() {
@@ -671,6 +674,22 @@ if [ "$have_script" = true ]; then
   grep -q 'stays at 0 replicas' "$out" || fail "set-crawler-keys --tunnel: no public host was not reported"
   grep -Eq 'stdin: .*replicas: [1-9]|rollout restart deployment/cloudflared' "$log" &&
     fail "set-crawler-keys --tunnel: started cloudflared without a public host"
+  # A cluster deployed before the app database existed (econ-graph-secrets without
+  # app-database-url): create-secrets.sh needs APP_DATABASE, and set-crawler-keys.sh passes it on.
+  keyless='STUB_MARKER=production STUB_SECRET=1 STUB_CLOUDFLARED_REPLICAS=0 STUB_KEYLESS_SECRET=1'
+  if run_keys "$keyless" --tunnel "$fake_token"$'\n'; then
+    fail "set-crawler-keys --tunnel: wrote into a Secret without app-database-url without APP_DATABASE"
+  fi
+  grep -q 'has no app-database-url' "$out" || fail "set-crawler-keys: the APP_DATABASE refusal is not shown: $(cat "$out")"
+  keys_env=(APP_DATABASE=shared)
+  run_keys "$keyless" --tunnel "$fake_token"$'\n' ||
+    fail "set-crawler-keys --tunnel: APP_DATABASE=shared did not reach create-secrets.sh: $(cat "$out")"
+  keys_env=()
+  grep -q 'create secret generic cloudflare-tunnel --from-file=token=' "$log" ||
+    fail "set-crawler-keys --tunnel with APP_DATABASE=shared: the token was not written"
+  grep -q 'app-database-url (shared with the data database, from APP_DATABASE)' "$out" ||
+    fail "set-crawler-keys --tunnel with APP_DATABASE=shared: create-secrets.sh did not use it: $(cat "$out")"
+
   # Facebook sign-in is disabled: --facebook refuses before any prompt, cluster call
   # or write, with --dry-run too.
   for args in --facebook '--facebook --dry-run'; do

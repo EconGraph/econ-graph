@@ -52,6 +52,30 @@ const mockSources = (data: DataSource[] | undefined, extra: object = {}) =>
   } as unknown as ReturnType<typeof useDataSources>);
 
 describe('DataSources', () => {
+  it('shows the publication lifecycle counts reported by each source', () => {
+    mockSources([
+      {
+        ...sources[0],
+        lifecycleCounts: {
+          discontinued: 2,
+          missingFromCatalog: 3,
+          retired: 4,
+          superseded: 5,
+        },
+      },
+    ]);
+    renderWithProviders(<DataSources />);
+    const fred = within(screen.getByRole('region', { name: sources[0].name }));
+    for (const [label, count] of [
+      ['Discontinued', '2'],
+      ['Missing from catalog', '3'],
+      ['Retired', '4'],
+      ['Superseded', '5'],
+    ]) {
+      expect(fred.getByText(label).parentElement).toHaveTextContent(count);
+    }
+  });
+
   it("shows each source's series count and their total", () => {
     mockSources(sources);
     renderWithProviders(<DataSources />);

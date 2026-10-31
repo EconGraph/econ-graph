@@ -72,6 +72,11 @@
 #     cluster's own kubectl and kubeconfig (ensure_kind_kubectl), exported to
 #     every step, on context kind-<cluster>. On the production host plain
 #     `kubectl` is the MicroK8s snap wrapper.
+#   - APP_DATABASE (shared or separate) is passed to deploy.sh's create-secrets.sh. It is
+#     needed only while the cluster's econ-graph-secrets has no app-database-url (deployed
+#     before the app database existed), or to change it
+#     (docs/deployment/APP_DATA_CONVERSION.md). create-secrets.sh --app-database-only
+#     --dry-run checks it here, read-only, so a refusal comes before any step.
 #   - PUBLIC_HOST comes from the host's deploy config,
 #     ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env (ECONGRAPH_CONFIG_DIR
 #     names another directory, ECONGRAPH_DEPLOY_ENV another file; see
@@ -386,6 +391,21 @@ if [ -n "$PUBLIC_HOST" ]; then
 elif [ "$CHANGE_TLS_ISSUER" = true ]; then
     die "--change-tls-issuer needs a public host: without one there is no certificate"
 fi
+
+# --- APP_DATABASE ------------------------------------------------------------------------
+# deploy.sh runs create-secrets.sh after the backups, the load and the precheck that stops the
+# crawler. Its decision on app-database-url (and the read-only checks of which database holds
+# the app tables) runs here first, as a dry run of only that key, so any refusal comes before
+# any step: a Secret without app-database-url and no APP_DATABASE, or a direction that would
+# point the backend at a database without the accounts.
+case "${APP_DATABASE:-}" in
+    "" | shared | separate) ;;
+    *) die "APP_DATABASE must be shared or separate" ;;
+esac
+app_db_check="$(KUBECTL="$KUBECTL" KUBECONFIG="$KUBECONFIG" \
+    "$DEPLOY_DIR/create-secrets.sh" --app-database-only --dry-run --context="$CONTEXT" 2>&1)" ||
+    die "create-secrets.sh, which deploy.sh runs after the first steps, refuses app-database-url now: $(sed -n 's/^create-secrets: error: //p' <<<"$app_db_check" | tail -1); nothing was changed (docs/deployment/APP_DATA_CONVERSION.md)"
+echo "  APP_DATABASE    ${APP_DATABASE:-(unset)}: $(sed -n 's/^create-secrets: app-database-url: //p' <<<"$app_db_check" | tail -1)"
 
 # --- what earlier runs of this tag recorded -------------------------------------------
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"

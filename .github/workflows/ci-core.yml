@@ -384,9 +384,12 @@ jobs:
       run: scripts/deploy/test-install-kind.sh
 
     # The pre-deploy database check (backup running, crawler stop, long transactions),
-    # against a stub kubectl.
+    # and deploy.sh's use of it when data migrations are pending, against a stub kubectl.
     - name: Check the pre-deploy database check
-      run: scripts/deploy/test-precheck-db-migration.sh
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        scripts/deploy/test-precheck-db-migration.sh
+        scripts/deploy/test-data-migrations.sh
 
     # Loading a release candidate's GHCR images into the kind cluster, the
     # restart and image check after deploy.sh, and the rollback, against stub
@@ -898,6 +901,20 @@ jobs:
           grep -Fq "test $name ... ok" "$log"
           grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$log"
         done
+      working-directory: backend
+
+    - name: Run publication lifecycle and public visibility regressions (required)
+      run: |
+        set -euo pipefail
+        : "${DATABASE_URL:?DATABASE_URL is required for lifecycle regressions}"
+        for filter in graphql::lifecycle::tests graphql::lifecycle_visibility_tests; do
+          log="$RUNNER_TEMP/lifecycle-${filter//:/_}.log"
+          cargo test -p econ-graph-graphql --lib "$filter" -- --test-threads=1 --nocapture | tee "$log"
+          grep -Eq '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' "$log"
+        done
+        log="$RUNNER_TEMP/lifecycle-cross-section.log"
+        cargo test -p econ-graph-services --lib restricted_series -- --test-threads=1 --nocapture | tee "$log"
+        grep -Eq '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' "$log"
       working-directory: backend
 
     - name: Run catalog and anonymous permission regressions (required)

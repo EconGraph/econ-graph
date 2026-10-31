@@ -146,6 +146,7 @@ impl EconomicSeriesType {
         let mut conn = pool.get().await?;
         let mut query = dsl::data_points
             .filter(dsl::series_id.eq(series_uuid))
+            .filter(crate::graphql::dataloaders::public_data_points_predicate())
             .into_boxed();
 
         if let Some(start_date) = filter.start_date {

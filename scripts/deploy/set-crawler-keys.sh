@@ -26,6 +26,9 @@
 # create-secrets.sh runs with an environment cut down to the basics plus the
 # keys of the selected mode, so credentials exported in your shell for other
 # keys (another mode's keys, database or Grafana passwords) are not written.
+# APP_DATABASE (shared or separate, not a credential) is passed on: on a cluster
+# whose econ-graph-secrets has no app-database-url yet, create-secrets.sh needs
+# it (docs/deployment/APP_DATA_CONVERSION.md).
 #
 # Afterwards the crawler worker is scaled to one replica and restarted so it
 # picks up the keys (skip with --no-start-crawler). With --google, Keycloak is
@@ -286,8 +289,11 @@ fi
 if [ "$DRY_RUN" = true ]; then
     echo "==> Dry run: would prompt (hidden) for each key above, then run create-secrets.sh"
     [ "$START_CRAWLER" = true ] && echo "  then: kubectl -n ${NAMESPACE} scale deployment/crawler-worker --replicas=1 and restart it"
+    # The realm allows the public host only when there is one, else http://localhost.
+    realm_origin="http://localhost"
+    [ -n "${PUBLIC_HOST:-}" ] && realm_origin="https://${PUBLIC_HOST}"
     [ "$REIMPORT_REALM" = true ] && echo "  then: kubectl -n ${NAMESPACE} rollout restart deployment/keycloak," \
-        "then delete and re-apply job/keycloak-realm-import (for ${PUBLIC_HOST:+https://${PUBLIC_HOST} and }http://localhost) and wait for it"
+        "then delete and re-apply job/keycloak-realm-import (for ${realm_origin}) and wait for it"
     [ "$TUNNEL" = true ] && echo "  then: start cloudflared through apply_cloudflared for the public host the cluster serves, and restart it"
     exit 0
 fi
@@ -321,7 +327,7 @@ else
     # on any command line). KUBECTL and CLUSTER_ROLE_CONTEXT are kept, so
     # create-secrets.sh uses the same kind kubectl and context as this script.
     (
-        keep=" PATH HOME USER LOGNAME LANG LC_ALL TERM TMPDIR KUBECONFIG KUBECTL CLUSTER_ROLE_CONTEXT ${vars[*]} "
+        keep=" PATH HOME USER LOGNAME LANG LC_ALL TERM TMPDIR KUBECONFIG KUBECTL CLUSTER_ROLE_CONTEXT APP_DATABASE ${vars[*]} "
         while IFS= read -r name; do
             case "$keep" in
                 *" $name "*) ;;
