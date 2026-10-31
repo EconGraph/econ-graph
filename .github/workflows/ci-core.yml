@@ -914,6 +914,15 @@ jobs:
         python3 ../scripts/data-access/test_independent_access.py
       working-directory: backend
 
+    - name: Run selected observation compatibility contract (required)
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        : "${DATABASE_URL:?DATABASE_URL is required for storage compatibility}"
+        cargo test -p econ-graph-graphql --test selected_compatibility -- --test-threads=1 --nocapture | tee "$RUNNER_TEMP/selected-compatibility.log"
+        grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/selected-compatibility.log"
+      working-directory: backend
+
     - name: Run catalog and anonymous permission regressions (required)
       run: |
         set -euo pipefail
