@@ -72,6 +72,11 @@ def policy(documents):
             container = d['spec']['template']['spec']['containers'][0]
             assert re.fullmatch(r'[^\s]+@sha256:[0-9a-f]{64}', container['image']), 'image digest interpolation is invalid'
             assert container['imagePullPolicy'] != 'Never', 'Talos must pull feature images'
+        if d['kind'] == 'Deployment' and d['metadata']['name'] in ['econ-graph-backend', 'econ-graph-data-backend', 'econ-graph-frontend', 'keycloak']:
+            assert d['spec']['replicas'] == 2, 'replicated services need two instances'
+            assert d['spec'].get('strategy') == {
+                'type': 'RollingUpdate', 'rollingUpdate': {'maxUnavailable': 1, 'maxSurge': 0}
+            }, 'two-node anti-affinity needs a no-surge rolling update'
         if d['kind'] == 'ObjectStore':
             assert 'retentionPolicy' not in d['spec'], 'automatic backup deletion is forbidden'
         if d['kind'] == 'ScheduledBackup':

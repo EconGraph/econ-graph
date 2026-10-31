@@ -32,6 +32,79 @@ drill = module('drill', HERE / 'cnpg-drill.py')
 
 
 class PlatformTests(unittest.TestCase):
+    def test_replicated_deployments_roll_without_a_third_storage_node(self):
+        kustomization = yaml.safe_load((ROOT / 'platform/application/kustomization.yaml').read_text())
+        names = {'econ-graph-backend', 'econ-graph-data-backend', 'econ-graph-frontend', 'keycloak'}
+        strategies = {}
+        for entry in kustomization['patches']:
+            document = yaml.safe_load(entry['patch'])
+            if isinstance(document, dict) and 'strategy' in document.get('spec', {}):
+                strategies[document['metadata']['name']] = document['spec']['strategy']
+        self.assertEqual(set(strategies), names)
+        for strategy in strategies.values():
+            self.assertEqual(strategy, {'type': 'RollingUpdate', 'rollingUpdate': {'maxUnavailable': 1, 'maxSurge': 0}})
+            # Two anti-affine replicas fill the two eligible nodes. The first
+            # update must release one old slot rather than wait for a third.
+            occupied = 2
+            allowed_old_removals = occupied - (2 - strategy['rollingUpdate']['maxUnavailable'])
+            self.assertEqual(allowed_old_removals, 1)
+            self.assertEqual(strategy['rollingUpdate']['maxSurge'], 0)
+
+    def test_plugin_restore_waits_for_the_exact_switched_wal_before_recovery(self):
+        # CNPG's actual Cluster status shape has no lastArchivedWAL field.
+        source = {'metadata': {'name': 'copy', 'namespace': 'proof'},
+                  'spec': {'instances': 2, 'plugins': [{'name': 'barman-cloud.cloudnative-pg.io',
+                          'isWALArchiver': True, 'parameters': {'barmanObjectName': 'owned-store'}}]}}
+        args = SimpleNamespace(source_cluster='copy', namespace='proof', object_store='owned-store', owner='owner')
+        kube = Mock()
+        wal = '00000001000000000000000A'
+        archive_checks = []
+        def query(_kube, _args, cluster, statement, *unused):
+            if 'CREATE TABLE' in statement:
+                return ''
+            if 'clock_timestamp' in statement:
+                return '2026-10-31T12:00:00.000000Z\n'
+            if 'pg_switch_wal' in statement:
+                self.assertIn('VALUES (2)', statement)
+                return wal + '\n'
+            if 'pg_ls_archive_statusdir()' in statement:
+                self.assertIn("name = '" + wal + ".done'", statement)
+                archive_checks.append(statement)
+                return 'f\n' if len(archive_checks) == 1 else 't\n'
+            if 'string_agg' in statement:
+                self.assertNotEqual(cluster, 'copy')
+                return '1\n'
+            self.fail('unexpected SQL ' + statement)
+        def read(resource, name, namespace):
+            if resource == 'backup':
+                return {'status': {'phase': 'completed'}}
+            self.assertTrue(name.startswith('probe-restore-'))
+            self.assertEqual(len(archive_checks), 2, 'recovery must wait for exact WAL archive success')
+            return {'spec': {'instances': 2}, 'status': {'readyInstances': 2}}
+        def bounded_poll(read, accepted, **unused):
+            for _ in range(3):
+                value = read()
+                if accepted(value):
+                    return value
+            raise RuntimeError('not yet archived')
+        kube.get.side_effect = read
+        report = {}
+        with patch.object(drill, 'sql', side_effect=query), patch.object(drill, 'poll', side_effect=bounded_poll):
+            drill.backup_restore(kube, args, source, report)
+        self.assertEqual(report['archived_wal_segment'], wal)
+        self.assertEqual(report['status'], 'passed')
+        self.assertEqual(report['pitr_restored_ids'], '1')
+
+    def test_restore_rejects_a_different_wal_plugin_before_writing(self):
+        kube = Mock()
+        source = {'spec': {'plugins': [{'name': 'another-plugin', 'isWALArchiver': True,
+                                       'parameters': {'barmanObjectName': 'owned-store'}}]}}
+        args = SimpleNamespace(object_store='owned-store', namespace='proof', owner='owner')
+        with patch.object(drill, 'sql') as query:
+            with self.assertRaises(ValueError):
+                drill.backup_restore(kube, args, source, {})
+            query.assert_not_called()
+
     def test_dry_runs_cannot_contact_even_nonexistent_tools(self):
         with tempfile.TemporaryDirectory() as temporary:
             common = ['--context', 'invalid', '--kubeconfig', temporary + '/absent', '--owner', 'test', '--kubectl', temporary + '/absent-kubectl']

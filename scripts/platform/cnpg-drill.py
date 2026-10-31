@@ -55,8 +55,9 @@ def recovery_cluster(source, name, owner, object_store, target):
 
 def backup_restore(kube, args, source, report):
     kube.disposable_owned('objectstore.barmancloud.cnpg.io', args.object_store, args.owner, args.namespace)
-    configured = [p.get('parameters', {}).get('barmanObjectName') for p in source['spec'].get('plugins', []) if p.get('isWALArchiver')]
-    if configured != [args.object_store]:
+    configured = [(p.get('name'), p.get('parameters', {}).get('barmanObjectName'))
+                  for p in source['spec'].get('plugins', []) if p.get('isWALArchiver')]
+    if configured != [('barman-cloud.cloudnative-pg.io', args.object_store)]:
         raise ValueError('source WAL archiver must use the exact owned ObjectStore')
     suffix = uuid.uuid4().hex[:10]
     probe = 'train4_probe_' + suffix
@@ -75,10 +76,17 @@ def backup_restore(kube, args, source, report):
         return phase == 'completed'
     backup = poll(lambda: kube.get('backup', backup_name, args.namespace), backup_done)
     target = sql(kube, args, args.source_cluster, "SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"');").strip()
-    wal_before = kube.get('cluster', args.source_cluster, args.namespace).get('status', {}).get('lastArchivedWAL')
-    sql(kube, args, args.source_cluster, f'INSERT INTO public.{probe} VALUES (2); SELECT pg_switch_wal();')
-    poll(lambda: kube.get('cluster', args.source_cluster, args.namespace),
-         lambda c: bool(c.get('status', {}).get('lastArchivedWAL')) and c['status']['lastArchivedWAL'] != wal_before)
+    wal = sql(kube, args, args.source_cluster,
+              f'INSERT INTO public.{probe} VALUES (2); SELECT pg_walfile_name(pg_switch_wal());').strip()
+    if not re.fullmatch(r'[0-9A-F]{24}', wal):
+        raise RuntimeError('PostgreSQL did not identify the switched WAL segment')
+    # CNPG 1.30's Cluster status has no lastArchivedWAL. PostgreSQL exposes the
+    # exact segment's archive-success marker, including when archive_command
+    # delegates to CNPG's configured Barman plugin. A newer last_archived_wal
+    # alone would not prove this segment succeeded with parallel archiving.
+    poll(lambda: sql(kube, args, args.source_cluster,
+                    f"SELECT EXISTS (SELECT 1 FROM pg_ls_archive_statusdir() WHERE name = '{wal}.done');").strip(),
+         lambda done: done == 't')
     kube.apply(recovery_cluster(source, restored, args.owner, args.object_store, target))
     poll(lambda: kube.get('cluster', restored, args.namespace),
          lambda c: c.get('status', {}).get('readyInstances', 0) == c['spec']['instances'])
@@ -86,6 +94,7 @@ def backup_restore(kube, args, source, report):
     if ids != '1':
         raise RuntimeError('PITR failed: expected pre-target row and exclusion of post-target row')
     report.update({'base_backup_phase': backup['status']['phase'], 'wal_archive_advanced': True,
+                   'archived_wal_segment': wal, 'wal_evidence': 'PostgreSQL exact segment archive-success marker',
                    'pitr_restored_ids': ids, 'recovery_target': target, 'status': 'passed'})
 
 

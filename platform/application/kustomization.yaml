@@ -146,3 +146,59 @@ patches:
   patch: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: econ-graph-frontend\n\
     spec:\n  template:\n    spec:\n      containers:\n      - name: frontend\n   \
     \     image: ${FRONTEND_IMAGE}\n        imagePullPolicy: IfNotPresent\n"
+- target:
+    kind: Deployment
+    name: econ-graph-backend
+  patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: econ-graph-backend
+    spec:
+      strategy:
+        type: RollingUpdate
+        rollingUpdate:
+          maxUnavailable: 1
+          maxSurge: 0
+- target:
+    kind: Deployment
+    name: econ-graph-data-backend
+  patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: econ-graph-data-backend
+    spec:
+      strategy:
+        type: RollingUpdate
+        rollingUpdate:
+          maxUnavailable: 1
+          maxSurge: 0
+- target:
+    kind: Deployment
+    name: econ-graph-frontend
+  patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: econ-graph-frontend
+    spec:
+      strategy:
+        type: RollingUpdate
+        rollingUpdate:
+          maxUnavailable: 1
+          maxSurge: 0
+- target:
+    kind: Deployment
+    name: keycloak
+  patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: keycloak
+    spec:
+      strategy:
+        type: RollingUpdate
+        rollingUpdate:
+          maxUnavailable: 1
+          maxSurge: 0
