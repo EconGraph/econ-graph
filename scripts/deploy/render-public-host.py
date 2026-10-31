@@ -4,8 +4,11 @@
 Usage: render-public-host.py HOST [MANIFEST ...]
 MAIN_HOST defaults to www.HOST; set it to HOST to restore apex canonicalization.
 Only the canonical HTTPS host serves public routes and Keycloak. HTTP on both
-names and HTTPS on the alternate name redirect permanently to that host, retaining
-path and query. Localhost routes and the in-cluster JWKS URL remain unchanged.
+names and HTTPS on the alternate name redirect to that host, retaining path and
+query. The redirects are permanent (301) to the apex, and to www.HOST only when
+MAIN_HOST_PERMANENT names it (scripts/deploy/switch-main-host.sh --finalize);
+otherwise they are temporary (302), so a rollback is not undone by redirects that
+browsers and Cloudflare have cached. Localhost routes and the in-cluster JWKS URL remain unchanged.
 Keycloak and backend share the canonical issuer; public CORS allows both names
 and http://localhost. Tests: scripts/deploy/test-render-public-host.sh.
 """
@@ -105,8 +108,15 @@ def public_route(doc, host):
     }
 
 
+def redirect_status(host, main_host):
+    """301 to the apex, or to a main host MAIN_HOST_PERMANENT names; else 302."""
+    permanent = os.environ.get("MAIN_HOST_PERMANENT", "").strip().lower()
+    return 301 if main_host == host or permanent == main_host else 302
+
+
 def redirect_routes(namespace, host, main_host):
     """HTTP on both names and HTTPS on the alternate name go to MAIN_HOST."""
+    status = redirect_status(host, main_host)
 
     def route(name, section, hostnames):
         return {
@@ -124,7 +134,7 @@ def redirect_routes(namespace, host, main_host):
                                 "requestRedirect": {
                                     "scheme": "https",
                                     "hostname": main_host,
-                                    "statusCode": 301,
+                                    "statusCode": status,
                                 },
                             }
                         ]

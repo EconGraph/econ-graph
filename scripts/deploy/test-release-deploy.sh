@@ -119,7 +119,7 @@ case "$*" in
     "get nodes"*) printf 'econ-graph-control-plane econ-graph-worker' ;;
     "get namespace kube-system"*) printf '%s' "$uid" ;;
     "get namespace econ-graph --ignore-not-found -o name") echo namespace/econ-graph ;;
-    "get crd httproutes.gateway.networking.k8s.io"*) ;;
+    "get crd httproutes.gateway.networking.k8s.io"*) echo customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io ;;
     "get httproute econ-graph-frontend-public "*)
         printf '%s' "${STUB_SERVED_MAIN-www.econgraph.com}" ;;
     "get httproute -l econgraph.io/public-host=true "*)
@@ -1153,6 +1153,16 @@ run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
 
 run env STUB_SERVED_MAIN=econgraph.com "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
 refused "a release that would implicitly change the issuer" "switch-main-host.sh"
+# The refusal names the deploy-config fix first, then the switch.
+if has "To keep the live main host, set MAIN_HOST=econgraph.com in ${CONFIG}. To change it, run scripts/deploy/switch-main-host.sh"; then
+    echo "ok   the main-host refusal names MAIN_HOST=econgraph.com in the deploy config first"
+else
+    fail "the main-host refusal does not name MAIN_HOST=econgraph.com in the deploy config first"
+fi
+has "exported in this shell" && fail "the main-host refusal blames an export that is not there"
+printf 'PUBLIC_HOST=econgraph.com\nMAIN_HOST=econgraph.com\n' >"$CONFIG"
+run env STUB_SERVED_MAIN=econgraph.com MAIN_HOST=www.econgraph.com "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "a stale exported MAIN_HOST" "unset the MAIN_HOST=www.econgraph.com exported in this shell"
 
 # Several PUBLIC_HOST lines: the last one wins, as if the file were sourced.
 printf 'PUBLIC_HOST=econ-graph.com\nPUBLIC_HOST=econgraph.com\n' >"$CONFIG"

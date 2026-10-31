@@ -105,30 +105,31 @@ documents its inputs and outputs in full.
 
 ### Main address and sign-in checks
 
-The production target is `https://www.econgraph.com`. `PUBLIC_HOST=econgraph.com`
-remains the base domain, and `MAIN_HOST` defaults to www. For an explicit apex
-rollback, use the apex target and the checker's `--main-host econgraph.com` override.
-See [Main public address](../deployment/MAIN_HOST.md) for operator-only commands.
-These browser/token checks supplement the public-site scenario; do not treat a
-passing routing probe as proof that authentication completed.
+The production target is the main address, `https://www.econgraph.com` by default:
+`PUBLIC_HOST=econgraph.com` is the base domain and `MAIN_HOST` selects the main host.
+With the apex as the main host, use the apex target and the checker's
+`--main-host econgraph.com`. Once the switch to www is finalized, run the `public-site`
+scenario with `MAIN_HOST_PERMANENT=www.econgraph.com`, so it expects 301 redirects
+rather than 302s. See [Main public address](../deployment/MAIN_HOST.md) for
+the operator commands. These browser and token checks supplement the `public-site`
+scenario: a passing routing probe does not show that sign-in completes.
 
 | Check | Expected result |
 | --- | --- |
-| Open HTTP on each public name and HTTPS on the apex, with a page path and query | 301 to the same path/query on `https://www.econgraph.com`; the destination serves content without another canonical-host redirect |
+| Open HTTP on each public name and HTTPS on the apex, with a page path and query | A redirect to the same path and query on `https://www.econgraph.com`: 302 until the switch is finalized, 301 after; the destination serves content without another canonical-host redirect |
 | Open HTTPS www directly, in both a fresh and an existing browser profile | App loads without a redirect loop; the canonical link uses HTTPS www and the path, without query/fragment. Clear cached permanent redirects if an existing profile retains the opposite redirect |
 | Start sign-in from a page reached through each name | Both flows reach the same www realm, complete the callback on www, and return to the intended page |
 | Reload, renew a token, and sign out after signing in | Session restore/renewal and logout use www callbacks; no apex issuer or callback is introduced |
 | Complete a sign-in already in progress when the host changes | Old state either completes safely on the main host or offers a fresh sign-in; no loop or unrecoverable callback error |
 | Inspect discovery and a newly issued token | Issuer is exactly `https://www.econgraph.com/idp/realms/econ-graph`, matching backend validation and the frontend's resolved relative issuer |
-| Use a token from before the issuer change in an isolated QA deployment | Backend rejects the old issuer; a newly issued token succeeds. The release notice tells users to sign in again |
-| Preflight from both public origins | Both origins are allowed through the switch; `http://localhost` stays allowed and `http://localhost:3000` and arbitrary refused origins do not receive an allow-origin header |
-| Preview/apply the switch and apex rollback twice in a stubbed test or isolated QA deployment | Dry run makes no changes; reruns converge; rollback restores the apex issuer and inverse redirect matrix while retaining both public CORS origins and TLS names |
+| Use a token from before the issuer change in an isolated QA deployment | Backend rejects the old issuer; a newly issued token succeeds |
+| Browse signed out during the switch in an isolated QA deployment | Anonymous catalog data keeps loading, apart from at most the backend's own rollout |
+| Preflight from both public origins | Both origins are allowed whichever is the main host; `http://localhost` stays allowed, and `http://localhost:3000` and arbitrary origins get the backend's 403 with no allow-origin header |
+| Preview/apply the switch, finalize and apex rollback twice in a stubbed test or isolated QA deployment | Dry run makes no changes; reruns converge; finalize turns the redirects to www into 301s; rollback restores the apex issuer and the inverse redirect matrix while retaining both public CORS origins and TLS names |
 
-Do not run state-changing switch, token or rollback tests against production from an
-agent. Use the targeted tests with `kubectl` and `curl` stubbed; never glob-run
-`scripts/deploy/test-*.sh`. Production execution and browser acceptance are Joe's
-steps. Record an independent adversarial review of redirect loops, sign-in from
-both names, issuer changes, and CORS during the switch.
+State-changing switch, token and rollback tests run against an isolated QA deployment
+or the targeted tests with `kubectl` and `curl` stubbed, never against production;
+never glob-run `scripts/deploy/test-*.sh`.
 
 ### The cluster scenarios
 

@@ -9,7 +9,10 @@
 #   PUBLIC_HOST=econgraph.com  base domain; MAIN_HOST defaults to www.econgraph.com.
 #                              HTTP on both names and HTTPS on the alternate name
 #                              redirect to https://MAIN_HOST through the tunnel.
-#                              MAIN_HOST=econgraph.com restores the apex address;
+#                              MAIN_HOST=econgraph.com restores the apex address.
+#                              Redirects to the apex are permanent (301); those to
+#                              www are temporary (302) until MAIN_HOST_PERMANENT
+#                              names it (scripts/deploy/switch-main-host.sh --finalize);
 #   PUBLIC_HOST= (empty)       http://localhost only; every public-host piece
 #                              left by an earlier deploy is removed;
 #   unset                      the same as empty on a cluster that serves no
@@ -43,7 +46,10 @@ public_host_in_cluster() {
     local ns hosts=""
     ns="$(kc get namespace econ-graph --ignore-not-found -o name)" || return 1
     [ -n "$ns" ] || return 0
-    if kc get crd httproutes.gateway.networking.k8s.io >/dev/null 2>&1; then
+    local installed=0
+    gateway_api_installed || installed=$?
+    [ "$installed" != 2 ] || return 1
+    if [ "$installed" = 0 ]; then
         hosts="$(kc -n econ-graph get httproute -l "${PUBLIC_HOST_LABEL}=true" \
             -o jsonpath='{range .items[*]}{.spec.hostnames[0]}{"\n"}{end}')" || return 1
     fi
@@ -58,13 +64,24 @@ public_host_in_cluster() {
     printf '%s\n' "$hosts" | sed -n '/./{s/^www\.//;p;q;}'
 }
 
+# gateway_api_installed: true when the cluster has the Gateway API's HTTPRoute CRD,
+# false when it answers without it, and the status 2 when it can't be asked, so a
+# failed API call never reads as "no gateway" (fail closed).
+gateway_api_installed() {
+    local crd
+    crd="$(kc get crd httproutes.gateway.networking.k8s.io --ignore-not-found -o name)" || return 2
+    [ -n "$crd" ]
+}
+
 # The current canonical host is the frontend's public HTTPS route. Before the
 # gateway cutover it is the base host. Failed API reads must not silently switch
 # the sign-in realm to a different host.
 public_main_host_in_cluster() {
-    local host="${1:-}" main=""
+    local host="${1:-}" main="" installed=0
     [ -n "$host" ] || return 0
-    if kc get crd httproutes.gateway.networking.k8s.io >/dev/null 2>&1; then
+    gateway_api_installed || installed=$?
+    [ "$installed" != 2 ] || return 1
+    if [ "$installed" = 0 ]; then
         main="$(kc -n econ-graph get httproute econ-graph-frontend-public --ignore-not-found \
             -o jsonpath='{.spec.hostnames[0]}')" || return 1
     fi
@@ -74,26 +91,56 @@ public_main_host_in_cluster() {
 # Resolve the main name without querying or changing the cluster. Explicit
 # environment wins, then a deploy-config MAIN_HOST for the same base domain,
 # then www.PUBLIC_HOST. No public host means no canonical public name.
+# MAIN_HOST_PERMANENT (the main host whose redirects are permanent, written by
+# switch-main-host.sh --finalize) is resolved the same way, and is empty by default.
 main_host_init() {
-    local configured configured_base
+    local configured configured_base same_base=false
     if [ -z "${PUBLIC_HOST:-}" ] || [ "$PUBLIC_HOST" = none ]; then
         MAIN_HOST=""
-        export MAIN_HOST
+        MAIN_HOST_PERMANENT=""
+        export MAIN_HOST MAIN_HOST_PERMANENT
         return 0
+    fi
+    configured_base="$(deploy_config_value PUBLIC_HOST "host name")" || return 1
+    if [ -z "$configured_base" ] || [ "${configured_base,,}" = "${PUBLIC_HOST,,}" ]; then
+        same_base=true
     fi
     if [ -z "${MAIN_HOST+x}" ]; then
         configured="$(deploy_config_value MAIN_HOST "host name")" || return 1
-        configured_base="$(deploy_config_value PUBLIC_HOST "host name")" || return 1
-        if [ -n "$configured" ] && { [ -z "$configured_base" ] || [ "${configured_base,,}" = "${PUBLIC_HOST,,}" ]; }; then
+        if [ -n "$configured" ] && [ "$same_base" = true ]; then
             MAIN_HOST="$configured"
         else
             MAIN_HOST="www.${PUBLIC_HOST}"
         fi
     fi
+    if [ -z "${MAIN_HOST_PERMANENT+x}" ]; then
+        MAIN_HOST_PERMANENT=""
+        if [ "$same_base" = true ]; then
+            MAIN_HOST_PERMANENT="$(deploy_config_value MAIN_HOST_PERMANENT "host name")" || return 1
+        fi
+    fi
     MAIN_HOST="${MAIN_HOST,,}"
+    MAIN_HOST_PERMANENT="${MAIN_HOST_PERMANENT,,}"
     MAIN_HOST="$MAIN_HOST" "$(dirname "${BASH_SOURCE[0]}")/../render-public-host.py" \
         "$PUBLIC_HOST" /dev/null >/dev/null || return 1
-    export MAIN_HOST
+    case "$MAIN_HOST_PERMANENT" in
+        "" | "${PUBLIC_HOST,,}" | "www.${PUBLIC_HOST,,}") ;;
+        *)
+            echo "error: MAIN_HOST_PERMANENT=${MAIN_HOST_PERMANENT} must be empty, ${PUBLIC_HOST} or www.${PUBLIC_HOST}" >&2
+            return 1 ;;
+    esac
+    export MAIN_HOST MAIN_HOST_PERMANENT
+}
+
+# main_host_redirect_status HOST MAIN: the status of the redirects to https://MAIN, as
+# render-public-host.py writes them: 301 to the apex or to the main host
+# MAIN_HOST_PERMANENT names, else 302.
+main_host_redirect_status() {
+    if [ "${2,,}" = "${1,,}" ] || [ "${MAIN_HOST_PERMANENT:-}" = "${2,,}" ]; then
+        echo 301
+    else
+        echo 302
+    fi
 }
 
 # The PUBLIC_HOST in the host's deploy config (deploy_config_path in
@@ -313,24 +360,28 @@ wait_cloudflared() {
     fi
 }
 
-# check_public_host_urls HOST: report (never fail) whether https://HOST answers 200 or 302
-# and https://www.HOST answers the gateway's www redirect: a 301 to https://HOST with the
-# path and query kept and no port, the rule scripts/deploy/check-public-site.sh checks.
-# Goes the way a visitor does (DNS, Cloudflare, the tunnel); the certificate is not
-# verified. For restart-k8s-rollout.sh's summary; check-public-site.sh is the full check.
+# check_public_host_urls HOST [MAIN]: report (never fail) whether https://MAIN answers
+# 200 or 302 and the other public name (HOST or www.HOST) answers the gateway's redirect:
+# main_host_redirect_status's 301 or 302 to https://MAIN with the path and query kept and
+# no port, the rule scripts/deploy/check-public-site.sh checks. MAIN defaults to
+# www.HOST. Goes the way a visitor does (DNS, Cloudflare, the tunnel); the certificate is
+# not verified. For restart-k8s-rollout.sh's summary; check-public-site.sh is the full check.
 check_public_host_urls() {
-    local host="$1" status location
-    local www_path="/series/smoke-check?from=www"
-    status="$(curl -s -k --max-time 20 -o /dev/null -w '%{http_code}' "https://${host}/" || true)"
+    local host="${1,,}" main="${2:-www.${1}}" alternate status location expected
+    local redirect_path="/series/smoke-check?from=alternate"
+    main="${main,,}"
+    if [ "$main" = "$host" ]; then alternate="www.${host}"; else alternate="$host"; fi
+    expected="$(main_host_redirect_status "$host" "$main")"
+    status="$(curl -s -k --max-time 20 -o /dev/null -w '%{http_code}' "https://${main}/" || true)"
     case "$status" in
-        200 | 302) echo "  ✅ HTTPS Production: https://${host} - Accessible" ;;
-        *) echo "  ❌ HTTPS Production: https://${host} - Not accessible (HTTP ${status:-000}; the certificate or the tunnel may not be ready)" ;;
+        200 | 302) echo "  ✅ HTTPS Production: https://${main} - Accessible" ;;
+        *) echo "  ❌ HTTPS Production: https://${main} - Not accessible (HTTP ${status:-000}; the certificate or the tunnel may not be ready)" ;;
     esac
     read -r status location < <(curl -s -k --max-time 20 -o /dev/null \
-        -w '%{http_code} %{redirect_url}\n' "https://www.${host}${www_path}" || true) || true
-    if [ "${status:-}" = 301 ] && [ "${location:-}" = "https://${host}${www_path}" ]; then
-        echo "  ✅ HTTPS Production: https://www.${host} - Redirects (301) to https://${host}"
+        -w '%{http_code} %{redirect_url}\n' "https://${alternate}${redirect_path}" || true) || true
+    if [ "${status:-}" = "$expected" ] && [ "${location:-}" = "https://${main}${redirect_path}" ]; then
+        echo "  ✅ HTTPS Production: https://${alternate} - Redirects (${expected}) to https://${main}"
     else
-        echo "  ❌ HTTPS Production: https://www.${host} - Expected a 301 to https://${host}${www_path}, got HTTP ${status:-000}${location:+ to ${location}}"
+        echo "  ❌ HTTPS Production: https://${alternate} - Expected a ${expected} to https://${main}${redirect_path}, got HTTP ${status:-000}${location:+ to ${location}}"
     fi
 }

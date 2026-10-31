@@ -59,7 +59,7 @@ trap 'rm -rf "$log" "$log.ctx" "$out" "$path_log" "$stub_dir"' EXIT
 # (apply-host-storage.sh and the other deploy helpers) is a stub wherever deploy.sh runs.
 export HOME="$stub_dir/home" XDG_CACHE_HOME="$stub_dir/xdg-cache" ECONGRAPH_BACKUP_ROOT="$stub_dir/backups"
 # The deploy config (lib/deploy-config.sh) too: never the operator's ~/.config/econgraph.
-unset ECONGRAPH_DEPLOY_ENV XDG_CONFIG_HOME GATEWAY_TLS_ISSUER MAIN_HOST
+unset ECONGRAPH_DEPLOY_ENV XDG_CONFIG_HOME GATEWAY_TLS_ISSUER MAIN_HOST MAIN_HOST_PERMANENT
 export ECONGRAPH_CONFIG_DIR="$stub_dir/config"
 mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT" "$ECONGRAPH_CONFIG_DIR"
 
@@ -71,7 +71,8 @@ mkdir -p "$HOME" "$XDG_CACHE_HOME" "$ECONGRAPH_BACKUP_ROOT" "$ECONGRAPH_CONFIG_D
 #   STUB_CLUSTER_FAILS=1 the kube-system lookup fails; STUB_EMPTY_UID=1 it answers nothing
 #   STUB_NO_CONTEXT=1    there is no current context
 #   STUB_ROUTE_HOST      the host the public HTTPRoutes serve; STUB_NO_GATEWAY_API=1 the
-#                        cluster has no HTTPRoute CRD
+#                        cluster has no HTTPRoute CRD; STUB_GATEWAY_API_FAILS=1 the CRD
+#                        lookup fails
 #   STUB_PUBLIC_HOST     the host the public Ingresses serve; STUB_SSL_HOSTS the retired one's
 #   STUB_SECRET=1        cloudflare-tunnel exists (with a fake token); STUB_SECRET_FAILS=1
 #                        looking it up fails
@@ -114,7 +115,13 @@ case "$*" in
     [ "${STUB_NO_NAMESPACE:-0}" = 1 ] || echo namespace/econ-graph ;;
   *"get crd certificates.cert-manager.io"*) [ -z "${STUB_CERT_ISSUER+x}" ] || echo customresourcedefinition/certificates.cert-manager.io ;;
   *"get certificate econ-graph-tls"*) [ "${STUB_CERT_FAILS:-0}" != 1 ] || exit 1; printf '%s' "${STUB_CERT_ISSUER:-}" ;;
-  *"get crd httproutes.gateway.networking.k8s.io"*) [ "${STUB_NO_GATEWAY_API:-0}" != 1 ] || exit 1 ;;
+  *"get crd httproutes.gateway.networking.k8s.io"*)
+    [ "${STUB_GATEWAY_API_FAILS:-0}" != 1 ] || exit 1
+    if [ "${STUB_NO_GATEWAY_API:-0}" = 1 ]; then
+      # Without the CRD: --ignore-not-found answers nothing, a plain get fails.
+      case "$*" in *--ignore-not-found*) exit 0 ;; *) exit 1 ;; esac
+    fi
+    echo customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io ;;
   *"get httproute econ-graph-frontend-public"*) printf '%s' "${STUB_MAIN_HOST:-}" ;;
   *"get httproute -l"*) printf '%s' "${STUB_ROUTE_HOST:-}" ;;
   *"get ingress -l"*) printf '%s' "${STUB_PUBLIC_HOST:-}" ;;
@@ -201,6 +208,16 @@ if (unset PUBLIC_HOST; STUB_NO_GATEWAY_API=1 STUB_PUBLIC_HOST=econgraph.com run_
   fail "PUBLIC_HOST unset on a cluster without the gateway, serving econgraph.com, did not stop"
 fi
 grep -q 'get httproute' "$log" && fail "HTTPRoutes looked up without their CRD"
+# The HTTPRoute CRD lookup fails: stop (fail closed) rather than read "no gateway",
+# which would skip the public routes and the main-host guard.
+if PUBLIC_HOST=econgraph.com STUB_GATEWAY_API_FAILS=1 STUB_PUBLIC_HOST=econgraph.com run_lib public_host_init; then
+  fail "a failed HTTPRoute CRD lookup did not stop"
+fi
+grep -q "Could not read the cluster's routes" "$out" || fail "a failed HTTPRoute CRD lookup did not say why it stopped"
+grep -q 'delete ingress' "$log" && fail "a failed HTTPRoute CRD lookup changed cluster resources"
+if STUB_GATEWAY_API_FAILS=1 run_lib 'public_main_host_in_cluster econgraph.com'; then
+  fail "public_main_host_in_cluster read a failed CRD lookup as no gateway"
+fi
 # Unset on a legacy cluster whose retired econ-graph-ssl-ingress serves the public host: stop.
 if (unset PUBLIC_HOST; STUB_SSL_HOSTS=$'www.econgraph.com\necongraph.com' run_lib public_host_init); then
   fail "PUBLIC_HOST unset on a cluster with econ-graph-ssl-ingress did not stop"
@@ -240,6 +257,20 @@ PUBLIC_HOST=econgraph.com MAIN_HOST=www.econgraph.com run_lib 'main_host_init; [
   fail "explicit MAIN_HOST did not override deploy config"
 PUBLIC_HOST=example.org run_lib 'main_host_init; [ "$MAIN_HOST" = www.example.org ]' ||
   fail "another domain inherited the main host from stale config"
+# MAIN_HOST_PERMANENT: empty by default, from the deploy config for the same base domain,
+# overridden by the environment, and validated.
+(unset MAIN_HOST_PERMANENT; PUBLIC_HOST=econgraph.com run_lib 'main_host_init; [ -z "$MAIN_HOST_PERMANENT" ] && [ "$(main_host_redirect_status econgraph.com econgraph.com)" = 301 ]') ||
+  fail "MAIN_HOST_PERMANENT was not empty by default, or the apex redirect not permanent"
+printf 'PUBLIC_HOST=econgraph.com\nMAIN_HOST=www.econgraph.com\nMAIN_HOST_PERMANENT=WWW.econgraph.com\n' >"$ECONGRAPH_CONFIG_DIR/deploy.env"
+(unset MAIN_HOST_PERMANENT; PUBLIC_HOST=econgraph.com run_lib 'main_host_init; [ "$MAIN_HOST_PERMANENT" = www.econgraph.com ] && [ "$(main_host_redirect_status econgraph.com www.econgraph.com)" = 301 ]') ||
+  fail "deploy config MAIN_HOST_PERMANENT was not honored"
+PUBLIC_HOST=econgraph.com MAIN_HOST_PERMANENT='' run_lib 'main_host_init; [ "$(main_host_redirect_status econgraph.com www.econgraph.com)" = 302 ]' ||
+  fail "an empty MAIN_HOST_PERMANENT in the environment did not override the deploy config"
+(unset MAIN_HOST_PERMANENT; PUBLIC_HOST=example.org run_lib 'main_host_init; [ -z "$MAIN_HOST_PERMANENT" ]') ||
+  fail "another domain inherited MAIN_HOST_PERMANENT from stale config"
+if PUBLIC_HOST=econgraph.com MAIN_HOST_PERMANENT=other.example.org run_lib main_host_init; then
+  fail "a MAIN_HOST_PERMANENT for another domain was accepted"
+fi
 rm -f "$ECONGRAPH_CONFIG_DIR/deploy.env"
 
 # A regular deploy must not bypass the operator's session-invalidating switch.

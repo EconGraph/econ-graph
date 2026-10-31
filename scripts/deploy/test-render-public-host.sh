@@ -2,7 +2,8 @@
 # Tests for scripts/deploy/render-public-host.py against the committed manifests:
 # every localhost HTTPRoute gains a separate -public copy for the public host (listener
 # https only, without the admin and debug paths; localhost stays as it was), the rate
-# limits cover the copies, plain http and www redirect to https://<host>, Keycloak's
+# limits cover the copies, plain http and the alternate name redirect to https://MAIN_HOST
+# (302 to www until MAIN_HOST_PERMANENT names it, then 301; always 301 to the apex), Keycloak's
 # hostname and the backend's issuer agree on https://<host>/idp/realms/econ-graph, the
 # JWKS stays in-cluster, the realm import allows the public origin only (the committed
 # manifests keep localhost), CORS
@@ -11,7 +12,7 @@
 #
 # Needs python3 with PyYAML. Usage: scripts/deploy/test-render-public-host.sh
 set -euo pipefail
-unset MAIN_HOST
+unset MAIN_HOST MAIN_HOST_PERMANENT
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 render="${repo_root}/scripts/deploy/render-public-host.py"
@@ -72,10 +73,10 @@ check "the public host leaves out the admin and debug paths" \
   "not any(p == x or p.startswith(x + '/') for r in ('econ-graph-frontend-public', 'econ-graph-backend-public') for p in paths(r) for x in ('/admin', '/api/admin', '/playground')) and '/api' in paths('econ-graph-backend-public')"
 check "the public Keycloak route serves only the econ-graph realm and its resources" \
   "paths('econ-graph-idp-public') == ['/idp/realms/econ-graph', '/idp/resources']"
-check "plain http for the host and www redirects permanently to https://www.econgraph.com" \
-  "hosts('econ-graph-public-redirect') == ['econgraph.com', 'www.econgraph.com'] and sections('econ-graph-public-redirect') == ['http'] and redirect('econ-graph-public-redirect') == {'scheme': 'https', 'hostname': 'www.econgraph.com', 'statusCode': 301}"
-check "https for the apex redirects permanently to https://www.econgraph.com" \
-  "hosts('econ-graph-www-redirect') == ['econgraph.com'] and sections('econ-graph-www-redirect') == ['https'] and redirect('econ-graph-www-redirect') == {'scheme': 'https', 'hostname': 'www.econgraph.com', 'statusCode': 301}"
+check "plain http for the host and www redirects temporarily to https://www.econgraph.com" \
+  "hosts('econ-graph-public-redirect') == ['econgraph.com', 'www.econgraph.com'] and sections('econ-graph-public-redirect') == ['http'] and redirect('econ-graph-public-redirect') == {'scheme': 'https', 'hostname': 'www.econgraph.com', 'statusCode': 302}"
+check "https for the apex redirects temporarily to https://www.econgraph.com" \
+  "hosts('econ-graph-www-redirect') == ['econgraph.com'] and sections('econ-graph-www-redirect') == ['https'] and redirect('econ-graph-www-redirect') == {'scheme': 'https', 'hostname': 'www.econgraph.com', 'statusCode': 302}"
 check "every route rule sets X-Forwarded-For to the address the gateway settled on" \
   "all(any(f['type'] == 'RequestHeaderModifier' and {'name': 'X-Forwarded-For', 'value': '%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%'} in f['requestHeaderModifier'].get('set', []) for f in r.get('filters', [])) for (k, n), d in docs.items() if k == 'HTTPRoute' and not n.endswith('-redirect') for r in d['spec']['rules'])"
 check "KC_HOSTNAME is the https public URL" \
@@ -154,13 +155,26 @@ fi
 check "canonical HTTPS cannot redirect to itself" \
   "redirect('econ-graph-www-redirect')['hostname'] not in hosts('econ-graph-www-redirect')"
 
+# MAIN_HOST_PERMANENT naming the main host makes both redirects permanent; naming
+# another host leaves them temporary.
+temporary="$rendered"
+rendered="$(MAIN_HOST_PERMANENT=WWW.econgraph.com "$render" econgraph.com "$manifests/gateway/routes/httproutes.yaml")"
+check "MAIN_HOST_PERMANENT=www makes both redirects to www permanent" \
+  "redirect('econ-graph-public-redirect')['statusCode'] == 301 and redirect('econ-graph-www-redirect')['statusCode'] == 301"
+[ "$("$render" econgraph.com - <<<"$rendered" | grep -c 'statusCode: 302')" = 2 ] ||
+  fail "rerendering finalized routes without MAIN_HOST_PERMANENT does not return to 302"
+rendered="$(MAIN_HOST_PERMANENT=econgraph.com "$render" econgraph.com "$manifests/gateway/routes/httproutes.yaml")"
+check "MAIN_HOST_PERMANENT naming another host keeps the redirects to www temporary" \
+  "redirect('econ-graph-public-redirect')['statusCode'] == 302 and redirect('econ-graph-www-redirect')['statusCode'] == 302"
+rendered="$temporary"
+
 # Explicit rollback restores the apex consistently, preserving dual-origin CORS.
 forward="$rendered"
 rendered="$(MAIN_HOST=econgraph.com "$render" econgraph.com \
   "$manifests/gateway/routes/httproutes.yaml" "$manifests/keycloak/deployment.yaml" \
   "$manifests/keycloak/realm-import-job.yaml" "$manifests/backend-deployment.yaml" "$manifests/configmap.yaml")"
-check "rollback serves the apex and redirects www" \
-  "hosts('econ-graph-frontend-public') == ['econgraph.com'] and hosts('econ-graph-www-redirect') == ['www.econgraph.com'] and redirect('econ-graph-www-redirect')['hostname'] == 'econgraph.com' and redirect('econ-graph-public-redirect')['hostname'] == 'econgraph.com'"
+check "rollback serves the apex and redirects www permanently" \
+  "hosts('econ-graph-frontend-public') == ['econgraph.com'] and hosts('econ-graph-www-redirect') == ['www.econgraph.com'] and redirect('econ-graph-www-redirect') == {'scheme': 'https', 'hostname': 'econgraph.com', 'statusCode': 301} and redirect('econ-graph-public-redirect') == {'scheme': 'https', 'hostname': 'econgraph.com', 'statusCode': 301}"
 check "rollback restores the issuer and sign-in client together" \
   "env('Deployment', 'keycloak', 'keycloak', 'KC_HOSTNAME') == 'https://econgraph.com/idp' and env('Deployment', 'econ-graph-backend', 'backend', 'OIDC_ISSUER') == 'https://econgraph.com/idp/realms/econ-graph' and env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_BASE_URL') == 'https://econgraph.com'"
 check "rollback retains both CORS origins" \

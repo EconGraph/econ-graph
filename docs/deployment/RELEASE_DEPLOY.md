@@ -170,16 +170,16 @@ production host it holds `econgraph.com`; a test cluster's host has no file, or
 default is `www.${PUBLIC_HOST}`; the only other supported value is `PUBLIC_HOST`
 itself. The hostname setting drives gateway routes, Keycloak's hostname and realm
 `frontendUrl`, the web client, and the backend's token issuer. Normal deploys and
-release deploys refuse to change the main host of a live deployment; use the
-operator switch so existing realm sessions are invalidated. When installing this
-release on an existing apex deployment, retain `MAIN_HOST=econgraph.com` in the
-deploy configuration first. Deploy the reviewed release to install the matching
-realm ConfigMap and helper, then run the operator switch to select www.
+release deploys refuse to change the main host of a live deployment: set `MAIN_HOST`
+in the deploy configuration to the main host the cluster serves, and change it only
+with the operator switch, which invalidates existing realm sessions with the issuer.
+An exported `MAIN_HOST` overrides the deploy configuration, so a stale export is
+refused the same way.
 
-Keep an explicit `MAIN_HOST=econgraph.com` when using the apex after rollback so a
-later deploy does not restore www. See
-[Main public address](MAIN_HOST.md) for the coordinated operator procedure and
-forced-sign-out notice.
+`MAIN_HOST_PERMANENT`, written by the switch's `--finalize`, makes the redirects to
+www permanent (301); without it they are temporary (302). Redirects to the apex are
+always permanent. See [Main public address](MAIN_HOST.md) for the operator procedure,
+the redirect status and rollback.
 
 ## APP_DATABASE
 

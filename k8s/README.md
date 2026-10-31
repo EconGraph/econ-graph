@@ -91,7 +91,7 @@ terraform init
 terraform apply
 ```
 
-Only on the production cluster (the one that serves <https://www.econgraph.com>), mark it as
+Only on the production cluster (the one that serves the public site), mark it as
 production once, after creating it and again after every recreate. See
 [Production marker](#production-marker). On every other cluster, run it with `--unmark`
 once instead.
@@ -261,7 +261,8 @@ dashboard change that retires it. Its header lists every step.
 
 ## 🌍 Public site (Cloudflare Tunnel)
 
-Production is served at <https://www.econgraph.com> (no hyphen) through a Cloudflare Tunnel:
+The public site is served through a Cloudflare Tunnel, at the main address `MAIN_HOST`, by
+default <https://www.econgraph.com> for `PUBLIC_HOST=econgraph.com` (no hyphen):
 
 ```text
 browser --https--> Cloudflare edge --tunnel--> cloudflared (pod) --https--> gateway (listener https) --> app, Keycloak
@@ -286,7 +287,7 @@ origin.
 | --- | --- |
 | Gateway | listener `https` (port 443, no host name, so any TLS server name gets the certificate), certificate `econ-graph-tls` for `econgraph.com` and `www.econgraph.com` from ClusterIssuer `GATEWAY_TLS_ISSUER` (default `econ-graph-selfsigned`: only the tunnel connector sees it, unverified) |
 | HTTPRoutes | a separate `<name>-public` route per localhost one, for `www.econgraph.com` on listener `https` only, labelled `econgraph.io/public-host=true`, without `/admin`, `/api/admin` and `/playground`; the rate limits cover them |
-| Apex HTTPS and both names on HTTP | `econ-graph-www-redirect` and `econ-graph-public-redirect`: 301 redirects to `https://www.econgraph.com`, preserving path and query |
+| Apex HTTPS and both names on HTTP | `econ-graph-www-redirect` and `econ-graph-public-redirect`: redirects to `https://www.econgraph.com`, preserving path and query; 302 until `MAIN_HOST_PERMANENT` names www (`switch-main-host.sh --finalize`), then 301. Redirects to the apex are always 301 |
 | Keycloak `KC_HOSTNAME` | `https://www.econgraph.com/idp`; the admin console stays on the port-forward (`KC_HOSTNAME_ADMIN`) |
 | Realm client `econ-graph-web` | redirect URIs and web origins for `https://www.econgraph.com` only (`KC_WEB_BASE_URL` and `KC_WEB_E2E_BASE_URL`); without a public host, `http://localhost` |
 | Backend `OIDC_ISSUER` | `https://www.econgraph.com/idp/realms/econ-graph`; the signing keys are still fetched in-cluster (`OIDC_JWKS_URL`) |
@@ -313,15 +314,15 @@ logged for in-cluster callers are not audit-grade.
 
 The frontend image needs no rebuild per host: `build-images.sh` builds it with the issuer
 `/idp/realms/econ-graph`, which the app resolves against the page's origin at runtime.
-The release-image build check rejects an empty issuer. The app's canonical link uses the
+An empty `VITE_OIDC_ISSUER` only warns and builds an image with sign-in hidden. The app's canonical link uses the
 main page origin and path, without a query or fragment.
 
 The apex redirects to www before the app starts, so sign-in uses one Keycloak issuer
 that the backend checks exactly. Allowing both public CORS origins does not create a
 second issuer. Changing the main host changes the issuer and forces users to sign in
 again; existing sessions and old-issuer tokens are no longer usable. See
-[Main public address](../docs/deployment/MAIN_HOST.md) for the operator commands,
-rollback, and release notice.
+[Main public address](../docs/deployment/MAIN_HOST.md) for the operator commands and
+rollback.
 
 **Tunnel token.** The token is the Secret `cloudflare-tunnel` (key `token`). Enter it
 yourself with hidden input, on the production cluster only, after marking it. It is never
@@ -366,7 +367,7 @@ gateway without DNS or the tunnel, connecting over https as cloudflared does. It
 
 - the frontend and a `/graphql` search;
 - the Keycloak discovery document (issuer `https://www.econgraph.com/idp/realms/econ-graph`) and the sign-in page;
-- both allowed public CORS origins, refused-origin preflights, and the full 301 redirect matrix;
+- both allowed public CORS origins, refused-origin preflights (the backend's 403), and the full redirect matrix (301 or 302, see [Main public address](../docs/deployment/MAIN_HOST.md#redirect-status));
 - that spoofed `X-Forwarded-Proto`, `-Host` and `-Port` headers change nothing, and that plain http is redirected;
 - that `/idp/admin`, `/idp/realms/master`, `/metrics`, `/playground`, `/api/admin` and encoded traversals of them are not served.
 

@@ -13,7 +13,9 @@
 # `dns` (real DNS, the way a visitor arrives; --via-cloudflare) or `gateway` (curl
 # --connect-to the gateway on this host, with LOCAL_INGRESS_IP, LOCAL_HTTPS_PORT and
 # LOCAL_HTTP_PORT passed through), for a runner on the host whose gateway serves the target. It
-# defaults to `dns`. QA_CHECK_PUBLIC_SITE overrides the script's path.
+# defaults to `dns`. QA_CHECK_PUBLIC_SITE overrides the script's path. MAIN_HOST_PERMANENT
+# reaches the script as it is: set it to the target's host when the redirects to it are
+# permanent (301; scripts/deploy/switch-main-host.sh --finalize), else they must be 302s.
 set -euo pipefail
 
 repo="${QA_REPO_ROOT:?run through scripts/qa/run-scenarios.sh}"

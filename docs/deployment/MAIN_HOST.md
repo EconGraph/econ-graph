@@ -1,40 +1,57 @@
 # Main public address
 
-The public address is `https://www.econgraph.com`. The base domain remains
-`PUBLIC_HOST=econgraph.com`; `MAIN_HOST` selects the main host and defaults to
-`www.${PUBLIC_HOST}`. An explicit `MAIN_HOST=${PUBLIC_HOST}` selects the apex.
-Without a public host, the deployment remains localhost-only.
+The base domain is `PUBLIC_HOST` (for production, `econgraph.com`). `MAIN_HOST`
+selects the main public address and defaults to `www.${PUBLIC_HOST}`; an explicit
+`MAIN_HOST=${PUBLIC_HOST}` selects the apex. Without a public host, the deployment
+is localhost-only. Both settings are read from the environment or the operator's
+deploy configuration (`deploy.env`, see `scripts/deploy/lib/deploy-config.sh`).
 
 The gateway serves the application and Keycloak only on the main HTTPS host.
-HTTP on both public names and HTTPS on the other name return a 301 to the main
-HTTPS host, preserving the path and query. The TLS certificate covers both names.
+HTTP on both public names and HTTPS on the other name redirect to the main HTTPS
+host, preserving the path and query. The TLS certificate covers both names.
 Keycloak's hostname and realm `frontendUrl`, the web client's callback/logout URLs
 and origins, and the backend's exact token issuer follow `MAIN_HOST`. The public
-realm import explicitly updates `frontendUrl` as well as the client settings.
-The frontend resolves its relative issuer `/idp/realms/econ-graph` against the page origin, after canonicalization. Its
-canonical link uses the page origin and path without the query or fragment. Release
-images must still pass the check that their issuer is nonempty.
+realm import sets `frontendUrl` as well as the client settings; an import without
+a public host clears it. The frontend resolves its relative issuer
+`/idp/realms/econ-graph` against the page origin, after canonicalization. Its
+canonical link uses the page origin and path without the query or fragment.
 
 Backend CORS permits `https://econgraph.com,https://www.econgraph.com,http://localhost`
-through the switch. It does not permit `http://localhost:3000` or arbitrary origins.
-CORS permission on both names does not permit a second token issuer.
+whichever name is the main host. It does not permit `http://localhost:3000` or
+arbitrary origins. CORS permission on both names does not permit a second token issuer.
+
+## Redirect status
+
+| Main host | Redirects to it |
+| --- | --- |
+| The apex | 301 (permanent) |
+| `www.${PUBLIC_HOST}`, before `--finalize` | 302 (temporary) |
+| `www.${PUBLIC_HOST}`, after `--finalize` | 301 (permanent) |
+
+A permanent redirect is cached by browsers with no expiry, and by Cloudflare. A
+temporary one is not kept, so a rollback from www to the apex works for every
+visitor until the switch is finalized. `switch-main-host.sh --finalize` records
+`MAIN_HOST_PERMANENT=www.${PUBLIC_HOST}` in the deploy configuration; later deploys
+render permanent redirects from it. A switch to a different main host drops a
+`MAIN_HOST_PERMANENT` that names another host, so the new direction starts temporary.
 
 ## Operator procedure
 
-Joe runs the production steps. Agents validate this procedure only with stubbed
-`kubectl` and `curl`; they do not access the live clusters `econ-graph` or
-`econgraph-train1-qa`, production databases, `/srv/econgraph`,
-`~/econgraph-backups`, `~/.config/econgraph`, or host ports 80 and 443.
+Run the production steps from a reviewed checkout that contains the script, with the
+kind cluster's own kubectl. Tests and dry runs use stubbed `kubectl` and `curl`; they
+do not touch a live cluster, production data, the operator's deploy configuration,
+or host ports 80 and 443.
 
-Use a reviewed checkout containing the script and the kind cluster's own kubectl.
-Normal deploys and release deploys refuse to change a live `MAIN_HOST`: the switch
-must run through the operator script so existing realm sessions are invalidated.
-For a production site still using the apex, first retain `MAIN_HOST=econgraph.com`
-in its deploy configuration and deploy the reviewed release with that setting.
-This installs the new realm helper without changing the live issuer. The live
-`keycloak-realm` ConfigMap must match this checkout, including the realm file,
-renderer, and catalog-grant preservation helper; the switch refuses a mismatch.
-Then run the switch below to select www.
+Normal deploys and release deploys refuse to change a live `MAIN_HOST`: a change
+of main host runs through `scripts/deploy/switch-main-host.sh`, which invalidates
+existing realm sessions with the issuer change. The live `keycloak-realm` ConfigMap
+must match the checkout, including the realm file, renderer, and catalog-grant
+preservation helper; the switch refuses a mismatch, so deploy the release that
+contains the checkout first, with `MAIN_HOST` set to the main host it serves.
+
+Every run except `--dry-run` needs `--confirm-production` with the first 8
+characters of the production cluster's kube-system UID, as `release-deploy.sh`
+does. The script prints the cluster's identity, UID included, before it checks it.
 
 Before changing the main host, confirm that the Google OAuth client authorizes
 `https://www.econgraph.com/idp/realms/econ-graph/broker/google/endpoint`. Keep the apex
@@ -49,28 +66,39 @@ configuration:
 scripts/deploy/switch-main-host.sh --context kind-econ-graph --host econgraph.com --main-host www.econgraph.com --dry-run
 ```
 
-DNS and tunnel configuration need no change: both names already reach the same
-Cloudflare Tunnel, and both tunnel hostname entries already forward the visitor's
-Host header to the gateway over HTTPS. The script reports these as no-op steps;
-keep both entries, their DNS records, the tunnel credentials, and the existing TLS
-trust settings. A different base domain needs both names provisioned before using
-this procedure.
+DNS and tunnel configuration need no change: both names reach the same Cloudflare
+Tunnel, and both tunnel hostname entries forward the visitor's Host header to the
+gateway over HTTPS. The script reports these as no-op steps; keep both entries,
+their DNS records, the tunnel credentials, and the existing TLS trust settings. A
+different base domain needs both names provisioned before using this procedure.
 
 Apply the coordinated gateway and sign-in change:
 
 ```bash
-scripts/deploy/switch-main-host.sh --context kind-econ-graph --host econgraph.com --main-host www.econgraph.com
+scripts/deploy/switch-main-host.sh --context kind-econ-graph --host econgraph.com --main-host www.econgraph.com --confirm-production UID-PREFIX
 ```
 
 The script updates the existing deployments without selecting new application
-images, applies the realm through its admin API while preserving catalog grants,
-updates the backend's issuer and CORS, and changes the gateway routes. It persists
-the main-host choice in the operator deploy configuration so subsequent deploys use
-it. It waits for readiness and checks the resulting public behavior. The steps are
-idempotent: on a partial failure, inspect the reported failed step and rerun the same
-command after fixing its cause.
+images. In order, it:
 
-Check through Cloudflare as a visitor:
+1. records the main host in the operator deploy configuration, so later deploys
+   use it;
+2. signs out existing realm sessions when the issuer changes;
+3. sets Keycloak's hostname and web client origins and waits for its rollout;
+4. reruns the realm import, which preserves catalog grants and moves the realm
+   `frontendUrl` (it overrides the hostname) to the main host, so Keycloak now
+   issues tokens for the new issuer;
+5. sets the backend's expected issuer and the CORS origins, rolls the app on the
+   configuration change (the app-config hash `deploy.sh` uses) and waits;
+6. applies the gateway routes and runs `check-public-site.sh`.
+
+Keycloak's issuer moves before the backend's, so the backend rejects tokens for the
+new issuer only during its own rollout. Every step is idempotent: on a partial
+failure, inspect the reported failed step and rerun the same command after fixing its
+cause.
+
+After the switch, purge the Cloudflare cache (below), then check through Cloudflare
+as a visitor:
 
 ```bash
 scripts/deploy/check-public-site.sh --host econgraph.com --main-host www.econgraph.com --via-cloudflare
@@ -78,10 +106,35 @@ scripts/deploy/check-public-site.sh --host econgraph.com --main-host www.econgra
 
 Also complete the [browser and token checks](../release/qa-scenarios.md#main-address-and-sign-in-checks).
 A successful command-line check does not prove a browser has no cached permanent
-redirect. Browsers can retain the previous www-to-apex 301; combining it with the
-new apex-to-www 301 can produce a client-side loop. Test a fresh browser profile
+redirect. Browsers can retain an earlier www-to-apex 301; combined with the
+apex-to-www redirect it produces a client-side loop. Test a fresh browser profile
 and a previously used profile. Affected users must clear cached site redirects/data
-and reopen the main address. Check any configured edge redirect cache as well.
+and reopen the main address.
+
+Browser tabs left open on the old main address need a reload: their `/graphql`
+POSTs are redirected and arrive as GETs.
+
+### Finalize
+
+Once the switch is accepted, make the redirects to www permanent:
+
+```bash
+scripts/deploy/switch-main-host.sh --context kind-econ-graph --host econgraph.com --finalize --confirm-production UID-PREFIX
+```
+
+It refuses unless Keycloak's hostname and the deploy configuration are already on
+www, records `MAIN_HOST_PERMANENT`, reapplies the gateway routes and checks the
+public site. It changes neither Keycloak nor the backend, and rerunning it changes
+nothing. Purge the Cloudflare cache afterwards. After finalizing, a rollback leaves
+browsers that cached the 301 looping until they clear it.
+
+## Cloudflare cache purge
+
+Envoy's redirects carry no `Cache-Control`, and Cloudflare caches 301s for cacheable
+paths (such as `/robots.txt`) for about two hours by default. After each switch,
+finalize and rollback, purge the cache for both names in the Cloudflare dashboard
+(Caching, Configuration, Purge Cache: purge everything, or custom purge by hostname
+for `econgraph.com` and `www.econgraph.com`). The scripts do not call Cloudflare.
 
 ## Rollback
 
@@ -91,25 +144,18 @@ Select the apex explicitly with the same script. Preview it first:
 scripts/deploy/switch-main-host.sh --context kind-econ-graph --host econgraph.com --main-host econgraph.com --dry-run
 ```
 
-Then apply the rollback:
+Then apply the rollback and purge the Cloudflare cache:
 
 ```bash
-scripts/deploy/switch-main-host.sh --context kind-econ-graph --host econgraph.com --main-host econgraph.com
+scripts/deploy/switch-main-host.sh --context kind-econ-graph --host econgraph.com --main-host econgraph.com --confirm-production UID-PREFIX
 ```
 
-This restores the apex routes, issuer, web client settings and canonical page
-origin together, and records `MAIN_HOST=econgraph.com` for later deploys. Both public
-CORS origins, DNS/tunnel entries, and TLS certificate names stay in place. It is
-safe to rerun after a partial rollback. Switching the issuer back forces another
-sign-in; do not accept tokens from both issuers to hide the interruption. Recheck
-cached redirects in existing browsers: an apex-to-www 301 cached during the switch
-can conflict with the restored www-to-apex redirect. Clear those redirects before
-judging rollback behavior.
-
-## Release notice
-
-The main public address is now **https://www.econgraph.com**. Existing links to
-https://econgraph.com redirect to it. The sign-in issuer changes with the address,
-so everyone is signed out once and must sign in again; existing sessions and tokens
-are no longer usable. If an existing browser reports a redirect loop, clear its
-cached site redirects/data and reopen https://www.econgraph.com.
+The rollback runs the same steps in the same order. It restores the apex routes,
+issuer, realm `frontendUrl`, web client settings and canonical page origin together,
+records `MAIN_HOST=econgraph.com` and drops `MAIN_HOST_PERMANENT` for later deploys.
+Both public CORS origins, DNS/tunnel entries, and TLS certificate names stay in
+place. It is safe to rerun after a partial rollback. Switching the issuer back forces
+another sign-in; do not accept tokens from both issuers to hide the interruption.
+Redirects to the apex are permanent. Before finalize, the apex-to-www redirect was
+temporary, so browsers have not kept it; after finalize, browsers that cached the
+301 must clear it.

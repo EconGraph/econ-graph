@@ -217,18 +217,20 @@ apply_routes() {
 }
 
 # The public host's redirects: plain http for HOST and www.HOST, and https for
-# the alternate host, answer 301 to https://MAIN_HOST. BASE_HTTP and BASE_HTTPS are where
-# the gateway's ports 80 and 443 answer.
+# the alternate host, answer to https://MAIN_HOST with render-public-host.py's status:
+# 301 to the apex or to the main host MAIN_HOST_PERMANENT names, else 302. BASE_HTTP and
+# BASE_HTTPS are where the gateway's ports 80 and 443 answer.
 check_public_redirects() {
-    local base_http="$1" base_https="$2" status=0 got spec scheme name base alternate
+    local base_http="$1" base_https="$2" status=0 got spec scheme name base alternate code=301
+    [ "$MAIN_HOST" = "$PUBLIC_HOST" ] || [ "${MAIN_HOST_PERMANENT:-}" = "$MAIN_HOST" ] || code=302
     alternate="$PUBLIC_HOST"
     [ "$MAIN_HOST" != "$PUBLIC_HOST" ] || alternate="www.${PUBLIC_HOST}"
     for spec in "http ${PUBLIC_HOST} ${base_http}" "http www.${PUBLIC_HOST} ${base_http}" \
         "https ${alternate} ${base_https}"; do
         read -r scheme name base <<<"$spec"
         got="$(curl -sk -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 10 -H "Host: ${name}" "${base}/some/path?from=redirect")"
-        if [ "$got" = "301 https://${MAIN_HOST}/some/path?from=redirect" ]; then
-            echo "  ok    ${scheme}://${name}/some/path?from=redirect -> 301 https://${MAIN_HOST}/some/path?from=redirect"
+        if [ "$got" = "${code} https://${MAIN_HOST}/some/path?from=redirect" ]; then
+            echo "  ok    ${scheme}://${name}/some/path?from=redirect -> ${code} https://${MAIN_HOST}/some/path?from=redirect"
         else
             echo "  FAIL  ${scheme}://${name}/some/path?from=redirect: got '${got}'"
             status=1
@@ -556,7 +558,21 @@ if [ -n "$PUBLIC_HOST" ]; then
         "$PUBLIC_HOST" | "www.${PUBLIC_HOST}") ;;
         *) die "MAIN_HOST must be ${PUBLIC_HOST} or www.${PUBLIC_HOST}" ;;
     esac
-    echo "  public host: ${PUBLIC_HOST} (PUBLIC_HOST); main host: ${MAIN_HOST} (MAIN_HOST)"
+    # Whether the redirects to MAIN_HOST are permanent, resolved as lib/public-host.sh's
+    # main_host_init does for apply-gateway-routes.sh: the environment, else the deploy
+    # config for the same base domain.
+    if [ -z "${MAIN_HOST_PERMANENT+x}" ]; then
+        # shellcheck source=scripts/deploy/lib/deploy-config.sh
+        source "$PROJECT_ROOT/scripts/deploy/lib/deploy-config.sh"
+        configured_base="$(deploy_config_value PUBLIC_HOST "host name")" || exit 1
+        MAIN_HOST_PERMANENT=""
+        if [ -z "$configured_base" ] || [ "${configured_base,,}" = "${PUBLIC_HOST,,}" ]; then
+            MAIN_HOST_PERMANENT="$(deploy_config_value MAIN_HOST_PERMANENT "host name")" || exit 1
+        fi
+    fi
+    MAIN_HOST_PERMANENT="${MAIN_HOST_PERMANENT,,}"
+    export MAIN_HOST_PERMANENT
+    echo "  public host: ${PUBLIC_HOST} (PUBLIC_HOST); main host: ${MAIN_HOST} (MAIN_HOST)${MAIN_HOST_PERMANENT:+; permanent redirects to ${MAIN_HOST_PERMANENT} (MAIN_HOST_PERMANENT)}"
     kc get crd certificates.cert-manager.io >/dev/null 2>&1 ||
         die "the public host needs cert-manager (for the gateway's https listener certificate); install it first"
 else

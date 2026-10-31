@@ -422,7 +422,7 @@ kubectl get pods -n econ-graph -o wide
 echo ""
 echo "🌐 Application URLs:"
 if [ -n "$PUBLIC_HOST" ]; then
-    echo "  🌍 Production (SSL): https://${PUBLIC_HOST} (https://www.${PUBLIC_HOST} redirects to it)"
+    echo "  🌍 Production (SSL): https://${MAIN_HOST} (the other public name redirects to it)"
 fi
 echo "  🏠 Local Development:"
 echo "    Frontend: http://localhost:${FRONTEND_NODEPORT}"
@@ -472,11 +472,11 @@ else
     echo "  ❌ Main Entry Point: http://localhost - Not accessible (the gateway may be missing: scripts/deploy/install-gateway.sh)"
 fi
 
-# The public host, and its www redirect (lib/public-host.sh).
+# The main public address, and the other name's redirect to it (lib/public-host.sh).
 if [ -n "$PUBLIC_HOST" ]; then
     echo ""
     echo "🔒 Testing HTTPS termination..."
-    check_public_host_urls "$PUBLIC_HOST"
+    check_public_host_urls "$PUBLIC_HOST" "$MAIN_HOST"
 fi
 
 # Test SSL Certificate Status

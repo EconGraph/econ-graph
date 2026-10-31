@@ -359,12 +359,18 @@ fi
 if [ "$marker" = 0 ] && [ -z "$CONFIRM_PRODUCTION" ] && [ "$DRY_RUN" != true ] && [ ! -t 0 ]; then
     die "deploying to the production cluster needs --confirm-production with the first 8 characters of its kube-system UID, or a terminal to type them on; --yes alone does not answer it. Read the UID from the cluster's identity above, on the terminal you deploy from"
 fi
+main_host_from_env="${MAIN_HOST+set}"
 main_host_init || die "could not choose MAIN_HOST; nothing was changed"
 if [ "$marker" = 0 ] && [ -n "$PUBLIC_HOST" ] && [ "$served" = "$PUBLIC_HOST" ]; then
     served_main="$(public_main_host_in_cluster "$PUBLIC_HOST")" ||
         die "could not read the current main host; nothing was changed"
-    [ "$served_main" = "$MAIN_HOST" ] ||
-        die "MAIN_HOST=${MAIN_HOST} differs from the live main host ${served_main}; run scripts/deploy/switch-main-host.sh --context ${CONTEXT} --host ${PUBLIC_HOST} --main-host ${MAIN_HOST} for the coordinated issuer/session change, or retain MAIN_HOST=${served_main} in the deploy config. Nothing was changed"
+    if [ "$served_main" != "$MAIN_HOST" ]; then
+        keep="set MAIN_HOST=${served_main} in ${DEPLOY_ENV}"
+        if [ "$main_host_from_env" = set ]; then
+            keep+=", and unset the MAIN_HOST=${MAIN_HOST} exported in this shell (perhaps left from an earlier run), which overrides the deploy config"
+        fi
+        die "MAIN_HOST=${MAIN_HOST} differs from the live main host ${served_main}. To keep the live main host, ${keep}. To change it, run scripts/deploy/switch-main-host.sh --context ${CONTEXT} --host ${PUBLIC_HOST} --main-host ${MAIN_HOST} --confirm-production UID-PREFIX, which changes the issuer and signs out sessions together. Nothing was changed"
+    fi
 fi
 export PUBLIC_HOST MAIN_HOST
 echo "  MAIN_HOST       ${MAIN_HOST:-(none: localhost only)}"
