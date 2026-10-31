@@ -58,6 +58,7 @@ const authLink = setContext((_, { headers }) => {
 
   // Return the headers to the context so httpLink can read them
   return {
+    authSessionVersion,
     headers: {
       ...headers,
       authorization: token ? `Bearer ${token}` : "",
@@ -67,7 +68,7 @@ const authLink = setContext((_, { headers }) => {
 });
 
 // Apollo 4 passes a single typed error, rather than Apollo 3's networkError fields.
-const errorLink = onError(({ error }) => {
+const errorLink = onError(({ error, operation }) => {
   if (CombinedGraphQLErrors.is(error)) {
     error.errors.forEach(({ message }) =>
       console.error(`[GraphQL error]: ${message}`),
@@ -76,6 +77,15 @@ const errorLink = onError(({ error }) => {
     console.error(`[Network error]: ${error.message}`);
     if (ServerError.is(error)) {
       if (error.statusCode === 401) {
+        const context = operation.getContext();
+        const token = getAuthToken();
+        // clearStore cancels queries, but an old session's mutation can still finish.
+        // Its rejection must not sign out a newer operator (including a reused token).
+        if (
+          context.authSessionVersion !== authSessionVersion ||
+          context.headers?.authorization !== (token ? `Bearer ${token}` : "")
+        )
+          return;
         clearAuthToken();
         window.location.href = "/login";
       } else if (error.statusCode === 403) {
@@ -210,6 +220,7 @@ export const getAuthToken = (): string | null => {
 // Cache identities are opaque generations, never bearer tokens or token claims. In-flight
 // responses for an old generation cannot become data for the newly signed-in principal.
 let sessionGeneration = 0;
+let authSessionVersion = 0;
 let authSessionReady = true;
 let authSessionError: Error | null = null;
 let sessionToken = localStorage.getItem("auth_token");
@@ -218,6 +229,7 @@ function rotateAuthSession(): void {
   const token = localStorage.getItem("auth_token");
   if (token === sessionToken) return;
   sessionToken = token;
+  authSessionVersion += 1;
   sessionGeneration += 1;
   const transition = sessionGeneration;
   authSessionReady = false;

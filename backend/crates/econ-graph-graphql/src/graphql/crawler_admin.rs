@@ -56,13 +56,22 @@ fn redact_error(message: &str) -> String {
     // a queue failure. CrawlError already requires redacted messages; this also covers old rows.
     static URLS: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new(r#"https?://[^\s<>"']+"#).unwrap());
+    // Authorization credentials can contain a scheme plus token68 or a comma-separated
+    // auth-param list. Redact the complete value while retaining later diagnostic text.
+    static AUTHORIZATION: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(
+            r#"(?i)(["']?authorization["']?\s*[:=]\s*)(?:"(?:[^"\\]|\\.)*"|'[^']*'|[a-z][a-z0-9_-]*[ \t]+(?:[a-z][a-z0-9_-]*[ \t]*=[ \t]*(?:"(?:[^"\\]|\\.)*"|[^\s,;]+)(?:[ \t]*,[ \t]*[a-z][a-z0-9_-]*[ \t]*=[ \t]*(?:"(?:[^"\\]|\\.)*"|[^\s,;]+))*|[^\s,;]+)|[^\s,;]+)"#,
+        )
+        .unwrap()
+    });
     static ASSIGNMENTS: LazyLock<regex::Regex> = LazyLock::new(|| {
         regex::Regex::new(
-        r#"(?i)(["']?(?:api[_-]?key|(?:access[_-]?)?token|password|secret|authorization)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|Bearer\s+[^\s,;]+|[^\s,;]+)"#,
+        r#"(?i)(["']?(?:api[_-]?key|(?:access[_-]?)?token|password|secret)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|Bearer\s+[^\s,;]+|[^\s,;]+)"#,
     )
     .unwrap()
     });
     let text = URLS.replace_all(message, "[upstream URL redacted]");
+    let text = AUTHORIZATION.replace_all(&text, "$1[redacted]");
     ASSIGNMENTS
         .replace_all(&text, "$1[redacted]")
         .chars()
@@ -160,6 +169,30 @@ pub(super) async fn sources(ctx: &Context<'_>) -> Result<Vec<CrawlerSource>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn authorization_redaction_removes_scheme_and_full_credentials() {
+        for header in [
+            "Basic dXNlcjpwYXNz",
+            "Bearer opaque-token",
+            "Negotiate Z29vZC1ieWU=",
+            r#"Digest username="operator", realm="private", nonce="sensitive""#,
+        ] {
+            let original = format!("HTTP auth failed: Authorization: {header}; retry exhausted");
+            assert_eq!(
+                redact_error(&original),
+                "HTTP auth failed: Authorization: [redacted]; retry exhausted"
+            );
+        }
+        assert_eq!(
+            redact_error("HTTP auth failed: authorization=Basic dXNlcjpwYXNz next retry deferred"),
+            "HTTP auth failed: authorization=[redacted] next retry deferred"
+        );
+        assert_eq!(
+            redact_error("HTTP auth failed; retry exhausted"),
+            "HTTP auth failed; retry exhausted"
+        );
+    }
+
     #[test]
     fn stored_error_redaction_keeps_diagnostic_category_without_credentials() {
         for original in [

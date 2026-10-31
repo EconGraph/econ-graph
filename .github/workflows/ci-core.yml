@@ -1025,6 +1025,9 @@ jobs:
       run: |
         set -euo pipefail
         : "${DATABASE_URL:?DATABASE_URL is required for crawler administration contracts}"
+        log="$RUNNER_TEMP/crawler-error-redaction.log"
+        cargo test -p econ-graph-graphql --lib graphql::crawler_admin::tests -- --test-threads=1 --nocapture | tee "$log"
+        grep -Eq '^test result: ok\. 2 passed; 0 failed; 0 ignored;' "$log"
         log="$RUNNER_TEMP/crawler-administration.log"
         cargo test -p econ-graph-graphql --test crawler_admin -- --test-threads=1 --nocapture | tee "$log"
         grep -Fq 'test real_job_history_is_bounded_filtered_and_role_guarded ... ok' "$log"

@@ -37,7 +37,7 @@ fn caller(user: &User, roles: &[Role]) -> Arc<GraphQLContext> {
 async fn real_job_history_is_bounded_filtered_and_role_guarded() {
     let (db, pool, user) = setup().await;
     db.connect().batch_execute("INSERT INTO crawl_queue(id,source,series_id,kind,status,priority,max_retries,error_message) VALUES
-      ('10000000-0000-4000-8000-000000000001','FRED','GDP','fetch_series','failed',5,3,'transient error: https://api.test?q=secret token=hidden'),
+      ('10000000-0000-4000-8000-000000000001','FRED','GDP','fetch_series','failed',5,3,'transient error: https://api.test?q=secret token=hidden Authorization: Basic dXNlcjpwYXNz'),
       ('10000000-0000-4000-8000-000000000002','BLS','ALL','discover_catalog','pending',5,3,NULL)").unwrap();
     let schema = create_schema(AppPool(pool.clone()), Some(DataPool(pool.clone())));
     let operation = "{crawlerJobs(limit:1,source:\"FRED\",status:\"failed\"){id source seriesId kind status errorMessage}}";
@@ -57,6 +57,7 @@ async fn real_job_history_is_bounded_filtered_and_role_guarded() {
     assert_eq!(data["crawlerJobs"][0]["status"], "failed");
     assert!(!data.to_string().contains("secret"));
     assert!(!data.to_string().contains("hidden"));
+    assert!(!data.to_string().contains("dXNlcjpwYXNz"));
     for operation in [
         "{crawlerJobs(limit:201){id}}",
         "{crawlerJobs(offset:-1){id}}",
