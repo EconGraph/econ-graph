@@ -62,6 +62,10 @@ jobs:
       run: npm ci
       working-directory: frontend
 
+    - name: Verify patched dependency compatibility
+      run: npm run test:dependency-compat
+      working-directory: frontend
+
     - name: Run npm security audit
       run: npm audit --json > npm-audit.json
       working-directory: frontend

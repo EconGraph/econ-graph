@@ -6,6 +6,8 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
+# Local API adapter is a locked dependency and must precede npm ci.
+COPY compat ./compat
 
 # Install dependencies (including dev dependencies for build)
 RUN npm ci

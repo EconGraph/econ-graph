@@ -30,6 +30,8 @@ WORKDIR /app
 
 # Copy package files
 COPY frontend/package*.json ./
+# Local API adapter is a locked dependency and must precede npm ci.
+COPY frontend/compat ./compat
 
 # Install npm dependencies
 RUN npm ci

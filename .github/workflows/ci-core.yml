@@ -1479,7 +1479,9 @@ jobs:
       # Gates every production and dev dependency, with narrow, documented
       # exceptions for advisories with no upstream fix (see
       # scripts/npm-audit-allowlist.json) instead of a blanket --omit=dev.
-      run: node scripts/check-npm-audit.mjs .
+      run: |
+        npm run test:dependency-compat
+        node scripts/check-npm-audit.mjs .
       working-directory: frontend
 
     - name: Install admin-frontend dependencies
