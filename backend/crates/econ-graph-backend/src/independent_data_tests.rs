@@ -390,17 +390,36 @@ async fn independent_company_http_keeps_catalog_audience_and_app_content_boundar
         403
     );
     wrong_roles["roles"] = json!(["catalog.fred:read"]);
-    let (status, denied) = post(&url, Some(&issuer.sign(&wrong_roles)), &query).await;
-    assert_eq!(status, 200, "{denied}");
-    assert_eq!(
-        denied["errors"][0]["extensions"]["code"],
-        if cfg!(flag_financial_components) {
-            "FORBIDDEN"
-        } else {
-            "FEATURE_DISABLED"
-        },
-        "{denied}"
-    );
+    // Query each root separately: one non-null error in an aggregate query would
+    // otherwise erase the whole response and hide another root's missing guard.
+    for root_query in [
+        "{ companies { nodes { cik } } }".to_owned(),
+        "{ company(cik:\"42\") { cik } }".to_owned(),
+        "{ companyFacts(cik:\"42\") { nodes { value } } }".to_owned(),
+        "{ financialStatement(cik:\"42\",kind:BALANCE_SHEET) { lines { key } } }".to_owned(),
+        "{ companyRatios(cik:\"42\",periodEnd:\"2024-12-31\") { name } }".to_owned(),
+        "{ companyPeers(cik:\"42\",periodEnd:\"2024-12-31\") { company { cik } } }".to_owned(),
+        format!("{{ companyResearchTargetExists(anchor:{anchor_literal}) }}"),
+    ] {
+        let (status, denied) = post(&url, Some(&issuer.sign(&wrong_roles)), &root_query).await;
+        assert_eq!(status, 200, "{root_query}: {denied}");
+        assert_eq!(
+            denied["errors"][0]["extensions"]["code"],
+            if cfg!(flag_financial_components) {
+                "FORBIDDEN"
+            } else {
+                "FEATURE_DISABLED"
+            },
+            "{root_query}: {denied}"
+        );
+        assert!(
+            denied["data"].is_null()
+                || denied["data"]
+                    .as_object()
+                    .is_some_and(|fields| fields.values().all(Value::is_null)),
+            "{root_query}: {denied}"
+        );
+    }
 
     let (status, result) = post(&url, Some(&token), &query).await;
     assert_eq!(status, 200, "{result}");
