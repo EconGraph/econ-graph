@@ -371,19 +371,26 @@ impl EconomicSeriesType {
             .order(dsl::date.asc())
             .load::<models::DataPoint>(&mut conn)
             .await?;
+        // From the stored values, before any transformation.
+        let revised = econ_graph_services::services::series_service::revised_from_original(
+            &mut conn,
+            series_uuid,
+            &data_points,
+        )
+        .await?;
 
         // Apply transformation if requested
-        if let Some(transformation) = transformation {
-            // Transform the data points using the GraphQL transformation function
-            let transformed =
+        let data_points = match transformation {
+            Some(transformation) => {
                 crate::graphql::query::apply_data_transformation(data_points, transformation)
-                    .await?;
-
-            // Convert transformed data points to GraphQL types
-            Ok(transformed.into_iter().map(DataPointType::from).collect())
-        } else {
-            Ok(data_points.into_iter().map(DataPointType::from).collect())
-        }
+                    .await?
+            }
+            None => data_points,
+        };
+        Ok(data_points
+            .into_iter()
+            .map(|point| DataPointType::with_revised(point, &revised))
+            .collect())
     }
 }
 
@@ -453,8 +460,25 @@ pub struct DataPointType {
     pub value: Option<BigDecimal>,
     pub revision_date: NaiveDate,
     pub is_original_release: bool,
+    /// Whether this value differs from its date's original release value (the earliest
+    /// real original, synthetic legacy rows left out). False for the original release itself
+    /// and for a later release that repeated its value; values compare as numbers, so `3.0`
+    /// and `3.00` are the same. Null when the date's original release isn't known; use
+    /// `isOriginalRelease` then.
+    pub revised_from_original: Option<bool>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl DataPointType {
+    /// `point` with `revisedFromOriginal` from `revised` (by point id; absent: unknown).
+    pub fn with_revised(point: DataPoint, revised: &std::collections::HashMap<Uuid, bool>) -> Self {
+        let revised_from_original = revised.get(&point.id).copied();
+        Self {
+            revised_from_original,
+            ..Self::from(point)
+        }
+    }
 }
 
 impl From<DataPoint> for DataPointType {
@@ -466,6 +490,7 @@ impl From<DataPoint> for DataPointType {
             value: data_point.value,
             revision_date: data_point.revision_date,
             is_original_release: data_point.is_original_release,
+            revised_from_original: None,
             created_at: data_point.created_at,
             updated_at: data_point.updated_at,
         }

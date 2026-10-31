@@ -444,6 +444,14 @@ type DataPoint {
 	value: BigDecimal
 	revisionDate: NaiveDate!
 	isOriginalRelease: Boolean!
+	"""
+	Whether this value differs from its date's original release value (the earliest
+	real original, synthetic legacy rows left out). False for the original release itself
+	and for a later release that repeated its value; values compare as numbers, so `3.0`
+	and `3.00` are the same. Null when the date's original release isn't known; use
+	`isOriginalRelease` then.
+	"""
+	revisedFromOriginal: Boolean
 	createdAt: DateTime!
 	updatedAt: DateTime!
 }
