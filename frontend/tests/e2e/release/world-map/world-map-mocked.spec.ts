@@ -3,6 +3,11 @@
 // See LICENSE file for complete terms and conditions.
 
 import { test, expect, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { geoArea } from 'd3-geo';
+import { feature } from 'topojson-client';
+import type { WorldAtlasTopology } from '../../../../src/components/global/worldAtlas';
 import { expectEqualEarthGeometry, expectEqualLandAreas } from './equal-earth';
 
 /**
@@ -104,6 +109,40 @@ async function mockGraphQL(page: Page): Promise<string[]> {
 const country = (page: Page, isoNumeric: number) =>
   page.locator(`svg path.country[data-iso-numeric="${isoNumeric}"]`);
 
+// Rank the actual bundled polygons independently of the zoom implementation. Generalized
+// atlas area is used to find the hardest outlines to hit, not as a physical land-area claim.
+const require = createRequire(import.meta.url);
+const atlas = JSON.parse(
+  readFileSync(require.resolve('world-atlas/countries-50m.json'), 'utf8')
+) as WorldAtlasTopology;
+const smallestCountries = feature(atlas, atlas.objects.countries)
+  .features.sort((a, b) => geoArea(a) - geoArea(b))
+  .slice(0, 15);
+
+/** Find a real fill interior, optionally requiring an unobscured on-screen hit target. */
+async function countryInterior(page: Page, name: string, requireHit: boolean) {
+  // Some territories share their parent's ISO code (Ashmore and Cartier with Australia).
+  return page
+    .locator(`svg path.country[data-name=${JSON.stringify(name)}]`)
+    .evaluate((element, hit) => {
+      const path = element as SVGGeometryElement;
+      const bounds = path.getBBox();
+      const matrix = path.getScreenCTM();
+      if (!matrix) throw new Error('Country has no screen transform');
+      // A fine grid also finds narrow, disconnected islands such as the Maldives.
+      for (let y = 0.01; y < 1; y += 0.01) {
+        for (let x = 0.01; x < 1; x += 0.01) {
+          const point = new DOMPoint(bounds.x + bounds.width * x, bounds.y + bounds.height * y);
+          if (!path.isPointInFill(point)) continue;
+          const screen = point.matrixTransform(matrix);
+          if (!hit || document.elementFromPoint(screen.x, screen.y) === path)
+            return { x: screen.x, y: screen.y };
+        }
+      }
+      throw new Error(`No usable interior for ${path.getAttribute('data-name')}`);
+    }, requireHit);
+}
+
 test.describe('World map (mocked)', () => {
   let requested: string[];
 
@@ -132,7 +171,9 @@ test.describe('World map (mocked)', () => {
     await expect(legend).toContainText('Unit: current US$');
     // The World aggregate is left out.
     await expect(legend).toContainText('3 countries with data.');
-    await expect(legend).toContainText("Each country's latest value, so dates differ: 2022 to 2023.");
+    await expect(legend).toContainText(
+      "Each country's latest value, so dates differ: 2022 to 2023."
+    );
   });
 
   test('shows value, unit and date on hover', async ({ page }) => {
@@ -194,6 +235,64 @@ test.describe('World map (mocked)', () => {
 
     await page.getByRole('button', { name: 'Reset view' }).click();
     await expect(map).toContainText('100%');
+  });
+
+  test('buttons and keyboard zoom past 800% and clamp at the microstate limit', async ({
+    page,
+  }) => {
+    const controls = page.getByTestId('map-zoom-controls');
+    const zoomIn = page.getByRole('button', { name: 'Zoom in' });
+    for (let step = 0; step < 6; step++) await zoomIn.click();
+    await expect(controls).toContainText('1139%');
+    const svg = page.getByRole('img', { name: 'World map', exact: true });
+    await svg.focus();
+    for (let step = 0; step < 14; step++) await page.keyboard.press('+');
+    await expect(controls).toContainText('102400%');
+    await expect(zoomIn).toBeDisabled();
+    await page.keyboard.press('+');
+    await expect(controls).toContainText('102400%');
+    await page.keyboard.press('Home');
+    await expect(controls).toContainText('100%');
+    await expect(zoomIn).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Reset view' })).toBeDisabled();
+  });
+
+  test('real wheel zoom and pointer hover show tooltips for the 15 smallest outlines', async ({
+    page,
+  }) => {
+    test.slow();
+    expect(smallestCountries.map(c => Number(c.id))).toEqual(
+      expect.arrayContaining([336, 492, 520, 674]) // Vatican, Monaco, Nauru, San Marino
+    );
+    const svg = page.getByRole('img', { name: 'World map', exact: true });
+    const controls = page.getByTestId('map-zoom-controls');
+    for (const outline of smallestCountries) {
+      const name = outline.properties.name;
+      await test.step(name, async () => {
+        await svg.scrollIntoViewIfNeeded();
+        // Approach in stages, as a user would: pointer coordinates are rounded to screen
+        // pixels, so a single enormous wheel jump can miss a subpixel country entirely.
+        for (let step = 0; step < 20; step++) {
+          if (await page.getByRole('button', { name: 'Zoom in' }).isDisabled()) break;
+          const before = await controls.innerText();
+          const focus = await countryInterior(page, name, false);
+          await page.mouse.move(focus.x, focus.y);
+          await page.mouse.wheel(0, -1000);
+          await expect(controls).not.toHaveText(before);
+        }
+        await expect(controls).toContainText('102400%');
+        await expect(page.getByRole('button', { name: 'Zoom in' })).toBeDisabled();
+        const target = await countryInterior(page, name, true);
+        await page.mouse.move(0, 0);
+        await expect(page.getByTestId('country-tooltip')).toHaveCount(0);
+        await page.mouse.move(target.x, target.y);
+        await expect(page.getByTestId('country-tooltip')).toContainText(outline.properties.name);
+        await expect(page.getByTestId('country-tooltip')).toContainText('No data');
+        await page.getByRole('button', { name: 'Reset view' }).click();
+        await expect(controls).toContainText('100%');
+      });
+    }
   });
 
   test('defaults to Equal Earth geometry with equal land areas', async ({ page }) => {
