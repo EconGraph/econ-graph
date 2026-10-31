@@ -13,7 +13,9 @@
 #   - the sign-in page for the web client: Keycloak accepts the public
 #     redirect URI and does not answer "HTTPS required", and refuses a
 #     http://localhost redirect URI (the live realm, not just the rendered one);
-#   - CORS for the public origin, and the www.HOST redirect: a 301 to
+#   - CORS for the public origin, and no CORS for origins the backend must refuse
+#     (the dev server's http://localhost:3000, an unrelated https://evil.example), so a
+#     backend still on an older origin list fails; and the www.HOST redirect: a 301 to
 #     https://HOST with the path and query kept and no port;
 #   - spoofing: X-Forwarded-Proto/-Host/-Port sent by the client change
 #     neither the issuer, the sign-in form, nor the redirect, and plain http
@@ -210,6 +212,21 @@ if [ "$allowed" = "$PUBLIC_URL" ]; then
 else
     fail "CORS preflight returned ${status}, Access-Control-Allow-Origin '${allowed}', expected ${PUBLIC_URL}"
 fi
+
+# 5b. CORS: origins the backend must not list get no Access-Control-Allow-Origin.
+for refused_origin in http://localhost:3000 https://evil.example; do
+    status="$(fetch cors-refused -X OPTIONS -H "Origin: ${refused_origin}" \
+        -H 'Access-Control-Request-Method: POST' \
+        -H 'Access-Control-Request-Headers: content-type, authorization' "${BASE}/graphql")"
+    allowed="$(header cors-refused Access-Control-Allow-Origin)"
+    if [ "$status" = 000 ]; then
+        fail "CORS preflight from ${refused_origin} got no response"
+    elif [ -z "$allowed" ]; then
+        pass "CORS preflight from ${refused_origin} refused (${status})"
+    else
+        fail "CORS preflight from ${refused_origin} returned ${status} with Access-Control-Allow-Origin '${allowed}'; the backend allows an origin it must not"
+    fi
+done
 
 # 6. www redirects to the apex on https, keeping the path and query, with no port
 # spelled out: econ-graph-www-redirect's 301 (scripts/deploy/render-public-host.py).

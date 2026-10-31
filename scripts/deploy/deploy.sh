@@ -120,6 +120,9 @@ source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
 # stop_crawler_for_pending_migrations, before the crawler-migrate Job (ECO-802).
 # shellcheck source=scripts/deploy/lib/data-migrations.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/data-migrations.sh"
+# roll_app_on_config_change, after the Deployments.
+# shellcheck source=scripts/deploy/lib/app-config.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/app-config.sh"
 CLUSTER_ROLE_DRY_RUN="$DRY_RUN"
 if ! cluster_role_use_context "kind-${KIND_CLUSTER}"; then
     echo "❌ ${KUBECTL} has no context kind-${KIND_CLUSTER}"
@@ -191,6 +194,7 @@ kubectl apply -f k8s/manifests/namespace.yaml
 # databases. Runs before create-secrets.sh: it refuses to continue if a host data
 # directory already holds a database whose password Secret is missing.
 run_script ./scripts/deploy/apply-host-storage.sh
+# Pods read the ConfigMap only at start: roll_app_on_config_change, below.
 render_manifest k8s/manifests/configmap.yaml | kubectl apply -f -
 # Credentials live in Secrets created out of band (never committed). The script
 # keeps existing values and generates missing internal passwords; see k8s/README.md.
@@ -315,6 +319,7 @@ kubectl apply -f k8s/manifests/backend-service.yaml
 kubectl apply -f k8s/manifests/crawler-worker.yaml
 kubectl apply -f k8s/manifests/frontend-deployment.yaml
 kubectl apply -f k8s/manifests/frontend-service.yaml
+roll_app_on_config_change || exit 1
 # admin-frontend-deployment/service and admin-ingress: not applied here (ECO-242).
 # See the note in build-images.sh for why. Delete any
 # admin-frontend resources a previous deploy left running, so a stale, broken

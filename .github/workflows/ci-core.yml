@@ -322,13 +322,15 @@ jobs:
     # manifests through render-public-host.py and lib/public-host.sh; check the
     # rendering against the manifests, the library and the cut-over's rollback
     # NetworkPolicy step against a stub kubectl, and check-public-site.sh's www
-    # redirect checks against a stub curl.
+    # redirect and CORS checks and restart-k8s-rollout.sh's URL summary against a stub
+    # curl.
     - name: Check the public-host rendering
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-render-public-host.sh
         scripts/deploy/test-check-public-site.sh
         scripts/deploy/test-public-host-lib.sh
+        scripts/deploy/test-public-host-urls.sh
         python3 scripts/deploy/test-cloudflare-dns-token.py
         scripts/deploy/test-cutover-rollback-policy.sh
         scripts/deploy/test-stage-tunnel-origin-ca.sh
@@ -394,12 +396,14 @@ jobs:
       run: scripts/deploy/test-install-kind.sh
 
     # The pre-deploy database check (backup running, crawler stop, long transactions),
-    # and deploy.sh's use of it when data migrations are pending, against a stub kubectl.
+    # and deploy.sh's use of it when data migrations are pending, and its roll of the app
+    # when econ-graph-config changes, against a stub kubectl.
     - name: Check the pre-deploy database check
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-precheck-db-migration.sh
         scripts/deploy/test-data-migrations.sh
+        scripts/deploy/test-app-config.sh
 
     # Loading a release candidate's GHCR images into the kind cluster, the
     # restart and image check after deploy.sh, and the rollback, against stub
