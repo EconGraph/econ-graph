@@ -3,24 +3,45 @@
  *
  * The list lives in `dashboard-series.json` so it can change without touching code. Each
  * entry names a series by its data source's name (exactly as the backend's `dataSources`
- * query returns it) and the source's own id for the series.
+ * query returns it) and the source's own id for the series. The cards are read anonymously,
+ * so every entry must come from a source the anonymous reader can read (`catalog-public` in
+ * config/keycloak/econ-graph-realm.json).
+ *
+ * An entry may set `displayScale` to show a value stored in base units (BEA stores dollars,
+ * not millions of dollars) in thousands, millions, billions or trillions, and `units` to label
+ * the value as shown. Set `units` whenever `displayScale` is set: the series' own units
+ * describe the stored value, not the scaled one.
  */
 
 import rawDashboardSeries from './dashboard-series.json';
+
+/** Powers of ten a card can divide a value by, by name. */
+export const DISPLAY_SCALES = {
+  thousands: 3,
+  millions: 6,
+  billions: 9,
+  trillions: 12,
+} as const;
+
+export type DisplayScale = keyof typeof DISPLAY_SCALES;
 
 export interface DashboardSeriesEntry {
   /** Stable key for the card. */
   id: string;
   /** Card heading, shown even when the series is not loaded yet. */
   label: string;
-  /** `data_sources.name` of the series' source, for example "Federal Reserve Economic Data (FRED)". */
+  /** `data_sources.name` of the series' source, for example "Bureau of Economic Analysis (BEA)". */
   sourceName: string;
   /** Short source name shown on the card. */
   sourceLabel: string;
-  /** The source's id for the series, for example "GDP". */
+  /** The source's id for the series, for example "bea_nipa/T10105.1.Q". */
   externalId: string;
-  /** Digits after the decimal point when the value is displayed. */
+  /** Digits after the decimal point when the value is displayed, after any `displayScale`. */
   fractionDigits: number;
+  /** Show the value divided into this scale; absent shows it as stored. */
+  displayScale?: DisplayScale;
+  /** Units shown under the value, in place of the series' own units. */
+  units?: string;
 }
 
 /**
@@ -59,6 +80,28 @@ export function parseDashboardSeries(value: unknown): DashboardSeriesEntry[] {
     if (seen.has(id)) {
       throw new Error(`dashboard-series.json has "${id}" more than once`);
     }
+    const { displayScale, units } = record;
+    if (
+      displayScale !== undefined &&
+      !(
+        typeof displayScale === 'string' &&
+        Object.prototype.hasOwnProperty.call(DISPLAY_SCALES, displayScale)
+      )
+    ) {
+      throw new Error(
+        `dashboard-series.json entry ${index} has "displayScale" other than ${Object.keys(
+          DISPLAY_SCALES
+        ).join(', ')}`
+      );
+    }
+    if (units !== undefined && (typeof units !== 'string' || units.trim() === '')) {
+      throw new Error(`dashboard-series.json entry ${index} has an empty "units"`);
+    }
+    if (displayScale !== undefined && units === undefined) {
+      throw new Error(
+        `dashboard-series.json entry ${index} sets "displayScale" without "units" for the scaled value`
+      );
+    }
     seen.add(id);
     return {
       id,
@@ -67,6 +110,8 @@ export function parseDashboardSeries(value: unknown): DashboardSeriesEntry[] {
       sourceLabel: record.sourceLabel as string,
       externalId: record.externalId as string,
       fractionDigits,
+      ...(displayScale !== undefined && { displayScale: displayScale as DisplayScale }),
+      ...(units !== undefined && { units: units as string }),
     };
   });
 }

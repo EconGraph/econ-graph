@@ -10,10 +10,10 @@ import dashboardSource from '../Dashboard.tsx?raw';
 import cardSource from '../../components/dashboard/LatestValueCard.tsx?raw';
 import { DASHBOARD_SERIES } from '../../config/dashboardSeries';
 import { executeGraphQL } from '../../utils/graphql';
-import gdp from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/gdp.json';
-import unrate from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/unrate.json';
-import cpiaucsl from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/cpiaucsl.json';
-import fedfunds from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/fedfunds.json';
+import gdp from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/bea_gdp.json';
+import unemployment from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/unemployment_rate.json';
+import cpi from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/cpi.json';
+import payrolls from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/nonfarm_payrolls.json';
 import notFound from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/not_found.json';
 import emptySeries from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/empty_series.json';
 import nullValue from '../../test-utils/mocks/graphql-responses/get_series_latest_observation/null_value.json';
@@ -26,11 +26,12 @@ vi.mock('../../utils/graphql', async () => {
 const mockedExecuteGraphQL = vi.mocked(executeGraphQL);
 
 type Fixture = { data: unknown };
+const GDP_ID = 'bea_nipa/T10105.1.Q';
 const FIXTURES: Record<string, Fixture> = {
-  GDP: gdp,
-  UNRATE: unrate,
-  CPIAUCSL: cpiaucsl,
-  FEDFUNDS: fedfunds,
+  [GDP_ID]: gdp,
+  LNS14000000: unemployment,
+  CUSR0000SA0: cpi,
+  CES0000000001: payrolls,
 };
 
 /**
@@ -72,23 +73,42 @@ describe('Dashboard', () => {
     vi.restoreAllMocks();
   });
 
-  test('lists the four FRED series from the config file', () => {
-    expect(DASHBOARD_SERIES.map(entry => entry.externalId)).toEqual([
-      'GDP',
-      'UNRATE',
-      'CPIAUCSL',
-      'FEDFUNDS',
+  test('lists the four BEA and BLS series from the config file', () => {
+    expect(
+      DASHBOARD_SERIES.map(({ label, sourceName, externalId }) => ({
+        label,
+        sourceName,
+        externalId,
+      }))
+    ).toEqual([
+      {
+        label: 'Gross Domestic Product',
+        sourceName: 'Bureau of Economic Analysis (BEA)',
+        externalId: GDP_ID,
+      },
+      {
+        label: 'Unemployment Rate',
+        sourceName: 'Bureau of Labor Statistics (BLS)',
+        externalId: 'LNS14000000',
+      },
+      {
+        label: 'Consumer Price Index',
+        sourceName: 'Bureau of Labor Statistics (BLS)',
+        externalId: 'CUSR0000SA0',
+      },
+      {
+        label: 'Nonfarm Payrolls',
+        sourceName: 'Bureau of Labor Statistics (BLS)',
+        externalId: 'CES0000000001',
+      },
     ]);
-    for (const entry of DASHBOARD_SERIES) {
-      expect(entry.sourceName).toBe('Federal Reserve Economic Data (FRED)');
-    }
   });
 
   test('looks each series up by source name and external id', async () => {
     mockResponses();
     renderDashboard();
 
-    await screen.findByText('29,723.9');
+    await screen.findByText('29.72');
     expect(mockedExecuteGraphQL).toHaveBeenCalledTimes(4);
     for (const entry of DASHBOARD_SERIES) {
       expect(mockedExecuteGraphQL).toHaveBeenCalledWith(
@@ -104,24 +124,39 @@ describe('Dashboard', () => {
     mockResponses();
     renderDashboard();
 
+    // BEA stores GDP in dollars (it applies UNIT_MULT): 29,723,864.9 million dollars is shown
+    // as 29.72 trillion, labelled as such rather than with the stored "Current Dollars".
     const gdpCard = card('Gross Domestic Product');
-    expect(await within(gdpCard).findByText('29,723.9')).toBeInTheDocument();
-    expect(within(gdpCard).getByText('Billions of Dollars')).toBeInTheDocument();
+    expect(await within(gdpCard).findByText('29.72')).toBeInTheDocument();
+    expect(
+      within(gdpCard).getByText('Trillions of dollars, seasonally adjusted annual rate')
+    ).toBeInTheDocument();
+    expect(within(gdpCard).queryByText('Current Dollars')).not.toBeInTheDocument();
     expect(within(gdpCard).getByText('Oct 1, 2024')).toHaveAttribute('datetime', '2024-10-01');
-    expect(within(gdpCard).getByText('FRED GDP')).toBeInTheDocument();
+    expect(within(gdpCard).getByText(`BEA ${GDP_ID}`)).toBeInTheDocument();
 
-    const unrateCard = card('Unemployment Rate');
-    expect(await within(unrateCard).findByText('4.1')).toBeInTheDocument();
-    expect(within(unrateCard).getByText('Percent')).toBeInTheDocument();
-    expect(within(unrateCard).getByText('Feb 1, 2025')).toBeInTheDocument();
+    const unemploymentCard = card('Unemployment Rate');
+    expect(await within(unemploymentCard).findByText('4.1')).toBeInTheDocument();
+    expect(within(unemploymentCard).getByText('Percent, seasonally adjusted')).toBeInTheDocument();
+    expect(within(unemploymentCard).getByText('Feb 1, 2025')).toBeInTheDocument();
+    expect(within(unemploymentCard).getByText('BLS LNS14000000')).toBeInTheDocument();
 
     // 319.0825 rounds up to 319.083 on the digits; float rounding would give 319.082.
     const cpiCard = card('Consumer Price Index');
     expect(await within(cpiCard).findByText('319.083')).toBeInTheDocument();
-    expect(within(cpiCard).getByText('Index 1982-1984=100')).toBeInTheDocument();
+    expect(within(cpiCard).getByText('Index 1982-84=100, seasonally adjusted')).toBeInTheDocument();
+    expect(within(cpiCard).getByText('BLS CUSR0000SA0')).toBeInTheDocument();
 
-    const fedFundsCard = card('Federal Funds Rate');
-    expect(await within(fedFundsCard).findByText('4.33')).toBeInTheDocument();
+    // BLS publishes payrolls in thousands; the value is shown as stored.
+    const payrollsCard = card('Nonfarm Payrolls');
+    expect(await within(payrollsCard).findByText('159,275')).toBeInTheDocument();
+    expect(
+      within(payrollsCard).getByText('Thousands of employees, seasonally adjusted')
+    ).toBeInTheDocument();
+    expect(within(payrollsCard).getByText('BLS CES0000000001')).toBeInTheDocument();
+
+    expect(screen.queryByText(/FRED/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: 'Federal Funds Rate' })).not.toBeInTheDocument();
   });
 
   test("shows each value's source notice with a terms link, outside the card's link", async () => {
@@ -129,14 +164,14 @@ describe('Dashboard', () => {
     renderDashboard();
 
     const gdpCard = card('Gross Domestic Product');
-    await within(gdpCard).findByText('29,723.9');
+    await within(gdpCard).findByText('29.72');
     const notice = within(gdpCard).getByTestId('source-notice');
     expect(notice).toHaveTextContent(
-      'This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.'
+      'This product uses the Bureau of Economic Analysis (BEA) Data API but is not endorsed or certified by BEA.'
     );
     expect(within(notice).getByRole('link', { name: 'Terms of use' })).toHaveAttribute(
       'href',
-      'https://fred.stlouisfed.org/docs/api/terms_of_use.html'
+      'https://apps.bea.gov/API/_pdf/bea_api_tos.pdf'
     );
     expect(
       within(gdpCard).getByRole('link', { name: 'Gross Domestic Product' })
@@ -147,18 +182,18 @@ describe('Dashboard', () => {
     mockResponses();
     renderDashboard();
 
-    await screen.findByText('29,723.9');
+    await screen.findByText('29.72');
     expect(
       within(card('Gross Domestic Product')).getByRole('link', { name: 'Gross Domestic Product' })
     ).toHaveAttribute('href', `/series/${gdp.data.seriesByExternalId.id}`);
-    expect(within(card('Federal Funds Rate')).getByRole('link')).toHaveAttribute(
+    expect(await within(card('Nonfarm Payrolls')).findByRole('link')).toHaveAttribute(
       'href',
-      `/series/${fedfunds.data.seriesByExternalId.id}`
+      `/series/${payrolls.data.seriesByExternalId.id}`
     );
   });
 
   test('shows "No data yet" without a link when the series does not exist', async () => {
-    mockResponses({ GDP: notFound });
+    mockResponses({ [GDP_ID]: notFound });
     renderDashboard();
 
     const gdpCard = card('Gross Domestic Product');
@@ -171,26 +206,29 @@ describe('Dashboard', () => {
   test('shows "No data yet" without a link when the series has no observations', async () => {
     // series(id) treats a series with no observations as not found, so linking to it would
     // send the visitor to a "Series not found" page.
-    mockResponses({ FEDFUNDS: emptySeries });
+    mockResponses({ CES0000000001: emptySeries });
     renderDashboard();
 
-    const fedFundsCard = card('Federal Funds Rate');
-    expect(await within(fedFundsCard).findByText('No data yet')).toBeInTheDocument();
-    expect(within(fedFundsCard).queryByRole('link')).not.toBeInTheDocument();
+    const payrollsCard = card('Nonfarm Payrolls');
+    expect(await within(payrollsCard).findByText('No data yet')).toBeInTheDocument();
+    expect(within(payrollsCard).queryByRole('link')).not.toBeInTheDocument();
   });
 
   test('says no value was reported when the latest observation has a null value', async () => {
-    mockResponses({ UNRATE: nullValue });
+    mockResponses({ LNS14000000: nullValue });
     renderDashboard();
 
     const unrateCard = card('Unemployment Rate');
     expect(await within(unrateCard).findByText('No value reported')).toBeInTheDocument();
     expect(within(unrateCard).getByText('Feb 1, 2025')).toBeInTheDocument();
+    // The card's own units still label it, not the stored "Percent".
+    expect(within(unrateCard).getByText('Percent, seasonally adjusted')).toBeInTheDocument();
+    expect(within(unrateCard).queryByText('Percent')).not.toBeInTheDocument();
   });
 
   test('shows an error on the card when the lookup fails', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    mockResponses({ CPIAUCSL: new Error('HTTP error! status: 500') });
+    mockResponses({ CUSR0000SA0: new Error('HTTP error! status: 500') });
     renderDashboard();
 
     const cpiCard = card('Consumer Price Index');
@@ -227,9 +265,9 @@ describe('Dashboard', () => {
     ).toHaveAttribute('href', `/series/${gdp.data.seriesByExternalId.id}`);
   });
 
-  test('shows the raw value when it is not a decimal the formatter understands', async () => {
+  test('shows the raw value, with the series units, when the formatter cannot read it', async () => {
     mockResponses({
-      GDP: {
+      [GDP_ID]: {
         data: {
           seriesByExternalId: {
             ...gdp.data.seriesByExternalId,
@@ -240,7 +278,13 @@ describe('Dashboard', () => {
     });
     renderDashboard();
 
-    expect(await within(card('Gross Domestic Product')).findByText('n/a')).toBeInTheDocument();
+    const gdpCard = card('Gross Domestic Product');
+    expect(await within(gdpCard).findByText('n/a')).toBeInTheDocument();
+    // The trillions label describes a scaled value; an unscaled one keeps the stored units.
+    expect(within(gdpCard).getByText('Current Dollars')).toBeInTheDocument();
+    expect(
+      within(gdpCard).queryByText('Trillions of dollars, seasonally adjusted annual rate')
+    ).not.toBeInTheDocument();
   });
 
   test('keeps the quick links to the explorer and data sources', () => {
@@ -279,7 +323,7 @@ describe('Dashboard', () => {
     mockResponses();
     renderDashboard();
 
-    await screen.findByText('29,723.9');
+    await screen.findByText('29.72');
     for (const link of screen.getAllByRole('link')) {
       expect(link.getAttribute('href')).not.toMatch(/^\/series\/[a-z-]+$/);
     }

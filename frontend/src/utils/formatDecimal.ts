@@ -13,18 +13,24 @@ const DECIMAL_PATTERN = /^([+-])?(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/;
  * Round and format a decimal string.
  * @param value - A decimal such as "27360.935", "-0.5" or "1.2E+3".
  * @param fractionDigits - Digits to keep after the decimal point.
+ * @param divisorExponent - Divide the value by 10 to this power before rounding, exactly, so
+ * that a value in dollars can be shown in trillions (12). Defaults to 0.
  * @returns The formatted number, for example "27,360.9", or null when `value` is not a
  * decimal number.
  */
-export function formatDecimalString(value: string, fractionDigits: number): string | null {
+export function formatDecimalString(
+  value: string,
+  fractionDigits: number,
+  divisorExponent = 0
+): string | null {
   const match = DECIMAL_PATTERN.exec(value.trim());
   if (!match) return null;
   const [, sign, intDigits = '', fracDigits = '', exponentText = '0'] = match;
   if (intDigits === '' && fracDigits === '') return null;
 
-  // value = coefficient * 10^-scale
+  // value / 10^divisorExponent = coefficient * 10^-scale
   let coefficient = BigInt(`${intDigits}${fracDigits}` || '0');
-  const scale = fracDigits.length - Number(exponentText);
+  const scale = fracDigits.length - Number(exponentText) + divisorExponent;
   if (!Number.isSafeInteger(scale) || Math.abs(scale) > 1000) return null;
 
   if (scale > fractionDigits) {

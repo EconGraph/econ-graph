@@ -2,33 +2,38 @@
   {
     "id": "gdp",
     "label": "Gross Domestic Product",
-    "sourceName": "Federal Reserve Economic Data (FRED)",
-    "sourceLabel": "FRED",
-    "externalId": "GDP",
-    "fractionDigits": 1
+    "sourceName": "Bureau of Economic Analysis (BEA)",
+    "sourceLabel": "BEA",
+    "externalId": "bea_nipa/T10105.1.Q",
+    "fractionDigits": 2,
+    "displayScale": "trillions",
+    "units": "Trillions of dollars, seasonally adjusted annual rate"
   },
   {
     "id": "unemployment",
     "label": "Unemployment Rate",
-    "sourceName": "Federal Reserve Economic Data (FRED)",
-    "sourceLabel": "FRED",
-    "externalId": "UNRATE",
-    "fractionDigits": 1
+    "sourceName": "Bureau of Labor Statistics (BLS)",
+    "sourceLabel": "BLS",
+    "externalId": "LNS14000000",
+    "fractionDigits": 1,
+    "units": "Percent, seasonally adjusted"
   },
   {
     "id": "cpi",
     "label": "Consumer Price Index",
-    "sourceName": "Federal Reserve Economic Data (FRED)",
-    "sourceLabel": "FRED",
-    "externalId": "CPIAUCSL",
-    "fractionDigits": 3
+    "sourceName": "Bureau of Labor Statistics (BLS)",
+    "sourceLabel": "BLS",
+    "externalId": "CUSR0000SA0",
+    "fractionDigits": 3,
+    "units": "Index 1982-84=100, seasonally adjusted"
   },
   {
-    "id": "fed-funds",
-    "label": "Federal Funds Rate",
-    "sourceName": "Federal Reserve Economic Data (FRED)",
-    "sourceLabel": "FRED",
-    "externalId": "FEDFUNDS",
-    "fractionDigits": 2
+    "id": "nonfarm-payrolls",
+    "label": "Nonfarm Payrolls",
+    "sourceName": "Bureau of Labor Statistics (BLS)",
+    "sourceLabel": "BLS",
+    "externalId": "CES0000000001",
+    "fractionDigits": 0,
+    "units": "Thousands of employees, seasonally adjusted"
   }
 ]

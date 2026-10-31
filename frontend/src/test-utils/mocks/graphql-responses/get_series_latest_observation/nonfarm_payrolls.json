@@ -2,11 +2,11 @@
   "data": {
     "seriesByExternalId": {
       "id": "0192f0a1-0000-7000-8000-000000000004",
-      "units": "Percent",
+      "units": "All Employees, In Thousands",
       "latestObservation": {
         "date": "2025-02-01",
-        "value": "4.330000",
-        "revisionDate": "2025-03-03"
+        "value": "159275",
+        "revisionDate": "2025-02-01"
       }
     }
   }

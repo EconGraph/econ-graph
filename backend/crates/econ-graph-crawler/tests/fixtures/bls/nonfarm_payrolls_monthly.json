@@ -1,0 +1,44 @@
+{
+  "status": "REQUEST_SUCCEEDED",
+  "responseTime": 162,
+  "message": [],
+  "Results": {
+    "series": [
+      {
+        "seriesID": "CES0000000001",
+        "catalog": {
+          "series_title": "All employees, thousands, total nonfarm, seasonally adjusted",
+          "series_id": "CES0000000001",
+          "seasonality": "Seasonally Adjusted",
+          "survey_name": "Employment, Hours, and Earnings from the Current Employment Statistics survey (National)",
+          "survey_abbreviation": "CE",
+          "measure_data_type": "All Employees, In Thousands"
+        },
+        "data": [
+          {
+            "year": "2024",
+            "period": "M03",
+            "periodName": "March",
+            "latest": "true",
+            "value": "158089",
+            "footnotes": [{ "code": "P", "text": "preliminary" }]
+          },
+          {
+            "year": "2024",
+            "period": "M02",
+            "periodName": "February",
+            "value": "157786",
+            "footnotes": [{ "code": "P", "text": "preliminary" }]
+          },
+          {
+            "year": "2024",
+            "period": "M01",
+            "periodName": "January",
+            "value": "157516",
+            "footnotes": [{}]
+          }
+        ]
+      }
+    ]
+  }
+}
