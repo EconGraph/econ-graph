@@ -30,4 +30,7 @@ and old nested minimatch packages. No advisory allowlist entry is added.
 Run `npm run test:dependency-compat` to exercise real glob 7 sync/callback and
 glob 14 Promise APIs, the ESLint import rule, module exports, and guard
 rejection cases. The Docker build contexts copy the adapter before `npm ci`
-resolves the local package link.
+resolves the local package link. The optimized E2E runtime also copies the
+adapter target beside the installed node_modules symlink. Its layout regression
+loads the real matcher from the copied registry dependency closure and fails
+when that final-stage copy is removed.
