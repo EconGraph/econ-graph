@@ -145,8 +145,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = DataPool(econ_graph_core::create_pool(&database_url).await?);
 
     let keys = ApiKeys::from_env();
-    // Without its key, a source in SKIPPED_WITHOUT_KEY (WTO) is left out here, with a warning.
-    let registry = registry_for_keys(&keys);
+    // Licence-gated sources get no adapter, so nothing below (startup reference-data refresh,
+    // scheduler, coverage, job dispatch) can reach their upstream. Without its key, a source in
+    // SKIPPED_WITHOUT_KEY (WTO) is left out too, with a warning.
+    let registry = econ_graph_crawler::licence::ungated_registry(registry_for_keys(&keys));
     for source in registry.ids() {
         econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS.initialize_source(source.as_str());
     }

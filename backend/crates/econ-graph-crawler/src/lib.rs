@@ -72,6 +72,7 @@ pub mod coverage;
 pub mod dataset;
 pub mod error;
 pub mod http;
+pub mod licence;
 pub mod lifecycle;
 pub mod persist;
 pub mod policy;

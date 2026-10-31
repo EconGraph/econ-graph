@@ -6,6 +6,22 @@
       "kind": "build",
       "value": false
     },
+    "crawl_boj": {
+      "kind": "build",
+      "value": false
+    },
+    "crawl_imf": {
+      "kind": "build",
+      "value": false
+    },
+    "crawl_snb": {
+      "kind": "build",
+      "value": false
+    },
+    "crawl_un_stats": {
+      "kind": "build",
+      "value": false
+    },
     "financial_components": {
       "kind": "build",
       "value": false

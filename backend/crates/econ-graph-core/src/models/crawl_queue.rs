@@ -378,6 +378,17 @@ impl CrawlQueueItem {
         worker_id: &str,
         sources: Option<&[String]>,
     ) -> AppResult<Option<Self>> {
+        Self::claim_next_except(pool, worker_id, sources, &[]).await
+    }
+
+    /// [`claim_next`](Self::claim_next), never claiming an item whose upper-cased `source` is in
+    /// `except` (which holds upper-case names). Excluded items are left as they are.
+    pub async fn claim_next_except(
+        pool: &DatabasePool,
+        worker_id: &str,
+        sources: Option<&[String]>,
+        except: &[String],
+    ) -> AppResult<Option<Self>> {
         let mut conn = get_conn(pool).await?;
         let item = diesel::sql_query(
             "UPDATE crawl_queue \
@@ -388,6 +399,7 @@ impl CrawlQueueItem {
                  WHERE status IN ('pending', 'retrying') \
                    AND (scheduled_for IS NULL OR scheduled_for <= NOW()) \
                    AND ($2::text[] IS NULL OR source = ANY($2::text[])) \
+                   AND NOT (upper(source) = ANY($3::text[])) \
                  ORDER BY priority DESC, created_at ASC \
                  FOR UPDATE SKIP LOCKED \
                  LIMIT 1 \
@@ -396,6 +408,7 @@ impl CrawlQueueItem {
         )
         .bind::<Text, _>(worker_id)
         .bind::<Nullable<Array<Text>>, _>(sources)
+        .bind::<Array<Text>, _>(except)
         .get_result::<Self>(&mut conn)
         .await
         .optional()?;
