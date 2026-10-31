@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Release lab, data-copy mode: a disposable kind cluster running the app stack on its own
-copy of the data, restored from dumps given by path.
+"""Release lab, data-copy mode: a disposable kind cluster running the candidate (the
+checkout this runs from, and its images) on its own copy of production's data, restored
+from dumps given by path. It rehearses the candidate on that data, not an upgrade from
+one deployed release to another. docs/deployment/RELEASE_LAB.md is the runbook.
 
 Usage:
   scripts/deploy/release-lab.sh create --lab NAME \\
-      --data-dump FILE --app-dump FILE --keycloak-dump FILE \\
+      --data-dump FILE --keycloak-dump FILE [--app-dump FILE] [--app-database shared|separate] \\
       --backend-image REF --frontend-image REF --crawler-image REF \\
       [--release vX.Y.Z] [--dry-run]
   scripts/deploy/release-lab.sh status --lab NAME
   scripts/deploy/release-lab.sh port-forward --lab NAME
+  scripts/deploy/release-lab.sh env --lab NAME
   scripts/deploy/release-lab.sh measure [--lab NAME]
   scripts/deploy/release-lab.sh list
   scripts/deploy/release-lab.sh teardown --lab NAME [--yes] [--keep-storage] [--dry-run]
@@ -25,7 +28,12 @@ ${ECONGRAPH_LAB_ROOT:-~/econgraph-labs}/NAME/ (never under /tmp or on a tmpfs):
 create:
   1. Checks the dumps (regular pg_dump custom-format files outside the lab directory),
      records their SHA-256, size and modification time, and checks that the lab root has
-     10 GiB plus 8 times the dumps' size free. Checks the images (below).
+     10 GiB plus 8 times the dumps' size free, and the Docker data root 10 GiB plus twice
+     the images' size. Checks the images (below).
+     Without --app-dump the app tables are in the data database (--app-database shared,
+     as in a release before the app database): app-database-url names the data database
+     and the app database runs empty, for convert-app-data.sh. With --app-dump they are
+     in the app database (separate).
   2. Creates the lab directory atomically (an existing lab is reported, never reused for
      other dumps), then the kind cluster: one node, no port mappings, its API server on
      127.0.0.1. Writes the ownership marker ConfigMap kube-system/econgraph-lab-owner
@@ -35,7 +43,8 @@ create:
   4. Applies the app stack from scripts/deploy/render-branch.py's local-data rendering:
      ClusterIP Services only, no gateway, no cloudflared, no tunnel token, no API keys,
      lab-generated passwords, crawler-worker at 0 replicas.
-  5. Restores each dump into its own empty database (one transaction each), removes
+  5. Restores each dump into its own empty database (one transaction each, as the role
+     the services connect as, without the dump's owners, grants and comments), removes
      the Keycloak copy's identity providers, signing keys, client secrets, sessions,
      events and SMTP settings (docs/deployment/RELEASE_LAB.md), runs the data
      migrations, starts Keycloak (which migrates an older copy), the backend and the
@@ -66,8 +75,11 @@ terminal, or --yes. --dry-run makes the same checks and shows what it would dele
 Once torn down, with its storage removed, the lab name can be created again; the old
 directory is kept as .NAME.torn-down-<time>/ in the lab root.
 
-port-forward: forwards the frontend, backend and Keycloak to 127.0.0.1 only, on the ports
-in the record. measure: memory, CPU, and disk of each lab (docs/deployment/RELEASE_LAB.md).
+port-forward: forwards the frontend, backend, Keycloak and the data database to 127.0.0.1
+only, on the ports in the record. env: prints the shell lines that point the kind-env.sh
+scripts (convert-app-data.sh, set-catalog-access.sh) at the lab instead of production; use
+it as eval "$(scripts/deploy/release-lab.sh env --lab NAME)". measure: memory, CPU and disk
+of each lab (docs/deployment/RELEASE_LAB.md).
 """
 import argparse
 import contextlib
@@ -105,6 +117,9 @@ NODE_STORAGE_PATH = '/var/local-path-provisioner'
 FREE_RESERVE_BYTES = 10 * 1024 ** 3
 FREE_DUMP_FACTOR = 8
 IMAGE_NAMES = ('backend', 'frontend', 'crawler-worker')
+# The ports `port-forward` uses on 127.0.0.1, chosen at creation.
+PORT_NAMES = ('frontend', 'backend', 'keycloak', 'data')
+DOCKER_RESERVE_BYTES = 10 * 1024 ** 3
 # Kinds the lab never applies: no gateway, no public routes.
 DROPPED_KINDS = {'HTTPRoute', 'BackendTrafficPolicy'}
 DROPPED_POLICIES = {'gateway-to-app'}
@@ -113,11 +128,11 @@ DROPPED_POLICIES = {'gateway-to-app'}
 # and the row counts reported after the restore (each only when its table exists).
 DATABASES = {
     'data': {'pod': 'postgresql-0', 'container': 'postgresql', 'user': 'postgres', 'database': 'econ_graph',
-             'counts': ['economic_series', 'data_points']},
+             'owner': 'econgraph', 'counts': ['economic_series', 'data_points', 'users']},
     'app': {'pod': 'app-postgres-0', 'container': 'postgres', 'user': 'postgres', 'database': 'econ_graph_app',
-            'counts': ['users', 'chart_annotations']},
+            'owner': 'econgraph', 'counts': ['users', 'chart_annotations']},
     'keycloak': {'pod': 'keycloak-postgres-0', 'container': 'postgres', 'user': 'keycloak',
-                 'database': 'keycloak', 'counts': ['realm', 'user_entity']},
+                 'database': 'keycloak', 'owner': 'keycloak', 'counts': ['realm', 'user_entity']},
 }
 
 # Run on the restored Keycloak database before Keycloak starts, in one transaction.
@@ -461,7 +476,10 @@ def check_ownership(tools, record):
     found = tools.kubectl('-n', 'kube-system', 'get', 'configmap', OWNER_CONFIGMAP, '--ignore-not-found',
                           '-o', 'json').stdout.strip()
     if not found:
-        raise LabError(f'{record["cluster"]} has no ownership marker kube-system/{OWNER_CONFIGMAP}; refusing')
+        raise LabError(f'{record["cluster"]} has no ownership marker kube-system/{OWNER_CONFIGMAP}; refusing. If it '
+                       'is the lab\'s and its creation stopped before the marker, check its nodes with kind get '
+                       f'nodes --name {record["cluster"]}, then delete it by hand: kind delete cluster --name '
+                       f'{record["cluster"]}')
     data = json.loads(found).get('data') or {}
     if data.get('lab-id') != record['lab_id'] or data.get('lab') != record['name'] or \
             data.get('kube-system-uid') != uid:
@@ -484,8 +502,15 @@ def render_manifests(record):
     branch = 'lab-' + record['name']
     docs = renderer.render(branch, images['backend']['lab_tag'], images['frontend']['lab_tag'],
                            True, images['crawler-worker']['lab_tag'])
-    _, branch_namespace = renderer.identity(branch)
+    slug, branch_namespace = renderer.identity(branch)
+    # The branch rendering's addresses become the lab's port-forward ports on localhost:
+    # Keycloak's (its issuer and admin console) and the frontend's (its origin).
+    ports = record['ports']
+    keycloak = f'http://localhost:{ports["keycloak"]}/idp'
     text = json.dumps(docs).replace(branch_namespace, NAMESPACE)
+    text = text.replace(f'http://{slug}.localhost/idp', keycloak)
+    text = text.replace(f'http://{slug}.localhost', f'http://localhost:{ports["frontend"]}')
+    text = text.replace('http://localhost:18080/idp', keycloak)
     docs = [d for d in json.loads(text)
             if d['kind'] not in DROPPED_KINDS
             and not (d['kind'] == 'NetworkPolicy' and d['metadata']['name'] in DROPPED_POLICIES)]
@@ -583,14 +608,17 @@ def lab_secrets(record):
     """Lab-generated credentials; never production's, and never the tunnel token or API keys."""
     app, app_admin, kc_db, kc_admin, kc_anonymous, data, data_admin = [secrets.token_hex(24) for _ in range(7)]
     admin_user = 'lab-admin-' + record['lab_id'][:8]
+    data_url = f'postgresql://econgraph:{data}@data-postgres-service:5432/econ_graph'
+    # Shared: the app tables are in the data database, as in a release before the app
+    # database (APP_DATABASE=shared in create-secrets.sh); convert-app-data.sh moves them.
+    app_url = data_url if record.get('app_database', 'separate') == 'shared' else \
+        f'postgresql://econgraph:{app}@app-postgres-service:5432/econ_graph_app'
     return [
         ('econ-graph-app-postgres', {'postgres-password': app_admin, 'app-password': app}),
         ('econ-graph-keycloak', {'admin-username': admin_user, 'admin-password': kc_admin, 'db-password': kc_db,
                                  'anonymous-client-secret': kc_anonymous}),
         ('econ-graph-postgres', {'postgres-password': data_admin, 'app-password': data}),
-        ('econ-graph-secrets', {
-            'app-database-url': f'postgresql://econgraph:{app}@app-postgres-service:5432/econ_graph_app',
-            'data-database-url': f'postgresql://econgraph:{data}@data-postgres-service:5432/econ_graph'}),
+        ('econ-graph-secrets', {'app-database-url': app_url, 'data-database-url': data_url}),
     ]
 
 
@@ -628,8 +656,13 @@ def restore_dump(tools, spec, dump):
     log(f'Restoring {dump} into {spec["database"]} ({spec["pod"]})')
     fd = os.open(dump, os.O_RDONLY | os.O_NOFOLLOW)
     with os.fdopen(fd, 'rb') as source:
+        # Created as the role the lab's services connect as, whatever owners the dump
+        # names (as scripts/deploy/lib/keycloak-db.sh restores Keycloak's), with no
+        # grants to roles the lab doesn't have and no comments (a comment on an extension
+        # needs its owner, the superuser).
         tools.k('exec', '-i', spec['pod'], '-c', spec['container'], '--', 'pg_restore', '-U', spec['user'],
-                '-d', spec['database'], '--single-transaction', '--exit-on-error', stdin=source, capture=False)
+                '-d', spec['database'], '--no-owner', '--no-privileges', '--no-comments',
+                f'--role={spec["owner"]}', '--single-transaction', '--exit-on-error', stdin=source, capture=False)
     psql(tools, spec, 'ANALYZE')
 
 
@@ -672,6 +705,32 @@ def free_ports(count, root):
         if port not in taken and port not in ports:
             ports.append(port)
     return ports
+
+
+def checkout_source():
+    """The commit (and whether the tree has changes) the manifests are rendered from."""
+    def git(*args):
+        return subprocess.run(['git', '-C', str(renderer.ROOT), *args], capture_output=True, text=True,
+                              check=False).stdout.strip()
+    return {'commit': git('rev-parse', 'HEAD') or 'unknown', 'changed': bool(git('status', '--porcelain'))}
+
+
+def check_docker_space(tools, images, free=kind_tools.free_bytes):
+    """The Docker data root holds the node image and a copy of every image loaded into the
+    node: 10 GiB plus twice the images' size must be free there."""
+    root = tools.docker('info', '--format', '{{.DockerRootDir}}').stdout.strip()
+    if not root.startswith('/'):
+        raise LabError(f'docker info gave no data root ({root!r})')
+    sizes = 0
+    for image in images.values():
+        found = tools.docker('image', 'inspect', '--format', '{{.Size}}', image['image_id'], check=False)
+        sizes += int(found.stdout.strip()) if found.returncode == 0 and found.stdout.strip().isdigit() else 0
+    needed = DOCKER_RESERVE_BYTES + 2 * sizes
+    available = free(root)
+    if available < needed:
+        raise LabError(f'the Docker data root {root} has {available // 1024 ** 3} GiB free; the lab needs '
+                       f'{needed // 1024 ** 3} GiB (10 GiB plus twice its images)')
+    return available, needed
 
 
 def release_commit(release):
@@ -742,6 +801,7 @@ def create(args):
     root = lab_root(environ)
     directory = root / name
     cluster = cluster_for(name)
+    retire = False
     if (directory / 'lab.json').exists():
         record = read_record(name, environ)
         if record.get('status') == 'ready':
@@ -751,16 +811,19 @@ def create(args):
         if record.get('status') != 'torn-down':
             raise LabError(f'lab {name} exists with status {record.get("status")!r}; tear it down '
                            f'(scripts/deploy/release-lab.sh teardown --lab {name}) and create it again')
-        if not args.dry_run:
-            retire_lab_dir(name, root, directory)
+        retire = True
     if args.release and not re.fullmatch(r'v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?', args.release):
         raise LabError(f'--release {args.release}: use a release tag such as v4.0.1')
+    app_database = args.app_database or ('separate' if args.app_dump else 'shared')
+    if app_database == 'shared' and args.app_dump:
+        raise LabError('--app-database shared keeps the app tables in the data database; it takes no --app-dump')
     record = {'format': RECORD_FORMAT, 'name': name, 'cluster': cluster, 'context': 'kind-' + cluster,
               'network': cluster, 'lab_id': secrets.token_hex(16), 'created_at': now(), 'status': 'creating',
-              'release': args.release, 'mode': 'data-copy',
-              'ports': dict(zip(('frontend', 'backend', 'keycloak'), free_ports(3, root)))}
+              'release': args.release, 'mode': 'data-copy', 'app_database': app_database,
+              'source': checkout_source(),
+              'ports': dict(zip(PORT_NAMES, free_ports(len(PORT_NAMES), root)))}
     dumps = {'data': args.data_dump, 'app': args.app_dump, 'keycloak': args.keycloak_dump}
-    inputs = {role: inspect_dump(path, directory) for role, path in dumps.items()}
+    inputs = {role: inspect_dump(path, directory) for role, path in dumps.items() if path}
     if len({facts['sha256'] for facts in inputs.values()}) != len(inputs):
         raise LabError('two of the dumps have the same contents; give the data, app and Keycloak dumps')
     free, needed = check_free_space(root, inputs)
@@ -778,6 +841,13 @@ def create(args):
         facts = resolve_image(tools, image, reference, args.release, pull=not args.dry_run)
         facts['lab_tag'] = lab_tag(name, image, facts['image_id'])
         record['images'][image] = facts
+        if facts['revision'] not in ('', '(not pulled)', record['source']['commit']):
+            print(f'WARNING: the {image} image is from commit {facts["revision"]}, but the manifests come from '
+                  f'this checkout at {record["source"]["commit"]}. Run the lab from a worktree at the '
+                  'candidate.', file=sys.stderr)
+    docker_free, docker_needed = check_docker_space(tools, record['images'])
+    log(f'The Docker data root has {docker_free // 1024 ** 3} GiB free, the lab needs '
+        f'{docker_needed // 1024 ** 3} GiB')
     config = kind_config(record, directory)
     check_kind_config(config)
     docs = render_manifests(record)
@@ -787,7 +857,11 @@ def create(args):
               f'{len(docs)} objects in {NAMESPACE} (crawler-worker at 0 replicas), and restore:')
         for role, facts in inputs.items():
             print(f'  {role:8} {facts["path"]} ({facts["size"]} bytes, sha256 {facts["sha256"]})')
+        print(f'The app tables: {app_database} ('
+              + ('in the data database' if app_database == 'shared' else 'in the app database') + ')')
         return
+    if retire:
+        retire_lab_dir(name, root, directory)
     # The lab directory is the lock on the name: mkdir either creates it or fails.
     root.mkdir(parents=True, exist_ok=True)
     try:
@@ -845,6 +919,9 @@ def build_lab(tools, record, directory, config, docs):
     counts = {}
     for role, spec in DATABASES.items():
         wait_postgres_settled(tools, spec)
+        if role not in record['inputs']:
+            log(f'No {role} dump: {spec["database"]} stays empty (the app tables are in the data database)')
+            continue
         restore_dump(tools, spec, record['inputs'][role]['path'])
         if role == 'keycloak':
             log('Removing identity providers, keys, client secrets, sessions and events from the Keycloak copy')
@@ -903,12 +980,17 @@ def port_forward(args):
     check_ownership(tools, record)
     targets = [('frontend', 'svc/econ-graph-frontend-service', 3000),
                ('backend', 'svc/econ-graph-backend-service', 9876),
-               ('keycloak', 'svc/keycloak-service', 8080)]
+               ('keycloak', 'svc/keycloak-service', 8080),
+               ('data', 'svc/data-postgres-service', 5432)]
     processes = []
     try:
         for name, service, port in targets:
-            local = record['ports'][name]
-            print(f'  {name:9} http://127.0.0.1:{local}' + ('/idp/admin' if name == 'keycloak' else ''))
+            local = record['ports'].get(name) or free_ports(1, lab_root())[0]
+            if name == 'data':
+                print(f'  {name:9} postgresql://econgraph@127.0.0.1:{local}/econ_graph (password: Secret '
+                      'econ-graph-postgres, key app-password)')
+            else:
+                print(f'  {name:9} http://localhost:{local}' + ('/idp/admin' if name == 'keycloak' else ''))
             cmd = [tools.kubectl_binary, '--kubeconfig', tools.kubeconfig, '--context', record['context'],
                    '-n', NAMESPACE, 'port-forward', '--address', '127.0.0.1', service, f'{local}:{port}']
             processes.append(start_forward(cmd, tools.env))
@@ -920,6 +1002,22 @@ def port_forward(args):
     finally:
         for p in processes:
             p.terminate()
+
+
+def env(args):
+    """Print the shell lines that point the kind-env.sh scripts at this lab, not production."""
+    record, directory, tools = open_lab(check_name(args.lab))
+    lines = [
+        f'export KIND_CLUSTER={record["cluster"]}',
+        # kind-env.sh requires it for any cluster but econ-graph. The lab has no host
+        # storage there, so the host-storage scripts find nothing and stop.
+        f'export ECONGRAPH_SCRATCH_STORAGE={directory / "no-host-storage"}',
+        f'export XDG_CACHE_HOME={directory / "cache"}',
+        f'export ECONGRAPH_BACKUP_ROOT={directory / "backups"}',
+        f'export KEYCLOAK_BACKUP_ROOT={directory / "backups/keycloak"}',
+        'unset KUBECTL KUBECONFIG ECONGRAPH_KUBE_DIR CLUSTER_ROLE_CONTEXT PUBLIC_HOST',
+    ]
+    print('\n'.join(lines))
 
 
 def measure(args):
@@ -1048,12 +1146,16 @@ def main(argv=None):
     sub = p.add_subparsers(dest='command', required=True)
     c = sub.add_parser('create')
     c.add_argument('--lab', required=True)
-    for flag in ('--data-dump', '--app-dump', '--keycloak-dump', '--backend-image', '--frontend-image',
-                 '--crawler-image'):
+    for flag in ('--data-dump', '--keycloak-dump', '--backend-image', '--frontend-image', '--crawler-image'):
         c.add_argument(flag, required=True)
+    c.add_argument('--app-dump', help='the app database (econ_graph_app); none when the app tables are in the data '
+                                      'database, as in a release before the app database')
+    c.add_argument('--app-database', choices=('shared', 'separate'),
+                   help='where the backend finds the app tables: shared (the data database; the default without '
+                        '--app-dump) or separate (the app database; the default with it)')
     c.add_argument('--release', help='only to run the production-style tags of exactly this release')
     c.add_argument('--dry-run', action='store_true')
-    for command in ('status', 'port-forward'):
+    for command in ('status', 'port-forward', 'env'):
         sub.add_parser(command).add_argument('--lab', required=True)
     sub.add_parser('measure').add_argument('--lab')
     sub.add_parser('list')
@@ -1064,7 +1166,7 @@ def main(argv=None):
                    help="keep node-storage/, the lab's copy of the data (removed by default)")
     t.add_argument('--dry-run', action='store_true')
     args = p.parse_args(argv)
-    {'create': create, 'status': status, 'port-forward': port_forward, 'measure': measure,
+    {'create': create, 'status': status, 'port-forward': port_forward, 'env': env, 'measure': measure,
      'list': list_labs, 'teardown': teardown}[args.command](args)
 
 

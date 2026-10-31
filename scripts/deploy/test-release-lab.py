@@ -79,7 +79,11 @@ STUB = textwrap.dedent(r'''
             s['owner'] = None; save(s)
         sys.exit(0)
     if tool == 'docker':
-        if args[:1] == ['info']: out('[name=rootless]\n' if s.get('rootless') else '[name=seccomp,profile=builtin]\n')
+        if args[:1] == ['info'] and 'DockerRootDir' in joined: out(s.get('docker_root', '/') + '\n')
+        elif args[:1] == ['info']:
+            out('[name=rootless]\n' if s.get('rootless') else '[name=seccomp,profile=builtin]\n')
+        elif args[:3] == ['image', 'inspect', '--format']:
+            out(str(s.get('image_size', 1000)) + '\n')
         elif args[:2] == ['image', 'inspect']:
             image = s['images'].get(args[2])
             if image is None: sys.exit(1)
@@ -92,7 +96,7 @@ STUB = textwrap.dedent(r'''
             target.chmod(0o755)
         elif args[:2] == ['network', 'inspect']:
             if not s.get('network_exists', True): sys.exit(1)
-            out('0\n')
+            out(s.get('network_containers', '0') + '\n')
         sys.exit(0)
     # kubectl
     if 'create' in args and '-f' in args:
@@ -163,7 +167,8 @@ class Stubbed(unittest.TestCase):
         # Plain kubectl and kind on PATH must never run.
         # git answers only for the release tag the tests use.
         tool = self.bin / 'git'
-        tool.write_text(f'#!/bin/sh\ncase "$*" in *refs/tags/v4.0.1^{{commit}}*) echo {COMMIT} ;; *) exit 1 ;; esac\n')
+        tool.write_text(f'#!/bin/sh\ncase "$*" in *refs/tags/v4.0.1^{{commit}}*|*"rev-parse HEAD") echo {COMMIT} ;;\n'
+                        '*"status --porcelain") ;; *) exit 1 ;; esac\n')
         tool.chmod(0o755)
         for name in ('kubectl', 'kind'):
             trap = self.bin / name
@@ -311,7 +316,7 @@ class CreateTests(Stubbed):
                 self.assertNotIn('cloudflare', json.dumps(doc).lower(), doc['metadata']['name'])
         self.assertNotIn('cloudflare-tunnel', self.state()['secrets'])
         self.assertNotIn('crawler-api-keys', self.state()['secrets'])
-        record = {'name': 'one', 'lab_id': '0' * 32, 'images': {
+        record = {'name': 'one', 'lab_id': '0' * 32, 'ports': dict.fromkeys(lab.PORT_NAMES, 40000), 'images': {
             n: {'lab_tag': lab.lab_tag('one', n, IMAGE_ID)} for n in lab.IMAGE_NAMES}}
         docs = lab.render_manifests(record)
         cloudflared = {'apiVersion': 'apps/v1', 'kind': 'Deployment',
@@ -351,6 +356,16 @@ class CreateTests(Stubbed):
                'spec': {'template': {'spec': {'containers': [{'name': 'c', 'ports': [{'hostPort': 80}]}]}}}}
         with self.assertRaises(lab.LabError):
             lab.check_manifests([pod])
+        balancer = {'apiVersion': 'v1', 'kind': 'Service', 'metadata': {'name': 's', 'namespace': 'econ-graph'},
+                    'spec': {'type': 'LoadBalancer', 'ports': [{'port': 80}]}}
+        with self.assertRaisesRegex(lab.LabError, 'LoadBalancer'):
+            lab.check_manifests([balancer])
+        connector = {'apiVersion': 'apps/v1', 'kind': 'Deployment',
+                     'metadata': {'name': 'edge', 'namespace': 'econ-graph'},
+                     'spec': {'replicas': 1, 'template': {'spec': {'containers': [
+                         {'name': 'edge', 'image': 'example.invalid/edge:1', 'args': ['--via', 'Cloudflare']}]}}}}
+        with self.assertRaisesRegex(lab.LabError, 'cloudflared'):
+            lab.check_manifests([connector])
 
     def test_port_forward_listens_on_loopback_only(self):
         self.create()
@@ -370,7 +385,7 @@ class CreateTests(Stubbed):
         with patch.dict(os.environ, self.env, clear=True), patch.object(lab, 'start_forward', Process), \
                 contextlib.redirect_stdout(io.StringIO()):
             lab.port_forward(type('Args', (), {'lab': 'one'})())
-        self.assertEqual(len(started), 3)
+        self.assertEqual(len(started), 4)
         for cmd in started:
             self.assertEqual(cmd[cmd.index('--address') + 1], '127.0.0.1')
             self.assertEqual(cmd[cmd.index('--context') + 1], 'kind-econ-graph-lab-one')
@@ -412,6 +427,95 @@ class CreateTests(Stubbed):
         self.assertIn('pg_dump custom-format', result.stderr)
         self.assertFalse(any(c['args'][:2] == ['create', 'cluster'] for c in self.calls('kind')))
 
+    def created_secrets(self):
+        values = {}
+        for call in self.calls('kubectl'):
+            if 'create' in call['args'] and 'kind: Secret' in call['stdin']:
+                doc = yaml.safe_load(call['stdin'])
+                values[doc['metadata']['name']] = doc['stringData']
+        return values
+
+    def test_without_an_app_dump_the_app_tables_are_in_the_data_database(self):
+        self.create(**{'--app-dump': None})
+        record = json.loads(self.record_path().read_text())
+        self.assertEqual(record['app_database'], 'shared')
+        self.assertEqual(sorted(record['inputs']), ['data', 'keycloak'])
+        urls = self.created_secrets()['econ-graph-secrets']
+        self.assertEqual(urls['app-database-url'], urls['data-database-url'])
+        self.assertIn('@data-postgres-service:5432/econ_graph', urls['app-database-url'])
+        restores = [c['args'] for c in self.calls('kubectl') if 'pg_restore' in c['args']]
+        self.assertEqual(sorted(a[a.index('exec') + 2] for a in restores), ['keycloak-postgres-0', 'postgresql-0'])
+        for args in restores:
+            for flag in ('--no-owner', '--no-privileges', '--single-transaction', '--exit-on-error'):
+                self.assertIn(flag, args)
+
+    def test_with_an_app_dump_the_app_tables_are_in_the_app_database(self):
+        self.create()
+        record = json.loads(self.record_path().read_text())
+        self.assertEqual(record['app_database'], 'separate')
+        urls = self.created_secrets()['econ-graph-secrets']
+        self.assertIn('@app-postgres-service:5432/econ_graph_app', urls['app-database-url'])
+        restores = [c['args'] for c in self.calls('kubectl') if 'pg_restore' in c['args']]
+        self.assertIn('--role=econgraph', next(a for a in restores if 'app-postgres-0' in a))
+        self.assertIn('--role=keycloak', next(a for a in restores if 'keycloak-postgres-0' in a))
+
+    def test_shared_app_database_takes_no_app_dump(self):
+        result = self.create(expect_ok=False, **{'--app-database': 'shared'})
+        self.assertIn('takes no --app-dump', result.stderr)
+        self.assertFalse(any(c['args'][:2] == ['create', 'cluster'] for c in self.calls('kind')))
+
+    def test_browser_addresses_are_the_port_forward_ports(self):
+        self.create()
+        record = json.loads(self.record_path().read_text())
+        keycloak = f'http://localhost:{record["ports"]["keycloak"]}/idp'
+        applied = json.dumps(self.state()['applied'])
+        self.assertNotIn('.localhost', applied)
+        deployment = next(d for d in self.state()['applied']
+                          if d['kind'] == 'Deployment' and d['metadata']['name'] == 'keycloak')
+        env = {e['name']: e.get('value') for e in deployment['spec']['template']['spec']['containers'][0]['env']}
+        self.assertEqual(env['KC_HOSTNAME'], keycloak)
+        self.assertEqual(env['KC_HOSTNAME_ADMIN'], keycloak)
+        self.assertEqual(env['KC_WEB_BASE_URL'], f'http://localhost:{record["ports"]["frontend"]}')
+        backend = next(d for d in self.state()['applied']
+                       if d['kind'] == 'Deployment' and d['metadata']['name'] == 'econ-graph-backend')
+        env = {e['name']: e.get('value') for e in backend['spec']['template']['spec']['containers'][0]['env']}
+        self.assertEqual(env['OIDC_ISSUER'], keycloak + '/realms/econ-graph')
+        self.assertEqual(len(set(record['ports'].values())), len(lab.PORT_NAMES))
+
+    def test_warns_when_the_images_are_not_from_this_checkout(self):
+        images = self.state()['images']
+        other = 'c' * 40
+        ref = f'ghcr.io/econgraph/econ-graph-backend:sha-{other}'
+        images[ref] = {'Id': IMAGE_ID, 'RepoDigests': [],
+                       'Config': {'Labels': {'org.opencontainers.image.revision': other}}}
+        self.state(images=images)
+        result = self.lab_cli(*self.create_args(**{'--backend-image': ref}), '--dry-run')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Run the lab from a worktree at the candidate', result.stderr)
+
+    def test_refuses_too_little_space_in_the_docker_data_root(self):
+        class Tools:
+            def docker(self, *args, check=True):
+                text = '/var/lib/docker' if args[0] == 'info' else str(4 * 1024 ** 3)
+                return subprocess.CompletedProcess(args, 0, text, '')
+        images = {n: {'image_id': IMAGE_ID} for n in lab.IMAGE_NAMES}
+        needed = 10 * 1024 ** 3 + 2 * 3 * 4 * 1024 ** 3
+        with self.assertRaisesRegex(lab.LabError, 'Docker data root'):
+            lab.check_docker_space(Tools(), images, free=lambda path: needed - 1)
+        self.assertEqual(lab.check_docker_space(Tools(), images, free=lambda path: needed), (needed, needed))
+
+    def test_env_points_the_deploy_scripts_at_the_lab(self):
+        self.create()
+        result = self.lab_cli('env', '--lab', 'one')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.splitlines()
+        directory = self.scratch / 'labs/one'
+        self.assertIn('export KIND_CLUSTER=econ-graph-lab-one', lines)
+        self.assertIn(f'export XDG_CACHE_HOME={directory / "cache"}', lines)
+        self.assertIn(f'export ECONGRAPH_BACKUP_ROOT={directory / "backups"}', lines)
+        self.assertTrue(any(line.startswith('export ECONGRAPH_SCRATCH_STORAGE=' + str(directory)) for line in lines))
+        self.assertIn('unset KUBECTL KUBECONFIG ECONGRAPH_KUBE_DIR CLUSTER_ROLE_CONTEXT PUBLIC_HOST', lines)
+
     def test_dry_run_creates_and_changes_nothing(self):
         result = self.lab_cli(*self.create_args(), '--dry-run')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -419,7 +523,7 @@ class CreateTests(Stubbed):
         self.assertFalse((self.scratch / 'labs').exists())
         for call in self.calls():
             self.assertIn(call['args'][:2], (['version'], ['info', '--format'], ['get', 'clusters'],
-                                             ['image', 'inspect']), call)
+                                             ['image', 'inspect'], ['rev-parse', 'HEAD']), call)
         self.assert_inputs_unchanged()
 
     def test_existing_ready_lab_is_left_alone_and_others_refused(self):
@@ -456,9 +560,14 @@ class CreateTests(Stubbed):
         self.assertFalse(any(c['args'][:2] == ['create', 'cluster'] for c in self.calls('kind')))
 
     def test_lab_root_is_never_under_tmp(self):
-        for root in ('/tmp/labs', '/tmp'):
-            with self.assertRaisesRegex(lab.LabError, '/tmp'):
-                lab.lab_root({'ECONGRAPH_LAB_ROOT': root})
+        # Refused by path, whatever filesystem /tmp is on, and on a RAM filesystem anywhere.
+        with patch.object(kind_tools, 'filesystem_type', lambda path: 'ext4'):
+            for root in ('/tmp/labs', '/tmp'):
+                with self.assertRaisesRegex(lab.LabError, '/tmp'):
+                    lab.lab_root({'ECONGRAPH_LAB_ROOT': root})
+        with patch.object(kind_tools, 'filesystem_type', lambda path: 'tmpfs'):
+            with self.assertRaisesRegex(lab.LabError, 'RAM filesystem'):
+                lab.lab_root({'ECONGRAPH_LAB_ROOT': str(self.scratch / 'labs')})
 
     def test_names_never_reach_protected_clusters(self):
         for name in ('', 'Econ', 'a_b', '-a', 'a' * 33, '../x'):
@@ -517,6 +626,7 @@ class TeardownTests(Stubbed):
         self.state(owner=None)
         result = self.teardown('--yes')
         self.assertIn('no ownership marker', result.stderr)
+        self.assertIn('kind delete cluster --name econ-graph-lab-one', result.stderr)
         self.assertEqual(self.deletes(), [])
 
     def test_refuses_a_forged_ownership_marker(self):
@@ -598,6 +708,13 @@ class TeardownTests(Stubbed):
         listed = self.lab_cli('list')
         self.assertEqual(listed.returncode, 0, listed.stderr)
         self.assertNotIn('unreadable', listed.stdout)
+
+    def test_keeps_a_network_another_container_uses(self):
+        self.state(network_containers='2')
+        result = self.teardown('--yes')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([c for c in self.calls('docker') if c['args'][:2] == ['network', 'rm']], [])
+        self.assertIn('still has containers', result.stdout)
 
     def test_is_safe_to_run_again(self):
         self.assertEqual(self.teardown('--yes').returncode, 0)
@@ -686,6 +803,17 @@ class ImageTests(Stubbed):
         self.state(images=images)
         result = self.create(expect_ok=False)
         self.assertIn('revision label', result.stderr)
+        self.assertFalse(any(c['args'][:2] == ['create', 'cluster'] for c in self.calls('kind')))
+
+    def test_digest_reference_must_be_that_digest(self):
+        digest = 'sha256:' + 'e' * 64
+        ref = f'ghcr.io/econgraph/econ-graph-backend@{digest}'
+        images = self.state()['images']
+        images[ref] = {'Id': IMAGE_ID, 'RepoDigests': ['ghcr.io/econgraph/econ-graph-backend@sha256:' + '9' * 64],
+                       'Config': {'Labels': {}}}
+        self.state(images=images)
+        result = self.create(expect_ok=False, **{'--backend-image': ref})
+        self.assertIn('is not that digest', result.stderr)
         self.assertFalse(any(c['args'][:2] == ['create', 'cluster'] for c in self.calls('kind')))
 
     def test_digest_reference_is_pulled_and_checked(self):

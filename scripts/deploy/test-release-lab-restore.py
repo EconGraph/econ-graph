@@ -185,6 +185,14 @@ class RestoreRehearsal(unittest.TestCase):
         for role, (source, owner, ddl) in SOURCES.items():
             cls.sql('postgres', f'CREATE DATABASE {source} OWNER {owner}')
             cls.sql(source, ddl, user=owner)
+            if role == 'data':
+                # As in production: an extension the database's init created, a comment on
+                # it, and a table owned by the superuser rather than the app's role.
+                cls.sql(source, "CREATE EXTENSION IF NOT EXISTS pg_trgm; "
+                                "CREATE INDEX economic_series_title_trgm ON economic_series "
+                                "USING gin (title gin_trgm_ops); "
+                                "CREATE TABLE series_notes (id int PRIMARY KEY); "
+                                "INSERT INTO series_notes VALUES (1); GRANT SELECT ON series_notes TO PUBLIC;")
             path = dumps / f'{role}.dump'
             with open(path, 'wb') as out:
                 subprocess.run(DOCKER + ['exec', cls.container, 'pg_dump', '-Fc', '-h', '127.0.0.1', '-U',
@@ -195,6 +203,9 @@ class RestoreRehearsal(unittest.TestCase):
         for spec in lab.DATABASES.values():
             owner = 'keycloak' if spec['user'] == 'keycloak' else 'econgraph'
             cls.sql('postgres', f'CREATE DATABASE {spec["database"]} OWNER {owner}')
+            if spec['database'] == 'econ_graph':
+                # What postgres-init.yaml does in the lab's data database.
+                cls.sql('econ_graph', 'CREATE EXTENSION IF NOT EXISTS pg_trgm')
         cls.facts = {role: cls.file_facts(p) for role, p in cls.dumps.items()}
         directory = cls.root / 'labs/rehearsal'
         (directory / 'kube').mkdir(parents=True)
@@ -220,6 +231,10 @@ class RestoreRehearsal(unittest.TestCase):
         self.assertEqual(counts, {'data': {'economic_series': 7, 'data_points': 50},
                                   'app': {'users': 3, 'chart_annotations': 2},
                                   'keycloak': {'realm': 2, 'user_entity': 3}})
+        # --no-owner --role: everything belongs to the role the services connect as.
+        self.assertEqual(self.sql('econ_graph', "select string_agg(distinct tableowner, ',') from pg_tables "
+                                                "where schemaname = 'public'"), 'econgraph')
+        self.assertEqual(self.sql('econ_graph', 'select count(*) from series_notes'), '1')
         self.assertEqual(self.sql('econ_graph', "select tableowner from pg_tables where tablename = 'data_points'"),
                          'econgraph')
 
