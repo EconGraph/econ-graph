@@ -85,27 +85,42 @@ pub async fn load_evidence(pool: &DataPool) -> Result<Vec<LoadRun>> {
 }
 pub fn check_freshness(runs: &[LoadRun], now: DateTime<Utc>) -> Result<()> {
     let latest = runs.first().context("no companyfacts load has run")?;
-    if latest.status != "succeeded" {
-        bail!("latest companyfacts load is {}", latest.status);
-    }
-    if latest.source_mode != "downloaded" {
-        bail!("staged imports cannot establish nightly source freshness");
-    }
-    for modified in [
-        latest.companyfacts_last_modified,
-        latest.submissions_last_modified,
-    ] {
-        let modified = modified.context("missing upstream publication timestamp")?;
-        let age = now.signed_duration_since(modified).num_seconds();
-        if !(-5 * 60..=24 * 60 * 60).contains(&age) {
-            bail!("upstream companyfacts/submissions archive is stale");
+    // A normal active load does not make a still-fresh successful snapshot disappear.
+    // A killed process leaves a running row; the same eight-hour bound as the Job deadline
+    // detects it even when an older successful snapshot would otherwise remain fresh.
+    if latest.status == "running" {
+        let age = now.signed_duration_since(latest.started_at).num_seconds();
+        if !(0..=8 * 60 * 60).contains(&age) {
+            bail!("latest companyfacts load is stuck or has an invalid start timestamp");
         }
     }
-    let completed = latest
+    let successful = runs
+        .iter()
+        .find(|run| run.status == "succeeded" && run.source_mode == "downloaded")
+        .context("no verified downloaded companyfacts load has succeeded")?;
+    if successful.companies_count <= 0
+        || successful.facts_count <= 0
+        || successful.filings_count <= 0
+    {
+        bail!("successful load has no usable companies, facts or filings");
+    }
+    let completed = successful
         .completed_at
         .context("load has no completion timestamp")?;
     if completed > now || now.signed_duration_since(completed).num_seconds() > 24 * 60 * 60 {
         bail!("companyfacts successful load is stale");
+    }
+    // Source publication must have been fresh when this run completed. Comparing it with
+    // now instead would introduce a false daily gap before the next scheduled ingestion.
+    for modified in [
+        successful.companyfacts_last_modified,
+        successful.submissions_last_modified,
+    ] {
+        let modified = modified.context("missing upstream publication timestamp")?;
+        let age = completed.signed_duration_since(modified).num_seconds();
+        if !(-5 * 60..=24 * 60 * 60).contains(&age) {
+            bail!("successful load did not have fresh upstream companyfacts/submissions receipts");
+        }
     }
     Ok(())
 }

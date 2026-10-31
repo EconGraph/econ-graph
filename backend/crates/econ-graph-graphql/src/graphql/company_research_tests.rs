@@ -1,12 +1,17 @@
 //! Real data-plane regression tests; every fixture owns an independently migrated DB.
 use super::*;
+#[cfg(flag_financial_components)]
 use async_graphql::{Request, Variables};
+#[cfg(flag_financial_components)]
 use diesel::sql_types::{Date, Nullable, Numeric, Text, Uuid as SqlUuid};
+#[cfg(flag_financial_components)]
 use diesel_async::RunQueryDsl;
-use econ_graph_core::database::{
-    create_pool, run_migration_set, AppPool, DataPool, DatabasePool, MigrationSet,
-};
+#[cfg(flag_financial_components)]
+use econ_graph_core::database::{create_pool, run_migration_set, MigrationSet};
+use econ_graph_core::database::{AppPool, DataPool, DatabasePool};
+#[cfg(flag_financial_components)]
 use econ_graph_core::test_utils::ScratchDatabase;
+#[cfg(flag_financial_components)]
 use serde_json::{json, Value};
 
 fn unreachable_pool() -> DatabasePool {
@@ -36,6 +41,7 @@ fn schema(
         Arc::new(auth),
     )
 }
+#[cfg(flag_financial_components)]
 async fn result(
     schema: &async_graphql::Schema<
         super::super::query::Query,
@@ -152,8 +158,8 @@ async fn company_research_postgres_revision_pagination_statement_peer_and_anchor
     let pool = create_pool(&db.url).await.unwrap();
     {
         let mut conn = pool.get().await.unwrap();
-        diesel::sql_query("INSERT INTO companies(cik,name,ticker,sic_code) VALUES ('0000320193','Apple research fixture','AAPL','3571'),('0000789019','Compatible peer fixture','PEER','3571'),('0000000002','Metadata-only issuer','META','9999')").execute(&mut conn).await.unwrap();
-        diesel::sql_query("INSERT INTO company_fact_filings(id,cik,accession,filed,form,is_xbrl) VALUES('00000000-0000-0000-0000-000000000111','0000320193','0000320193-24-000099','2024-04-01','10-K',true)").execute(&mut conn).await.unwrap();
+        diesel::sql_query("INSERT INTO companies(cik,name,ticker,sic_code) VALUES ('0000320193','Apple research fixture','AAPL','3571'),('0000789019','Compatible peer fixture','PEER','3571'),('0000000002','Metadata-only issuer','META','9999'),('0000000003','Zed XBRL issuer','ZED','9999')").execute(&mut conn).await.unwrap();
+        diesel::sql_query("INSERT INTO company_fact_filings(id,cik,accession,filed,form,is_xbrl) VALUES('00000000-0000-0000-0000-000000000111','0000320193','0000320193-24-000099','2024-04-01','10-K',true),('00000000-0000-0000-0000-000000000112','0000000003','0000000003-24-000001','2024-04-01','10-K',true)").execute(&mut conn).await.unwrap();
     }
     let original = insert_fact(
         &pool,
@@ -293,7 +299,16 @@ async fn company_research_postgres_revision_pagination_statement_peer_and_anchor
     )
     .await;
     assert_eq!(second["companies"]["nodes"][0]["cik"], "0000789019");
-    assert_eq!(second["companies"]["hasNextPage"], false);
+    assert_eq!(second["companies"]["hasNextPage"], true);
+    assert_eq!(
+        result(
+            &schema,
+            r#"{companies(search:"Zed"){nodes{cik}}}"#,
+            json!({})
+        )
+        .await["companies"]["nodes"][0]["cik"],
+        "0000000003"
+    );
     assert_eq!(
         result(
             &schema,
