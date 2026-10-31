@@ -4,6 +4,7 @@ pub mod global_analysis_service;
 pub mod observation_store;
 pub mod queue_service;
 pub mod search_service;
+pub mod selected_observation_store;
 pub mod series_check;
 pub mod series_service;
 

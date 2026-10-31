@@ -897,9 +897,14 @@ impl Worker {
                 }
                 let result: Dispatched = match result {
                     Ok(JobWrite::Series(fetched)) => {
-                        let write =
-                            persist::persist_series_conn(conn, source, &item.series_id, &fetched)
-                                .await?;
+                        let write = persist::persist_series_conn(
+                            conn,
+                            &self.ctx.pool,
+                            source,
+                            &item.series_id,
+                            &fetched,
+                        )
+                        .await?;
                         Ok(JobStats {
                             series_id: Some(write.series_id),
                             points_written: write.points_upserted,
