@@ -7,7 +7,10 @@ use econ_graph_core::{
     models::{AnnotationAnchor, FinancialAnnotation},
 };
 use econ_graph_services::services::{company_notes as service, series_check::DataPlaneClient};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::{OnceCell, Semaphore};
+
+const MAX_CONCURRENT_TARGET_CHECKS: usize = 8;
 
 #[derive(SimpleObject)]
 #[graphql(complex)]
@@ -19,6 +22,10 @@ pub struct CompanyNote {
     pub content: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    #[graphql(skip)]
+    target_resolution: Arc<OnceCell<&'static str>>,
+    #[graphql(skip)]
+    target_checks: Arc<Semaphore>,
 }
 #[ComplexObject]
 impl CompanyNote {
@@ -29,14 +36,25 @@ impl CompanyNote {
         if !auth.is_some_and(|a| a.can_read_catalog(Role::CatalogSecRead)) {
             return "not_found";
         }
-        let Ok(anchor) = parse_anchor(&self.anchor) else {
-            return "unavailable";
-        };
-        match target_exists(ctx, &anchor).await {
-            Ok(true) => "found",
-            Ok(false) => "not_found",
-            Err(_) => "unavailable",
-        }
+        // Cells and the concurrency limit belong to this returned list, never the auth
+        // context (which callers may reuse across requests). Resolve once per distinct
+        // anchor, including failures, while limiting concurrent source checks to eight.
+        *self
+            .target_resolution
+            .get_or_init(|| async {
+                let Ok(anchor) = parse_anchor(&self.anchor) else {
+                    return "unavailable";
+                };
+                let Ok(_permit) = self.target_checks.acquire().await else {
+                    return "unavailable";
+                };
+                match target_exists(ctx, &anchor).await {
+                    Ok(true) => "found",
+                    Ok(false) => "not_found",
+                    Err(_) => "unavailable",
+                }
+            })
+            .await
     }
 }
 async fn target_exists(ctx: &Context<'_>, anchor: &AnnotationAnchor) -> Result<bool> {
@@ -63,6 +81,9 @@ impl TryFrom<FinancialAnnotation> for CompanyNote {
             content: note.content,
             created_at: note.created_at,
             updated_at: note.updated_at,
+            // Mutation results start with fresh state; a later request must check again.
+            target_resolution: Arc::new(OnceCell::new()),
+            target_checks: Arc::new(Semaphore::new(MAX_CONCURRENT_TARGET_CHECKS)),
         })
     }
 }
@@ -86,17 +107,27 @@ pub async fn company_notes(
 ) -> Result<Vec<CompanyNote>> {
     let owner = current_user(ctx)?.id;
     let anchor = anchor.as_deref().map(parse_anchor).transpose()?;
-    service::list(
+    let rows = service::list(
         &app_pool(ctx)?.0,
         owner,
         &cik,
         anchor.as_ref(),
         i64::from(offset.unwrap_or(0)),
     )
-    .await?
-    .into_iter()
-    .map(CompanyNote::try_from)
-    .collect()
+    .await?;
+    let target_checks = Arc::new(Semaphore::new(MAX_CONCURRENT_TARGET_CHECKS));
+    let mut targets: HashMap<String, Arc<OnceCell<&'static str>>> = HashMap::new();
+    rows.into_iter()
+        .map(|row| {
+            let mut note = CompanyNote::try_from(row)?;
+            note.target_resolution = targets
+                .entry(note.anchor.clone())
+                .or_insert_with(|| Arc::new(OnceCell::new()))
+                .clone();
+            note.target_checks = target_checks.clone();
+            Ok(note)
+        })
+        .collect()
 }
 
 pub async fn create(ctx: &Context<'_>, anchor: String, content: String) -> Result<CompanyNote> {
@@ -154,6 +185,138 @@ mod tests {
         matchers::{body_partial_json, method},
         Mock, MockServer, ResponseTemplate,
     };
+
+    #[tokio::test]
+    async fn duplicate_targets_are_checked_once_per_list_and_rechecked_on_each_request() {
+        let database = ScratchDatabase::create("gql_note_target_cache");
+        econ_graph_core::run_migrations(&database.url)
+            .await
+            .unwrap();
+        let pool = econ_graph_core::create_pool(&database.url).await.unwrap();
+        let alice = User::get_or_create_for_subject(
+            &pool,
+            uuid::Uuid::new_v4(),
+            None,
+            false,
+            Some("Alice"),
+        )
+        .await
+        .unwrap();
+        let bob =
+            User::get_or_create_for_subject(&pool, uuid::Uuid::new_v4(), None, false, Some("Bob"))
+                .await
+                .unwrap();
+        let anchor = AnnotationAnchor::V1 {
+            target: SubjectRef::Company {
+                cik: "0000320193".into(),
+            },
+            chart_id: None,
+            observation_date: None,
+            observation_value: None,
+        };
+        let first = service::create(&pool, alice.id, anchor.clone(), "First note".into())
+            .await
+            .unwrap();
+        service::create(&pool, alice.id, anchor, "Second note, same target".into())
+            .await
+            .unwrap();
+        let server = MockServer::start().await;
+        let remote = Arc::new(
+            DataPlaneClient::new(&DataGraphqlConfig {
+                url: server.uri(),
+                host: None,
+                timeout: Duration::from_secs(2),
+                forward_authorization: false,
+                allow_insecure_authorization: false,
+            })
+            .unwrap(),
+        );
+        let schema = super::super::schema::create_schema_with_data_plane(
+            AppPool(pool),
+            None,
+            Some(remote),
+            (),
+        );
+        // Deliberately reuse one auth Arc across executions: cache state must not live there.
+        let alice_auth = Arc::new(super::super::context::GraphQLContext::signed_in(
+            alice.clone(),
+            [Role::AnnotationCreate, Role::CatalogSecRead],
+        ));
+        let query = "{companyNotes(cik:\"0000320193\"){content targetStatus again:targetStatus}}";
+        for (response, expected) in [
+            (Some(true), "found"),
+            (Some(false), "not_found"),
+            (None, "unavailable"),
+        ] {
+            server.reset().await;
+            let response = match response {
+                Some(exists) => ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"data":{"companyResearchTargetExists":exists}}),
+                ),
+                None => ResponseTemplate::new(503),
+            };
+            Mock::given(method("POST"))
+                .respond_with(response)
+                .mount(&server)
+                .await;
+            let result = schema
+                .execute(Request::new(query).data(alice_auth.clone()))
+                .await;
+            assert!(result.errors.is_empty(), "{:?}", result.errors);
+            let data = result.data.into_json().unwrap();
+            let notes = data["companyNotes"].as_array().unwrap();
+            assert_eq!(notes.len(), 2);
+            for note in notes {
+                assert_eq!(note["targetStatus"], expected);
+                assert_eq!(note["again"], expected);
+            }
+            assert_eq!(
+                server.received_requests().await.unwrap().len(),
+                1,
+                "Only one preflight per distinct anchor, including failures"
+            );
+            if expected == "not_found" {
+                let update = format!("mutation{{updateCompanyNote(id:\"{}\",content:\"Edited note\"){{targetStatus}}}}", first.id);
+                let edited = schema
+                    .execute(Request::new(update).data(alice_auth.clone()))
+                    .await;
+                assert!(edited.errors.is_empty(), "{:?}", edited.errors);
+                assert_eq!(
+                    edited.data.into_json().unwrap()["updateCompanyNote"]["targetStatus"],
+                    "not_found"
+                );
+                assert_eq!(
+                    server.received_requests().await.unwrap().len(),
+                    2,
+                    "Mutation results receive a fresh resolution cell"
+                );
+            }
+        }
+        server.reset().await;
+        let bob_auth = Arc::new(super::super::context::GraphQLContext::signed_in(
+            bob,
+            [Role::CatalogSecRead],
+        ));
+        let result = schema.execute(Request::new(query).data(bob_auth)).await;
+        assert!(result.errors.is_empty());
+        assert_eq!(
+            result.data.into_json().unwrap()["companyNotes"],
+            serde_json::json!([])
+        );
+        let revoked = Arc::new(super::super::context::GraphQLContext::signed_in(alice, []));
+        let result = schema.execute(Request::new(query).data(revoked)).await;
+        assert!(result.errors.is_empty());
+        for note in result.data.into_json().unwrap()["companyNotes"]
+            .as_array()
+            .unwrap()
+        {
+            assert_eq!(note["targetStatus"], "not_found");
+        }
+        assert!(
+            server.received_requests().await.unwrap().is_empty(),
+            "Ownership and revoked catalog grants still deny before lookup"
+        );
+    }
 
     #[tokio::test]
     async fn company_notes_enforce_owner_and_roles_and_preserve_targets_during_source_outages() {
