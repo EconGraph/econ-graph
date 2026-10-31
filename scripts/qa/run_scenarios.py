@@ -18,8 +18,10 @@ A scenario whose `qa-mutates` is missing or anything but `no` counts as changing
 
 The production profile runs only scenarios that change nothing, plus the annotation round
 trip, from this directory only, when a dedicated QA account (a `qa-` username) is configured.
-The lab and ci profiles run only against hosts named in QA_LAB_TARGET_OK, and never against a
-production host. --require-pass names scenarios that must pass, not skip. Credentials come from the environment or from files named in it, never
+The lab and ci profiles run only against targets named in QA_LAB_TARGET_OK (a host, which
+allows any port, or host:port), never against a production host, and never against this
+host's own http://localhost or https://localhost (ports 80 and 443), whatever
+QA_LAB_TARGET_OK says: on the production host, that is production's gateway. --require-pass names scenarios that must pass, not skip. Credentials come from the environment or from files named in it, never
 from arguments, and are redacted from everything the runner prints or writes.
 
 Exit status: 0 when no scenario failed, 1 when one did, 2 for a usage error or a refusal.
@@ -203,10 +205,29 @@ def production_hosts(env: dict[str, str]) -> set[str]:
     return set(PRODUCTION_HOSTS) | extra
 
 
-def lab_targets(env: dict[str, str]) -> set[str]:
-    """The hosts QA_LAB_TARGET_OK names: the only targets the lab and ci profiles accept."""
-    return {h.strip().rstrip('.').lower() for h in env.get('QA_LAB_TARGET_OK', '').split(',')
-            if h.strip()}
+# This host's loopback names: on the production host, ports 80 and 443 there are production's
+# gateway, so the lab and ci profiles refuse them whatever QA_LAB_TARGET_OK names.
+LOOPBACK_HOSTS = ('localhost', '127.0.0.1', '::1')
+GATEWAY_PORTS = (80, 443)
+
+
+def lab_targets(env: dict[str, str]) -> set[tuple[str, int | None]]:
+    """The targets QA_LAB_TARGET_OK names, as (host, port): the only targets the lab and ci
+    profiles accept. An entry without a port allows any port; host:port (or [v6]:port) only
+    that port."""
+    targets = set()
+    for entry in env.get('QA_LAB_TARGET_OK', '').split(','):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            parsed = urllib.parse.urlsplit('//' + entry)
+            port = parsed.port
+        except ValueError:
+            continue
+        if parsed.hostname:
+            targets.add((parsed.hostname.rstrip('.').lower(), port))
+    return targets
 
 
 def check_target(target: str, profile: str, env: dict[str, str]) -> str | None:
@@ -227,13 +248,24 @@ def check_target(target: str, profile: str, env: dict[str, str]) -> str | None:
             f'refusing the {profile} profile against {parsed.hostname}: it runs state-changing '
             'scenarios; use --profile production for the production site'
         )
+    try:
+        port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    except ValueError:
+        return f'--target has an invalid port: {target!r}'
+    if host in LOOPBACK_HOSTS and port in GATEWAY_PORTS:
+        return (
+            f'refusing the {profile} profile against {parsed.scheme}://{parsed.netloc}: port {port} '
+            'on this host is the production gateway on the production host; give a lab its own '
+            'port or name'
+        )
     # By name only: localhost or an address on the production host reaches production as
     # surely as its public name does, so the lab and ci profiles accept only hosts named for them.
-    if host not in lab_targets(env):
+    allowed = lab_targets(env)
+    if (host, None) not in allowed and (host, port) not in allowed:
         return (
-            f'refusing the {profile} profile against {parsed.hostname}: it runs state-changing '
-            f'scenarios, so its target must be named in QA_LAB_TARGET_OK '
-            f'(e.g. QA_LAB_TARGET_OK={host} for a lab or the release e2e stack)'
+            f'refusing the {profile} profile against {parsed.hostname}:{port}: it runs '
+            'state-changing scenarios, so its target must be named in QA_LAB_TARGET_OK '
+            f'(e.g. QA_LAB_TARGET_OK={parsed.hostname}:{port} for a lab or the release e2e stack)'
         )
     return None
 

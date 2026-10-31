@@ -29,23 +29,35 @@ NAME = 'qa-v410-rc1'
 
 # Records each call (program, argv, the environment that matters) and plays the cluster from
 # state.json: whether it exists, its markers, its kube-system UID, the Keycloak users.
+# Production's Secret econ-graph-keycloak as a restore brings it over.
+PRODUCTION_KEYCLOAK = {'db-password': 'restored-db-password', 'admin-username': 'prod-admin',
+                       'admin-password': 'PRODUCTION-ADMIN-PASSWORD',
+                       'anonymous-client-secret': 'PRODUCTION-ANONYMOUS-SECRET',
+                       'google-idp-client-id': 'prod-google-id', 'google-idp-client-secret': 'PRODUCTION-GOOGLE-SECRET'}
+
 STUB = r'''#!/usr/bin/env python3
 import json, os, pathlib, sys
+# Settings beside the stub, not in the environment: the script runs the candidate's scripts
+# with an empty one.
+STUB_DIR = pathlib.Path(__file__).resolve().parent
+CONFIG = json.loads((STUB_DIR / 'stub-env.json').read_text())
+PRODUCTION_KEYCLOAK = CONFIG['production_keycloak']
 prog = pathlib.Path(sys.argv[0]).name
 prog = 'kind' if prog.startswith('kind-v') else prog
 args = sys.argv[1:]
-state_path = pathlib.Path(os.environ['STUB_STATE'])
+state_path = pathlib.Path(CONFIG['state'])
 state = json.loads(state_path.read_text())
-stdin = '' if sys.stdin.isatty() else (sys.stdin.read() if prog in ('kubectl',) and '-i' in args else '')
+reads_stdin = prog == 'kubectl' and ('-i' in args or args[-2:] == ['-f', '-'])
+stdin = sys.stdin.read() if reads_stdin and not sys.stdin.isatty() else ''
 keep = ('HOME', 'KIND_CLUSTER', 'ECONGRAPH_SCRATCH_STORAGE', 'XDG_CACHE_HOME', 'ECONGRAPH_BACKUP_ROOT',
         'ECONGRAPH_RELEASES_DIR', 'ECONGRAPH_DEPLOY_ENV', 'PUBLIC_HOST', 'APP_DATABASE', 'DOCKER_HOST',
-        'FRED_API_KEY', 'KUBECONFIG', 'TMPDIR')
-with open(os.environ['STUB_CALLS'], 'a') as log:
+        'FRED_API_KEY', 'KUBECONFIG', 'KUBECTL', 'TMPDIR', 'CLOUDFLARE_TUNNEL_TOKEN', 'DRY_RUN', 'NAMESPACE')
+with open(CONFIG['calls'], 'a') as log:
     log.write(json.dumps({'prog': prog, 'args': args, 'cwd': os.getcwd(),
                           'env': {k: os.environ.get(k) for k in keep}, 'stdin': stdin}) + '\n')
 def save():
     state_path.write_text(json.dumps(state))
-name = os.environ.get('STUB_NAME', '')
+name = CONFIG['name']
 out = ''
 code = 0
 if prog == 'docker':
@@ -67,8 +79,7 @@ if prog == 'docker':
     elif args[0] == 'port':
         out = '127.0.0.1:%s\n' % state.get('port', '')
     elif args[0] == 'cp':
-        pathlib.Path(args[-1]).write_text(os.environ['STUB_KUBECTL_SOURCE'])
-        os.chmod(args[-1], 0o755)
+        os.symlink(STUB_DIR / 'stub.py', args[-1])
     elif args[0] == 'run':
         pass
 elif prog == 'kind':
@@ -79,10 +90,20 @@ elif prog == 'kind':
         save()
 elif prog == 'btrfs':
     path = pathlib.Path(args[-1])
+    subvolumes = state.setdefault('subvolumes', {})
     if args[:2] == ['subvolume', 'create']:
         path.mkdir()
+        subvolumes[str(path)] = 'uuid-%d' % (len(subvolumes) + 1)
+        save()
+    elif args[:2] == ['subvolume', 'show']:
+        if str(path) in subvolumes:
+            out = 'Name: x\n\tUUID: \t\t%s\n' % subvolumes[str(path)]
+        else:
+            code = 1
     elif args[:2] == ['subvolume', 'delete']:
         path.rmdir()
+        subvolumes.pop(str(path), None)
+        save()
 elif prog == 'recreate-kind-cluster.sh':
     if not state.get('cluster'):
         config = args[args.index('--config') + 1]
@@ -94,6 +115,18 @@ elif prog == 'kubectl':
     text = ' '.join(args)
     if 'get namespace kube-system' in text:
         out = state.get('kubeconfig_uid', state.get('uid', ''))
+    elif 'get secret econ-graph-keycloak -o json' in text:
+        import base64
+        b64 = lambda v: base64.b64encode(v.encode()).decode()
+        out = json.dumps({'apiVersion': 'v1', 'kind': 'Secret',
+                          'metadata': {'name': 'econ-graph-keycloak', 'namespace': 'econ-graph',
+                                       'resourceVersion': '7', 'uid': 'u'},
+                          'data': {k: b64(v) for k, v in PRODUCTION_KEYCLOAK.items()}})
+    elif 'get deployment crawler-worker' in text:
+        out = str(state.get('deployed_crawler_replicas', 1))
+    elif args[-3:] == ['replace', '-f', '-']:
+        state['keycloak_secret'] = json.loads(stdin)
+        save()
     elif ' exec ' in ' ' + text + ' ':
         kc = args[args.index('--') + 1:]
         kc = kc[kc.index('--') + 1:] if '--' in kc else kc
@@ -116,6 +149,12 @@ elif prog == 'kubectl':
         save()
 elif prog in ('load-release-images.sh',):
     code = int(os.environ.get('STUB_LOAD_EXIT', '3'))
+elif prog == 'deploy.sh':
+    import yaml
+    docs = [d for d in yaml.safe_load_all(open('k8s/manifests/crawler-worker.yaml')) if d]
+    state['deployed_crawler_replicas'] = next(d['spec']['replicas'] for d in docs
+                                              if d.get('kind') == 'Deployment')
+    save()
 sys.stdout.write(out)
 sys.exit(code)
 '''
@@ -135,6 +174,11 @@ class DeployRcToQaTest(unittest.TestCase):
         self.bin.mkdir()
         stub = self.bin / 'stub.py'
         stub.write_text(STUB)
+        self.state = self.work / 'state.json'
+        self.calls = self.work / 'calls.jsonl'
+        (self.bin / 'stub-env.json').write_text(json.dumps({
+            'state': str(self.state), 'calls': str(self.calls), 'name': NAME,
+            'production_keycloak': PRODUCTION_KEYCLOAK}))
         stub.chmod(0o755)
         for prog in ('docker', 'kind', 'btrfs'):
             (self.bin / prog).symlink_to(stub)
@@ -148,8 +192,11 @@ class DeployRcToQaTest(unittest.TestCase):
         run(['git', 'init', '-q', '--bare', str(origin)])
         self.repo = self.work / 'repo'
         run(['git', 'init', '-q', str(self.repo)])
-        for source in ('scripts/qa/deploy-rc-to-qa.sh', 'terraform/k8s/kind-config.yaml',
-                       'k8s/manifests/keycloak/realm-import-job.yaml'):
+        for source in ('scripts/qa/deploy-rc-to-qa.sh', 'scripts/deploy/lib/keycloak_sanitize.py',
+                       'terraform/k8s/kind-config.yaml',
+                       'k8s/manifests/keycloak/realm-import-job.yaml', 'k8s/manifests/keycloak/deployment.yaml',
+                       'k8s/manifests/crawler-worker.yaml', 'scripts/deploy/lib/agent-access.sh',
+                       'scripts/deploy/lib/kind-version.sh'):
             target = self.repo / source
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / source, target)
@@ -172,8 +219,6 @@ class DeployRcToQaTest(unittest.TestCase):
             (self.dump / name).write_text('x' * 10)
         self.dump_before = self.fingerprint(self.dump)
         self.qa_root = self.work / 'qa'
-        self.state = self.work / 'state.json'
-        self.calls = self.work / 'calls.jsonl'
         self.write_state({})
 
     def fingerprint(self, path):
@@ -193,9 +238,8 @@ class DeployRcToQaTest(unittest.TestCase):
     def env(self, **extra):
         env = dict(os.environ, PATH=f'{self.bin}{os.pathsep}{os.environ["PATH"]}',
                    ECONGRAPH_QA_ROOT=str(self.qa_root), XDG_DATA_HOME=str(self.data_home),
-                   STUB_STATE=str(self.state), STUB_CALLS=str(self.calls), STUB_NAME=NAME,
-                   STUB_KUBECTL_SOURCE=(self.bin / 'stub.py').read_text(),
-                   FRED_API_KEY='production-fred-key', KUBECONFIG=str(Path.home() / '.kube/config'))
+                   FRED_API_KEY='production-fred-key', CLOUDFLARE_TUNNEL_TOKEN='production-tunnel-token',
+                   DRY_RUN='false', NAMESPACE='econ-graph-prod', KUBECONFIG=str(self.work / 'operator-kubeconfig'))
         env.pop('ECONGRAPH_DOCKER_HOST', None)
         env.update(extra)
         return env
@@ -214,7 +258,7 @@ class DeployRcToQaTest(unittest.TestCase):
         # Only reads: docker ps and kubectl get through docker exec.
         for call in self.logged():
             self.assertEqual(call['prog'], 'docker', call)
-            self.assertIn(call['args'][0], ('ps', 'exec'), call)
+            self.assertIn(call['args'][0], ('ps', 'exec', 'info'), call)
             self.assertIn('get', call['args'], call) if call['args'][0] == 'exec' else None
         self.assertFalse((self.qa_root / NAME / 'src').exists())
         self.assertEqual(self.fingerprint(self.dump), self.dump_before)
@@ -301,9 +345,13 @@ class DeployRcToQaTest(unittest.TestCase):
                              ('ECONGRAPH_DEPLOY_ENV', 'deploy.env'), ('TMPDIR', 'tmp')]:
                 self.assertEqual(env[key], str(qa / sub), key)
             self.assertEqual(env['PUBLIC_HOST'], '')
-            self.assertIsNone(env['FRED_API_KEY'])
-            self.assertIsNone(env['KUBECONFIG'])
+            for leaked in ('FRED_API_KEY', 'CLOUDFLARE_TUNNEL_TOKEN', 'DRY_RUN', 'NAMESPACE'):
+                self.assertIsNone(env[leaked], leaked)
+            self.assertEqual(env['KUBECONFIG'], str(qa / f'cache/econgraph/kubeconfig-{NAME}'))
+            self.assertEqual(env['KUBECTL'], str(qa / 'cache/econgraph/bin/kubectl'))
             self.assertEqual(env['DOCKER_HOST'], 'unix:///var/run/docker.sock')
+        # The candidate's deploy never starts a crawler.
+        self.assertEqual(state['deployed_crawler_replicas'], 0)
         self.assertEqual(rc[1]['args'], ['--tag', TAG, '--cluster', NAME, '--allow-missing-nodes'])
         self.assertEqual(rc[2]['args'], ['--from', str(self.dump)])
         self.assertEqual(rc[2]['env']['APP_DATABASE'], 'shared')
@@ -324,9 +372,10 @@ class DeployRcToQaTest(unittest.TestCase):
                                                 '--context', f'kind-{NAME}'])
         texts = [' '.join(c['args']) for c in kubectl]
         self.assertTrue(any('delete secret crawler-api-keys' in t for t in texts))
+        self.assertTrue(any('delete secret grafana-admin monitoring-auth' in t for t in texts))
         self.assertTrue(any(f'KC_HOSTNAME=http://localhost:{port}/idp' in t for t in texts))
         self.assertTrue(any(f'OIDC_ISSUER=http://localhost:{port}/idp/realms/econ-graph' in t for t in texts))
-        self.assertTrue(any(f'"CORS_ORIGIN":"http://localhost:{port},http://localhost"' in t for t in texts))
+        self.assertTrue(any(f'"CORS_ORIGIN":"http://localhost:{port}"' in t for t in texts))
         self.assertTrue(any('scale deployment/crawler-worker --replicas=0' in t for t in texts))
         realm = (qa / 'realm-import.yaml').read_text()
         self.assertIn(f'http://localhost:{port}', realm)
@@ -349,7 +398,44 @@ class DeployRcToQaTest(unittest.TestCase):
             for call in self.logged():
                 self.assertNotIn(password, ' '.join(call['args']))
         self.assertIn(f'TARGET_URL=http://localhost:{port}', result.stdout)
-        self.assertIn('TARGET_HOST=localhost', result.stdout)
+        self.assertIn(f'TARGET_HOST=localhost:{port}', result.stdout)
+        self.assertIn(f'QA_LAB_TARGET_OK=localhost:{port} ', result.stdout)
+        self.assertNotIn('QA_LAB_TARGET_OK=localhost ', result.stdout)
+        # Production's Keycloak secrets: the database sanitized before Keycloak starts, the
+        # Secret rebuilt with only db-password kept, a QA bootstrap admin added before the
+        # candidate's deploy; production's admin never used, no secret in an argument.
+        order = []
+        for call in self.logged():
+            text = ' '.join(call['args'])
+            if call['prog'] == 'kubectl' and 'psql' in call['args'] and 'KeyProvider' in text:
+                order.append('sanitize')
+            elif call['prog'] == 'kubectl' and call['args'][-3:] == ['replace', '-f', '-']:
+                order.append('secret')
+            elif call['prog'] == 'kubectl' and text.endswith('k8s/manifests/keycloak/deployment.yaml'):
+                order.append('keycloak')
+            elif call['prog'] == 'kubectl' and text.endswith('keycloak-qa-admin.yaml'):
+                order.append('bootstrap-admin')
+            elif call['prog'] in ('restore-kind-databases.sh', 'deploy.sh'):
+                order.append(call['prog'])
+        self.assertEqual(order, ['restore-kind-databases.sh', 'sanitize', 'secret', 'keycloak',
+                                 'bootstrap-admin', 'deploy.sh'])
+        import base64
+        secret = {k: base64.b64decode(v).decode() for k, v in state['keycloak_secret']['data'].items()}
+        self.assertEqual(sorted(secret), ['admin-password', 'admin-username', 'anonymous-client-secret',
+                                          'db-password'])
+        self.assertEqual(secret['db-password'], PRODUCTION_KEYCLOAK['db-password'])
+        self.assertEqual(secret['admin-username'], 'qa-keycloak-admin')
+        self.assertEqual(secret['admin-password'], (qa / 'accounts/keycloak-admin.password').read_text().strip())
+        for key in ('admin-password', 'anonymous-client-secret'):
+            self.assertNotEqual(secret[key], PRODUCTION_KEYCLOAK[key])
+        self.assertNotIn('resourceVersion', state['keycloak_secret']['metadata'])
+        job = yaml.safe_load((qa / 'keycloak-qa-admin.yaml').read_text())
+        self.assertIn('kc.sh bootstrap-admin user', job['spec']['template']['spec']['containers'][0]['args'][0])
+        self.assertIn('KEYCLOAK_ADMIN_USERNAME=qa-keycloak-admin', accounts.read_text())
+        everything = result.stdout + ''.join(' '.join(c['args']) for c in self.logged())
+        for value in [*PRODUCTION_KEYCLOAK.values(), secret['admin-password'], secret['anonymous-client-secret']]:
+            if value != 'restored-db-password' and len(value) > 8:
+                self.assertNotIn(value, everything)
         self.assertIn(str(accounts), result.stdout)
         self.assertEqual(self.fingerprint(self.dump), self.dump_before)
         # A rerun: same cluster, port and passwords; no user created twice.
@@ -359,6 +445,10 @@ class DeployRcToQaTest(unittest.TestCase):
         self.assertEqual(state['created'], 1)
         self.assertEqual(state['port'], port)
         self.assertEqual(state['creates'], 3)
+        rerun = self.logged()
+        self.assertEqual(sum(c['prog'] == 'restore-kind-databases.sh' for c in rerun), 1)
+        self.assertEqual(sum('psql' in c['args'] for c in rerun), 1)
+        self.assertEqual(sum(c['args'][-3:] == ['replace', '-f', '-'] for c in rerun), 1)
         for user, password in passwords.items():
             self.assertEqual(state['users'][user]['password'], password)
         # Another dump or tag for the same name is refused.
@@ -392,6 +482,50 @@ class DeployRcToQaTest(unittest.TestCase):
         kubectl = [c for c in self.logged() if c['prog'] == 'kubectl']
         self.assertEqual([' '.join(c['args'][4:]) for c in kubectl],
                          ['get namespace kube-system -o jsonpath={.metadata.uid}'])
+        # Refused right after the cluster was created: no image, restore or deploy.
+        self.assertEqual([c['prog'] for c in self.logged() if c['prog'].endswith('.sh')],
+                         ['recreate-kind-cluster.sh'])
+
+
+    # Nothing the script mounts or deletes as root can be outside its own subvolumes.
+
+    def test_a_symlinked_storage_is_refused_for_deploy_and_teardown(self):
+        elsewhere = self.work / 'srv-econgraph'
+        (elsewhere / 'data-plane').mkdir(parents=True)
+        (elsewhere / 'data-plane' / 'PG_VERSION').write_text('18')
+        qa = self.qa_root / NAME
+        qa.mkdir(parents=True)
+        (qa / 'storage').symlink_to(elsewhere)
+        for args in (('--tag', TAG, '--dump-dir', str(self.dump)), ('--tag', TAG, '--teardown')):
+            result = self.deploy(*args)
+            self.assertEqual(result.returncode, 3, result.stdout)
+            self.assertIn('is a symlink', result.stdout)
+        self.assertTrue((elsewhere / 'data-plane' / 'PG_VERSION').exists())
+        self.assertFalse(any(c['prog'] == 'docker' and c['args'][:1] == ['run'] for c in self.logged()))
+
+    def test_teardown_refuses_a_subvolume_it_did_not_create(self):
+        self.assertEqual(self.deploy().returncode, 0)
+        qa = self.qa_root / NAME
+        state = self.read_state()
+        # Replaced behind the script's back: another subvolume at the same path.
+        state['subvolumes'][str(qa / 'storage/data-plane')] = 'uuid-other'
+        self.write_state(state)
+        self.calls.write_text('')
+        result = self.deploy('--tag', TAG, '--teardown')
+        self.assertEqual(result.returncode, 3, result.stdout)
+        self.assertIn('is not the subvolume this script created', result.stdout)
+        self.assertFalse(any(c['prog'] == 'docker' and c['args'][:1] == ['run'] for c in self.logged()))
+
+    def test_teardown_of_a_cluster_stopped_before_its_owner_marker(self):
+        self.assertEqual(self.deploy().returncode, 0)
+        state = self.read_state()
+        state['owner'] = ''
+        self.write_state(state)
+        state_env = self.qa_root / NAME / 'state.env'
+        state_env.write_text(state_env.read_text() + 'CLUSTER=creating\n')
+        result = self.deploy('--tag', TAG, '--teardown')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(self.read_state()['cluster'])
 
 
 if __name__ == '__main__':
