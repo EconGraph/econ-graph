@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import compatibility, { minimatch, Minimatch } from '../compat/minimatch/index.mjs';
 import { glob } from 'glob';
 import { validateMinimatchCompatibility } from './check-minimatch-compat.mjs';
@@ -97,3 +98,56 @@ for (const mutation of ['source', 'implementation', 'script']) {
     }
   });
 }
+
+test('real TypeScript consumers see the adapted named and default APIs', () => {
+  // Keep the fixture below node_modules so package resolution uses the actual
+  // installed minimatch exports and declaration, rather than a test-only path.
+  const root = mkdtempSync(join(frontend, 'node_modules/.minimatch-types-'));
+  try {
+    const path = join(root, 'consumer.mts');
+    writeFileSync(
+      path,
+      `
+      import compatibility, { makeRe, minimatch, Minimatch, type MinimatchOptions } from 'minimatch';
+      const options: MinimatchOptions = { dot: true };
+      const results: boolean[] = [
+        compatibility('Chart.tsx', '*.tsx', options),
+        minimatch('Chart.tsx', '*.tsx', options),
+        makeRe('*.tsx', options).test('Chart.tsx'),
+        new Minimatch('*.tsx', options).makeRe().test('Chart.tsx'),
+        new compatibility.Minimatch('*.tsx', options).makeRe().test('Chart.tsx'),
+        new minimatch.Minimatch('*.tsx', options).makeRe().test('Chart.tsx'),
+        compatibility.makeRe('*.tsx', options).test('Chart.tsx'),
+        minimatch.makeRe('*.tsx', options).test('Chart.tsx'),
+      ];
+      const matched: string[] | null = makeRe('*.tsx')[Symbol.match]('Chart.tsx');
+      // The adapter exposes only test/match, not the removed RegExp implementation.
+      // @ts-expect-error Legacy regex source is intentionally unsupported.
+      makeRe('*.tsx').source;
+      export { results, matched };
+    `
+    );
+    execFileSync(
+      process.execPath,
+      [
+        require.resolve('typescript/lib/tsc.js'),
+        '--ignoreConfig',
+        '--noEmit',
+        '--strict',
+        '--skipLibCheck',
+        '--module',
+        'NodeNext',
+        '--moduleResolution',
+        'NodeNext',
+        '--target',
+        'ES2022',
+        '--types',
+        'node',
+        path,
+      ],
+      { cwd: frontend, stdio: 'inherit' }
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

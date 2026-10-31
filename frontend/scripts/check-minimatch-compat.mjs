@@ -8,7 +8,7 @@ const IMPLEMENTATION_INTEGRITY =
 const SOURCE_HASHES = {
   'index.cjs': '3f468f89fbb23588b75012f527e8d2efef63c8c708e54e15c08bcf1049987694',
   'index.mjs': 'e416f6edaaffb77dce00c35d529aeba6d266d017fec4c4b69a8759dac5942552',
-  'index.d.ts': '479e39d93166d7ae4cc5e065957fa001522451fd0aa910f8acd97cfb9c6be9d0',
+  'index.d.ts': '74ea05852ab1b06b47cf6387354fbe92fe20828cca90818f673ec53ae8068690',
 };
 const readJson = path => JSON.parse(readFileSync(path, 'utf8'));
 const requireCondition = (condition, message) => {
@@ -34,12 +34,13 @@ export function validateMinimatchCompatibility(frontend) {
   }
   requireCondition(
     Object.keys(manifest).sort().join('|') ===
-      'dependencies|description|engines|exports|license|main|name|private|types|version' &&
+      'dependencies|description|engines|exports|license|main|name|private|type|types|version' &&
       manifest.name === 'minimatch' &&
       manifest.version === '11.0.1' &&
       manifest.private === true &&
       manifest.main === 'index.cjs' &&
       manifest.types === 'index.d.ts' &&
+      manifest.type === 'module' &&
       manifest.license === 'MIT' &&
       JSON.stringify(manifest.engines) === JSON.stringify({ node: '>=26.0.0 <27' }) &&
       JSON.stringify(manifest.exports) ===
