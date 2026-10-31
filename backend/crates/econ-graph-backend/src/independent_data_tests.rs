@@ -296,7 +296,7 @@ async fn independent_data_does_not_downgrade_an_unverifiable_token_to_anonymous(
 }
 
 /// Company research consumes the same independently signed data boundary as macro series.
-/// Run with `RUSTFLAGS='--cfg flag_financial_components'` to exercise the feature candidate;
+/// Run through `scripts/train5/with-company-api.sh` to exercise the feature candidate;
 /// the ordinary release profile proves that the disabled feature cannot expose its data.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn independent_company_http_keeps_catalog_audience_and_app_content_boundaries() {

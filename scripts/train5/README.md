@@ -162,6 +162,22 @@ errors, failed specs, skipped/expected-failure tests, retries and flaky outcomes
 Metadata describes collection intent; the test assertions and environment review
 establish that real requests and sign-in occurred.
 
+## Enabled API verification
+
+Both committed profiles keep company research disabled. To exercise the candidate
+API locally without changing release flags, run from the repository root:
+
+```bash
+bash scripts/train5/with-company-api.sh cargo test --locked \
+  --manifest-path backend/Cargo.toml -p econ-graph-graphql --lib company_research
+```
+
+The helper temporarily enables the financial-components flag in the backend's
+development profile and restores the original file after success or failure.
+Use a disposable database for database-backed tests. Run enabled checks serially
+within one checkout, because they temporarily share that profile file. The normal
+release-profile checks remain necessary to verify that disabled APIs refuse reads.
+
 ## Remaining release gates
 
 This checker validates evidence consistency and the explicit numerical/operational
