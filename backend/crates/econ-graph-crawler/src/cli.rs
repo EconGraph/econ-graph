@@ -41,7 +41,7 @@
 //! 3 when the rest are clean but a source was skipped for a missing API key.
 //!
 //! A command line the CLI can't run (a parse error, or `check-selection --source` naming a
-//! source it doesn't check) exits [`EXIT_USAGE`] (64).
+//! source it doesn't check or a licence-gated one) exits [`EXIT_USAGE`] (64).
 //!
 //! Diagnostics go through `tracing` (stderr, `RUST_LOG`); stdout carries only the command's output.
 
@@ -273,8 +273,8 @@ impl Command {
             | Command::Fetch { source, .. }
             | Command::RecordReferenceSeeds { source, .. } => vec![*source],
             Command::Refetch { sources, .. } => sources.source.clone(),
-            // Its default list leaves gated sources out (`check_selection_sources`).
-            Command::CheckSelection { source, .. } => source.clone(),
+            // Gated in `check_selection_sources`, which refuses with `EXIT_USAGE`.
+            Command::CheckSelection { .. } => Vec::new(),
             // Read-only, or stored data only with no upstream request: nothing to gate.
             Command::AcceptGuardedCatalog { .. }
             | Command::ConfirmSuccessor { .. }
@@ -432,7 +432,9 @@ impl std::fmt::Display for ExitStatus {
 impl std::error::Error for ExitStatus {}
 
 /// The sources `check-selection --source` names, de-duplicated in report order, or every
-/// checked source when it names none.
+/// checked source when it names none. A named source it doesn't check, or one the licence gate
+/// blocks, is refused with [`EXIT_USAGE`], whatever the build's licence flags; the default list
+/// leaves gated sources out.
 pub fn check_selection_sources(named: &[SourceId]) -> anyhow::Result<Vec<SourceId>> {
     use crate::check_selection::CHECKED_SOURCES;
     if let Some(bad) = named.iter().find(|s| !CHECKED_SOURCES.contains(s)) {
@@ -443,6 +445,12 @@ pub fn check_selection_sources(named: &[SourceId]) -> anyhow::Result<Vec<SourceI
             ),
         }
         .into());
+    }
+    for &source in named {
+        licence::check(source).map_err(|refusal| ExitStatus {
+            code: EXIT_USAGE,
+            message: refusal.to_string(),
+        })?;
     }
     Ok(CHECKED_SOURCES
         .into_iter()
@@ -491,9 +499,6 @@ impl Cli {
         if self.command == Command::Sources {
             return Ok(format_sources(&default_registry(), &ApiKeys::from_env()));
         }
-        for source in self.command.upstream_sources() {
-            licence::check(source)?;
-        }
         if let Command::CheckSelection {
             source,
             json,
@@ -518,6 +523,9 @@ impl Cli {
                     Err(status.into())
                 }
             };
+        }
+        for source in self.command.upstream_sources() {
+            licence::check(source)?;
         }
         if let Command::RecordReferenceSeeds {
             source,
@@ -1225,19 +1233,29 @@ mod tests {
         assert!(Cli::try_parse_from(["crawler", "check-selection"]).is_ok());
     }
 
-    /// `check-selection --source` goes through the licence gate like the other crawling
-    /// commands; with no `--source` its default list leaves gated sources out.
+    /// With no `--source`, check-selection's default list leaves gated sources out.
     #[test]
-    fn check_selection_names_its_sources_to_the_licence_gate() {
-        let cli = parse(&["check-selection", "--source", "FRED,BEA"]).unwrap();
-        assert_eq!(
-            cli.command.upstream_sources(),
-            [SourceId::Fred, SourceId::Bea]
-        );
-        let cli = parse(&["check-selection"]).unwrap();
-        assert!(cli.command.upstream_sources().is_empty());
+    fn check_selection_leaves_gated_sources_out_of_its_default_list() {
         for source in check_selection_sources(&[]).unwrap() {
             assert!(licence::allows(source), "{source}");
+        }
+    }
+
+    /// `check-selection --source` naming a licence-gated source exits `EXIT_USAGE`, before any
+    /// request, in every build: not 1, which means the check found selection problems.
+    #[tokio::test]
+    async fn check_selection_refuses_a_gated_source_with_the_usage_status() {
+        for gate in licence::LICENCE_GATES {
+            let name = gate.source.as_str();
+            let err = parse(&["check-selection", "--source", name])
+                .unwrap()
+                .execute()
+                .await
+                .unwrap_err();
+            let status = err
+                .downcast_ref::<ExitStatus>()
+                .unwrap_or_else(|| panic!("{name}: {err:#}"));
+            assert_eq!(status.code, EXIT_USAGE, "{name}: {status}");
         }
     }
 
