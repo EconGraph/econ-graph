@@ -1,1 +1,8 @@
-[]
+[
+  {
+    "id": "GHSA-g3hv-75wg-m249",
+    "package": "minimatch",
+    "reason": "ECO-809. Only minimatch 3.1.5 is left, a devDependency of eslint 9 and eslint-plugin-import, eslint-plugin-jsx-a11y and eslint-plugin-react, which require minimatch ^3 and call its CommonJS default export, removed in the only patched release line (11.0.1+); no 3.x release is patched. It never reaches the app bundle (no production dependency uses minimatch) and only matches lint globs and file paths from this repository, never outside input. Every other minimatch copy is overridden to ^11.0.1. Remove when eslint and those plugins accept a patched minimatch.",
+    "reviewBy": "2027-01-31"
+  }
+]
