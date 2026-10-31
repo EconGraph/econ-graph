@@ -87,6 +87,9 @@ impl Query {
         revision: Option<crate::graphql::company_research::CompanyRevisionInput>,
         period_start: Option<chrono::NaiveDate>,
         period_end: Option<chrono::NaiveDate>,
+        #[graphql(default)] instant_only: bool,
+        unclassified_first: Option<i32>,
+        unclassified_after: Option<String>,
     ) -> Result<crate::graphql::company_research::CompanyResearchStatement> {
         crate::graphql::company_research::financial_statement(
             ctx,
@@ -95,6 +98,9 @@ impl Query {
             revision,
             period_start,
             period_end,
+            instant_only,
+            unclassified_first,
+            unclassified_after,
         )
         .await
     }

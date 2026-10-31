@@ -99,78 +99,90 @@ pub struct StandardConcept {
     pub additive: bool,
 }
 
-/// Standardized statements are a view of companyfacts, not as-filed layouts.
-/// Unknown concepts remain available through companyFacts; no value is fabricated.
-pub fn standard_concept(
-    taxonomy: &str,
-    concept: &str,
-    kind: StatementKind,
-) -> Option<StandardConcept> {
-    if !matches!(taxonomy, "us-gaap" | "ifrs-full") {
-        return None;
-    }
-    let (key, label, additive) = match (kind, concept) {
-        (StatementKind::IncomeStatement, "RevenueFromContractWithCustomerExcludingAssessedTax" | "RevenueFromContractWithCustomerIncludingAssessedTax" | "Revenues" | "SalesRevenueNet" | "Revenue") => ("revenue", "Revenue", true),
-        (StatementKind::IncomeStatement, "CostOfRevenue" | "CostOfGoodsAndServicesSold" | "CostOfSales") => ("cost_of_revenue", "Cost of revenue", true),
-        (StatementKind::IncomeStatement, "GrossProfit") => ("gross_profit", "Gross profit", true),
-        (StatementKind::IncomeStatement, "OperatingExpenses") => ("operating_expenses", "Operating expenses", true),
-        (StatementKind::IncomeStatement, "OperatingCostsAndExpenses") => ("operating_costs_and_expenses", "Operating costs and expenses", true),
-        (StatementKind::IncomeStatement, "CostsAndExpenses") => ("total_costs_and_expenses", "Total costs and expenses", true),
-        (StatementKind::IncomeStatement, "NonoperatingIncomeExpense") => ("nonoperating_income", "Nonoperating income and expense", true),
-        (StatementKind::IncomeStatement, "IncomeLossFromEquityMethodInvestments") => ("equity_method_income", "Income from equity-method investments", true),
-        (StatementKind::IncomeStatement, "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest" | "ProfitLossBeforeTax") => ("pretax_income", "Income before tax", true),
-        (StatementKind::IncomeStatement, "ResearchAndDevelopmentExpense") => ("research_and_development", "Research and development", true),
-        (StatementKind::IncomeStatement, "SellingGeneralAndAdministrativeExpense") => ("selling_general_administrative", "Selling, general and administrative", true),
-        (StatementKind::IncomeStatement, "OperatingIncomeLoss" | "ProfitLossFromOperatingActivities") => ("operating_income", "Operating income", true),
-        (StatementKind::IncomeStatement, "InterestExpense") => ("interest_expense", "Interest expense", true),
-        (StatementKind::IncomeStatement, "IncomeTaxExpenseBenefit" | "IncomeTaxExpenseContinuingOperations") => ("income_tax", "Income tax", true),
-        (StatementKind::IncomeStatement, "NetIncomeLoss" | "ProfitLoss") => ("net_income", "Net income", true),
-        (StatementKind::IncomeStatement, "NetIncomeLossAvailableToCommonStockholdersBasic") => ("net_income_common", "Net income available to common shareholders", true),
-        (StatementKind::IncomeStatement, "EarningsPerShareBasic" | "BasicEarningsLossPerShare") => ("eps_basic", "Basic earnings per share", false),
-        (StatementKind::IncomeStatement, "EarningsPerShareDiluted" | "DilutedEarningsLossPerShare") => ("eps_diluted", "Diluted earnings per share", false),
-        (StatementKind::IncomeStatement, "WeightedAverageNumberOfSharesOutstandingBasic" | "WeightedAverageNumberOfSharesOutstanding") => ("shares_basic", "Weighted average basic shares", false),
-        (StatementKind::IncomeStatement, "WeightedAverageNumberOfDilutedSharesOutstanding" | "AdjustedWeightedAverageShares") => ("shares_diluted", "Weighted average diluted shares", false),
-        (StatementKind::BalanceSheet, "CashAndCashEquivalentsAtCarryingValue" | "CashAndCashEquivalents") => ("cash", "Cash and cash equivalents", false),
-        (StatementKind::BalanceSheet, "AccountsReceivableNetCurrent" | "TradeAndOtherCurrentReceivables") => ("receivables", "Current receivables", false),
-        (StatementKind::BalanceSheet, "InventoryNet" | "Inventories") => ("inventory", "Inventory", false),
-        (StatementKind::BalanceSheet, "AssetsCurrent" | "CurrentAssets") => ("current_assets", "Current assets", false),
-        (StatementKind::BalanceSheet, "AssetsNoncurrent" | "NoncurrentAssets") => ("noncurrent_assets", "Noncurrent assets", false),
-        (StatementKind::BalanceSheet, "LiabilitiesNoncurrent" | "NoncurrentLiabilities") => ("noncurrent_liabilities", "Noncurrent liabilities", false),
-        (StatementKind::BalanceSheet, "CommonStocksIncludingAdditionalPaidInCapital") => ("common_stock_and_paid_in_capital", "Common stock and additional paid-in capital", false),
-        (StatementKind::BalanceSheet, "RetainedEarningsAccumulatedDeficit" | "RetainedEarnings") => ("retained_earnings", "Retained earnings or accumulated deficit", false),
-        (StatementKind::BalanceSheet, "PropertyPlantAndEquipmentNet" | "PropertyPlantAndEquipment") => ("property_plant_equipment", "Property, plant and equipment", false),
-        (StatementKind::BalanceSheet, "Assets") => ("assets", "Total assets", false),
-        (StatementKind::BalanceSheet, "AccountsPayableCurrent" | "TradeAndOtherCurrentPayables") => ("payables", "Current payables", false),
-        (StatementKind::BalanceSheet, "LiabilitiesCurrent" | "CurrentLiabilities") => ("current_liabilities", "Current liabilities", false),
-        (StatementKind::BalanceSheet, "LongTermDebtCurrent") => ("current_debt", "Current portion of long-term debt", false),
-        (StatementKind::BalanceSheet, "LongTermDebtNoncurrent" | "LongTermDebt") => ("long_term_debt", "Long-term debt", false),
-        (StatementKind::BalanceSheet, "Liabilities") => ("liabilities", "Total liabilities", false),
-        (StatementKind::BalanceSheet, "StockholdersEquity" | "EquityAttributableToOwnersOfParent") => ("equity", "Shareholders' equity", false),
-        (StatementKind::BalanceSheet, "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest" | "Equity") => ("total_equity", "Equity including noncontrolling interests", false),
-        (StatementKind::BalanceSheet, "LiabilitiesAndStockholdersEquity" | "EquityAndLiabilities") => ("liabilities_and_equity", "Total liabilities and equity", false),
-        (StatementKind::CashFlow, "NetIncomeLoss" | "ProfitLoss") => ("net_income", "Net income", true),
-        (StatementKind::CashFlow, "DepreciationDepletionAndAmortization" | "DepreciationDepletionAndAmortizationPropertyPlantAndEquipment" | "AdjustmentsForDepreciationAndAmortisationExpense") => ("depreciation_amortization", "Depreciation and amortization", true),
-        (StatementKind::CashFlow, "PaymentsToAcquireAvailableForSaleSecuritiesDebt") => ("debt_security_purchases", "Purchases of available-for-sale debt securities", true),
-        (StatementKind::CashFlow, "ProceedsFromSaleOfAvailableForSaleSecuritiesDebt") => ("debt_security_sale_proceeds", "Proceeds from sales of available-for-sale debt securities", true),
-        (StatementKind::CashFlow, "IncomeTaxesPaidNet") => ("income_taxes_paid_net", "Income taxes paid, net", true),
-        (StatementKind::CashFlow, "IncomeTaxesPaid") => ("income_taxes_paid", "Income taxes paid", true),
-        (StatementKind::CashFlow, "InterestPaidNet") => ("interest_paid_net", "Interest paid, net", true),
-        (StatementKind::CashFlow, "ShareBasedCompensation") => ("share_based_compensation", "Share-based compensation", true),
-        (StatementKind::CashFlow, "NetCashProvidedByUsedInOperatingActivities" | "CashFlowsFromUsedInOperatingActivities") => ("operating_cash_flow", "Net cash from operating activities", true),
-        (StatementKind::CashFlow, "NetCashProvidedByUsedInInvestingActivities" | "CashFlowsFromUsedInInvestingActivities") => ("investing_cash_flow", "Net cash from investing activities", true),
-        (StatementKind::CashFlow, "NetCashProvidedByUsedInFinancingActivities" | "CashFlowsFromUsedInFinancingActivities") => ("financing_cash_flow", "Net cash from financing activities", true),
-        (StatementKind::CashFlow, "PaymentsToAcquirePropertyPlantAndEquipment" | "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities") => ("capital_expenditure", "Purchases of property, plant and equipment", true),
-        (StatementKind::CashFlow, "PaymentsOfDividends" | "DividendsPaidClassifiedAsFinancingActivities") => ("dividends_paid", "Dividends paid", true),
-        (StatementKind::CashFlow, "PaymentsForRepurchaseOfCommonStock") => ("share_repurchases", "Share repurchases", true),
-        (StatementKind::CashFlow, "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect") => ("change_in_cash_including_restricted", "Change in cash including restricted cash", true),
-        (StatementKind::CashFlow, "CashAndCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect" | "IncreaseDecreaseInCashAndCashEquivalents") => ("change_in_cash", "Change in cash", true),
-        _ => return None,
+/// One catalog emits both the statement matcher and SQL operand metadata.
+/// Adding a ratio-relevant alias here automatically includes it in ratio reads.
+macro_rules! standard_concept_catalog {
+    ($( $kind:ident: [$($concept:literal),+] => ($key:literal, $label:literal, $additive:literal); )+) => {
+        /// Normalized companyfacts concepts, not as-filed layouts. Unknown facts
+        /// remain available through the separately paginated Other facts view.
+        pub fn standard_concept(taxonomy:&str,concept:&str,kind:StatementKind)->Option<StandardConcept> {
+            if !STANDARD_TAXONOMIES.contains(&taxonomy) {return None;}
+            match (kind,concept) {
+                $((StatementKind::$kind,$($concept)|+) => Some(StandardConcept{key:$key,label:$label,additive:$additive}),)+
+                _=>None,
+            }
+        }
+        /// Every raw alias required by the ratio definitions, derived from the
+        /// same catalog as statement classification rather than a second list.
+        pub fn ratio_input_concepts(period:&ResearchPeriod)->Vec<&'static str> {
+            let definitions=ratio_definitions(period);
+            let mut concepts=Vec::new();
+            $(if definitions.iter().any(|(_,top,bottom,kind)| *kind==StatementKind::$kind && (*top==$key || *bottom==$key)) {
+                concepts.extend([$($concept),+]);
+            })+
+            concepts.sort_unstable();concepts.dedup();concepts
+        }
     };
-    Some(StandardConcept {
-        key,
-        label,
-        additive,
-    })
+}
+
+/// Taxonomy families whose standard concepts have an explicit normalized mapping.
+pub const STANDARD_TAXONOMIES: &[&str] = &["us-gaap", "ifrs-full"];
+
+standard_concept_catalog! {
+    IncomeStatement: ["RevenueFromContractWithCustomerExcludingAssessedTax","RevenueFromContractWithCustomerIncludingAssessedTax","Revenues","SalesRevenueNet","Revenue"] => ("revenue", "Revenue", true);
+    IncomeStatement: ["CostOfRevenue","CostOfGoodsAndServicesSold","CostOfSales"] => ("cost_of_revenue", "Cost of revenue", true);
+    IncomeStatement: ["GrossProfit"] => ("gross_profit", "Gross profit", true);
+    IncomeStatement: ["OperatingExpenses"] => ("operating_expenses", "Operating expenses", true);
+    IncomeStatement: ["OperatingCostsAndExpenses"] => ("operating_costs_and_expenses", "Operating costs and expenses", true);
+    IncomeStatement: ["CostsAndExpenses"] => ("total_costs_and_expenses", "Total costs and expenses", true);
+    IncomeStatement: ["NonoperatingIncomeExpense"] => ("nonoperating_income", "Nonoperating income and expense", true);
+    IncomeStatement: ["IncomeLossFromEquityMethodInvestments"] => ("equity_method_income", "Income from equity-method investments", true);
+    IncomeStatement: ["IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest","ProfitLossBeforeTax"] => ("pretax_income", "Income before tax", true);
+    IncomeStatement: ["ResearchAndDevelopmentExpense"] => ("research_and_development", "Research and development", true);
+    IncomeStatement: ["SellingGeneralAndAdministrativeExpense"] => ("selling_general_administrative", "Selling, general and administrative", true);
+    IncomeStatement: ["OperatingIncomeLoss","ProfitLossFromOperatingActivities"] => ("operating_income", "Operating income", true);
+    IncomeStatement: ["InterestExpense"] => ("interest_expense", "Interest expense", true);
+    IncomeStatement: ["IncomeTaxExpenseBenefit","IncomeTaxExpenseContinuingOperations"] => ("income_tax", "Income tax", true);
+    IncomeStatement: ["NetIncomeLoss","ProfitLoss"] => ("net_income", "Net income", true);
+    IncomeStatement: ["NetIncomeLossAvailableToCommonStockholdersBasic"] => ("net_income_common", "Net income available to common shareholders", true);
+    IncomeStatement: ["EarningsPerShareBasic","BasicEarningsLossPerShare"] => ("eps_basic", "Basic earnings per share", false);
+    IncomeStatement: ["EarningsPerShareDiluted","DilutedEarningsLossPerShare"] => ("eps_diluted", "Diluted earnings per share", false);
+    IncomeStatement: ["WeightedAverageNumberOfSharesOutstandingBasic","WeightedAverageNumberOfSharesOutstanding"] => ("shares_basic", "Weighted average basic shares", false);
+    IncomeStatement: ["WeightedAverageNumberOfDilutedSharesOutstanding","AdjustedWeightedAverageShares"] => ("shares_diluted", "Weighted average diluted shares", false);
+    BalanceSheet: ["CashAndCashEquivalentsAtCarryingValue","CashAndCashEquivalents"] => ("cash", "Cash and cash equivalents", false);
+    BalanceSheet: ["AccountsReceivableNetCurrent","TradeAndOtherCurrentReceivables"] => ("receivables", "Current receivables", false);
+    BalanceSheet: ["InventoryNet","Inventories"] => ("inventory", "Inventory", false);
+    BalanceSheet: ["AssetsCurrent","CurrentAssets"] => ("current_assets", "Current assets", false);
+    BalanceSheet: ["AssetsNoncurrent","NoncurrentAssets"] => ("noncurrent_assets", "Noncurrent assets", false);
+    BalanceSheet: ["LiabilitiesNoncurrent","NoncurrentLiabilities"] => ("noncurrent_liabilities", "Noncurrent liabilities", false);
+    BalanceSheet: ["CommonStocksIncludingAdditionalPaidInCapital"] => ("common_stock_and_paid_in_capital", "Common stock and additional paid-in capital", false);
+    BalanceSheet: ["RetainedEarningsAccumulatedDeficit","RetainedEarnings"] => ("retained_earnings", "Retained earnings or accumulated deficit", false);
+    BalanceSheet: ["PropertyPlantAndEquipmentNet","PropertyPlantAndEquipment"] => ("property_plant_equipment", "Property, plant and equipment", false);
+    BalanceSheet: ["Assets"] => ("assets", "Total assets", false);
+    BalanceSheet: ["AccountsPayableCurrent","TradeAndOtherCurrentPayables"] => ("payables", "Current payables", false);
+    BalanceSheet: ["LiabilitiesCurrent","CurrentLiabilities"] => ("current_liabilities", "Current liabilities", false);
+    BalanceSheet: ["LongTermDebtCurrent"] => ("current_debt", "Current portion of long-term debt", false);
+    BalanceSheet: ["LongTermDebtNoncurrent","LongTermDebt"] => ("long_term_debt", "Long-term debt", false);
+    BalanceSheet: ["Liabilities"] => ("liabilities", "Total liabilities", false);
+    BalanceSheet: ["StockholdersEquity","EquityAttributableToOwnersOfParent"] => ("equity", "Shareholders' equity", false);
+    BalanceSheet: ["StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest","Equity"] => ("total_equity", "Equity including noncontrolling interests", false);
+    BalanceSheet: ["LiabilitiesAndStockholdersEquity","EquityAndLiabilities"] => ("liabilities_and_equity", "Total liabilities and equity", false);
+    CashFlow: ["NetIncomeLoss","ProfitLoss"] => ("net_income", "Net income", true);
+    CashFlow: ["DepreciationDepletionAndAmortization","DepreciationDepletionAndAmortizationPropertyPlantAndEquipment","AdjustmentsForDepreciationAndAmortisationExpense"] => ("depreciation_amortization", "Depreciation and amortization", true);
+    CashFlow: ["PaymentsToAcquireAvailableForSaleSecuritiesDebt"] => ("debt_security_purchases", "Purchases of available-for-sale debt securities", true);
+    CashFlow: ["ProceedsFromSaleOfAvailableForSaleSecuritiesDebt"] => ("debt_security_sale_proceeds", "Proceeds from sales of available-for-sale debt securities", true);
+    CashFlow: ["IncomeTaxesPaidNet"] => ("income_taxes_paid_net", "Income taxes paid, net", true);
+    CashFlow: ["IncomeTaxesPaid"] => ("income_taxes_paid", "Income taxes paid", true);
+    CashFlow: ["InterestPaidNet"] => ("interest_paid_net", "Interest paid, net", true);
+    CashFlow: ["ShareBasedCompensation"] => ("share_based_compensation", "Share-based compensation", true);
+    CashFlow: ["NetCashProvidedByUsedInOperatingActivities","CashFlowsFromUsedInOperatingActivities"] => ("operating_cash_flow", "Net cash from operating activities", true);
+    CashFlow: ["NetCashProvidedByUsedInInvestingActivities","CashFlowsFromUsedInInvestingActivities"] => ("investing_cash_flow", "Net cash from investing activities", true);
+    CashFlow: ["NetCashProvidedByUsedInFinancingActivities","CashFlowsFromUsedInFinancingActivities"] => ("financing_cash_flow", "Net cash from financing activities", true);
+    CashFlow: ["PaymentsToAcquirePropertyPlantAndEquipment","PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"] => ("capital_expenditure", "Purchases of property, plant and equipment", true);
+    CashFlow: ["PaymentsOfDividends","DividendsPaidClassifiedAsFinancingActivities"] => ("dividends_paid", "Dividends paid", true);
+    CashFlow: ["PaymentsForRepurchaseOfCommonStock"] => ("share_repurchases", "Share repurchases", true);
+    CashFlow: ["CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect"] => ("change_in_cash_including_restricted", "Change in cash including restricted cash", true);
+    CashFlow: ["CashAndCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect","IncreaseDecreaseInCashAndCashEquivalents"] => ("change_in_cash", "Change in cash", true);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -691,26 +703,10 @@ pub struct CompanyFinancialRatio {
     pub unavailable_reason: Option<String>,
 }
 
-/// Ratios use actual economic periods and one currency. No market-price ratios
-/// are invented. Missing or ambiguous source concepts remain explicitly unavailable.
-pub fn calculate_ratios(
-    facts: &[CompanyFact],
+fn ratio_definitions(
     period: &ResearchPeriod,
-    selection: &RevisionSelection,
-) -> Result<Vec<CompanyFinancialRatio>, FinancialCalculationError> {
-    let facts = select_fact_revisions(facts, selection)?;
-    if facts
-        .iter()
-        .map(|f| &f.subject.cik)
-        .collect::<BTreeSet<_>>()
-        .len()
-        > 1
-    {
-        return Err(FinancialCalculationError(
-            "ratios require one company".into(),
-        ));
-    }
-    let definitions: &[(&str, &str, &str, StatementKind)] = match period {
+) -> &'static [(&'static str, &'static str, &'static str, StatementKind)] {
+    match period {
         ResearchPeriod::Instant { .. } => &[
             (
                 "current_ratio",
@@ -745,7 +741,29 @@ pub fn calculate_ratios(
                 StatementKind::IncomeStatement,
             ),
         ],
-    };
+    }
+}
+
+/// Ratios use actual economic periods and one currency. No market-price ratios
+/// are invented. Missing or ambiguous source concepts remain explicitly unavailable.
+pub fn calculate_ratios(
+    facts: &[CompanyFact],
+    period: &ResearchPeriod,
+    selection: &RevisionSelection,
+) -> Result<Vec<CompanyFinancialRatio>, FinancialCalculationError> {
+    let facts = select_fact_revisions(facts, selection)?;
+    if facts
+        .iter()
+        .map(|f| &f.subject.cik)
+        .collect::<BTreeSet<_>>()
+        .len()
+        > 1
+    {
+        return Err(FinancialCalculationError(
+            "ratios require one company".into(),
+        ));
+    }
+    let definitions = ratio_definitions(period);
     let statement_kind = match period {
         ResearchPeriod::Instant { .. } => StatementKind::BalanceSheet,
         _ => StatementKind::IncomeStatement,

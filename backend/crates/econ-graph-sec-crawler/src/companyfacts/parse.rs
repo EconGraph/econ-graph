@@ -68,6 +68,7 @@ pub fn parse_companyfacts(bytes: &[u8]) -> Result<ParsedCompanyFacts> {
                     )?;
                     fact.fiscal_year = row
                         .get("fy")
+                        .filter(|v| !v.is_null())
                         .map(|v| {
                             v.as_i64()
                                 .and_then(|n| i32::try_from(n).ok())

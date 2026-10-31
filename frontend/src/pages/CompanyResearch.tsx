@@ -26,6 +26,8 @@ import {
   useResearchCompany,
   useCompanyStatement,
   useCompanyComparisons,
+  useCompanyOtherFacts,
+  useCompanyFactHistory,
   type CompanyStatementKind,
   type CompanyStatementLine,
   type CompanyRevisionInput,
@@ -39,6 +41,23 @@ import {
   type CompanyValue,
 } from '../utils/companyResearch';
 import { downloadCsv } from '../utils/seriesCsv';
+
+interface PageCursor {
+  scope: string;
+  after: string | null;
+  back: (string | null)[];
+}
+const emptyPage: PageCursor = { scope: '', after: null, back: [] };
+const nextPage = (page: PageCursor, after: string | null): PageCursor => ({
+  ...page,
+  after,
+  back: [...page.back, page.after],
+});
+const previousPage = (page: PageCursor): PageCursor => ({
+  ...page,
+  after: page.back[page.back.length - 1] ?? null,
+  back: page.back.slice(0, -1),
+});
 
 const STATEMENTS: { value: CompanyStatementKind; label: string }[] = [
   { value: 'INCOME_STATEMENT', label: 'Income statement' },
@@ -55,7 +74,9 @@ const lineValue = (line: CompanyStatementLine): CompanyValue => ({
   sourceAccessions: [...new Set(line.provenance.map(fact => fact.accession))],
 });
 /** Compare like periods only: instants, quarters, annual and trailing-year calculations. */
-function durationGroup(line: CompanyStatementLine): string {
+function durationGroup(
+  line: Pick<CompanyValue, 'periodStart' | 'periodEnd' | 'derivation'>
+): string {
   if (!line.periodStart) return 'instant';
   if (line.derivation === 'trailing_twelve_months') return 'ttm';
   const days = (Date.parse(line.periodEnd) - Date.parse(line.periodStart)) / 86400000;
@@ -129,6 +150,8 @@ function CompanyDetail({ cik }: { cik: string }) {
   const [period, setPeriod] = useState('');
   const [selected, setSelected] = useState('');
   const [noteTarget, setNoteTarget] = useState('company');
+  const [otherPage, setOtherPage] = useState<PageCursor>(emptyPage);
+  const [historyPage, setHistoryPage] = useState<PageCursor>(emptyPage);
   const validRevision =
     revisionMode === 'AS_OF'
       ? /^\d{4}-\d{2}-\d{2}$/.test(revisionDetail)
@@ -142,15 +165,33 @@ function CompanyDetail({ cik }: { cik: string }) {
   };
   const statement = useCompanyStatement(cik, kind, revision, validRevision && !!company.data);
   const mappedLines = statement.data?.lines ?? [];
-  const unclassified = statement.data?.unclassifiedFacts ?? [];
-  const lines = [...mappedLines, ...unclassified];
-  const periods = [...new Set(lines.map(periodKey))].sort((a, b) => {
+  const periods = [
+    ...new Set([
+      ...(statement.data?.periods ?? []).map(item => `${item.start ?? ''}/${item.end}`),
+      ...mappedLines.map(periodKey),
+    ]),
+  ].sort((a, b) => {
     const [aStart, aEnd] = a.split('/');
     const [bStart, bEnd] = b.split('/');
     return bEnd.localeCompare(aEnd) || aStart.localeCompare(bStart);
   });
   const mappedPeriods = periods.filter(key => mappedLines.some(line => periodKey(line) === key));
   const currentPeriod = periods.includes(period) ? period : (mappedPeriods[0] ?? periods[0] ?? '');
+  const [periodStart, periodEnd] = currentPeriod.split('/');
+  const otherScope = JSON.stringify([cik, revision, currentPeriod]);
+  const activeOtherPage =
+    otherPage.scope === otherScope ? otherPage : { ...emptyPage, scope: otherScope };
+  const otherFacts = useCompanyOtherFacts(
+    cik,
+    revision,
+    periodStart || null,
+    periodEnd ?? '',
+    activeOtherPage.after,
+    validRevision && !!company.data && !!currentPeriod
+  );
+  const unclassified = otherFacts.data?.unclassifiedFacts ?? [];
+  const lines = [...mappedLines, ...unclassified];
+  const mappedShown = mappedLines.filter(line => periodKey(line) === currentPeriod);
   const shown = lines.filter(line => periodKey(line) === currentPeriod);
   const selectedLine = shown.find(line => lineId(line) === selected);
   const history = selectedLine
@@ -169,14 +210,41 @@ function CompanyDetail({ cik }: { cik: string }) {
     if (!existing || line.derivation === null) historyByPeriod.set(periodKey(line), line);
   }
   if (selectedLine) historyByPeriod.set(periodKey(selectedLine), selectedLine);
-  const chartHistory = [...historyByPeriod.values()];
+  const selectedIsOther = !!selectedLine && unclassified.includes(selectedLine);
+  const historyScope = JSON.stringify([
+    cik,
+    revision,
+    selectedLine?.taxonomy,
+    selectedLine?.concept,
+    selectedLine?.unit,
+  ]);
+  const activeHistoryPage =
+    historyPage.scope === historyScope ? historyPage : { ...emptyPage, scope: historyScope };
+  const sourceHistory = useCompanyFactHistory(
+    cik,
+    selectedLine,
+    revision,
+    activeHistoryPage.after,
+    validRevision && selectedIsOther
+  );
+  const chartValues: CompanyValue[] = selectedIsOther
+    ? (sourceHistory.data?.nodes ?? [])
+        .map(fact => ({
+          ...fact,
+          label: fact.label ?? fact.concept,
+          derivation: null,
+          sourceAccessions: [fact.accession],
+        }))
+        .filter(fact => durationGroup(fact) === durationGroup(selectedLine!))
+    : [...historyByPeriod.values()].map(lineValue);
+
   const noteTargets: { id: string; label: string; anchor?: string }[] = [
     { id: 'company', label: 'Company' },
     ...(selectedLine
       ? [
           {
             id: 'line',
-            label: `Statement line / chart: ${selectedLine.label}`,
+            label: `Statement line / chart: ${selectedLine.label}, ${companyPeriodLabel(selectedLine)}`,
             anchor: selectedLine.subjectAnchor ?? undefined,
           },
         ]
@@ -202,7 +270,6 @@ function CompanyDetail({ cik }: { cik: string }) {
   const selectedNoteTarget = noteTargets.find(target => target.id === noteTarget);
   const noteTargetAvailable =
     !!selectedNoteTarget && (selectedNoteTarget.id === 'company' || !!selectedNoteTarget.anchor);
-  const [periodStart, periodEnd] = currentPeriod.split('/');
   const comparisons = useCompanyComparisons(
     cik,
     periodStart || null,
@@ -307,7 +374,7 @@ function CompanyDetail({ cik }: { cik: string }) {
           {item.periodEnd}: {item.derivation} unavailable — {item.reason}
         </Alert>
       ))}
-      {validRevision && statement.data && !lines.length && (
+      {validRevision && statement.data && !periods.length && (
         <Alert severity='info'>No statement values are available for this revision.</Alert>
       )}
       {!!periods.length && (
@@ -323,29 +390,92 @@ function CompanyDetail({ cik }: { cik: string }) {
             }}
           >
             {periods.map(key => {
-              const line = lines.find(item => periodKey(item) === key)!;
+              const [start, end] = key.split('/');
+              const labelPeriod = { periodStart: start || null, periodEnd: end };
               return (
                 <MenuItem key={key} value={key} data-statement-period={mappedPeriods.includes(key)}>
-                  {companyPeriodLabel(line)}
+                  {companyPeriodLabel(labelPeriod)}
                 </MenuItem>
               );
             })}
           </Select>
         </FormControl>
       )}
-      {!!shown.length && (
+      {!!currentPeriod && (
         <>
           <Button
+            disabled={!mappedShown.length}
             variant='outlined'
             onClick={() =>
               downloadCsv(
                 `${profile.cik}-${kind.toLowerCase()}.csv`,
-                companyValuesCsv(profile, shown.map(lineValue), window.location.href)
+                companyValuesCsv(profile, mappedShown.map(lineValue), window.location.href)
               )
             }
           >
             Download statement CSV
           </Button>
+          {!!currentPeriod && (
+            <Box component='section' aria-label='Other facts pagination'>
+              <Typography variant='body2'>
+                Other reported facts: this page contains up to 100 facts for the selected period.
+                Statement CSV includes mapped statement lines; other-facts CSV includes only this
+                page.
+              </Typography>
+              {otherFacts.data && !unclassified.length && (
+                <Typography>
+                  No other reported facts on this page for the selected period.
+                </Typography>
+              )}
+              {otherFacts.isPending && <CircularProgress aria-label='Loading other facts' />}
+              {otherFacts.isError && (
+                <Alert severity='error'>
+                  Other reported facts could not be loaded.{' '}
+                  <Button onClick={() => otherFacts.refetch()}>Retry</Button>
+                </Alert>
+              )}
+              <Button
+                disabled={!unclassified.length || otherFacts.isError || otherFacts.isPending}
+                onClick={() =>
+                  downloadCsv(
+                    `${profile.cik}-other-facts-page.csv`,
+                    companyValuesCsv(profile, unclassified.map(lineValue), window.location.href)
+                  )
+                }
+              >
+                Download other facts page CSV
+              </Button>
+              <Button
+                disabled={!activeOtherPage.back.length}
+                onClick={() => {
+                  setOtherPage(previousPage(activeOtherPage));
+                  setSelected('');
+                }}
+              >
+                Previous other facts
+              </Button>
+              <Button
+                disabled={
+                  !otherFacts.data?.unclassifiedHasNextPage ||
+                  !otherFacts.data.unclassifiedEndCursor
+                }
+                onClick={() => {
+                  setOtherPage(
+                    nextPage(activeOtherPage, otherFacts.data?.unclassifiedEndCursor ?? null)
+                  );
+                  setSelected('');
+                }}
+              >
+                Next other facts
+              </Button>
+            </Box>
+          )}
+          {!mappedShown.length && statement.data && (
+            <Alert severity='info'>
+              No mapped statement lines are available for the selected period. Other reported facts
+              remain available through the page controls.
+            </Alert>
+          )}
           <TableContainer component={Paper}>
             <Table aria-label={`${STATEMENTS.find(item => item.value === kind)?.label} values`}>
               <TableHead>
@@ -426,12 +556,60 @@ function CompanyDetail({ cik }: { cik: string }) {
           <Typography variant='h5' component='h2'>
             {selectedLine.label} history
           </Typography>
-          <CompanyLineChart values={chartHistory.map(lineValue)} label={selectedLine.label} />
+          {selectedIsOther && (
+            <Box>
+              <Typography>
+                Source history page: up to 100 facts. The chart and line CSV include only compatible
+                periods on this history page.
+              </Typography>
+              {sourceHistory.data && (
+                <Typography>
+                  {chartValues.length} compatible values from {sourceHistory.data.nodes.length}{' '}
+                  source facts on this page.
+                </Typography>
+              )}
+              {sourceHistory.isPending && (
+                <CircularProgress aria-label='Loading source fact history' />
+              )}
+              {sourceHistory.isError && (
+                <Alert severity='error'>
+                  Source fact history could not be loaded.{' '}
+                  <Button onClick={() => sourceHistory.refetch()}>Retry</Button>
+                </Alert>
+              )}
+              <Button
+                disabled={!activeHistoryPage.back.length}
+                onClick={() => setHistoryPage(previousPage(activeHistoryPage))}
+              >
+                Previous history page
+              </Button>
+              <Button
+                disabled={!sourceHistory.data?.hasNextPage || !sourceHistory.data.endCursor}
+                onClick={() =>
+                  setHistoryPage(nextPage(activeHistoryPage, sourceHistory.data?.endCursor ?? null))
+                }
+              >
+                Next history page
+              </Button>
+            </Box>
+          )}
+          {selectedIsOther && sourceHistory.data && !chartValues.length ? (
+            <Alert severity='info'>
+              No compatible economic periods are on this source-history page. Use the history page
+              controls to browse the remaining source facts.
+            </Alert>
+          ) : (
+            <CompanyLineChart values={chartValues} label={selectedLine.label} />
+          )}
           <Button
+            disabled={
+              !chartValues.length ||
+              (selectedIsOther && (sourceHistory.isPending || sourceHistory.isError))
+            }
             onClick={() =>
               downloadCsv(
                 `${profile.cik}-${selectedLine.concept}.csv`,
-                companyValuesCsv(profile, chartHistory.map(lineValue), window.location.href)
+                companyValuesCsv(profile, chartValues, window.location.href)
               )
             }
           >

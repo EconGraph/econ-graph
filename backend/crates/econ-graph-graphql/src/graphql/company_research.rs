@@ -499,6 +499,8 @@ impl From<company_financials::DerivationUnavailable> for CompanyDerivationUnavai
 }
 #[derive(SimpleObject)]
 pub struct CompanyResearchStatement {
+    pub unclassified_has_next_page: bool,
+    pub unclassified_end_cursor: Option<String>,
     pub notice: String,
     pub unclassified_facts: Vec<CompanyStatementLine>,
     pub unavailable_derivations: Vec<CompanyDerivationUnavailable>,
@@ -538,6 +540,7 @@ fn earlier_changed_value(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn financial_statement(
     ctx: &Context<'_>,
     cik: String,
@@ -545,11 +548,28 @@ pub async fn financial_statement(
     revision_input: Option<CompanyRevisionInput>,
     period_start: Option<NaiveDate>,
     period_end: Option<NaiveDate>,
+    instant_only: bool,
+    unclassified_first: Option<i32>,
+    unclassified_after: Option<String>,
 ) -> Result<CompanyResearchStatement> {
     require_access(ctx)?;
     let pool = context::data_pool(ctx)?;
     let cik = checked_cik(&cik)?;
     let selection = revision(revision_input)?.1;
+    if instant_only && period_start.is_some() {
+        return Err(bad_user_input(
+            "An instant filter cannot have a period start",
+        ));
+    }
+    let (first, offset) = if unclassified_first == Some(0) {
+        (0, 0)
+    } else {
+        page(
+            unclassified_first.or(Some(100)),
+            unclassified_after.as_deref(),
+            250,
+        )?
+    };
     if let (Some(start), Some(end)) = (period_start, period_end) {
         period(Some(start), end)?;
     }
@@ -558,7 +578,9 @@ pub async fn financial_statement(
         .map_err(|e| bad_user_input(e.to_string()))?;
     lines.retain(|l| {
         let (start, end) = dates(&l.period);
-        period_start.is_none_or(|s| start == Some(s)) && period_end.is_none_or(|e| end == e)
+        period_start.is_none_or(|s| start == Some(s))
+            && period_end.is_none_or(|e| end == e)
+            && (!instant_only || start.is_none())
     });
     let mut periods = BTreeMap::new();
     for line in &lines {
@@ -575,13 +597,38 @@ pub async fn financial_statement(
         });
     }
     let history = fact_history(&facts)?;
-    let unclassified_facts = company_financials::unclassified_statement_facts(&facts, &selection)
-        .map_err(|e| bad_user_input(e.to_string()))?
+    let selected_unclassified =
+        company_financials::unclassified_statement_facts(&facts, &selection)
+            .map_err(|e| bad_user_input(e.to_string()))?
+            .into_iter()
+            .filter(|f| {
+                let (start, end) = dates(&f.subject.period);
+                period_start.is_none_or(|s| start == Some(s))
+                    && period_end.is_none_or(|e| end == e)
+                    && (!instant_only || start.is_none())
+            })
+            .collect::<Vec<_>>();
+    // Period discovery is complete even when the caller omits or pages Other facts.
+    for fact in &selected_unclassified {
+        let (start, end) = dates(&fact.subject.period);
+        periods.entry((end, start)).or_insert(CompanyPeriod {
+            start,
+            end,
+            kind: if start.is_some() {
+                "duration"
+            } else {
+                "instant"
+            }
+            .into(),
+        });
+    }
+    let total = selected_unclassified.len() as i64;
+    let unclassified_has_next_page = first > 0 && offset + first < total;
+    let unclassified_end_cursor = unclassified_has_next_page.then(|| (offset + first).to_string());
+    let unclassified_facts = selected_unclassified
         .into_iter()
-        .filter(|f| {
-            let (start, end) = dates(&f.subject.period);
-            period_start.is_none_or(|s| start == Some(s)) && period_end.is_none_or(|e| end == e)
-        })
+        .skip(offset as usize)
+        .take(first as usize)
         .map(|f| {
             let evidence = FactEvidence::from(&f);
             let restated = earlier_changed_value(&f, &history)?;
@@ -600,31 +647,19 @@ pub async fn financial_statement(
             .into())
         })
         .collect::<Result<Vec<CompanyStatementLine>>>()?;
-    for line in &unclassified_facts {
-        periods
-            .entry((line.period_end, line.period_start))
-            .or_insert(CompanyPeriod {
-                start: line.period_start,
-                end: line.period_end,
-                kind: if line.period_start.is_some() {
-                    "duration"
-                } else {
-                    "instant"
-                }
-                .into(),
-            });
-    }
     let unavailable_derivations =
         company_financials::statement_derivation_diagnostics(&facts, kind.into(), &selection)
             .map_err(|e| bad_user_input(e.to_string()))?
             .into_iter()
             .filter(|d| {
                 let (start, end) = dates(&d.period);
-                period_start.is_none_or(|s| start == Some(s)) && period_end.is_none_or(|e| end == e)
+                period_start.is_none_or(|s| start == Some(s))
+                    && period_end.is_none_or(|e| end == e)
+                    && (!instant_only || start.is_none())
             })
             .map(Into::into)
             .collect();
-    Ok(CompanyResearchStatement{notice:"Normalized standard concepts from SEC companyfacts. Other reported facts remain available; original filing layouts, custom concepts and segments require as-filed research.".into(),unclassified_facts,unavailable_derivations,kind,lines:lines.into_iter().map(Into::into).collect(),periods:periods.into_values().rev().collect()})
+    Ok(CompanyResearchStatement{unclassified_has_next_page,unclassified_end_cursor,notice:"Normalized standard concepts from SEC companyfacts. Other reported facts remain available; original filing layouts, custom concepts and segments require as-filed research.".into(),unclassified_facts,unavailable_derivations,kind,lines:lines.into_iter().map(Into::into).collect(),periods:periods.into_values().rev().collect()})
 }
 #[derive(SimpleObject)]
 pub struct CompanyFinancialRatio {
@@ -657,7 +692,7 @@ pub async fn company_ratios(
     let cik = checked_cik(&cik)?;
     let selection = revision(revision_input)?.1;
     let period = period(period_start, period_end)?;
-    let facts = service::calculation_facts(pool, &cik).await?;
+    let facts = service::ratio_facts(pool, &cik, &period).await?;
     Ok(
         company_financials::calculate_ratios(&facts, &period, &selection)
             .map_err(|e| bad_user_input(e.to_string()))?
@@ -688,7 +723,7 @@ pub async fn company_peers(
     let peers = service::sic_peers(pool, &cik, first).await?;
     let mut results = Vec::new();
     for peer in peers {
-        let facts = service::calculation_facts(pool, &peer.cik).await?;
+        let facts = service::ratio_facts(pool, &peer.cik, &period).await?;
         let ratios = company_financials::calculate_ratios(&facts, &period, &selection)
             .map_err(|e| bad_user_input(e.to_string()))?;
         results.push(CompanyPeerComparison {
@@ -905,7 +940,7 @@ mod tests {
         assert_eq!(index.len(), 4_000);
         assert_eq!(index.values().map(Vec::len).sum::<usize>(), facts.len());
         assert!(index.values().all(|bucket| bucket.len() == 3));
-        for facts in facts.chunks_exact(3) {
+        for facts in facts.as_chunks::<3>().0 {
             assert!(!earlier_changed_value(&facts[0], &index).unwrap());
             assert!(!earlier_changed_value(&facts[1], &index).unwrap());
             assert!(earlier_changed_value(&facts[2], &index).unwrap());
