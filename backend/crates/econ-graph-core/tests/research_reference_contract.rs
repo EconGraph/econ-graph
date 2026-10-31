@@ -196,3 +196,15 @@ fn malformed_legacy_series_ids_are_reported_without_mutation_or_chart_fallback()
         assert_eq!(note.series_id.as_deref(), Some(series_id));
     }
 }
+
+#[test]
+fn canonical_key_bytes_are_stable_for_v1() {
+    assert_eq!(
+        SubjectRef::Company {
+            cik: "0000320193".into()
+        }
+        .canonical_key()
+        .unwrap(),
+        r#"research:v1:{"kind":"company","cik":"0000320193"}"#
+    );
+}
