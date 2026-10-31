@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -817,6 +818,97 @@ class JobWaitTests(unittest.TestCase):
 
 
 
+def run_owned_proxy(docker, arguments, env):
+    """Bound the optional smoke container and reap it even if the client stops."""
+    owner = secrets.token_hex(16)
+    name = 'econgraph-branch-proxy-' + owner
+    label = 'econgraph.branch-proxy.owner'
+    command = [*docker, 'run', '--rm', '--name', name, '--label', label + '=' + owner,
+               '--memory', '128m', '--cpus', '0.5', '--pids-limit', '64', *arguments]
+    try:
+        subprocess.run(command, check=True, timeout=30, env=env, capture_output=True, text=True)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        # Do not surface daemon output or the future contents of the shell argv.
+        raise RuntimeError('isolated branch proxy smoke failed or timed out') from None
+    finally:
+        try:
+            # An exact random name plus owner label finds created-but-not-started
+            # containers too. A successful --rm run normally leaves no match.
+            listed = subprocess.run([*docker, 'ps', '--all', '--no-trunc',
+                                     '--filter', 'name=^/' + name + '$',
+                                     '--filter', 'label=' + label + '=' + owner,
+                                     '--format', '{{.ID}}'], check=True, timeout=10,
+                                    env=env, capture_output=True, text=True).stdout.splitlines()
+            if len(listed) > 1 or any(not re.fullmatch('[0-9a-f]{64}', cid) for cid in listed):
+                raise ValueError('unexpected proxy container inventory; refusing cleanup')
+            for cid in listed:
+                inspected = subprocess.run([*docker, 'inspect', '--format',
+                                            '{{.Id}}|{{index .Config.Labels "' + label + '"}}', cid],
+                                           check=False, timeout=10, env=env, capture_output=True, text=True)
+                if inspected.returncode:
+                    continue  # --rm may have finished between inventory and inspection.
+                if inspected.stdout.strip() != cid + '|' + owner:
+                    raise ValueError('proxy container ownership changed; refusing cleanup')
+                # Use the inspected immutable ID, never a potentially replaced name.
+                subprocess.run([*docker, 'rm', '--force', cid], check=True, timeout=10,
+                               env=env, capture_output=True, text=True)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            raise RuntimeError('could not verify cleanup of the isolated branch proxy container') from None
+
+
+class ProxyCleanupTests(unittest.TestCase):
+    def test_timeout_interrupt_and_failed_start_remove_only_the_owned_id(self):
+        docker = ['docker', '--host=unix:///test.sock']
+        owner, cid = 'ab' * 16, 'c' * 64
+        for error in [subprocess.TimeoutExpired('docker', 30), KeyboardInterrupt(),
+                      subprocess.CalledProcessError(1, 'docker')]:
+            calls = []
+            def execute(command, **kwargs):
+                calls.append(command)
+                operation = command[len(docker)]
+                if operation == 'run':
+                    raise error
+                output = cid + '\n' if operation == 'ps' else cid + '|' + owner + '\n'
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr='')
+            with self.subTest(error=type(error).__name__):
+                with patch('secrets.token_hex', return_value=owner), patch('subprocess.run', side_effect=execute):
+                    expected = KeyboardInterrupt if isinstance(error, KeyboardInterrupt) else RuntimeError
+                    with self.assertRaises(expected):
+                        run_owned_proxy(docker, ['fake-image'], {})
+                self.assertEqual(calls[-1], [*docker, 'rm', '--force', cid])
+                run = calls[0]
+                for flag, value in [('--memory', '128m'), ('--cpus', '0.5'), ('--pids-limit', '64')]:
+                    self.assertEqual(run[run.index(flag) + 1], value)
+                self.assertIn('label=econgraph.branch-proxy.owner=' + owner, calls[1])
+
+    def test_foreign_container_is_not_removed(self):
+        docker = ['docker', '--host=unix:///test.sock']
+        owner, cid = 'ab' * 16, 'c' * 64
+        calls = []
+        def execute(command, **kwargs):
+            calls.append(command)
+            operation = command[len(docker)]
+            if operation == 'run':
+                raise subprocess.TimeoutExpired('docker', 30)
+            output = cid + '\n' if operation == 'ps' else cid + '|foreign-owner\n'
+            return subprocess.CompletedProcess(command, 0, stdout=output, stderr='')
+        with patch('secrets.token_hex', return_value=owner), patch('subprocess.run', side_effect=execute):
+            with self.assertRaisesRegex(ValueError, 'ownership changed'):
+                run_owned_proxy(docker, ['fake-image'], {})
+        self.assertFalse(any(command[len(docker)] == 'rm' for command in calls))
+
+    def test_failed_create_with_no_owned_resource_never_removes_a_name(self):
+        docker = ['docker', '--host=unix:///test.sock']
+        def execute(command, **kwargs):
+            if command[len(docker)] == 'run':
+                raise subprocess.CalledProcessError(1, command, stderr='private daemon output')
+            return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+        with patch('subprocess.run', side_effect=execute) as run:
+            with self.assertRaisesRegex(RuntimeError, '^isolated branch proxy smoke failed or timed out$'):
+                run_owned_proxy(docker, ['fake-image'], {})
+        self.assertEqual([call.args[0][len(docker)] for call in run.call_args_list], ['run', 'ps'])
+
+
 @unittest.skipUnless(os.environ.get('BRANCH_PROXY_IMAGE'), 'set BRANCH_PROXY_IMAGE for isolated nginx runtime check')
 class ProxyRuntimeTests(unittest.TestCase):
     def test_http_requests_cannot_select_another_host_path_or_forward_credentials(self):
@@ -834,8 +926,8 @@ class ProxyRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             conf = Path(temp)/'nginx.conf'
             conf.write_text(config)
-            command = ['docker', '--host=' + os.environ.get('BRANCH_PROXY_DOCKER_HOST', 'unix:///var/run/docker.sock'),
-                       'run', '--rm', '--pull=never', '--network=none', '--read-only',
+            docker = ['docker', '--host=' + os.environ.get('BRANCH_PROXY_DOCKER_HOST', 'unix:///var/run/docker.sock')]
+            arguments = ['--pull=never', '--network=none', '--read-only',
                        '--tmpfs', '/tmp:rw,size=67108864', '--user', '101', '--cap-drop', 'ALL',
                        '--security-opt', 'no-new-privileges', '--add-host',
                        'econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:127.0.0.1',
@@ -855,7 +947,7 @@ done
             env = dict(os.environ)
             for key in ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH']:
                 env.pop(key, None)
-            subprocess.run(command, check=True, timeout=30, env=env, capture_output=True, text=True)
+            run_owned_proxy(docker, arguments, env)
 
 
 

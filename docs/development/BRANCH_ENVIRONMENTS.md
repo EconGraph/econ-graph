@@ -119,7 +119,9 @@ KUSTOMIZE_KUBECTL=/path/to/kubectl python3 scripts/deploy/test-branch-environmen
 
 Set `BRANCH_PROXY_IMAGE` to an already-built frontend image to additionally run
 the proxy HTTP check in one network-isolated, read-only, automatically removed
-container. `BRANCH_PROXY_DOCKER_HOST` selects the local scratch Docker socket.
+container, bounded to 128 MiB memory, half a CPU and 64 PIDs. A random owner label
+and exact inspected container ID scope cleanup even after a timeout, interruption
+or failed start. `BRANCH_PROXY_DOCKER_HOST` selects the local scratch Docker socket.
 This proves that forged Host headers cannot select another route, credentials
 are removed and non-data paths are denied. It does not prove Kubernetes CNI
 enforcement.
