@@ -197,11 +197,7 @@ impl Target {
         if !query.is_empty() {
             url.query_pairs_mut().extend_pairs(query);
         }
-        let mut secrets: Vec<String> = url
-            .query_pairs()
-            .filter(|(k, v)| is_secret_param(k) && !v.is_empty())
-            .map(|(_, v)| v.into_owned())
-            .collect();
+        let mut secrets = secrets_of(&url);
         secrets.extend(body.as_deref().map(body_secrets).unwrap_or_default());
         Ok(Self {
             source,
@@ -580,7 +576,6 @@ impl HttpFetcher {
             } else {
                 format!("{}: {}", target.context(), snippet(&body, &target.secrets))
             };
-            let context = scrub(&context, &target.secrets);
             let err = CrawlError::from_status(status, retry_after, context);
             self.record_request(target, status.as_str(), start);
             if status == StatusCode::TOO_MANY_REQUESTS
@@ -629,7 +624,7 @@ impl HttpFetcher {
         let permanent = e.is_builder() || e.is_redirect();
         // reqwest's Display includes the full URL (query string and all); strip it, and scrub
         // what is left in case a source error quotes a URL or a value carrying a secret.
-        let detail = scrub(&error_chain(&e.without_url()), &target.secrets);
+        let detail = transport_detail(&e.without_url(), &target.secrets);
         let err = if is_timeout {
             CrawlError::Transient(format!(
                 "{}: timed out after {:?}: {detail}",
@@ -675,7 +670,16 @@ fn decode<T: DeserializeOwned>(target: &Target, text: &str) -> Result<T, CrawlEr
 /// Scrubbing happens on the whole text *before* truncating: truncating first would leave the
 /// prefix of a secret that straddles the cut unmatched (and so leaked).
 fn snippet(text: &str, secrets: &[String]) -> String {
-    let mut scrubbed = scrub(text, secrets);
+    // Only the start of the text can end up in the snippet: scrub the first SNIPPET_CHARS
+    // characters plus room for the longest secret in its longest form (each byte as `%HH`), so
+    // a secret straddling the cut is still found, without scanning a large body to the end. One
+    // character more, so a text longer than the snippet is still seen to be cut.
+    let room = secrets.iter().map(|s| s.len() * 3).max().unwrap_or(0);
+    let window = match text.char_indices().nth(SNIPPET_CHARS + room + 1) {
+        Some((end, _)) => &text[..end],
+        None => text,
+    };
+    let mut scrubbed = scrub(window, secrets);
     match scrubbed.char_indices().nth(SNIPPET_CHARS) {
         Some((cut, _)) => {
             scrubbed.truncate(cut);
@@ -690,7 +694,7 @@ fn snippet(text: &str, secrets: &[String]) -> String {
 /// echo it in: each byte of the secret may appear as itself, percent-encoded (`%2B`, `%2b`) or,
 /// for a space, form-encoded as `+`, in any mix. So a key `a+b/c=` is found as `a+b/c=`,
 /// `a%2Bb%2Fc%3D`, `a%2bb%2fc%3d` or `a%2Bb/c%3d`, and `a b` also as `a+b`.
-fn scrub(text: &str, secrets: &[String]) -> String {
+pub(crate) fn scrub(text: &str, secrets: &[String]) -> String {
     let mut out = text.to_owned();
     for secret in secrets.iter().filter(|s| !s.is_empty()) {
         out = scrub_one(&out, secret.as_bytes());
@@ -736,6 +740,48 @@ fn encoded_match(text: &[u8], secret: &[u8]) -> Option<usize> {
         [b'%', hi, lo, ..] if hex(*hi)? * 16 + hex(*lo)? == u32::from(want) => then(3),
         _ => None,
     }
+}
+
+/// `e` with every secret scrubbed from its message (see [`scrub`]), for an adapter error that
+/// quotes a response body the fetcher's own error path never saw (a 200 body it then fails to
+/// parse, or a source's in-body error).
+pub(crate) fn scrub_error(e: CrawlError, secrets: &[String]) -> CrawlError {
+    let clean = |m: String| scrub(&m, secrets);
+    match e {
+        CrawlError::Transient(m) => CrawlError::Transient(clean(m)),
+        CrawlError::NotFound(m) => CrawlError::NotFound(clean(m)),
+        CrawlError::Absent(m) => CrawlError::Absent(clean(m)),
+        CrawlError::Restricted(m) => CrawlError::Restricted(clean(m)),
+        CrawlError::Auth(m) => CrawlError::Auth(clean(m)),
+        CrawlError::Parse(m) => CrawlError::Parse(clean(m)),
+        CrawlError::Permanent(m) => CrawlError::Permanent(clean(m)),
+        CrawlError::Busy {
+            retry_after,
+            message,
+        } => CrawlError::Busy {
+            retry_after,
+            message: clean(message),
+        },
+        e @ CrawlError::RateLimited { .. } => e,
+    }
+}
+
+/// The secret query values (see `SECRET_PARAMS`) of `url`, decoded; none for an unparseable URL.
+pub(crate) fn url_secrets(url: &str) -> Vec<String> {
+    Url::parse(url).map(|u| secrets_of(&u)).unwrap_or_default()
+}
+
+fn secrets_of(url: &Url) -> Vec<String> {
+    url.query_pairs()
+        .filter(|(k, v)| is_secret_param(k) && !v.is_empty())
+        .map(|(_, v)| v.into_owned())
+        .collect()
+}
+
+/// A transport error's text: `e` (already without its URL) and its source chain, scrubbed, in
+/// case a source error quotes a URL or a value that carries a secret.
+fn transport_detail(e: &(dyn std::error::Error + 'static), secrets: &[String]) -> String {
+    scrub(&error_chain(e), secrets)
 }
 
 /// `e` and its source chain, joined by `": "`.
@@ -1496,7 +1542,74 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert_no_key(&err.to_string());
+        let msg = err.to_string();
+        assert!(matches!(err, CrawlError::Permanent(_)), "{err:?}");
+        assert!(msg.contains("redirect"), "a redirect error: {msg}");
+        assert_no_key(&msg);
+    }
+
+    #[test]
+    fn transport_errors_scrub_keys_quoted_in_their_source_chain() {
+        // reqwest drops the URL from its own message; a source error quoting one is scrubbed.
+        #[derive(Debug)]
+        struct Quoting(String, Option<Box<Quoting>>);
+        impl std::fmt::Display for Quoting {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+        impl std::error::Error for Quoting {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                self.1.as_deref().map(|e| e as _)
+            }
+        }
+        for echoed in echoed_forms() {
+            let e = Quoting(
+                "error following redirect".into(),
+                Some(Box::new(Quoting(
+                    format!("to http://x.test/?api_key={echoed}"),
+                    None,
+                ))),
+            );
+            let msg = transport_detail(&e, &[ENCODED_KEY.to_owned()]);
+            assert!(
+                msg.starts_with("error following redirect: to http://x.test/?api_key="),
+                "{msg}"
+            );
+            assert_no_key(&msg);
+        }
+    }
+
+    #[test]
+    fn snippet_scrubs_only_a_window_but_still_the_straddling_secret() {
+        let secrets = [ENCODED_KEY.to_owned()];
+        let form: String = url::form_urlencoded::byte_serialize(ENCODED_KEY.as_bytes()).collect();
+        // An encoded key starting just before the cut, in a body far longer than the snippet.
+        let text = format!(
+            "{}{form}{}",
+            "x".repeat(SNIPPET_CHARS - 3),
+            "y".repeat(1_000_000)
+        );
+        let s = snippet(&text, &secrets);
+        assert!(s.starts_with(&"x".repeat(SNIPPET_CHARS - 3)), "{s}");
+        assert!(s.ends_with("RED…"), "{s}");
+        assert!(!s.contains("k%2"), "{s}");
+    }
+
+    #[test]
+    fn scrub_error_keeps_the_kind_and_url_secrets_are_the_decoded_values() {
+        let secrets =
+            url_secrets("https://x.test/?UserID=a%2Bb%2F1&method=GetData&key=&api_key=c+d");
+        assert_eq!(secrets, ["a+b/1", "c d"]);
+        let e = scrub_error(
+            CrawlError::Auth("Invalid UserId a%2bb%2f1, or c+d".into()),
+            &secrets,
+        );
+        assert!(
+            matches!(&e, CrawlError::Auth(m) if m == "Invalid UserId REDACTED, or REDACTED"),
+            "{e:?}"
+        );
+        assert!(url_secrets("not a url").is_empty());
     }
 
     #[tokio::test]

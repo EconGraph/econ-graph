@@ -491,29 +491,9 @@ fn api_key(ctx: &CrawlCtx) -> Result<&str, CrawlError> {
         .ok_or_else(|| CrawlError::Auth(MISSING_KEY.into()))
 }
 
-/// `e` with every occurrence of `key` in its message replaced.
+/// `e` with `key` scrubbed from its message, in any form (see [`crate::http::scrub`]).
 fn redact_key(e: CrawlError, key: &str) -> CrawlError {
-    if key.is_empty() {
-        return e;
-    }
-    let scrub = |m: String| m.replace(key, "REDACTED");
-    match e {
-        CrawlError::Transient(m) => CrawlError::Transient(scrub(m)),
-        CrawlError::NotFound(m) => CrawlError::NotFound(scrub(m)),
-        CrawlError::Absent(m) => CrawlError::Absent(scrub(m)),
-        CrawlError::Restricted(m) => CrawlError::Restricted(scrub(m)),
-        CrawlError::Auth(m) => CrawlError::Auth(scrub(m)),
-        CrawlError::Parse(m) => CrawlError::Parse(scrub(m)),
-        CrawlError::Permanent(m) => CrawlError::Permanent(scrub(m)),
-        CrawlError::Busy {
-            retry_after,
-            message,
-        } => CrawlError::Busy {
-            retry_after,
-            message: scrub(message),
-        },
-        e @ CrawlError::RateLimited { .. } => e,
-    }
+    crate::http::scrub_error(e, &[key.to_owned()])
 }
 
 /// The API portal answers an exhausted call quota with `403` ("Out of call volume quota. Quota

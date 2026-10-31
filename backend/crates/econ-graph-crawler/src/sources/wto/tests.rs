@@ -434,6 +434,24 @@ async fn parse_errors_from_the_data_body_never_carry_the_key() {
         TEST_API_KEY,
     );
     assert!(!e.to_string().contains(TEST_API_KEY), "{e}");
+    // A key with characters that URL-encode, echoed encoded, is scrubbed as well.
+    let key = "k+y/1=2&3%4 5";
+    let form: String = url::form_urlencoded::byte_serialize(key.as_bytes()).collect();
+    let e = redact_key(
+        parse_rows(
+            "t",
+            &format!(
+                r#"{{"Dataset": [{{"Year": ["{}"]}}]}}"#,
+                form.to_lowercase()
+            ),
+        )
+        .unwrap_err(),
+        key,
+    );
+    assert!(
+        !e.to_string().to_lowercase().contains(&form.to_lowercase()),
+        "{e}"
+    );
 }
 
 #[test]
