@@ -22,6 +22,18 @@
 //! work is enqueued. An empty catalog, failed page, changing count, truncated page or duplicate
 //! id fails the entire discovery, so a temporary upstream problem cannot look like retirement.
 //!
+//! Discovery runs in chunks ([`crate::discovery_run`]): [`enumerate_discovery`] walks the
+//! rules' catalogs exactly as `discover()` does and lists one [`FredUnit`] per selected series
+//! (with the metadata its catalog page returned, so it needs no request) and per include
+//! override the rules didn't select (one `/series` request in its chunk). Chunks of
+//! [`UNITS_PER_CHUNK`] build their series with the same [`discovered_series`] as a single walk,
+//! so copyright filtering is unchanged. The run's catalog scope is
+//! [`FredCatalogRules::fingerprint`], computed from the rules file without a walk, equal to the
+//! scope a walk reports under the same rules; unusable rules leave it `None`, which the worker
+//! refuses.
+//!
+//! [`enumerate_discovery`]: SourceAdapter::enumerate_discovery
+//!
 //! Restricted series remain in the catalog metadata but are hidden by the lifecycle writer;
 //! `(DISCONTINUED)` titles retain their histories and carry a badge. Fetching any series still
 //! repeats the copyright-notes check before requesting observations. Pagination follows FRED's
@@ -119,6 +131,7 @@ use crate::adapter::{
     CrawlCtx, DiscoveredSeries, FetchedPoint, FetchedSeries, NewSeriesMetadataLite, SourceAdapter,
 };
 use crate::dataset::SeriesDataset;
+use crate::discovery_run::{ChunkDiscovery, ChunkedDiscovery, DiscoveryUnit, Enumeration};
 use crate::error::CrawlError;
 use crate::http::Validators;
 use crate::lifecycle::CatalogLifecycle;
@@ -515,6 +528,62 @@ fn is_copyright_restricted(notes: Option<&str>) -> bool {
         .any(|marker| lower.contains(marker))
 }
 
+/// The selected series `id`, as discovery lists it, recording on `facts` whether its notes
+/// restrict it ([`is_copyright_restricted`]) or its title marks it discontinued. Single-job
+/// discovery and every chunk of a chunked one build their series here, so copyright filtering
+/// is the same on both paths.
+fn discovered_series(
+    id: String,
+    metadata: FredSeries,
+    facts: &mut CatalogLifecycle,
+) -> DiscoveredSeries {
+    if is_copyright_restricted(metadata.notes.as_deref()) {
+        facts.restricted_ids.push(id.clone());
+    } else if metadata
+        .title
+        .to_ascii_uppercase()
+        .contains("(DISCONTINUED)")
+    {
+        facts.discontinued_ids.push(id.clone());
+    }
+    DiscoveredSeries {
+        data_url: Some(format!("{FRED_WEB_SERIES_URL}/{id}")),
+        external_id: id,
+        title: metadata.title,
+        description: non_empty(metadata.notes),
+        units: non_empty(metadata.units),
+        frequency: non_empty(metadata.frequency),
+        dataset: fred_dataset(),
+    }
+}
+
+/// What [`FredAdapter::walk_rules`] found.
+struct RuleWalk {
+    selected: BTreeMap<String, FredSeries>,
+    walked: BTreeSet<String>,
+    rule_matches: Vec<usize>,
+    scanned: usize,
+}
+
+/// A chunked discovery's work unit, as [`DiscoveryUnit::listing`] carries it.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum FredUnit {
+    /// Selected by a rule: the catalog page already returned its metadata, so its chunk makes
+    /// no request for it.
+    Listed { series: FredSeries },
+    /// An include override the rules didn't select: its chunk asks `/series` for its metadata.
+    /// `expected_missing` keeps a known-retired probe out of the missing-entry alert.
+    Include { expected_missing: bool },
+}
+
+/// Units per `discover_chunk` job. A chunk makes at most one `/series` request per unit (only
+/// include overrides need one; rule-selected units carry their catalog metadata), so at most
+/// 50 requests: at FRED's 120 a minute that is 25 seconds alone, and under 7 minutes even if
+/// fetch jobs leave the chunk a sixteenth of the source's budget, well inside the worker's
+/// 30-minute lease.
+pub const UNITS_PER_CHUNK: usize = 50;
+
 /// A complete catalog selection ([`FredAdapter::select_catalog`]).
 #[derive(Debug)]
 pub(crate) struct CatalogSelection {
@@ -535,6 +604,10 @@ pub struct FredAdapter {
     skipped_ids: Arc<Mutex<Vec<String>>>,
     /// Facts and rule fingerprint from the last fully validated catalog only.
     catalog: Arc<Mutex<Option<(String, CatalogLifecycle)>>>,
+    /// Selection rules to use instead of [`CATALOG_RULES_FILE`] (tests only).
+    rules_text: Option<Arc<str>>,
+    /// Units per `discover_chunk` job: [`UNITS_PER_CHUNK`], smaller in tests.
+    units_per_chunk: usize,
 }
 
 impl FredAdapter {
@@ -544,6 +617,30 @@ impl FredAdapter {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             skipped_ids: Arc::default(),
             catalog: Arc::default(),
+            rules_text: None,
+            units_per_chunk: UNITS_PER_CHUNK,
+        }
+    }
+
+    /// This adapter with `units` per `discover_chunk` job instead of [`UNITS_PER_CHUNK`].
+    #[cfg(any(test, feature = "testkit"))]
+    pub fn with_units_per_chunk(mut self, units: usize) -> Self {
+        self.units_per_chunk = units;
+        self
+    }
+
+    /// This adapter with selection rules read from `text` instead of [`CATALOG_RULES_FILE`].
+    #[cfg(any(test, feature = "testkit"))]
+    pub fn with_catalog_rules_text(mut self, text: &str) -> Self {
+        self.rules_text = Some(text.into());
+        self
+    }
+
+    /// The selection rules: [`CATALOG_RULES_FILE`], or the text a test gave.
+    fn rules(&self) -> Result<FredCatalogRules, CrawlError> {
+        match &self.rules_text {
+            Some(text) => FredCatalogRules::parse(text),
+            None => load_catalog_rules(),
         }
     }
 
@@ -578,6 +675,75 @@ impl FredAdapter {
         rules: &FredCatalogRules,
     ) -> Result<CatalogSelection, CrawlError> {
         let api_key = self.api_key(ctx)?;
+        let RuleWalk {
+            mut selected,
+            walked,
+            rule_matches,
+            scanned,
+        } = self.walk_rules(ctx, api_key, rules).await?;
+        let mut facts = CatalogLifecycle::default();
+        for id in &rules.include {
+            if rules.exclude.contains(id) || selected.contains_key(id) {
+                continue;
+            }
+            match self.fetch_metadata(ctx, api_key, id).await {
+                Ok((meta, _)) => {
+                    selected.insert(id.clone(), FredSeries::from_metadata(meta));
+                    if selected.len() > rules.max_series {
+                        return Err(catalog_volume_error(
+                            "selected series",
+                            selected.len(),
+                            rules.max_series,
+                        ));
+                    }
+                }
+                Err(CrawlError::NotFound(_)) => facts.confirmed_missing_ids.push(id.clone()),
+                // Parse/permanent errors are not evidence of removal. Never publish a partial
+                // override list as a successful catalog, even if other entries succeeded.
+                Err(error) => return Err(error),
+            }
+        }
+        if selected.is_empty() {
+            return Err(CrawlError::Transient(
+                "FRED catalog selection is empty; refusing to infer removals".into(),
+            ));
+        }
+        facts.unselected_ids = walked
+            .into_iter()
+            .filter(|id| !selected.contains_key(id))
+            .collect();
+        let mut found = Vec::with_capacity(selected.len());
+        for (id, metadata) in selected {
+            found.push(discovered_series(id, metadata, &mut facts));
+        }
+        *self
+            .skipped_ids
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = facts
+            .confirmed_missing_ids
+            .iter()
+            .filter(|id| !rules.expected_missing.contains(id))
+            .cloned()
+            .collect();
+        *self.catalog.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some((rules.fingerprint(), facts));
+        Ok(CatalogSelection {
+            found,
+            rule_matches,
+            scanned,
+        })
+    }
+
+    /// Walks every rule's complete release or category catalog: the rows the rules select
+    /// (exclusions applied, at most `max_series`), every id the walked catalogs list, and how
+    /// many rows each rule matched. Shared by single-job discovery and the enumeration of a
+    /// chunked one, so both select exactly the same series.
+    async fn walk_rules(
+        &self,
+        ctx: &CrawlCtx,
+        api_key: &str,
+        rules: &FredCatalogRules,
+    ) -> Result<RuleWalk, CrawlError> {
         let mut selected = BTreeMap::new();
         // Every id the walked releases and categories list, selected or not. Absence evidence
         // counts only ids missing from the whole walked catalog: a series retitled or
@@ -627,81 +793,9 @@ impl FredAdapter {
             }
             rule_matches.push(matched);
         }
-        let mut facts = CatalogLifecycle::default();
-        for id in &rules.include {
-            if rules.exclude.contains(id) || selected.contains_key(id) {
-                continue;
-            }
-            match self.fetch_metadata(ctx, api_key, id).await {
-                Ok((meta, _)) => {
-                    selected.insert(
-                        id.clone(),
-                        FredSeries {
-                            title: meta.title,
-                            notes: meta.description,
-                            units: meta.units,
-                            frequency: meta.frequency,
-                            seasonal_adjustment: meta.seasonal_adjustment,
-                            last_updated: None,
-                        },
-                    );
-                    if selected.len() > rules.max_series {
-                        return Err(catalog_volume_error(
-                            "selected series",
-                            selected.len(),
-                            rules.max_series,
-                        ));
-                    }
-                }
-                Err(CrawlError::NotFound(_)) => facts.confirmed_missing_ids.push(id.clone()),
-                // Parse/permanent errors are not evidence of removal. Never publish a partial
-                // override list as a successful catalog, even if other entries succeeded.
-                Err(error) => return Err(error),
-            }
-        }
-        if selected.is_empty() {
-            return Err(CrawlError::Transient(
-                "FRED catalog selection is empty; refusing to infer removals".into(),
-            ));
-        }
-        facts.unselected_ids = walked
-            .into_iter()
-            .filter(|id| !selected.contains_key(id))
-            .collect();
-        let mut found = Vec::with_capacity(selected.len());
-        for (id, metadata) in selected {
-            if is_copyright_restricted(metadata.notes.as_deref()) {
-                facts.restricted_ids.push(id.clone());
-            } else if metadata
-                .title
-                .to_ascii_uppercase()
-                .contains("(DISCONTINUED)")
-            {
-                facts.discontinued_ids.push(id.clone());
-            }
-            found.push(DiscoveredSeries {
-                external_id: id.clone(),
-                title: metadata.title,
-                description: non_empty(metadata.notes),
-                units: non_empty(metadata.units),
-                frequency: non_empty(metadata.frequency),
-                data_url: Some(format!("{FRED_WEB_SERIES_URL}/{id}")),
-                dataset: fred_dataset(),
-            });
-        }
-        *self
-            .skipped_ids
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = facts
-            .confirmed_missing_ids
-            .iter()
-            .filter(|id| !rules.expected_missing.contains(id))
-            .cloned()
-            .collect();
-        *self.catalog.lock().unwrap_or_else(PoisonError::into_inner) =
-            Some((rules.fingerprint(), facts));
-        Ok(CatalogSelection {
-            found,
+        Ok(RuleWalk {
+            selected,
+            walked,
             rule_matches,
             scanned,
         })
@@ -1053,8 +1147,126 @@ impl SourceAdapter for FredAdapter {
 
     /// Walks the complete configured catalog rules, under both scan and selection limits.
     async fn discover(&self, ctx: &CrawlCtx) -> Result<Vec<DiscoveredSeries>, CrawlError> {
-        let rules = load_catalog_rules()?;
+        let rules = self.rules()?;
         self.discover_catalog(ctx, &rules).await
+    }
+
+    /// FRED discovers in chunks of [`UNITS_PER_CHUNK`]. Its catalog scope is the selection
+    /// rules' fingerprint, the same value [`catalog_scope`](SourceAdapter::catalog_scope)
+    /// reports after a single-job walk under the same rules, computed here without a walk. It is
+    /// `None` only when the rules can't be read or are invalid, and then the worker refuses the
+    /// chunked discovery rather than retire without a scope.
+    fn chunked_discovery(&self) -> Option<ChunkedDiscovery> {
+        let catalog_scope = match self.rules() {
+            Ok(rules) => Some(rules.fingerprint()),
+            Err(error) => {
+                tracing::warn!(%error, "FRED catalog rules unusable; no catalog scope");
+                None
+            }
+        };
+        Some(ChunkedDiscovery {
+            units_per_chunk: self.units_per_chunk,
+            catalog_scope,
+        })
+    }
+
+    /// Walks every rule's complete catalog, as single-job discovery does, and lists one unit per
+    /// selected series (carrying the metadata its catalog page returned) and one per include
+    /// override the rules didn't select, in series-id order. The volume guard counts every unit,
+    /// include overrides that may turn out missing included.
+    async fn enumerate_discovery(&self, ctx: &CrawlCtx) -> Result<Enumeration, CrawlError> {
+        let rules = self.rules()?;
+        let api_key = self.api_key(ctx)?;
+        let RuleWalk {
+            selected, walked, ..
+        } = self.walk_rules(ctx, api_key, &rules).await?;
+        let mut units: BTreeMap<String, FredUnit> = selected
+            .into_iter()
+            .map(|(id, series)| (id, FredUnit::Listed { series }))
+            .collect();
+        for id in &rules.include {
+            if rules.exclude.contains(id) || units.contains_key(id) {
+                continue;
+            }
+            units.insert(
+                id.clone(),
+                FredUnit::Include {
+                    expected_missing: rules.expected_missing.contains(id),
+                },
+            );
+            if units.len() > rules.max_series {
+                return Err(catalog_volume_error(
+                    "selected series",
+                    units.len(),
+                    rules.max_series,
+                ));
+            }
+        }
+        if units.is_empty() {
+            return Err(CrawlError::Transient(
+                "FRED catalog selection is empty; refusing to infer removals".into(),
+            ));
+        }
+        let lifecycle = CatalogLifecycle {
+            unselected_ids: walked
+                .into_iter()
+                .filter(|id| !units.contains_key(id))
+                .collect(),
+            ..CatalogLifecycle::default()
+        };
+        let units = units
+            .into_iter()
+            .map(|(id, unit)| {
+                serde_json::to_value(&unit)
+                    .map(|listing| DiscoveryUnit::with_listing(id, listing))
+                    .map_err(|e| CrawlError::Permanent(format!("encoding a FRED unit: {e}")))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Enumeration::Units {
+            units,
+            validator: None,
+            curated_missing: Vec::new(),
+            lifecycle,
+        })
+    }
+
+    /// Each unit's series: a rule-selected unit from the metadata it carries, with no request; an
+    /// include override from `/series`. An override FRED reports missing is confirmed missing
+    /// (and, unless it is an expected-missing probe, a curated entry missing). Any other error
+    /// fails the chunk, to be retried on its own.
+    async fn discover_units(
+        &self,
+        ctx: &CrawlCtx,
+        units: &[DiscoveryUnit],
+    ) -> Result<ChunkDiscovery, CrawlError> {
+        let mut out = ChunkDiscovery::default();
+        for unit in units {
+            let listing = unit.listing.clone().ok_or_else(|| {
+                CrawlError::Permanent(format!("FRED unit {} carries no listing", unit.key))
+            })?;
+            let unit_kind: FredUnit = serde_json::from_value(listing)
+                .map_err(|e| CrawlError::Permanent(format!("decoding FRED unit: {e}")))?;
+            let series = match unit_kind {
+                FredUnit::Listed { series } => series,
+                FredUnit::Include { expected_missing } => {
+                    let api_key = self.api_key(ctx)?;
+                    match self.fetch_metadata(ctx, api_key, &unit.key).await {
+                        Ok((meta, _)) => FredSeries::from_metadata(meta),
+                        Err(CrawlError::NotFound(_)) => {
+                            out.lifecycle.confirmed_missing_ids.push(unit.key.clone());
+                            if !expected_missing {
+                                out.curated_missing.push(unit.key.clone());
+                            }
+                            continue;
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+            };
+            let found = discovered_series(unit.key.clone(), series, &mut out.lifecycle);
+            out.found.push(found);
+        }
+        Ok(out)
     }
 
     fn discovery_is_complete(&self) -> bool {
@@ -1382,7 +1594,7 @@ struct CatalogSeries {
     metadata: FredSeries,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 struct FredSeries {
     title: String,
     #[serde(default)]
@@ -1397,6 +1609,20 @@ struct FredSeries {
     /// revisions included. See [Re-crawls](self#re-crawls).
     #[serde(default)]
     last_updated: Option<String>,
+}
+
+impl FredSeries {
+    /// The series as an include override's `/series` metadata describes it.
+    fn from_metadata(meta: NewSeriesMetadataLite) -> Self {
+        Self {
+            title: meta.title,
+            notes: meta.description,
+            units: meta.units,
+            frequency: meta.frequency,
+            seasonal_adjustment: meta.seasonal_adjustment,
+            last_updated: None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1420,6 +1646,9 @@ struct FredObservation {
     value: String,
     realtime_start: String,
 }
+
+#[cfg(test)]
+mod chunked_tests;
 
 #[cfg(test)]
 mod tests {

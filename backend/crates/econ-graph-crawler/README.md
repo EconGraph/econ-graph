@@ -63,7 +63,8 @@ By default a source's catalog is discovered by one `discover_catalog` job, insid
 An adapter whose `chunked_discovery()` returns `Some` is discovered in pieces instead
 ([`src/discovery_run.rs`](src/discovery_run.rs)), so a catalog that needs one upstream request
 per entry neither outlives the worker's `stuck_after` nor fails as a whole on one transient error.
-No adapter that ships with the crawler does this; all use single-job discovery.
+FRED discovers this way (see [FRED](../../../docs/data-sources/fred.md)); every other adapter
+uses single-job discovery.
 
 1. **Enumerate.** The `discover_catalog` job refreshes reference data, records a run in
    `discovery_runs` (state `enumerating`) and calls `enumerate_discovery()` for a list of work
