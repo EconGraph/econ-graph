@@ -86,9 +86,10 @@ pub async fn list_companies(
                 .or(companies::cik.eq(canonical_cik(search).unwrap_or_default())),
         );
     }
-    // Metadata-only SEC entries do not represent a shipped structured company surface.
+    // Discover all known XBRL issuers, including those without standardized facts.
+    // The UI reports unavailable data explicitly rather than concealing the company.
     query = query.filter(diesel::dsl::sql::<Bool>(
-        "EXISTS (SELECT 1 FROM company_facts cf WHERE cf.cik = companies.cik)",
+        "(EXISTS (SELECT 1 FROM company_facts cf WHERE cf.cik = companies.cik) OR EXISTS (SELECT 1 FROM company_fact_filings filing WHERE filing.cik=companies.cik AND filing.is_xbrl))",
     ));
     Ok(query
         .order((companies::name.asc(), companies::cik.asc()))
