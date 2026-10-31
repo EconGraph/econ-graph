@@ -157,3 +157,27 @@ at tag `json/json-schema-v0.2.15` (Apache-2.0, see [the license](schema/LICENSE)
 copy both files from a newer tag's `json/` directory and run the check. The
 check's validator supports only the JSON Schema keywords these files use, and
 fails loudly on any other.
+
+## Train 3 deadline audit
+
+Train 3 establishes shared development contracts without shipping unfinished
+features or changing production flag values. The deadlines follow the planned
+feature completion, rather than product version numbers. This audit updates the
+earlier seeded MCP deadline; its current configured deadline is Train 7.
+
+| Flag | Deadline | Reason |
+|---|---|---|
+| `mcp` | Train 7 | Workspace and machine access complete in Train 7. |
+| `global_analysis_tabs` | Train 8 | Comparative research completes in Train 8. |
+| `financial_components` | Train 5 | The SEC financial UI/demo belongs to Train 5 company research; completion replaces the unfinished financial surface. |
+| `technical_analysis` | Unscheduled | No committed feature completion train yet. |
+| `build_canary`, `static_catalogs` | Unscheduled | Permanent development/build checks described above. |
+| `crawl_imf`, `crawl_boj`, `crawl_snb`, `crawl_un_stats` | Unscheduled | Existing source licence gates retain their current values and deadlines. |
+
+Only deadline metadata changes at this cut. The generated development and release
+profiles retain exactly the same values. Product versions remain Train 4 v4.2.0,
+Train 5 v4.3.0, Train 6 v4.4.0, Train 7 v4.5.0, Train 8 v4.6.0 and Train 9 v4.7.0.
+
+The separately authorized [milestone procedure](../../docs/development/TRAIN_3_MILESTONE.md)
+creates only `train-3` after exact-main acceptance. That development marker counts
+for numeric flag expiry, just as a product train does; no product tag accompanies it.

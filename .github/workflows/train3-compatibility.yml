@@ -1,0 +1,50 @@
+name: Train 3 Compatibility
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  contracts:
+    name: Split-plane compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      TRAIN3_EVIDENCE_PATH: ${{ github.workspace }}/train3-evidence.json
+    steps:
+      - name: Check out exact candidate and target history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: backend
+          shared-key: backend
+          save-if: false
+      - name: Install build libraries
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev pkg-config libssl-dev
+      - name: Check runner ownership and fixture evidence offline
+        run: python3 scripts/train3/test-runner.py
+      - name: Run isolated current-Postgres compatibility baseline
+        run: scripts/train3/check-compatibility.sh
+      - name: Upload candidate and fixture evidence
+        if: success()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: train3-compatibility-evidence
+          path: train3-evidence.json
+          if-no-files-found: error
+          retention-days: 14
