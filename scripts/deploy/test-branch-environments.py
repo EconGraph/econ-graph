@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -113,9 +114,54 @@ class RenderTests(unittest.TestCase):
                     self.assertNotIn('ipBlock', peer)
         self.assertEqual(len(proxy_rules), 1)
         policy, rule, peer = proxy_rules[0]
-        self.assertEqual(policy['spec']['podSelector'], {'matchLabels': {'app': 'econ-graph-backend'}})
+        self.assertEqual(policy['spec']['podSelector'], {'matchLabels': {'app': 'branch-data-proxy'}})
         self.assertEqual(rule['ports'], [{'port': 10080, 'protocol': 'TCP'}])
         self.assertIn('podSelector', peer)
+
+    def test_shared_gateway_is_confined_to_fixed_host_and_data_path(self):
+        backend = by_name(self.docs, 'Deployment', 'econ-graph-backend')['spec']['template']['spec']['containers'][0]
+        self.assertIn({'name': 'DATA_GRAPHQL_URL', 'value': 'http://branch-data-proxy:8080/data/graphql'}, backend['env'])
+        config = by_name(self.docs, 'ConfigMap', 'branch-data-proxy')['data']['nginx.conf']
+        self.assertIn('proxy_set_header Host ' + self.slug + '.localhost;', config)
+        self.assertIn('location = /data/graphql {', config)
+        self.assertIn('location / { return 403; }', config)
+        self.assertIn('proxy_set_header Authorization "";', config)
+        self.assertIn('proxy_set_header Cookie "";', config)
+        self.assertNotIn('$http_host', config)
+        self.assertNotIn('$request_uri', config)
+        local = r.render('local', 'b:branch', 'f:branch', True, 'crawler:sha-' + 'a' * 40)
+        self.assertFalse(any(d['metadata']['name'] == 'branch-data-proxy' for d in local))
+
+    def test_local_data_accepts_full_commit_or_digest_and_stops_restored_queue(self):
+        for image in ['crawler:sha-' + 'a' * 40, 'registry:5000/crawler@sha256:' + 'b' * 64,
+                      'crawler:v4.1.0']:
+            docs = r.render('local', 'b:branch', 'f:branch', True, image)
+            worker = by_name(docs, 'Deployment', 'crawler-worker')
+            self.assertEqual(worker['spec']['replicas'], 0)
+            self.assertEqual(worker['spec']['template']['spec']['containers'][0]['image'], image)
+        for image in ['crawler:latest', 'crawler:main', 'crawler:sha-abcdef', 'crawler',
+                      'crawler@sha256:' + 'b' * 63]:
+            with self.assertRaises(ValueError):
+                r.render('local', 'registry.example/b:x', 'registry.example/f:x', True, image)
+        with self.assertRaisesRegex(ValueError, 'only allowed'):
+            r.render('shared', 'registry.example/b:x', 'registry.example/f:x', False, 'crawler:sha-' + 'a' * 40)
+
+    def test_mutable_tags_are_pulled_again_and_commit_images_can_be_loaded_locally(self):
+        self.assertEqual(r.pull_policy('backend:branch-one'), 'IfNotPresent')
+        self.assertEqual(r.pull_policy('registry.example/backend:branch-one'), 'Always')
+        self.assertEqual(r.pull_policy('backend:sha-' + 'a' * 40), 'IfNotPresent')
+        self.assertEqual(r.pull_policy('backend@sha256:' + 'a' * 64), 'IfNotPresent')
+        self.assertEqual(r.pull_policy('localhost:5000/backend:branch-one'), 'Always')
+        self.assertTrue(r.local_image('backend:branch-one'))
+        self.assertFalse(r.local_image('registry.example/backend:branch-one'))
+        docs = r.render('mutable', 'backend:branch-one', 'frontend:sha-' + 'a' * 40)
+        backend = by_name(docs, 'Deployment', 'econ-graph-backend')['spec']['template']
+        frontend = by_name(docs, 'Deployment', 'econ-graph-frontend')['spec']['template']
+        deploy.freshen_mutable_images(docs)
+        first = backend['metadata']['annotations']['econgraph.io/redeploy-token']
+        deploy.freshen_mutable_images(docs)
+        self.assertNotEqual(first, backend['metadata']['annotations']['econgraph.io/redeploy-token'])
+        self.assertNotIn('econgraph.io/redeploy-token', frontend['metadata'].get('annotations', {}))
 
     def test_branch_services_never_claim_production_nodeports(self):
         for d in self.docs:
@@ -207,7 +253,7 @@ class GuardTests(unittest.TestCase):
 
     def test_dryrun_up_down_list_and_build_contact_nothing(self):
         common = ['--context', 'scratch', '--dry-run']
-        for argv in [['up', 'one', '--backend-image', 'b:x', '--frontend-image', 'f:x'], ['down', 'one'], ['list'], ['build-frontend', 'one']]:
+        for argv in [['up', 'one', '--backend-image', 'registry.example/b:x', '--frontend-image', 'registry.example/f:x'], ['down', 'one'], ['list'], ['build-frontend', 'one']]:
             self.assertEqual(self.invoke(argv+common), [])
             # No kubectl is chosen either, so a dry run needs none.
             with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {'HOME': home}, clear=True), \
@@ -223,7 +269,7 @@ class GuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             Path(home, 'kubectl').write_text('#!/bin/sh\nexit 0\n')
             Path(home, 'kubectl').chmod(0o755)
-            for action in [['list'], ['down', 'one'], ['up', 'one', '--backend-image', 'b:x', '--frontend-image', 'f:x']]:
+            for action in [['list'], ['down', 'one'], ['up', 'one', '--backend-image', 'registry.example/b:x', '--frontend-image', 'registry.example/f:x']]:
                 with patch.dict(os.environ, {'HOME': home, 'PATH': home}, clear=True), \
                         patch.object(sys, 'argv', ['deploy-branch.py']+action+['--context', 'kind-econ-graph']), \
                         patch.object(subprocess, 'run', side_effect=AssertionError('contacted')), \
@@ -232,20 +278,57 @@ class GuardTests(unittest.TestCase):
 
     def test_up_rejects_unowned_existing_namespace_before_mutations(self):
         with self.assertRaisesRegex(ValueError, 'ownership'):
-            self.invoke(['up', 'one', '--context', 'scratch', '--backend-image', 'b:x', '--frontend-image', 'f:x'],
+            self.invoke(['up', 'one', '--context', 'scratch', '--backend-image', 'registry.example/b:x', '--frontend-image', 'registry.example/f:x'],
                         lambda cmd: json.dumps({'metadata': {'labels': {'econgraph.io/env': 'production'}}}))
 
     def test_down_absent_namespace_does_not_delete_anything(self):
         calls = self.invoke(['down', 'one', '--context', 'scratch'])
-        self.assertEqual(len(calls), 1)
-        self.assertIn('get', calls[0][0])
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all('get' in call[0] for call in calls))
 
     def test_down_requires_terminal_and_matching_typed_name(self):
         slug, ns = r.identity('one')
-        existing = {'metadata': {'labels': {'econgraph.io/env': 'branch', 'econgraph.io/branch': slug},
-                                 'annotations': {'econgraph.io/branch-name': 'one'}}}
+        existing = {'metadata': self.owned()}
         with patch.object(sys.stdin, 'isatty', return_value=False), self.assertRaisesRegex(ValueError, 'typed'):
             self.invoke(['down', 'one', '--context', 'scratch'], lambda cmd: json.dumps(existing))
+
+    def test_orphan_cleanup_uses_inspected_grant_preconditions(self):
+        _, namespace = r.identity('one')
+        grant = r.grant('one')
+        grant['metadata'].update(uid='grant-uid', resourceVersion='42')
+        error, calls, sent = self.cluster(['down', 'one'], grant=grant, typed=namespace)
+        self.assertIsNone(error)
+        deletes = [c for c in calls if 'delete' in c]
+        self.assertEqual(len(deletes), 1)
+        self.assertIn('--raw', deletes[0])
+        options = next(d for d in sent if d.get('kind') == 'DeleteOptions')
+        self.assertEqual(options['preconditions'], {'uid': 'grant-uid', 'resourceVersion': '42'})
+
+    def test_orphan_cleanup_refuses_namespace_created_during_confirmation(self):
+        _, namespace = r.identity('one')
+        grant = r.grant('one')
+        grant['metadata'].update(uid='grant-uid', resourceVersion='42')
+        reads = 0
+        def respond(cmd):
+            nonlocal reads
+            if 'namespace' in cmd:
+                reads += 1
+                return '' if reads == 1 else json.dumps({'metadata': self.owned()})
+            return json.dumps(grant)
+        with patch.object(sys.stdin, 'isatty', return_value=True), patch('builtins.input', return_value=namespace):
+            with self.assertRaisesRegex(ValueError, 'appeared during confirmation'):
+                self.invoke(['down', 'one', '--context', 'scratch'], respond)
+
+    def test_ownership_is_checked_again_after_acquiring_lock(self):
+        reads = 0
+        def respond(cmd):
+            nonlocal reads
+            if 'namespace' in cmd and 'get' in cmd:
+                reads += 1
+                return json.dumps({'metadata': self.owned(mode='primary' if reads == 1 else 'local')})
+            return ''
+        with self.assertRaisesRegex(ValueError, 'data mode cannot change'):
+            self.invoke(self.UP + ['--context', 'scratch'], respond)
 
     def test_ci_missing_kubectl_fails_before_python_can_skip_parity(self):
         workflow = yaml.safe_load((ROOT/'.github/workflows/ci-core.yml').read_text())
@@ -266,23 +349,33 @@ class GuardTests(unittest.TestCase):
     def test_up_creates_every_secret_key_and_realm_file_the_workloads_use(self):
         slug, namespace = r.identity('one')
         sent = []
+        created = {}
         def fake(command, **kwargs):
             if kwargs.get('input'):
-                sent.extend(d for d in yaml.safe_load_all(kwargs['input']) if d)
+                objects = [d for d in yaml.safe_load_all(kwargs['input']) if d]
+                sent.extend(objects)
+                if 'create' in command:
+                    for obj in objects:
+                        obj['metadata'].update(uid='test-uid', resourceVersion='1')
+                        created[(obj['kind'].lower(), obj['metadata']['name'])] = obj
             code, out = 0, ''
             if 'nc' in command:
                 client, target = command[command.index('exec') + 1], command[-2]
                 code = 0 if ((client == 'branch-network-allow' and target == '10.244.1.3')
-                             or (client == 'branch-network-backend' and target == '10.96.0.13')) else 1
+                             or (client == 'branch-network-proxy' and target == '10.96.0.13')) else 1
             elif 'get' in command and 'json' in command:
                 kind, name = command[command.index('get') + 1:command.index('get') + 3]
-                if kind == 'pod':
+                if (kind, name) in created:
+                    out = json.dumps(created[(kind, name)])
+                elif kind == 'job':
+                    out = json.dumps({'status': {'conditions': [{'type': 'Complete', 'status': 'True'}]}})
+                elif kind == 'pod':
                     out = json.dumps({'status': {'podIP': '10.244.1.3'}})
                 elif kind == 'service':
                     out = json.dumps({'spec': {'clusterIP': {'econ-graph-backend-service': '10.96.0.11',
                         'data-postgres-service': '10.96.0.12', 'econ-graph-gateway-proxy': '10.96.0.13'}[name]}})
             return subprocess.CompletedProcess(command, code, stdout=out)
-        argv = ['deploy-branch.py', 'up', 'one', '--context', 'scratch', '--backend-image', 'b:x', '--frontend-image', 'f:x']
+        argv = ['deploy-branch.py', 'up', 'one', '--context', 'scratch', '--backend-image', 'registry.example/b:x', '--frontend-image', 'registry.example/f:x']
         with patch.object(sys, 'argv', argv), patch.object(subprocess, 'run', side_effect=fake), \
                 patch.dict(os.environ, {'KUBECTL': 'stub-kubectl'}):
             deploy.main()
@@ -303,31 +396,52 @@ class GuardTests(unittest.TestCase):
                     for script in set(re.findall(r'/config/([\w.-]+)', text)):
                         self.assertIn(script, set(realm), (d['metadata']['name'], c['name']))
 
-    def cluster(self, argv, namespace=None, grant=None, present=(), typed=None):
+    def cluster(self, argv, namespace=None, grant=None, present=(), typed=None, delete_namespace_immediately=False,
+                context='scratch'):
         """Run deploy-branch.py against a fake cluster; return (error, calls, sent documents)."""
         calls, sent = [], []
+        created = {}
+        namespace_gone = False
         def fake(command, **kwargs):
+            nonlocal namespace_gone
             calls.append(command)
+            if 'delete' in command and '--raw' in command:
+                target = command[command.index('--raw') + 1]
+                if re.fullmatch(r'/api/v1/namespaces/[^/]+', target):
+                    namespace_gone = True
+                    if delete_namespace_immediately:
+                        created.clear()
             if kwargs.get('input'):
-                sent.extend(d for d in yaml.safe_load_all(kwargs['input']) if d)
+                objects = [d for d in yaml.safe_load_all(kwargs['input']) if d]
+                sent.extend(objects)
+                if 'create' in command:
+                    for obj in objects:
+                        obj['metadata'].update(uid='test-uid', resourceVersion='1')
+                        created[(obj['kind'].lower(), obj['metadata']['name'])] = obj
             code, out = 0, ''
             if 'nc' in command:
                 client, target = command[command.index('exec') + 1], command[-2]
                 code = 0 if ((client == 'branch-network-allow' and target == '10.244.1.3')
-                             or (client == 'branch-network-backend' and target == '10.96.0.13')) else 1
+                             or (client == 'branch-network-proxy' and target == '10.96.0.13')) else 1
             elif 'get' in command and 'json' in command:
                 kind, name = command[command.index('get') + 1:command.index('get') + 3]
-                found = {'namespace': namespace, 'referencegrant': grant,
+                found = created.get((kind, name)) or {'namespace': namespace, 'referencegrant': grant,
+                         'job': {'status': {'conditions': [{'type': 'Complete', 'status': 'True'}]}},
                          'pod': {'status': {'podIP': '10.244.1.3'}},
                          'service': {'spec': {'clusterIP': {'econ-graph-backend-service': '10.96.0.11',
                              'data-postgres-service': '10.96.0.12', 'econ-graph-gateway-proxy': '10.96.0.13'}.get(name)}}}.get(kind)
+                if callable(found):
+                    found = found()
+                if namespace_gone and (kind == 'namespace' or (delete_namespace_immediately and kind == 'configmap')):
+                    found = None
                 out = json.dumps(found) if found else ''
             elif 'get' in command and 'secret' in command:
                 name = command[command.index('secret') + 1]
                 out = 'secret/' + name if name in present else ''
             return subprocess.CompletedProcess(command, code, stdout=out)
         error = None
-        with patch.object(sys, 'argv', ['deploy-branch.py'] + argv + ['--context', 'scratch']), \
+        with patch.object(sys, 'argv', ['deploy-branch.py'] + argv + ['--context', context]), \
+                patch.object(deploy, 'pinned_kind', return_value='/pinned/kind-v0.33.0'), \
                 patch.object(subprocess, 'run', side_effect=fake), patch.dict(os.environ, {'KUBECTL': 'stub-kubectl'}):
             if typed is None:
                 try:
@@ -352,10 +466,11 @@ class GuardTests(unittest.TestCase):
 
     def owned(self, branch='one', mode='primary', **meta):
         slug, _ = r.identity(branch)
-        return dict({'labels': {'econgraph.io/env': 'branch', 'econgraph.io/branch': slug, 'econgraph.io/data-mode': mode},
+        return dict({'uid': 'namespace-uid', 'resourceVersion': '23',
+                     'labels': {'econgraph.io/env': 'branch', 'econgraph.io/branch': slug, 'econgraph.io/data-mode': mode},
                      'annotations': {'econgraph.io/branch-name': branch}}, **meta)
 
-    UP = ['up', 'one', '--backend-image', 'b:x', '--frontend-image', 'f:x']
+    UP = ['up', 'one', '--backend-image', 'registry.example/b:x', '--frontend-image', 'registry.example/f:x']
 
     @staticmethod
     def mutations(calls):
@@ -365,6 +480,29 @@ class GuardTests(unittest.TestCase):
         error, calls, sent = self.cluster(self.UP, namespace={'metadata': self.owned()})
         self.assertIsNone(error)
         self.assertTrue(any(d['kind'] == 'ReferenceGrant' for d in sent))
+
+    def test_local_only_up_loads_images_before_workloads_and_keeps_node_pull_policy(self):
+        argv = ['up', 'one', '--backend-image', 'backend:branch-one', '--frontend-image', 'frontend:branch-one']
+        error, calls, sent = self.cluster(argv, namespace={'metadata': self.owned()}, context='kind-scratch')
+        self.assertIsNone(error)
+        load = ['/pinned/kind-v0.33.0', 'load', 'docker-image', '--name', 'scratch', 'backend:branch-one', 'frontend:branch-one']
+        self.assertIn(load, calls)
+        self.assertLess(calls.index(load), next(i for i, cmd in enumerate(calls) if 'apply' in cmd))
+        for name in ['econ-graph-backend', 'econ-graph-frontend', 'branch-data-proxy']:
+            template = by_name(sent, 'Deployment', name)['spec']['template']
+            self.assertIn('econgraph.io/redeploy-token', template['metadata']['annotations'])
+            self.assertTrue(all(c['imagePullPolicy'] == 'IfNotPresent' for c in template['spec']['containers']))
+
+    def test_up_stamps_reused_orphan_grant_with_new_namespace_identity(self):
+        grant = r.grant('one')
+        grant['metadata'].update(uid='grant-uid', resourceVersion='42',
+                                 annotations={'econgraph.io/namespace-uid': 'old-namespace-uid'})
+        error, _, sent = self.cluster(self.UP, namespace={'metadata': self.owned(uid='new-namespace-uid')}, grant=grant)
+        self.assertIsNone(error)
+        applied = next(d for d in sent if d['kind'] == 'ReferenceGrant')
+        self.assertEqual(applied['metadata']['annotations']['econgraph.io/namespace-uid'], 'new-namespace-uid')
+        self.assertNotEqual(applied['metadata']['annotations'], grant['metadata']['annotations'],
+                            'reusing an old grant must force an API resourceVersion change')
 
     def test_up_refuses_a_terminating_namespace_before_mutations(self):
         error, calls, _ = self.cluster(self.UP, namespace={'metadata': self.owned(deletionTimestamp='2026-10-28T00:00:00Z')})
@@ -382,9 +520,34 @@ class GuardTests(unittest.TestCase):
         error, calls, _ = self.cluster(['down', 'one'], namespace=existing, typed=namespace + 'x')
         self.assertRegex(str(error), 'typed namespace confirmation')
         self.assertEqual(self.mutations(calls), [])
-        error, calls, _ = self.cluster(['down', 'one'], namespace=existing, typed=namespace)
+        error, calls, sent = self.cluster(['down', 'one'], namespace=existing, typed=namespace)
         self.assertIsNone(error)
-        self.assertIn(['stub-kubectl', '--context', 'scratch', 'delete', 'namespace', namespace], calls)
+        self.assertIn(['stub-kubectl', '--context', 'scratch', 'delete', '--raw',
+                       '/api/v1/namespaces/' + namespace, '-f', '-'], calls)
+        options = next(d for d in sent if d.get('kind') == 'DeleteOptions')
+        self.assertEqual(options['preconditions'], {'uid': 'namespace-uid', 'resourceVersion': '23'})
+        self.assertFalse(any('delete' in c and 'namespace' in c for c in calls))
+
+    def test_down_refuses_namespace_replaced_during_confirmation_even_with_same_labels(self):
+        _, namespace = r.identity('one')
+        versions = iter([{'metadata': self.owned()}, {'metadata': self.owned(uid='replacement-uid')}])
+        error, calls, sent = self.cluster(['down', 'one'], namespace=lambda: next(versions), typed=namespace)
+        self.assertRegex(str(error), 'replaced during confirmation')
+        self.assertFalse(any('delete' in c and any('/api/v1/namespaces/' + namespace == arg for arg in c)
+                             for c in calls))
+        self.assertFalse(any(d.get('kind') == 'DeleteOptions' and d['preconditions']['uid'] == 'replacement-uid'
+                             for d in sent))
+        lock_deletes = [c for c in calls if '--raw' in c and any(arg.endswith('/configmaps/branch-deploy-lock') for arg in c)]
+        self.assertEqual(len(lock_deletes), 1, 'own lock is still cleaned up after refusal')
+
+    def test_down_tolerates_lock_disappearing_with_deleted_namespace(self):
+        _, namespace = r.identity('one')
+        error, calls, _ = self.cluster(['down', 'one'], namespace={'metadata': self.owned()},
+                                       typed=namespace, delete_namespace_immediately=True)
+        self.assertIsNone(error)
+        self.assertTrue(any('--raw' in c and '/api/v1/namespaces/' + namespace in c for c in calls))
+        self.assertFalse(any('--raw' in c and any(arg.endswith('/configmaps/branch-deploy-lock') for arg in c)
+                             for c in calls))
 
     def test_down_refuses_a_reference_grant_it_does_not_own(self):
         _, namespace = r.identity('one')
@@ -392,6 +555,16 @@ class GuardTests(unittest.TestCase):
         error, calls, _ = self.cluster(['down', 'one'], namespace={'metadata': self.owned()}, grant=foreign, typed=namespace)
         self.assertRegex(str(error), 'ReferenceGrant ownership differs')
         self.assertFalse([c for c in calls if 'delete' in c and ('referencegrant' in c or 'namespace' in c)])
+
+    def test_down_refuses_grant_bound_to_another_namespace_incarnation(self):
+        _, namespace = r.identity('one')
+        grant = r.grant('one')
+        grant['metadata']['annotations'] = {'econgraph.io/namespace-uid': 'different-namespace'}
+        error, calls, _ = self.cluster(['down', 'one'], namespace={'metadata': self.owned()}, grant=grant, typed=namespace)
+        self.assertRegex(str(error), 'another namespace incarnation')
+        self.assertFalse(any('--raw' in c and any(arg.startswith('/apis/gateway.networking.k8s.io/')
+                                                  or arg == '/api/v1/namespaces/' + namespace for arg in c)
+                             for c in calls))
 
     def test_up_refuses_a_reference_grant_it_does_not_own(self):
         foreign = {'metadata': {'labels': {'econgraph.io/branch': 'other'}}}
@@ -419,7 +592,7 @@ class GuardTests(unittest.TestCase):
     def test_build_frontend_uses_the_kind_docker_daemon_not_the_callers(self):
         for override, expected in [(None, 'unix:///var/run/docker.sock'), ('', 'unix:///var/run/docker.sock'),
                                    ('unix:///run/other.sock', 'unix:///run/other.sock')]:
-            env = {'DOCKER_HOST': 'unix:///run/user/1000/docker.sock'}
+            env = {'DOCKER_HOST': 'unix:///run/user/1000/docker.sock', 'DOCKER_CONTEXT': 'unrelated-daemon'}
             if override is not None:
                 env['ECONGRAPH_DOCKER_HOST'] = override
             runs = []
@@ -429,15 +602,53 @@ class GuardTests(unittest.TestCase):
             (cmd, kwargs), = runs
             self.assertEqual(cmd[:2], ['docker', 'build'])
             self.assertEqual(kwargs['env']['DOCKER_HOST'], expected)
+            self.assertNotIn('DOCKER_CONTEXT', kwargs['env'])
             with patch.dict(os.environ, env), patch.object(sys, 'argv', ['deploy-branch.py', 'build-frontend', 'one', '--context', 'x', '--dry-run']), \
                     patch('sys.stdout', new_callable=io.StringIO) as out:
                 deploy.main()
             self.assertTrue(out.getvalue().startswith('DOCKER_HOST=' + expected + ' docker build '))
 
+    def test_kind_load_uses_build_daemon_and_includes_immutable_local_data(self):
+        args = type('Args', (), {'context': 'kind-scratch', 'backend_image': 'backend:branch-one',
+                                 'frontend_image': 'frontend:sha-' + 'a' * 40,
+                                 'local_data': True, 'data_image': 'worker:sha-' + 'b' * 40,
+                                 'kind_binary': '/pinned/kind-v0.33.0'})()
+        runs = []
+        with patch.dict(os.environ, {'DOCKER_HOST': 'unix:///run/user/1000/docker.sock', 'DOCKER_CONTEXT': 'unrelated-daemon',
+                                      'ECONGRAPH_DOCKER_HOST': 'unix:///var/run/docker.sock'}), \
+                patch.object(subprocess, 'run', side_effect=lambda cmd, **kw: runs.append((cmd, kw))):
+            deploy.load_local_images(args)
+        (command, options), = runs
+        self.assertEqual(command, ['/pinned/kind-v0.33.0', 'load', 'docker-image', '--name', 'scratch',
+                                   args.backend_image, args.frontend_image, args.data_image])
+        self.assertEqual(options['env']['DOCKER_HOST'], 'unix:///var/run/docker.sock')
+        self.assertNotIn('DOCKER_CONTEXT', options['env'])
+        self.assertEqual(options['timeout'], 900)
+        args.context = 'primary'
+        with patch.object(subprocess, 'run', side_effect=AssertionError('called')):
+            with self.assertRaisesRegex(ValueError, 'explicit kind-'):
+                deploy.load_local_images(args)
+        args.backend_image = 'registry.example/backend:branch-one'
+        args.frontend_image = 'ghcr.io/econgraph/frontend:sha-' + 'a' * 40
+        args.data_image = 'localhost:5000/worker:sha-' + 'b' * 40
+        with patch.object(subprocess, 'run', side_effect=AssertionError('called')):
+            deploy.load_local_images(args)
+
+    def test_selected_docker_environment_preserves_credentials_and_explicit_tcp_tls(self):
+        source = {'DOCKER_CONTEXT': 'unrelated-daemon', 'DOCKER_HOST': 'unix:///wrong.sock',
+                  'ECONGRAPH_DOCKER_HOST': 'tcp://scratch:2376', 'DOCKER_CONFIG': '/trusted/config',
+                  'DOCKER_TLS_VERIFY': '1', 'DOCKER_CERT_PATH': '/trusted/certs', 'UNCHANGED': 'value'}
+        selected = deploy.selected_docker_env(source)
+        self.assertEqual(selected['DOCKER_HOST'], 'tcp://scratch:2376')
+        self.assertNotIn('DOCKER_CONTEXT', selected)
+        for key in ['DOCKER_CONFIG', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH', 'UNCHANGED']:
+            self.assertEqual(selected[key], source[key])
+        self.assertEqual(source['DOCKER_CONTEXT'], 'unrelated-daemon', 'do not mutate the caller environment')
+
     def test_local_data_rejects_untagged_crawler(self):
         with self.assertRaises(SystemExit):
             self.invoke(['up', 'one', '--context', 'scratch', '--dry-run', '--local-data', '--data-image', 'worker:latest',
-                         '--seed-dir', '/absent', '--backend-image', 'b:x', '--frontend-image', 'f:x'])
+                         '--seed-dir', '/absent', '--seed-sha256', 'a' * 64, '--backend-image', 'registry.example/b:x', '--frontend-image', 'registry.example/f:x'])
 
     def test_seed_rejects_missing_verification_and_checksum_mismatch_before_cluster_access(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -457,7 +668,7 @@ class GuardTests(unittest.TestCase):
             (path/'econ_graph.dump').write_bytes(b'synthetic data-only fixture')
             checksum = hashlib.sha256(b'synthetic data-only fixture').hexdigest()
             (path/'SHA256SUMS').write_text(checksum+'  econ_graph.dump\n')
-            args = type('Args', (), {'seed_dir': path, 'context': 'scratch'})()
+            args = type('Args', (), {'seed_dir': path, 'context': 'scratch', 'seed_sha256': checksum})()
             for toc in ['1; 1259 1 TABLE public chart_annotations postgres\n',
                         '2; 0 1 TABLE DATA public chart_annotations postgres\n',
                         '1; 1259 1 TABLE private economic_series postgres\n',
@@ -477,7 +688,7 @@ class SeedRestoreTests(unittest.TestCase):
         (path/'econ_graph.dump').write_bytes(b'synthetic data-only fixture')
         checksum = hashlib.sha256(b'synthetic data-only fixture').hexdigest()
         (path/'SHA256SUMS').write_text(checksum+'  econ_graph.dump\n')
-        return type('Args', (), {'seed_dir': path, 'context': 'scratch',
+        return type('Args', (), {'seed_dir': path, 'context': 'scratch', 'seed_sha256': checksum,
                                  'kubectl': staticmethod(lambda: ['stub-kubectl', '--context', 'scratch'])})(), checksum
 
     def seed(self, marker=None, tables='0'):
@@ -489,9 +700,9 @@ class SeedRestoreTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, stdout='1; 1259 1 TABLE public economic_series postgres\n')
             def k(*cmd, **kwargs):
                 execs.append(cmd)
-                return subprocess.CompletedProcess(cmd, 0, stdout=tables + '\n')
+                return subprocess.CompletedProcess(cmd, 0, stdout=('10485760' if 'df -Pk' in ' '.join(cmd) else tables) + '\n')
             applied = []
-            with patch.object(subprocess, 'run', side_effect=run):
+            with patch.object(subprocess, 'run', side_effect=run), patch.object(deploy, 'inspect_seed_size', return_value=128):
                 deploy.seed_local(args, 'branch', k, lambda *a: marker and {'data': {'sha256': marker(checksum)}}, applied.extend)
             return runs, execs, applied
 
@@ -517,17 +728,267 @@ class SeedRestoreTests(unittest.TestCase):
             (path/'econ_graph.dump').write_bytes(b'synthetic data-only fixture')
             checksum = hashlib.sha256(b'synthetic data-only fixture').hexdigest()
             (path/'SHA256SUMS').write_text(checksum+'  econ_graph.dump\n')
-            args = type('Args', (), {'seed_dir': path, 'context': 'scratch',
+            args = type('Args', (), {'seed_dir': path, 'context': 'scratch', 'seed_sha256': checksum,
                                      'kubectl': staticmethod(lambda: ['stub-kubectl', '--context', 'scratch'])})()
             runs = []
             def run(command, **kwargs):
                 runs.append(command)
                 return subprocess.CompletedProcess(command, 0, stdout='1; 1259 1 TABLE public economic_series postgres\n')
-            k = lambda *cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout='0\n')
-            with patch.object(subprocess, 'run', side_effect=run):
+            k = lambda *cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout=('10485760' if 'df -Pk' in ' '.join(cmd) else '0') + '\n')
+            with patch.object(subprocess, 'run', side_effect=run), patch.object(deploy, 'inspect_seed_size', return_value=128):
                 deploy.seed_local(args, 'branch', k, lambda *a: None, lambda docs: None)
             restore = next(c for c in runs if 'pg_restore' in c and 'exec' in c)
             self.assertEqual(restore[:3], ['stub-kubectl', '--context', 'scratch'])
+            # Bootstrap extensions belong to postgres, so a restore running as
+            # econgraph must not try to change their SQL object comments. This
+            # flag does not omit rows from the product's comments tables.
+            self.assertIn('--no-comments', restore)
+
+    def test_insufficient_node_space_stops_before_restore(self):
+        with tempfile.TemporaryDirectory() as temp:
+            args, _ = self.bundle(temp)
+            commands = []
+            def run(command, **kwargs):
+                commands.append(command)
+                return subprocess.CompletedProcess(command, 0, stdout='1; 1259 1 TABLE public economic_series postgres\n')
+            def k(*cmd, **kwargs):
+                return subprocess.CompletedProcess(cmd, 0, stdout='1\n' if 'df -Pk' in ' '.join(cmd) else '0\n')
+            with patch.object(subprocess, 'run', side_effect=run), patch.object(deploy, 'inspect_seed_size', return_value=128):
+                with self.assertRaisesRegex(ValueError, 'insufficient node disk'):
+                    deploy.seed_local(args, 'branch', k, lambda *a: None, lambda docs: None)
+            self.assertFalse(any('exec' in c and 'pg_restore' in c for c in commands))
+
+    def test_disk_preflight_uses_rendered_postgres_data_volume(self):
+        docs = r.render('local', 'backend:branch', 'frontend:branch', True, 'worker:sha-' + 'a' * 40)
+        pod = by_name(docs, 'StatefulSet', 'postgresql')['spec']['template']['spec']
+        postgres = next(c for c in pod['containers'] if c['name'] == 'postgresql')
+        pgdata = next(e['value'] for e in postgres['env'] if e['name'] == 'PGDATA')
+        mount = next(v['mountPath'] for v in postgres['volumeMounts'] if pgdata.startswith(v['mountPath'] + '/'))
+        _, execs, _ = self.seed()
+        command = next(cmd for cmd in execs if 'df -Pk' in ' '.join(cmd))
+        self.assertIn('df -Pk ' + mount + ' |', command[-1])
+
+    def test_archive_size_limit_stops_before_archive_or_cluster_commands(self):
+        with tempfile.TemporaryDirectory() as temp:
+            args, _ = self.bundle(temp)
+            with patch.object(deploy, 'MAX_SEED_BYTES', 1), patch.object(subprocess, 'run', side_effect=AssertionError('called')):
+                with self.assertRaisesRegex(ValueError, 'bounded-fixture'):
+                    deploy.seed_local(args, 'branch', None, None, None)
+
+    def test_bundle_cannot_authorize_its_own_provenance_hash(self):
+        with tempfile.TemporaryDirectory() as temp:
+            args, _ = self.bundle(temp)
+            args.seed_sha256 = '0' * 64
+            with patch.object(subprocess, 'run', side_effect=AssertionError('called')):
+                with self.assertRaisesRegex(ValueError, 'reviewed external'):
+                    deploy.seed_local(args, 'branch', None, None, None)
+
+
+class JobWaitTests(unittest.TestCase):
+    def test_namespace_wait_observes_only_confirmed_uid_and_never_mutates_replacement(self):
+        for result in [None, {'metadata': {'uid': 'replacement'}}]:
+            calls = []
+            def lookup(*args):
+                calls.append(args)
+                return result
+            with patch.object(deploy.time, 'sleep', side_effect=AssertionError('slept')):
+                deploy.wait_namespace_deleted(lookup, 'branch', 'confirmed')
+            self.assertEqual(calls, [('namespace', 'branch')])
+
+    def test_namespace_wait_has_a_bounded_gc_deadline(self):
+        with patch.object(deploy.time, 'monotonic', side_effect=[0, 0, 121]), patch.object(deploy.time, 'sleep'):
+            with self.assertRaisesRegex(ValueError, 'deletion did not complete within 120s'):
+                deploy.wait_namespace_deleted(lambda *a: {'metadata': {'uid': 'confirmed'}}, 'branch', 'confirmed')
+
+    def test_failed_job_stops_without_waiting_out_deadline(self):
+        def k(*cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({'status': {'conditions': [
+                {'type': 'Failed', 'status': 'True'}]}}))
+        with patch.object(deploy.time, 'sleep', side_effect=AssertionError('slept')):
+            with self.assertRaisesRegex(ValueError, 'Job branch/migrate failed'):
+                deploy.wait_job(k, 'branch', 'migrate', 900)
+
+    def test_completion_and_timeout_are_explicit(self):
+        def k(*cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({'status': {'conditions': [
+                {'type': 'Complete', 'status': 'True'}]}}))
+        deploy.wait_job(k, 'branch', 'migrate', 900)
+        with self.assertRaisesRegex(ValueError, 'did not complete'):
+            deploy.wait_job(k, 'branch', 'migrate', 0)
+
+
+
+def run_owned_proxy(docker, arguments, env):
+    """Bound the optional smoke container and reap it even if the client stops."""
+    owner = secrets.token_hex(16)
+    name = 'econgraph-branch-proxy-' + owner
+    label = 'econgraph.branch-proxy.owner'
+    command = [*docker, 'run', '--rm', '--name', name, '--label', label + '=' + owner,
+               '--memory', '128m', '--cpus', '0.5', '--pids-limit', '64', *arguments]
+    try:
+        subprocess.run(command, check=True, timeout=30, env=env, capture_output=True, text=True)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        # Do not surface daemon output or the future contents of the shell argv.
+        raise RuntimeError('isolated branch proxy smoke failed or timed out') from None
+    finally:
+        try:
+            # An exact random name plus owner label finds created-but-not-started
+            # containers too. A successful --rm run normally leaves no match.
+            listed = subprocess.run([*docker, 'ps', '--all', '--no-trunc',
+                                     '--filter', 'name=^/' + name + '$',
+                                     '--filter', 'label=' + label + '=' + owner,
+                                     '--format', '{{.ID}}'], check=True, timeout=10,
+                                    env=env, capture_output=True, text=True).stdout.splitlines()
+            if len(listed) > 1 or any(not re.fullmatch('[0-9a-f]{64}', cid) for cid in listed):
+                raise ValueError('unexpected proxy container inventory; refusing cleanup')
+            for cid in listed:
+                inspected = subprocess.run([*docker, 'inspect', '--format',
+                                            '{{.Id}}|{{index .Config.Labels "' + label + '"}}', cid],
+                                           check=False, timeout=10, env=env, capture_output=True, text=True)
+                if inspected.returncode:
+                    continue  # --rm may have finished between inventory and inspection.
+                if inspected.stdout.strip() != cid + '|' + owner:
+                    raise ValueError('proxy container ownership changed; refusing cleanup')
+                # Use the inspected immutable ID, never a potentially replaced name.
+                subprocess.run([*docker, 'rm', '--force', cid], check=True, timeout=10,
+                               env=env, capture_output=True, text=True)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            raise RuntimeError('could not verify cleanup of the isolated branch proxy container') from None
+
+
+class ProxyCleanupTests(unittest.TestCase):
+    def test_timeout_interrupt_and_failed_start_remove_only_the_owned_id(self):
+        docker = ['docker', '--host=unix:///test.sock']
+        owner, cid = 'ab' * 16, 'c' * 64
+        for error in [subprocess.TimeoutExpired('docker', 30), KeyboardInterrupt(),
+                      subprocess.CalledProcessError(1, 'docker')]:
+            calls = []
+            def execute(command, **kwargs):
+                calls.append(command)
+                operation = command[len(docker)]
+                if operation == 'run':
+                    raise error
+                output = cid + '\n' if operation == 'ps' else cid + '|' + owner + '\n'
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr='')
+            with self.subTest(error=type(error).__name__):
+                with patch('secrets.token_hex', return_value=owner), patch('subprocess.run', side_effect=execute):
+                    expected = KeyboardInterrupt if isinstance(error, KeyboardInterrupt) else RuntimeError
+                    with self.assertRaises(expected):
+                        run_owned_proxy(docker, ['fake-image'], {})
+                self.assertEqual(calls[-1], [*docker, 'rm', '--force', cid])
+                run = calls[0]
+                for flag, value in [('--memory', '128m'), ('--cpus', '0.5'), ('--pids-limit', '64')]:
+                    self.assertEqual(run[run.index(flag) + 1], value)
+                self.assertIn('label=econgraph.branch-proxy.owner=' + owner, calls[1])
+
+    def test_foreign_container_is_not_removed(self):
+        docker = ['docker', '--host=unix:///test.sock']
+        owner, cid = 'ab' * 16, 'c' * 64
+        calls = []
+        def execute(command, **kwargs):
+            calls.append(command)
+            operation = command[len(docker)]
+            if operation == 'run':
+                raise subprocess.TimeoutExpired('docker', 30)
+            output = cid + '\n' if operation == 'ps' else cid + '|foreign-owner\n'
+            return subprocess.CompletedProcess(command, 0, stdout=output, stderr='')
+        with patch('secrets.token_hex', return_value=owner), patch('subprocess.run', side_effect=execute):
+            with self.assertRaisesRegex(ValueError, 'ownership changed'):
+                run_owned_proxy(docker, ['fake-image'], {})
+        self.assertFalse(any(command[len(docker)] == 'rm' for command in calls))
+
+    def test_failed_create_with_no_owned_resource_never_removes_a_name(self):
+        docker = ['docker', '--host=unix:///test.sock']
+        def execute(command, **kwargs):
+            if command[len(docker)] == 'run':
+                raise subprocess.CalledProcessError(1, command, stderr='private daemon output')
+            return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+        with patch('subprocess.run', side_effect=execute) as run:
+            with self.assertRaisesRegex(RuntimeError, '^isolated branch proxy smoke failed or timed out$'):
+                run_owned_proxy(docker, ['fake-image'], {})
+        self.assertEqual([call.args[0][len(docker)] for call in run.call_args_list], ['run', 'ps'])
+
+
+@unittest.skipUnless(os.environ.get('BRANCH_PROXY_IMAGE'), 'set BRANCH_PROXY_IMAGE for isolated nginx runtime check')
+class ProxyRuntimeTests(unittest.TestCase):
+    def test_http_requests_cannot_select_another_host_path_or_forward_credentials(self):
+        config = r.data_proxy('unused', 'only-this-branch.localhost')[0]['data']['nginx.conf']
+        # Replace only the upstream port with a loopback canary in the same
+        # network-isolated container. Exercise the generated proxy rules.
+        config = config.replace('.svc.cluster.local/data/graphql', '.svc.cluster.local:18080/data/graphql')
+        end = config.rfind('}')
+        config = config[:end] + '''server {
+          listen 18080;
+          location = /data/graphql { return 200 "$host|$http_authorization|$http_cookie"; }
+          location / { return 500; }
+        }
+''' + config[end:]
+        with tempfile.TemporaryDirectory() as temp:
+            conf = Path(temp)/'nginx.conf'
+            conf.write_text(config)
+            docker = ['docker', '--host=' + os.environ.get('BRANCH_PROXY_DOCKER_HOST', 'unix:///var/run/docker.sock')]
+            arguments = ['--pull=never', '--network=none', '--read-only',
+                       '--tmpfs', '/tmp:rw,size=67108864', '--user', '101', '--cap-drop', 'ALL',
+                       '--security-opt', 'no-new-privileges', '--add-host',
+                       'econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local:127.0.0.1',
+                       '--mount', 'type=bind,src=' + str(conf) + ',dst=/branch/nginx.conf,readonly',
+                       '--entrypoint', 'sh', os.environ['BRANCH_PROXY_IMAGE'], '-ec', '''
+nginx -c /branch/nginx.conf -g 'daemon off;' &
+for i in 1 2 3 4 5; do
+  wget -qO /dev/null http://127.0.0.1:8080/health && break
+  sleep 1
+done
+body="$(wget -qO- --header 'Host: another-branch.localhost' --header 'Authorization: Bearer secret' --header 'Cookie: secret=yes' http://127.0.0.1:8080/data/graphql)"
+[ "$body" = 'only-this-branch.localhost||' ]
+for path in /graphql /idp/realms/econ-graph /data/graphql/extra; do
+  if wget -qO /dev/null "http://127.0.0.1:8080$path"; then exit 1; fi
+done
+''']
+            env = dict(os.environ)
+            for key in ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH']:
+                env.pop(key, None)
+            run_owned_proxy(docker, arguments, env)
+
+
+
+class PinnedKindTests(unittest.TestCase):
+    def test_pinned_binary_wins_over_old_path_kind_and_honors_xdg_data_home(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            old = root/'old-bin'
+            old.mkdir()
+            marker = root/'old-kind-was-run'
+            (old/'kind').write_text('#!/bin/sh\ntouch "' + str(marker) + '"\necho "kind v0.30.0"\n')
+            (old/'kind').chmod(0o755)
+            binary = root/'xdg/econgraph/bin/kind-v0.33.0'
+            binary.parent.mkdir(parents=True)
+            binary.write_text('#!/bin/sh\necho "kind v0.33.0 go1.26 linux/amd64"\n')
+            binary.chmod(0o755)
+            selected = deploy.pinned_kind({'HOME': str(root/'home'), 'XDG_DATA_HOME': str(root/'xdg'),
+                                           'PATH': str(old) + ':/usr/bin:/bin'})
+            self.assertEqual(selected, str(binary))
+            self.assertFalse(marker.exists())
+
+    def test_missing_or_old_pinned_binary_fails_with_install_instruction(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            env = {'HOME': str(root), 'PATH': '/usr/bin:/bin'}
+            with self.assertRaisesRegex(ValueError, 'install-kind.sh'):
+                deploy.pinned_kind(env)
+            binary = root/'.local/share/econgraph/bin/kind-v0.33.0'
+            binary.parent.mkdir(parents=True)
+            binary.write_text('#!/bin/sh\necho "kind v0.30.0"\n')
+            binary.chmod(0o755)
+            with self.assertRaisesRegex(ValueError, 'at least v0.33.0'):
+                deploy.pinned_kind(env)
+
+    def test_missing_pin_stops_before_any_cluster_command(self):
+        argv = ['deploy-branch.py', 'up', 'one', '--context', 'kind-scratch',
+                '--backend-image', 'backend:branch', '--frontend-image', 'frontend:branch']
+        with patch.object(sys, 'argv', argv), patch.object(deploy, 'pinned_kind', side_effect=ValueError('missing pin')), \
+                patch.object(subprocess, 'run', side_effect=AssertionError('cluster command before kind validation')):
+            with self.assertRaisesRegex(ValueError, 'missing pin'):
+                deploy.main()
 
 
 class KubectlChoiceTests(unittest.TestCase):
@@ -597,7 +1058,7 @@ class KubectlChoiceTests(unittest.TestCase):
 
 
 class NetworkProbeTests(unittest.TestCase):
-    def check(self, insecure=False, primary_open=False, proxy_open=False, canary_open=True, local_data=False, backend_proxy=True):
+    def check(self, insecure=False, primary_open=False, proxy_open=False, canary_open=True, local_data=False, backend_proxy=True, backend_open=False):
         network = module('network', 'branch-network-check.py')
         calls = []
         def k(*cmd, **kwargs):
@@ -608,7 +1069,7 @@ class NetworkProbeTests(unittest.TestCase):
                 allowed = ((client == 'branch-network-allow' and target == '10.244.1.3' and canary_open)
                            or (client == 'branch-network-deny' and insecure)
                            or (target in ['10.96.0.11', '10.96.0.12'] and primary_open)
-                           or (target == '10.96.0.13' and ((client == 'branch-network-backend' and backend_proxy) or proxy_open)))
+                           or (target == '10.96.0.13' and ((client == 'branch-network-proxy' and backend_proxy) or proxy_open or (client == 'branch-network-backend' and backend_open))))
                 code = 0 if allowed else 1
             return subprocess.CompletedProcess(cmd, code, stdout='')
         def lookup(kind, name, namespace):
@@ -640,6 +1101,10 @@ class NetworkProbeTests(unittest.TestCase):
             self.check(local_data=True, backend_proxy=True)
         with self.assertRaisesRegex(ValueError, 'does not match the selected branch data mode'):
             self.check(local_data=False, backend_proxy=False)
+
+    def test_backend_cannot_select_another_host_on_shared_listener(self):
+        with self.assertRaisesRegex(ValueError, 'select another branch Host'):
+            self.check(backend_open=True)
 
     def test_primary_or_nonbackend_proxy_access_fails_closed(self):
         with self.assertRaisesRegex(ValueError, 'directly reach'):
