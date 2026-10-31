@@ -84,15 +84,21 @@ export function parseRange(range) {
   });
 }
 
-/** Whether `version` (a plain semver string) is in `range` (see parseRange). */
+/** Whether `version` (a plain semver string) is in `range` (see parseRange). As in npm's
+ * semver, a prerelease version is in a comparator set only if some comparator in it names a
+ * prerelease of the same major.minor.patch: `>=3.0.0 <4.0.0` does not take `4.0.0-alpha.1`, and
+ * `<=3.1.5` does not take `3.1.5-rc.1`. */
 export function satisfies(version, range) {
   const v = parseVersion(version);
   if (!v) return false;
-  return parseRange(range).some(set =>
-    set.every(({ op, version: bound }) => {
-      const c = compareVersions(v, bound);
-      return { '=': c === 0, '>': c > 0, '>=': c >= 0, '<': c < 0, '<=': c <= 0 }[op];
-    })
+  const sameRelease = bound => bound[0] === v[0] && bound[1] === v[1] && bound[2] === v[2];
+  return parseRange(range).some(
+    set =>
+      set.every(({ op, version: bound }) => {
+        const c = compareVersions(v, bound);
+        return { '=': c === 0, '>': c > 0, '>=': c >= 0, '<': c < 0, '<=': c <= 0 }[op];
+      }) &&
+      (v[3].length === 0 || set.some(({ version: bound }) => bound[3].length > 0 && sameRelease(bound)))
   );
 }
 
@@ -117,7 +123,13 @@ export function loadAllowlist(path = defaultAllowlistPath) {
     } catch (err) {
       throw new Error(`${path}: allowlist entry ${entry.id} (${entry.package}): ${err.message}`);
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.reviewBy) || Number.isNaN(Date.parse(`${entry.reviewBy}T00:00:00Z`))) {
+    // Round-tripped, since Date.parse rolls an impossible day over (2027-02-30 to 2027-03-02).
+    const reviewBy = new Date(`${entry.reviewBy}T00:00:00Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(entry.reviewBy) ||
+      Number.isNaN(reviewBy.getTime()) ||
+      reviewBy.toISOString().slice(0, 10) !== entry.reviewBy
+    ) {
       throw new Error(`${path}: allowlist entry ${entry.id} reviewBy "${entry.reviewBy}" is not YYYY-MM-DD`);
     }
     if (

@@ -245,9 +245,19 @@ describe('version ranges', () => {
   });
 
   it('orders prereleases below their release', () => {
-    expect(satisfies('4.0.0-rc.1', '<4.0.0')).toBe(true);
     expect(satisfies('4.0.0-rc.2', '>4.0.0-rc.10')).toBe(false);
     expect(satisfies('4.0.0-beta', '<4.0.0-rc.1')).toBe(true);
+    expect(satisfies('4.0.0-rc.11', '>=4.0.0-rc.10 <4.0.0')).toBe(true);
+  });
+
+  it('takes a prerelease only in a set naming a prerelease of the same release, as npm does', () => {
+    expect(satisfies('4.0.0-alpha.1', '>=3.0.0 <4.0.0')).toBe(false);
+    expect(satisfies('3.1.5-rc.1', '<=3.1.5')).toBe(false);
+    expect(satisfies('4.0.0-rc.1', '<4.0.0')).toBe(false);
+    expect(satisfies('3.1.5-rc.1', '3.1.5-rc.1')).toBe(true);
+    expect(satisfies('3.1.5-rc.2', '>=3.1.5-rc.1 <=3.1.5')).toBe(true);
+    // A prerelease bound of another release does not open the set to this one's prereleases.
+    expect(satisfies('3.2.0-rc.1', '>=3.1.5-rc.1 <4.0.0')).toBe(false);
   });
 
   it('never matches a version it cannot read', () => {
@@ -288,7 +298,7 @@ describe('loadAllowlist', () => {
   });
 
   it('refuses a reviewBy that is not a YYYY-MM-DD date', () => {
-    for (const reviewBy of ['2027-13-45', 'next year', '2027/01/31']) {
+    for (const reviewBy of ['2027-13-45', '2027-02-30', '2027-04-31', 'next year', '2027/01/31']) {
       expect(() => load([{ ...minimatch315, reviewBy }]), reviewBy).toThrow(/reviewBy/);
     }
   });
@@ -312,12 +322,22 @@ describe('the checked-in allowlists', () => {
     }
   });
 
-  it('cover exactly the versions this lockfile installs at their paths', () => {
+  it('cover versions this lockfile installs, at their paths when they list any', () => {
     const lock = loadLockPackages('.');
     for (const entry of loadAllowlist('scripts/npm-audit-allowlist.json')) {
       for (const path of entry.paths ?? []) {
         expect(lock[path]?.version, `${entry.id} ${path}`).toBeDefined();
         expect(satisfies(lock[path].version, entry.versions), `${entry.id} ${path}`).toBe(true);
+      }
+      if (entry.paths === undefined) {
+        // Some installed copy of the package is in the range.
+        const copies = Object.entries(lock).filter(([path]) =>
+          path.endsWith(`node_modules/${entry.package}`)
+        );
+        expect(
+          copies.some(([, pkg]) => satisfies(pkg.version, entry.versions)),
+          `${entry.id} ${entry.package}`
+        ).toBe(true);
       }
     }
   });
