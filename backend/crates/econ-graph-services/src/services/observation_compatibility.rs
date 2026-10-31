@@ -104,6 +104,79 @@ pub async fn iceberg_rows_conn(
     Ok(result)
 }
 
+/// Summary calls pin the same SQL identities/pointers as point reads, but their
+/// budget measures output series, not historical revisions scanned by DataFusion.
+async fn iceberg_summary_datasets(
+    conn: &mut AsyncPgConnection,
+    keys: &[Uuid],
+) -> AppResult<Vec<(econ_graph_timeseries::TablePointer, Vec<Uuid>)>> {
+    check_keys(keys)?;
+    let metadata = economic_series::table
+        .filter(economic_series::id.eq_any(keys))
+        .select((economic_series::id, economic_series::dataset_id))
+        .load::<(Uuid, Uuid)>(conn)
+        .await?;
+    let mut datasets = BTreeMap::<Uuid, Vec<Uuid>>::new();
+    for (series, dataset) in metadata {
+        datasets.entry(dataset).or_default().push(series);
+    }
+    let mut result = Vec::new();
+    for (dataset, series) in datasets {
+        let pointer = SqlCatalog::pointer_conn(conn, dataset)
+            .await
+            .map_err(|_| AppError::ServiceUnavailable("could not pin Iceberg metadata".into()))?
+            .ok_or_else(|| {
+                AppError::ServiceUnavailable(
+                    "selected Iceberg dataset has not been migrated".into(),
+                )
+            })?;
+        result.push((pointer, series));
+    }
+    Ok(result)
+}
+
+fn summary_budget() -> AppResult<usize> {
+    econ_graph_timeseries::query::QueryLimits::from_env()
+        .map(|limits| limits.max_rows.min(MAX_COMPATIBILITY_ROWS))
+        .map_err(|_| AppError::ConfigError("invalid Iceberg query budget".into()))
+}
+
+/// Select one observation per series without materializing historical rows. The
+/// caller owns the repeatable-read transaction and asserts durable selection there.
+pub async fn iceberg_latest_conn(
+    conn: &mut AsyncPgConnection,
+    keys: &[Uuid],
+    on_date: Option<NaiveDate>,
+    as_of: Option<NaiveDate>,
+    non_null_current: bool,
+) -> AppResult<Vec<Observation>> {
+    let datasets = iceberg_summary_datasets(conn, keys).await?;
+    let config = StorageConfig::from_env()
+        .map_err(|_| AppError::ConfigError("invalid Iceberg storage configuration".into()))?;
+    let budget = summary_budget()?;
+    let mut result = Vec::new();
+    for (pointer, series) in datasets {
+        result.extend(
+            econ_graph_timeseries::query::latest_at_config(
+                &config,
+                &pointer,
+                &series,
+                on_date,
+                as_of,
+                non_null_current,
+                budget - result.len(),
+            )
+            .await
+            .map_err(|_| {
+                AppError::ServiceUnavailable(
+                    "Iceberg latest summary unavailable or result budget exceeded".into(),
+                )
+            })?,
+        );
+    }
+    Ok(result)
+}
+
 pub async fn points_batch(
     pool: &DatabasePool,
     keys: &[Uuid],
@@ -287,8 +360,28 @@ pub async fn counts_batch(pool: &DatabasePool, keys: &[Uuid]) -> AppResult<HashM
                     result.insert(id, count);
                 }
             } else {
-                for row in iceberg_rows_conn(conn, keys, None, None).await? {
-                    *result.entry(row.series_id).or_default() += 1;
+                let datasets = iceberg_summary_datasets(conn, keys).await?;
+                let config = StorageConfig::from_env().map_err(|_| {
+                    AppError::ConfigError("invalid Iceberg storage configuration".into())
+                })?;
+                let budget = summary_budget()?;
+                let mut returned = 0;
+                for (pointer, series) in datasets {
+                    for (id, count) in econ_graph_timeseries::query::counts_at_config(
+                        &config,
+                        &pointer,
+                        &series,
+                        budget - returned,
+                    )
+                    .await
+                    .map_err(|_| {
+                        AppError::ServiceUnavailable(
+                            "Iceberg count summary unavailable or result budget exceeded".into(),
+                        )
+                    })? {
+                        returned += 1;
+                        result.insert(id, count);
+                    }
                 }
             }
             Ok(result)
@@ -311,11 +404,7 @@ pub async fn latest_batch(
                 .bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>,_>(keys).load::<LatestObservation>(conn).await?;
             for row in rows {result.insert(row.series_id,Some(row));}
         } else {
-            let rows=iceberg_rows_conn(conn,keys,None,None).await?;
-            let mut latest=BTreeMap::<Uuid,Observation>::new();
-            for p in rows {let previous=latest.entry(p.series_id).or_insert_with(||p.clone());
-                if (p.date,p.revision_date,!p.is_original_release,p.id)>(previous.date,previous.revision_date,!previous.is_original_release,previous.id){*previous=p;}}
-            for (id,row) in latest {result.insert(id,Some(LatestObservation{series_id:id,date:row.date,value:row.value,revision_date:row.revision_date,attributes:row.attributes}));}
+            for row in iceberg_latest_conn(conn,keys,None,None,false).await? {result.insert(row.series_id,Some(LatestObservation{series_id:row.series_id,date:row.date,value:row.value,revision_date:row.revision_date,attributes:row.attributes}));}
         }
         Ok(result)
     }).await

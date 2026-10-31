@@ -10,9 +10,9 @@ Postgres shadow rows are never a fallback for a selected Iceberg read.
 | ----------------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | Series `dataPoints`                 | Filtered ordered query                                | Bounded immutable series scan and exact revision selection                                |
 | `recentDataPoints` / batched points | Batched latest-revision SQL                           | Same legacy latest-revision selection over decoded exact observations                     |
-| Direct / batched `dataPointCount`   | One grouped count, all revisions                      | Count logical observation IDs in one pinned snapshot, all revisions                       |
+| Direct / batched `dataPointCount`   | One grouped count, all revisions                      | DataFusion grouped count of logical IDs in one pinned snapshot, all revisions                       |
 | Batched `latestObservation`         | Indexed lateral `LIMIT 1` per series in one statement | Latest date/vintage, with non-original then UUID tie-break; current null remains null     |
-| `crossSection`                      | Existing batched lateral current-vintage query        | Matching SQL series and table pointer from the same snapshot, then bounded physical reads |
+| `crossSection`                      | Existing batched lateral current-vintage query        | Matching SQL series and table pointer from the same snapshot, then DataFusion current/latest selection before collection |
 
 Every compatibility call checks `ObservationStorage` against the durable recovery
 target **inside** its repeatable-read snapshot. Iceberg series/dataset identities
@@ -39,7 +39,13 @@ query is too large. Compatibility vectors are bounded to 100000 observations
 and 2000 requested series. The bound is applied in PostgreSQL or DataFusion
 **before** result collection, with one extra row used to detect overflow. An
 exceeded budget returns an availability error so callers can narrow the query.
-Iceberg's configured row and memory budgets also apply; production capacity and
+For count, latest-observation and cross-section summaries, DataFusion performs
+logical UUID upsert deduplication and aggregation or per-series selection before
+the output limit and collection. Their row budget counts returned summaries,
+not historical observations; a series with more than 100000 stored revisions can
+still return one count or latest row. Cross-section revision selection precedes
+non-null filtering and latest-date selection. Historical processing remains
+subject to the configured DataFusion memory budget, and production capacity and
 latency approval remain separate cutover gates.
 
 Revision selection preserves each existing surface's specific meaning. Explicit
@@ -55,7 +61,8 @@ through real signed-token verification, separate app/data databases, real Iceber
 files and DataFusion. Each backend case deliberately changes the unselected
 store so a bypass cannot pass by reading identical shadow rows. It covers direct
 fields, batched loaders, exact/null values, revision and synthetic semantics,
-attributes, catalog denial, scan overflow, stale loader refusal and a one-pool-
+attributes, catalog denial, point-scan overflow, summaries over a 100001-row
+single series and a 120002-row two-series cohort, stale loader refusal and a one-pool-
 connection cross-section pinned across a concurrent catalog publication.
 
 ```sh

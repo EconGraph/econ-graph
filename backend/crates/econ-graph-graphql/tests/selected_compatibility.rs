@@ -179,6 +179,20 @@ async fn selected_compatibility_contract() {
             !result.errors.is_empty(),
             "over-budget reads must not return the PG shadow"
         );
+        let summaries=schema.execute(Request::new(format!(r#"{{series(id:"{series}"){{dataPointCount latestObservation{{date value}}}} crossSection(datasetId:"{dataset}",across:"area",latest:true){{key date value}} early:crossSection(datasetId:"{dataset}",across:"area",date:"2024-01-01",asOf:"2024-01-15"){{key value}}}}"#)).data(context.clone())).await;
+        assert!(
+            summaries.errors.is_empty(),
+            "summary output fits budget even though history does not: {:?}",
+            summaries.errors
+        );
+        let summaries = summaries.data.into_json().unwrap();
+        assert_eq!(summaries["series"]["dataPointCount"], 6);
+        assert_eq!(
+            summaries["series"]["latestObservation"]["value"],
+            Value::Null
+        );
+        assert_eq!(summaries["crossSection"][1]["value"], "20");
+        assert_eq!(summaries["early"][1]["value"], Value::Null);
         let narrow=schema.execute(Request::new(format!(r#"{{series(id:"{series}"){{dataPoints(filter:{{startDate:"2024-03-01",endDate:"2024-03-01"}}){{value}} zero:recentDataPoints(limit:0){{id}}}}}}"#)).data(context.clone())).await;
         assert!(narrow.errors.is_empty(), "{:?}", narrow.errors);
         assert_eq!(
@@ -187,6 +201,45 @@ async fn selected_compatibility_contract() {
                 .unwrap()
                 .len(),
             2
+        );
+        // Configured output budgets cover the whole public batch, even when
+        // each frozen dataset's own two-result query would fit separately.
+        let extra_dataset = Uuid::new_v4();
+        let extra_series = [Uuid::new_v4(), Uuid::new_v4()];
+        let mut conn = data.get().await.unwrap();
+        conn.batch_execute(&format!("INSERT INTO datasets(id,source_id,code,name) VALUES('{extra_dataset}','{}','extra','Extra summary'); INSERT INTO economic_series(id,source_id,dataset_id,external_id,title,frequency) VALUES('{}','{}','{extra_dataset}','A','Extra A','Daily'),('{}','{}','{extra_dataset}','B','Extra B','Daily')",fred.id,extra_series[0],fred.id,extra_series[1],fred.id)).await.unwrap();
+        drop(conn);
+        let extra: Vec<_> = extra_series
+            .iter()
+            .map(|id| {
+                let mut row = rows[0].clone();
+                row.id = Uuid::new_v4();
+                row.series_id = *id;
+                row
+            })
+            .collect();
+        let prepared = catalog
+            .prepare_append(Uuid::new_v4(), extra_dataset, &extra)
+            .await
+            .unwrap();
+        let mut conn = data.get().await.unwrap();
+        conn.build_transaction()
+            .run::<_, anyhow::Error, _>(async |conn| {
+                SqlCatalog::commit_prepared_conn(conn, &prepared).await
+            })
+            .await
+            .unwrap();
+        drop(conn);
+        let cohort = [series, canada, extra_series[0], extra_series[1]];
+        assert!(
+            econ_graph_services::services::observation_compatibility::counts_batch(&data, &cohort)
+                .await
+                .is_err()
+        );
+        assert!(
+            econ_graph_services::services::observation_compatibility::latest_batch(&data, &cohort)
+                .await
+                .is_err()
         );
         return;
     }
@@ -312,6 +365,126 @@ async fn selected_compatibility_contract() {
         10001
     );
 
+    // A single series exceeds the real default 100k history cap; two further
+    // series each fit separately but exceed it together. Summaries must aggregate
+    // before applying the output cap, not split batches or raise history limits.
+    let summary_dataset = Uuid::new_v4();
+    let summary_series = [Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
+    let sizes = [100001_usize, 60001, 60001];
+    let mut conn = data.get().await.unwrap();
+    conn.batch_execute(&format!("INSERT INTO datasets(id,source_id,code,name,dimensions) VALUES('{summary_dataset}','{}','summaries','Oversized history','[{{\"name\":\"area\",\"label\":\"Area\",\"type\":\"string\"}}]')",fred.id)).await.unwrap();
+    for (index, id) in summary_series.iter().enumerate() {
+        conn.batch_execute(&format!("INSERT INTO economic_series(id,source_id,dataset_id,external_id,title,frequency,end_date,dimensions) VALUES('{id}','{}','{summary_dataset}','SUMMARY-{index}','Oversized history','Daily',DATE '1600-01-01'+{},'{{\"area\":\"{index}\"}}')",fred.id,sizes[index]-1)).await.unwrap();
+        if case == "postgres" {
+            let last = sizes[index] - 1;
+            conn.batch_execute(&format!("INSERT INTO data_points(series_id,date,revision_date,value) SELECT '{id}',DATE '1600-01-01'+n,DATE '1600-01-01'+n,CASE WHEN n={last} THEN NULL ELSE 1 END FROM generate_series(0,{last}) n")).await.unwrap();
+        }
+    }
+    drop(conn);
+    if case == "iceberg" {
+        for (index, id) in summary_series.iter().enumerate() {
+            for start in (0..sizes[index]).step_by(10000) {
+                let chunk: Vec<_> = (start..(start + 10000).min(sizes[index]))
+                    .map(|i| {
+                        let mut row = rows[0].clone();
+                        row.id = Uuid::new_v5(id, &i.to_be_bytes());
+                        row.series_id = *id;
+                        row.date = NaiveDate::from_ymd_opt(1600, 1, 1).unwrap()
+                            + chrono::Duration::days(i as i64);
+                        row.revision_date = row.date;
+                        row.value = if i + 1 == sizes[index] {
+                            None
+                        } else {
+                            Some(1.into())
+                        };
+                        row
+                    })
+                    .collect();
+                let prepared = catalog
+                    .prepare_append(Uuid::new_v4(), summary_dataset, &chunk)
+                    .await
+                    .unwrap();
+                let mut conn = data.get().await.unwrap();
+                conn.build_transaction()
+                    .run::<_, anyhow::Error, _>(async |conn| {
+                        SqlCatalog::commit_prepared_conn(conn, &prepared).await
+                    })
+                    .await
+                    .unwrap();
+            }
+        }
+    }
+    for (id, size) in summary_series.iter().zip(sizes) {
+        let answer = schema
+            .execute(
+                Request::new(format!(
+                    r#"{{series(id:"{id}"){{dataPointCount latestObservation{{date value}}}}}}"#
+                ))
+                .data(context.clone()),
+            )
+            .await;
+        assert!(
+            answer.errors.is_empty(),
+            "oversized single-series summary: {:?}",
+            answer.errors
+        );
+        let answer = answer.data.into_json().unwrap();
+        assert_eq!(answer["series"]["dataPointCount"], size);
+        assert_eq!(answer["series"]["latestObservation"]["value"], Value::Null);
+    }
+    let summary_loaders = DataLoaders::new(DataPool(data.clone()));
+    let (first, second, third) = tokio::join!(
+        summary_loaders
+            .data_point_count_loader
+            .try_load(summary_series[0]),
+        summary_loaders
+            .data_point_count_loader
+            .try_load(summary_series[1]),
+        summary_loaders
+            .data_point_count_loader
+            .try_load(summary_series[2])
+    );
+    assert_eq!(
+        (first.unwrap(), second.unwrap(), third.unwrap()),
+        (100001, 60001, 60001)
+    );
+    let (first, second, third) = tokio::join!(
+        loaders
+            .latest_observation_loader
+            .try_load(summary_series[0]),
+        loaders
+            .latest_observation_loader
+            .try_load(summary_series[1]),
+        loaders
+            .latest_observation_loader
+            .try_load(summary_series[2])
+    );
+    for latest in [first, second, third] {
+        assert_eq!(latest.unwrap().unwrap().value, None);
+    }
+    let summary=schema.execute(Request::new(format!(r#"{{crossSection(datasetId:"{summary_dataset}",across:"area",latest:true){{key date value}}}}"#)).data(context.clone())).await;
+    assert!(
+        summary.errors.is_empty(),
+        "oversized multi-series cross-section: {:?}",
+        summary.errors
+    );
+    let summary = summary.data.into_json().unwrap();
+    assert_eq!(summary["crossSection"].as_array().unwrap().len(), 3);
+    for (index, row) in summary["crossSection"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(row["value"], "1");
+        assert_eq!(
+            row["date"],
+            (NaiveDate::from_ymd_opt(1600, 1, 1).unwrap()
+                + chrono::Duration::days(sizes[index] as i64 - 2))
+            .to_string()
+        );
+    }
+
     if case == "iceberg" {
         // A one-connection compatibility reader must never check out a nested connection.
         // Publishing a newer pointer after its RR snapshot starts cannot retarget that read.
@@ -356,6 +529,15 @@ async fn selected_compatibility_contract() {
             .unwrap();
         drop(pinned);
         drop(one);
+        let fresh=schema.execute(Request::new(format!(r#"{{series(id:"{series}"){{dataPointCount latestObservation{{value}}}} crossSection(datasetId:"{dataset}",across:"area",latest:true){{key value}}}}"#)).data(context.clone())).await;
+        assert!(fresh.errors.is_empty(), "{:?}", fresh.errors);
+        let fresh = fresh.data.into_json().unwrap();
+        assert_eq!(
+            fresh["series"]["dataPointCount"], 6,
+            "logical upsert must not inflate count"
+        );
+        assert_eq!(fresh["series"]["latestObservation"]["value"], "777");
+        assert_eq!(fresh["crossSection"][1]["value"], "777");
     }
     // Even an existing loader must revalidate the durable selection, not return cached counts.
     let mut conn = data.get().await.unwrap();

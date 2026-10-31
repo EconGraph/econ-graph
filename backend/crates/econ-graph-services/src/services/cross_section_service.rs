@@ -16,7 +16,7 @@
 
 use std::collections::BTreeMap;
 
-use super::observation_compatibility::{self, PointsQuery, MAX_COMPATIBILITY_SERIES};
+use super::observation_compatibility::{self, MAX_COMPATIBILITY_SERIES};
 use bigdecimal::BigDecimal;
 use chrono::NaiveDate;
 use diesel::prelude::*;
@@ -179,28 +179,18 @@ async fn cross_section_snapshot(
             ));
         }
         let keys: Vec<_> = series.iter().map(|row| row.series_id).collect();
-        let observations =
-            observation_compatibility::iceberg_rows_conn(conn, &keys, on_date, on_date).await?;
-        let selected = observation_compatibility::select_points(
-            observations,
-            PointsQuery {
-                start_date: on_date,
-                end_date: on_date,
-                revisions: request.as_of.map_or(
-                    econ_graph_core::models::RevisionMode::Latest,
-                    econ_graph_core::models::RevisionMode::AsOf,
-                ),
-                exclude_synthetic: request.as_of.is_some(),
-                descending: true,
-                limit: None,
-            },
-        );
-        let mut latest = std::collections::HashMap::new();
-        for point in selected {
-            if on_date.is_some() || point.value.is_some() {
-                latest.entry(point.series_id).or_insert(point);
-            }
-        }
+        let selected = observation_compatibility::iceberg_latest_conn(
+            conn,
+            &keys,
+            on_date,
+            request.as_of,
+            on_date.is_none(),
+        )
+        .await?;
+        let mut latest: std::collections::HashMap<_, _> = selected
+            .into_iter()
+            .map(|point| (point.series_id, point))
+            .collect();
         for row in &mut series {
             if let Some(point) = latest.remove(&row.series_id) {
                 row.date = Some(point.date);
