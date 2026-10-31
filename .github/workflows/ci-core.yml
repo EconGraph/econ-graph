@@ -84,6 +84,7 @@ jobs:
       deps: ${{ steps.filter.outputs.deps }}
       docker: ${{ steps.filter.outputs.docker }}
       migrations: ${{ steps.filter.outputs.migrations }}
+      keycloak_import: ${{ steps.filter.outputs.keycloak_import }}
       e2e_images: ${{ steps.filter.outputs.e2e_images }}
       # False only on a PR that changes nothing but documentation (the paths
       # the push trigger ignores); every other event runs the suite.
@@ -181,6 +182,14 @@ jobs:
             - 'rust-toolchain.toml'
             - 'frontend/package.json'
             - 'frontend/package-lock.json'
+          # Keycloak Realm Import runs the realm import Job's steps against a
+          # throwaway Keycloak.
+          keycloak_import:
+            - '.github/workflows/ci-core.yml'
+            - 'config/keycloak/**'
+            - 'scripts/keycloak/**'
+            - 'k8s/manifests/keycloak/realm-import-job.yaml'
+            - 'k8s/manifests/keycloak/deployment.yaml'
           migrations:
             - '.github/workflows/ci-core.yml'
             - 'backend/migrations/**'
@@ -434,6 +443,26 @@ jobs:
       run: |
         shellcheck -x scripts/deploy/measure-v41-first-deploy.sh scripts/deploy/test-measure-v41-first-deploy.sh
         scripts/deploy/test-measure-v41-first-deploy.sh
+
+  keycloak-realm-import:
+    name: Keycloak Realm Import
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [changes]
+    # Only when the realm, its import or this workflow changed; every push to main and
+    # manual run still gets it. Stop if selection failed or the run was cancelled.
+    if: ${{ !cancelled() && needs.changes.result != 'failure' && (github.event_name != 'pull_request' || needs.changes.outputs.keycloak_import == 'true') }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
+
+    # A real Keycloak and keycloak-config-cli: which scope mappings a deploy keeps
+    # (scripts/keycloak/test-realm-import.sh).
+    - name: Run the realm import against a throwaway Keycloak
+      run: scripts/keycloak/test-realm-import.sh
 
   backend-migration-validation-tests:
     name: Backend Migration Validation Tests
@@ -2490,6 +2519,7 @@ jobs:
       - postgres-backup-scripts
       - deploy-manifests
       - backend-migration-validation-tests
+      - keycloak-realm-import
       - backend-smoke-tests
       - chart-api-integration-tests
       - backend-mcp-integration-tests
@@ -2522,7 +2552,8 @@ jobs:
         # The ordinary suite: in a merge group each of these must succeed.
         MUST_RUN: >-
           changes backend-build-cache prometheus-rules postgres-backup-scripts
-          deploy-manifests backend-migration-validation-tests backend-smoke-tests
+          deploy-manifests backend-migration-validation-tests keycloak-realm-import
+          backend-smoke-tests
           chart-api-integration-tests backend-mcp-integration-tests
           backend-workspace-tests backend-db-tests admin-frontend-tests
           frontend-tests quality-checks security-audit license-compliance
