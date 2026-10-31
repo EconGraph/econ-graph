@@ -229,6 +229,23 @@ fn read(
         .collect()
 }
 
+/// `(date, revision_date, is_original_release)` of the rows a latestRevisionOnly read returns
+/// (the series service's filters), whose flag the series page shows as "Revised" when false.
+fn latest_flags(conn: &mut PgConnection) -> Vec<(NaiveDate, NaiveDate, bool)> {
+    data_points::table
+        .filter(data_points::series_id.eq(world_bank_series_id(conn)))
+        .filter(exclude_synthetic_legacy_rows())
+        .filter(revision_filter_excluding_synthetic(None, false))
+        .order_by(data_points::date)
+        .select((
+            data_points::date,
+            data_points::revision_date,
+            data_points::is_original_release,
+        ))
+        .load(conn)
+        .expect("latest rows")
+}
+
 /// `(date, revision_date)` of the World Bank rows `exclude_synthetic_legacy_rows` drops.
 fn synthetic(conn: &mut PgConnection) -> Vec<(NaiveDate, NaiveDate)> {
     let kept: Vec<(NaiveDate, NaiveDate)> = data_points::table
@@ -260,6 +277,17 @@ async fn first_release_keeps_one_original_per_world_bank_date() {
     let as_of = Some(d("2022-12-31"));
     let as_of_before = read(&mut conn, false, as_of, false);
     let latest_before = read(&mut conn, false, None, true);
+    // Before: every date's latest row is a legacy release still marked original, except
+    // 2001's compare-and-skip revision.
+    assert_eq!(
+        latest_flags(&mut conn),
+        [
+            (d("2000-01-01"), d("2022-07-01"), true),
+            (d("2001-01-01"), d("2023-07-01"), false),
+            (d("2002-01-01"), d("2022-07-01"), true),
+            (d("2003-01-01"), d("2023-07-01"), true),
+        ]
+    );
     let synthetic_before = synthetic(&mut conn);
     assert_eq!(
         synthetic_before,
@@ -331,6 +359,17 @@ async fn first_release_keeps_one_original_per_world_bank_date() {
     // asOf and latest reads see the same values as before.
     assert_eq!(read(&mut conn, false, as_of, false), as_of_before);
     assert_eq!(read(&mut conn, false, None, true), latest_before);
+    // The latest rows keep their values but are now revisions, so a latestRevisionOnly read
+    // marks them revised: 2002 too, whose later release repeated the first one's value.
+    assert_eq!(
+        latest_flags(&mut conn),
+        [
+            (d("2000-01-01"), d("2022-07-01"), false),
+            (d("2001-01-01"), d("2023-07-01"), false),
+            (d("2002-01-01"), d("2022-07-01"), false),
+            (d("2003-01-01"), d("2023-07-01"), false),
+        ]
+    );
 }
 
 #[tokio::test]
@@ -379,6 +418,110 @@ async fn first_release_refuses_without_the_world_bank_source() {
 /// A World Bank write in progress (its transaction holds a series' economic_series row lock,
 /// as persist_series does) makes the migration wait at most lock_timeout and fail with
 /// nothing changed, so no fetch can compare against a label the migration is changing.
+/// Another source's write that commits while the migration runs (here, while its UPDATE
+/// waits on a row lock) neither fails its checks nor is touched by it.
+#[tokio::test]
+async fn first_release_ignores_another_sources_write_during_the_run() {
+    let (_container, url) = start_postgres().await;
+    let mut conn = connect(&url);
+    migrate_to_before(&mut conn, FIRST_RELEASE);
+    populate(&mut conn);
+    let migration_pid = backend_pid(&mut conn);
+
+    // Hold a row the migration relabels, so its UPDATE waits partway through the run.
+    let mut holder = connect(&url);
+    holder.batch_execute("BEGIN").expect("begin");
+    diesel::sql_query(
+        "SELECT dp.id FROM data_points dp JOIN economic_series es ON es.id = dp.series_id \
+         WHERE es.external_id = $1 AND dp.date = DATE '2000-01-01' \
+         AND dp.revision_date = DATE '2021-07-01' FOR UPDATE OF dp",
+    )
+    .bind::<Text, _>(WB_SERIES)
+    .execute(&mut holder)
+    .expect("lock a row to relabel");
+
+    let migration = std::thread::spawn(move || run_first_release(&mut conn).map(|_| conn));
+    let mut watcher = connect(&url);
+    let waiting = (0..80).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        waits_on_a_lock(&mut watcher, migration_pid)
+    });
+    assert!(waiting, "the migration never waited on the held row");
+
+    // A FRED point committed mid-run, after the migration counted its rows.
+    point(
+        &mut watcher,
+        FRED_SERIES,
+        ("2001-01-01", "2021-07-01", true, "6.0"),
+    );
+    holder.batch_execute("ROLLBACK").expect("release the row");
+
+    let mut conn = migration
+        .join()
+        .expect("migration thread")
+        .expect("another source's write doesn't fail the migration");
+    assert_eq!(
+        rows(&mut conn, FRED_SERIES),
+        [
+            Row {
+                date: d("2000-01-01"),
+                revision_date: d("2020-07-01"),
+                is_original_release: true,
+                value: "5.0".into(),
+            },
+            Row {
+                date: d("2000-01-01"),
+                revision_date: d("2021-07-01"),
+                is_original_release: true,
+                value: "5.1".into(),
+            },
+            Row {
+                date: d("2001-01-01"),
+                revision_date: d("2021-07-01"),
+                is_original_release: true,
+                value: "6.0".into(),
+            },
+        ]
+    );
+    assert_eq!(
+        read(&mut conn, true, None, false),
+        [
+            p("2000-01-01", "2020-07-01", "1.0"),
+            p("2001-01-01", "2020-07-01", "2.0"),
+            p("2002-01-01", "2021-07-01", "3.0"),
+            p("2003-01-01", "2002-10-01", "4.0"),
+        ]
+    );
+}
+
+fn backend_pid(conn: &mut PgConnection) -> i32 {
+    #[derive(QueryableByName)]
+    struct Pid {
+        #[diesel(sql_type = diesel::sql_types::Integer)]
+        pid: i32,
+    }
+    diesel::sql_query("SELECT pg_backend_pid() AS pid")
+        .get_result::<Pid>(conn)
+        .expect("backend pid")
+        .pid
+}
+
+/// Whether backend `pid` is waiting for a lock.
+fn waits_on_a_lock(conn: &mut PgConnection, pid: i32) -> bool {
+    #[derive(QueryableByName)]
+    struct N {
+        #[diesel(sql_type = BigInt)]
+        n: i64,
+    }
+    diesel::sql_query(
+        "SELECT COUNT(*) AS n FROM pg_stat_activity WHERE pid = $1 AND wait_event_type = 'Lock'",
+    )
+    .bind::<diesel::sql_types::Integer, _>(pid)
+    .get_result::<N>(conn)
+    .expect("pg_stat_activity")
+    .n > 0
+}
+
 #[tokio::test]
 async fn first_release_waits_for_a_world_bank_write_and_fails_cleanly() {
     let (_container, url) = start_postgres().await;

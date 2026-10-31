@@ -25,17 +25,24 @@
 --   source code column; the crawler finds its row by this name);
 -- - no row to relabel already has a revision twin, the same (series_id, date,
 --   revision_date) with is_original_release = false, which the unique key forbids;
--- - afterwards, no other source's rows changed, the row count is unchanged, and every
---   relabelled World Bank (series, date) has exactly one real original left.
+-- - afterwards, the World Bank series' row count is unchanged and every relabelled World
+--   Bank (series, date) has exactly one real original left.
+-- Every count and check covers only the World Bank series the migration locked (the temp
+-- table world_bank_series), and the UPDATE touches only rows of those series, so other
+-- sources' writes during the run neither fail it nor are touched by it.
 --
 -- Locking: before reading anything, the migration takes a share lock on every World Bank
 -- economic_series row. The crawler locks a series' row before it reads and writes that
 -- series' points (persist_series' upsert of economic_series), so a World Bank write in
 -- progress makes the migration fail after lock_timeout with nothing changed, and writes that
 -- start later wait for the migration and then see the new labels; no fetch can compare
--- against a label the migration is changing. Stop the crawler worker first all the same
+-- against a label the migration is changing. Until it commits, the share lock also blocks
+-- every other update of those economic_series rows (a title or metadata change); reads
+-- continue. Stop the crawler worker first all the same
 -- (scripts/deploy/precheck-db-migration.sh --stop-crawler), so the migration doesn't fail on
--- a busy worker. The UPDATE also locks the rows it relabels; API reads continue.
+-- a busy worker. The UPDATE also locks the rows it relabels; API reads continue. The
+-- update_data_points_updated_at trigger sets updated_at on each relabelled row, so every one
+-- is rewritten: a new row version, WAL and a dead tuple for autovacuum.
 -- lock_timeout bounds each lock wait; statement_timeout is lifted because the UPDATE's run
 -- time grows with the number of legacy rows.
 --
@@ -50,8 +57,6 @@ DECLARE
     world_bank_rows INTEGER;
     world_bank UUID;
     rows_before BIGINT;
-    other_originals_before BIGINT;
-    other_originals_after BIGINT;
     to_relabel BIGINT;
     twins BIGINT;
     relabelled BIGINT;
@@ -65,14 +70,18 @@ BEGIN
     END IF;
     SELECT id INTO world_bank FROM data_sources WHERE name = 'World Bank Open Data';
 
-    -- Keep World Bank writes out until commit (see Locking above).
-    PERFORM 1 FROM economic_series WHERE source_id = world_bank FOR SHARE;
+    -- The World Bank series this migration covers, locked until commit so their writes stay
+    -- out (see Locking above). A series created after this is not covered.
+    CREATE TEMP TABLE world_bank_series ON COMMIT DROP AS
+    SELECT id FROM economic_series WHERE source_id = world_bank;
+    PERFORM 1
+    FROM economic_series es
+    JOIN world_bank_series covered ON covered.id = es.id
+    FOR SHARE OF es;
 
-    SELECT COUNT(*) INTO rows_before FROM data_points;
-    SELECT COUNT(*) INTO other_originals_before
+    SELECT COUNT(*) INTO rows_before
     FROM data_points dp
-    JOIN economic_series es ON es.id = dp.series_id
-    WHERE es.source_id <> world_bank AND dp.is_original_release;
+    JOIN world_bank_series covered ON covered.id = dp.series_id;
 
     -- The later real originals of every World Bank (series, date).
     CREATE TEMP TABLE world_bank_later_originals ON COMMIT DROP AS
@@ -83,9 +92,8 @@ BEGIN
                 PARTITION BY dp.series_id, dp.date ORDER BY dp.revision_date, dp.id
             ) AS release_number
         FROM data_points dp
-        JOIN economic_series es ON es.id = dp.series_id
-        WHERE es.source_id = world_bank
-            AND dp.is_original_release
+        JOIN world_bank_series covered ON covered.id = dp.series_id
+        WHERE dp.is_original_release
             AND NOT (
                 dp.revision_date = dp.date
                 AND EXISTS (
@@ -120,11 +128,9 @@ BEGIN
     WHERE dp.id = later.id;
     GET DIAGNOSTICS relabelled = ROW_COUNT;
 
-    SELECT COUNT(*) INTO rows_after FROM data_points;
-    SELECT COUNT(*) INTO other_originals_after
+    SELECT COUNT(*) INTO rows_after
     FROM data_points dp
-    JOIN economic_series es ON es.id = dp.series_id
-    WHERE es.source_id <> world_bank AND dp.is_original_release;
+    JOIN world_bank_series covered ON covered.id = dp.series_id;
     SELECT COUNT(*) INTO dates_without_one_original
     FROM (
         SELECT COUNT(*) FILTER (
@@ -139,13 +145,11 @@ BEGIN
 
     IF relabelled <> to_relabel
         OR rows_after <> rows_before
-        OR other_originals_after <> other_originals_before
         OR dates_without_one_original <> 0
     THEN
-        RAISE EXCEPTION 'World Bank relabel check failed: relabelled % of %, rows % -> %, '
-            'other sources'' originals % -> %, relabelled dates without exactly one original %',
-            relabelled, to_relabel, rows_before, rows_after,
-            other_originals_before, other_originals_after, dates_without_one_original;
+        RAISE EXCEPTION 'World Bank relabel check failed: relabelled % of %, World Bank rows '
+            '% -> %, relabelled dates without exactly one original %',
+            relabelled, to_relabel, rows_before, rows_after, dates_without_one_original;
     END IF;
 
     RAISE NOTICE 'World Bank: % later releases relabelled as revisions', relabelled;

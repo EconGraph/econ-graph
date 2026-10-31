@@ -159,6 +159,10 @@ differs from UUIDv5 of `SOURCE:external_id`; do not change IDs to make it pass.
    brings over the combined `econ_graph`, Keycloak and the Secrets the databases were
    created with; the restored `econ-graph-secrets` has no `app-database-url`, hence
    `APP_DATABASE=shared`.
+   Before deploying, measure the restored copy as in step 8: its ECO-738 section counts the
+   World Bank rows the release's data migration 2026-11-01-000100_world_bank_first_release
+   relabels and estimates its run time against the crawler-migrate Job's deadline. Once
+   step 4 has applied that migration, the section reports it as already applied.
 4. Deploy the release being rolled out to the scratch cluster, keeping the backend on the
    combined database: `KIND_CLUSTER=<name> APP_DATABASE=shared scripts/deploy/deploy.sh`.
    It creates `app-postgres` with an empty `econ_graph_app`. Check out that release for
@@ -202,7 +206,8 @@ differs from UUIDv5 of `SOURCE:external_id`; do not change IDs to make it pass.
    ```
 
    It prints a Markdown report: inactive BEA series by catalog-selection rule, the
-   (series, date) pairs ECO-807 asks about, and the FRED selection against its cap. Unless
+   (series, date) pairs ECO-807 asks about, the World Bank relabel's size and estimated run
+   time (ECO-738; before the deploy, see step 3), and the FRED selection against its cap. Unless
    given `--i-know-this-is-production`, it refuses any target that may be production's data
    database: an in-cluster name, a host that doesn't resolve, or a local port served by
    anything but a local Postgres, a container port or a port-forward into another cluster or
