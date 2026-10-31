@@ -290,6 +290,7 @@ impl Detail {
             units: non_empty(self.metadata.unit),
             frequency,
             seasonal_adjustment: None,
+            ..NewSeriesMetadataLite::default()
         })
     }
 }
