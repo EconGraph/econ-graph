@@ -41,7 +41,8 @@ EOF
 # The fake kind kubectl that docker cp hands out. FAKE_CURRENT_CONTEXT, when
 # set, is what it reports as the current context after use-context;
 # FAKE_PRODUCTION=true makes the cluster carry a production marker for its own
-# kube-system UID; FAKE_PHASE is every pod's phase (default Running);
+# kube-system UID; FAKE_LAB=true makes it carry the release lab marker too
+# (kube-system/econgraph-lab-owner); FAKE_PHASE is every pod's phase (default Running);
 # FAKE_DUMP_FAILS set makes pg_dump fail; FAKE_RECLAIM is every PV's reclaim
 # policy (default Retain, so protect-postgres-pv.sh patches nothing; Delete makes
 # it patch). pg_dump prints a stub archive and psql a count, so a backup can
@@ -57,6 +58,10 @@ case " \$* " in
     *" config current-context"*) echo "\${FAKE_CURRENT_CONTEXT:-kind-econ-graph}"; exit 0 ;;
     *" config view "*) echo "https://127.0.0.1:6443"; exit 0 ;;
     *" get namespace kube-system "*) echo "$CLUSTER_UID"; exit 0 ;;
+    # The release lab marker (lib/cluster-role.sh, cluster_role_is_lab).
+    *" get configmap econgraph-lab-owner "*)
+        [ "\${FAKE_LAB:-false}" != true ] || echo configmap/econgraph-lab-owner
+        exit 0 ;;
     *" get configmap econgraph-cluster-role "*)
         # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
         [ "\${FAKE_PRODUCTION:-false}" = true ] || exit 0
@@ -273,6 +278,19 @@ else
 fi
 check "teardown.sh --yes on a production cluster"
 grep -qE -- ' (delete|patch|exec) ' "$KIND_CALLS" && fail "teardown.sh changed or dumped something before refusing --yes on production"
+
+# A production marker and the release lab marker together are conflicting markers:
+# unknown, never "not production", so the UID prefix is still required.
+reset
+out="$(FAKE_PRODUCTION=true FAKE_LAB=true teardown --yes)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q "conflicting markers" <<<"$out" &&
+    grep -q "tearing down the production cluster needs --confirm-production with the first 8 characters" <<<"$out"; then
+    echo "ok   teardown.sh --yes refuses a production cluster that also carries the lab marker"
+else
+    fail "teardown.sh --yes on a production cluster with the lab marker (exit $rc):"; printf '     %s\n' "$out"
+fi
+check "teardown.sh --yes with conflicting markers"
+grep -qE -- ' (delete|patch|exec) ' "$KIND_CALLS" && fail "teardown.sh changed or dumped something with conflicting markers"
 
 # The backup comes first: a teardown dumps the databases into
 # ECONGRAPH_BACKUP_ROOT before it patches or deletes anything. The PVs report

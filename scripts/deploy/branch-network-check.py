@@ -15,14 +15,15 @@ def verify(namespace, local_data, k, lookup, apply):
             'volumeMounts': [{'name': 'tmp', 'mountPath': '/tmp'}]}
         if target:
             container['readinessProbe'] = {'tcpSocket': {'port': 8080}, 'periodSeconds': 1}
-        elif app == 'econ-graph-backend':
+        elif app in ('econ-graph-backend', 'branch-data-proxy'):
             # Never become an endpoint of the branch backend Service during a redeploy.
             container['readinessProbe'] = {'exec': {'command': ['false']}, 'periodSeconds': 1}
         return {'apiVersion': 'v1', 'kind': 'Pod', 'metadata': {'name': name, 'namespace': namespace,
                 'labels': dict(label, app=app)}, 'spec': {'automountServiceAccountToken': False,
                 'restartPolicy': 'Never', 'containers': [container], 'volumes': [{'name': 'tmp', 'emptyDir': {}}],
                 'securityContext': {'seccompProfile': {'type': 'RuntimeDefault'}}}}
-    names = ['branch-network-target', 'branch-network-allow', 'branch-network-deny', 'branch-network-backend']
+    names = ['branch-network-target', 'branch-network-allow', 'branch-network-deny', 'branch-network-backend',
+             'branch-network-proxy']
     def connect(podname, address, port):
         ipaddress.ip_address(address)
         return k('-n', namespace, 'exec', podname, '--', 'nc', '-z', '-w', '3', address, str(port),
@@ -37,7 +38,7 @@ def verify(namespace, local_data, k, lookup, apply):
     try:
         k('-n', namespace, 'delete', 'pods', *names, '--ignore-not-found', '--wait=true')
         apply([pod(names[0], names[0], True), pod(names[1], names[1]),
-               pod(names[2], names[2]), pod(names[3], 'econ-graph-backend')])
+               pod(names[2], names[2]), pod(names[3], 'econ-graph-backend'), pod(names[4], 'branch-data-proxy')])
         for name in names:
             k('-n', namespace, 'wait', '--for=jsonpath={.status.phase}=Running', 'pod/'+name, '--timeout=120s')
         k('-n', namespace, 'wait', '--for=condition=Ready', 'pod/'+names[0], '--timeout=60s')
@@ -49,16 +50,18 @@ def verify(namespace, local_data, k, lookup, apply):
         primary = service('econ-graph-backend-service', 'econ-graph')
         database = service('data-postgres-service', 'econ-graph')
         proxy = service('econ-graph-gateway-proxy', 'envoy-gateway-system')
-        # First verify primary endpoints are actually reachable through the allowed
-        # backend-to-gateway path. Direct primary access must still be denied.
-        for client in [names[1], names[3]]:
+        # Direct primary access is denied for every role. Only the fixed-host
+        # proxy may reach the shared gateway, and only in shared-data mode.
+        for client in [names[1], names[3], names[4]]:
             if connect(client, primary, 9876) or connect(client, database, 5432):
                 raise ValueError('a branch pod can directly reach primary data services; refusing deployment')
         if connect(names[1], proxy, 80):
             raise ValueError('a non-backend branch pod can reach the shared gateway')
-        backend_proxy = connect(names[3], proxy, 80)
-        if backend_proxy != (not local_data):
-            raise ValueError('backend gateway access does not match the selected branch data mode')
+        if connect(names[3], proxy, 80):
+            raise ValueError('backend can reach the shared gateway and select another branch Host')
+        proxy_open = connect(names[4], proxy, 80)
+        if proxy_open != (not local_data):
+            raise ValueError('fixed proxy gateway access does not match the selected branch data mode')
     finally:
         # Cleanup is always namespace-scoped, even if any probe failed.
         k('-n', namespace, 'delete', 'pods', *names, '--ignore-not-found', '--wait=false', check=False)

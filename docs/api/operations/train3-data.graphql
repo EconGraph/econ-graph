@@ -1,0 +1,103 @@
+# Contract version 1. These operations run unchanged in data_api_contract.rs.
+query Train3ObservationPage(
+  $seriesId: ID!
+  $filter: DataFilter
+  $transformation: DataTransformation
+  $first: Int
+  $after: String
+) {
+  seriesData(
+    seriesId: $seriesId
+    filter: $filter
+    transformation: $transformation
+    first: $first
+    after: $after
+  ) {
+    totalCount
+    nodes {
+      id
+      seriesId
+      date
+      value
+      revisionDate
+      isOriginalRelease
+    }
+    pageInfo {
+      hasNextPage
+      hasPreviousPage
+      startCursor
+      endCursor
+    }
+  }
+}
+
+query Train3SeriesSubject($seriesId: ID!, $datasetId: ID!) {
+  series(id: $seriesId) {
+    id
+    externalId
+    units
+    dataPointCount
+    dataset {
+      id
+      code
+      defaultMeasure
+    }
+    latestObservation {
+      date
+      value
+      revisionDate
+    }
+    dataPoints {
+      id
+      seriesId
+      date
+      value
+      revisionDate
+      isOriginalRelease
+    }
+    latest: dataPoints(filter: { latestRevisionOnly: true }) {
+      date
+      value
+      revisionDate
+    }
+    original: dataPoints(filter: { originalOnly: true }) {
+      date
+      value
+      revisionDate
+    }
+    vintage: dataPoints(filter: { asOf: "2024-02-15" }) {
+      date
+      value
+      revisionDate
+    }
+    transformed: dataPoints(transformation: PERCENT_CHANGE) {
+      date
+      value
+    }
+    recentDataPoints(limit: 2) {
+      id
+      seriesId
+      date
+      value
+      revisionDate
+      isOriginalRelease
+    }
+  }
+  seriesExists(id: $seriesId)
+  seriesCatalog(id: $seriesId)
+  dataset(id: $datasetId) {
+    id
+    code
+    defaultMeasure
+  }
+  crossSection(datasetId: $datasetId, across: "area", date: "2024-02-01") {
+    key
+    seriesId
+    date
+    value
+    flags {
+      name
+      value
+    }
+  }
+}

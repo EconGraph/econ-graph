@@ -60,6 +60,8 @@ state = json.loads(state_file.read_text())
 if args[:2] == ['config', 'view']: print('https://test.invalid')
 elif args[:2] == ['get', 'nodes']: print('test-node')
 elif args[:3] == ['get', 'namespace', 'kube-system']: print('test-uid')
+elif args[:5] == ['-n', 'kube-system', 'get', 'configmap', 'econgraph-lab-owner']:
+    pass  # not a release lab (lib/cluster-role.sh, cluster_role_is_lab)
 elif args[:5] == ['-n', 'kube-system', 'get', 'configmap', 'econgraph-cluster-role']:
     if args[-1] == 'name': print('configmap/econgraph-cluster-role')
     elif 'kube-system-uid' in args[-1]: print('test-uid#')
