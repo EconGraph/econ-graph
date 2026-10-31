@@ -6,6 +6,9 @@
 //!
 //! Discovery and fetch jobs are enqueued here and processed by `crawler-worker`.
 //! `confirm-successor` records an operator-reviewed link without changing either history.
+//! `clear-restriction` records an operator's review of a restricted series and queues a fetch;
+//! the series is published again only if a fetch claimed after the review finds no
+//! restriction marker (see [`crate::lifecycle::request_restriction_review`]).
 //! `accept-guarded-catalog` shows, and with `--accept` applies, the newest catalog snapshot the
 //! mass-disappearance guard rejected (see [`crate::lifecycle`]).
 //!
@@ -22,6 +25,7 @@
 //! crawler check-selection [--source FRED[,BEA,...]] [--json]   # no database needed
 //! crawler migrate  [--dry-run]   # apply the data migrations
 //! crawler confirm-successor --source FRED --series OLD --successor NEW
+//! crawler clear-restriction --source FRED --series ID --reason TEXT
 //! crawler accept-guarded-catalog --source BEA [--accept --guarded-at TIME]
 //! ```
 //!
@@ -68,6 +72,7 @@ use crate::refetch::{self, RefetchOptions, SourcePlan, SourceProgress, DEFAULT_R
 use crate::source::SourceId;
 use crate::sources::default_registry;
 use crate::status::{crawler_status, CrawlerStatusSnapshot};
+use crate::CrawlError;
 
 /// `series_id` stored for `discover_catalog` jobs (one per source).
 pub const CATALOG_SERIES_ID: &str = "catalog";
@@ -78,6 +83,8 @@ pub const DEFAULT_CHECK_RATE_PERCENT: u8 = 25;
 
 /// Default queue priority (1 = lowest, 10 = highest).
 pub const DEFAULT_PRIORITY: i32 = 5;
+/// Priority of the fetch `clear-restriction` queues: the highest, as an operator waits on it.
+const REVIEW_FETCH_PRIORITY: i32 = 10;
 
 /// `crawler` command line.
 #[derive(Debug, Parser, PartialEq)]
@@ -127,6 +134,22 @@ pub enum Command {
         /// Replacement series id, in the same source.
         #[arg(long)]
         successor: String,
+    },
+    /// After reviewing a series' restriction (a false-positive copyright marker, say), queue
+    /// a fetch that may publish it again. The series stays hidden until that fetch, or any
+    /// fetch claimed from now on, finds no restriction marker; restriction evidence first
+    /// cancels the review. Every step is recorded in series_lifecycle_events.
+    ClearRestriction {
+        /// Source of the series, e.g. FRED. Only a source whose fetch checks restriction
+        /// markers can confirm a review.
+        #[arg(long)]
+        source: SourceId,
+        /// The restricted series.
+        #[arg(long)]
+        series: String,
+        /// What the review found, recorded with the review (1 to 500 characters).
+        #[arg(long)]
+        reason: String,
     },
     /// Enqueue fetch_series jobs.
     Enqueue {
@@ -274,6 +297,7 @@ impl Command {
     fn upstream_sources(&self) -> Vec<SourceId> {
         match self {
             Command::Enqueue { source, .. }
+            | Command::ClearRestriction { source, .. }
             | Command::Discover { source, .. }
             | Command::Fetch { source, .. }
             | Command::RecordReferenceSeeds { source, .. } => vec![*source],
@@ -592,6 +616,41 @@ impl Cli {
                     "enqueued {n} of {} fetch_series job(s) for {source}\n",
                     jobs.len()
                 ))
+            }
+            Command::ClearRestriction {
+                source,
+                series,
+                reason,
+            } => {
+                let series = series.trim();
+                // `upstream_sources` has already refused a licence-gated source.
+                let checks_markers = default_registry()
+                    .get(source)
+                    .is_some_and(|a| a.checks_restriction_markers());
+                crate::lifecycle::request_restriction_review(
+                    &pool,
+                    source,
+                    checks_markers,
+                    series,
+                    &reason,
+                )
+                .await
+                .context("recording the restriction review")?;
+                let job = new_job(source, series, JobKind::FetchSeries, REVIEW_FETCH_PRIORITY);
+                let queued = enqueue_all(&pool, &[job]).await?;
+                Ok(if queued == 1 {
+                    format!(
+                        "restriction review recorded for {source} {series}; it stays hidden until \
+                         the queued fetch finds no restriction marker\n"
+                    )
+                } else {
+                    format!(
+                        "restriction review recorded for {source} {series}; a fetch_series job \
+                         for it was already queued, so none was added. Only a fetch claimed \
+                         after this review can publish it: if that job had already been claimed, \
+                         run this command again once it has finished\n"
+                    )
+                })
             }
             Command::Discover { source, priority } => {
                 let job = new_job(
@@ -966,9 +1025,17 @@ async fn fetch_one(
     datasets.load_adapter(&*adapter)?;
     persist::sync_datasets(&pool, &datasets).await?;
     tracing::info!(%source, series_id = external_id, ?since, ?known_vintage, "fetching");
-    let fetched = adapter
+    let fetched = match adapter
         .fetch_series_incremental(&ctx, external_id, since, known_vintage)
-        .await?;
+        .await
+    {
+        // As the worker does: hide it, and cancel any pending review of its restriction.
+        Err(CrawlError::Restricted(message)) => {
+            crate::lifecycle::record_restricted(&pool, source, external_id).await?;
+            return Err(CrawlError::Restricted(message).into());
+        }
+        result => result?,
+    };
     datasets.check(source, external_id, &fetched.dataset)?;
     crate::value::check_fetched_values(external_id, &fetched)?;
     let write = persist::persist_series(&pool, source, external_id, &fetched).await?;
@@ -1416,6 +1483,42 @@ mod tests {
         );
         assert!(parse(&["confirm-successor", "--source", "FRED", "--series", "OLD"]).is_err());
         assert!(parse(&["confirm-successor", "--series", "OLD", "--successor", "NEW"]).is_err());
+        let review = parse(&[
+            "clear-restriction",
+            "--source",
+            "FRED",
+            "--series",
+            "CBBTCUSD",
+            "--reason",
+            "notes no longer restrict it",
+        ])
+        .unwrap()
+        .command;
+        assert_eq!(
+            review,
+            Command::ClearRestriction {
+                source: SourceId::Fred,
+                series: "CBBTCUSD".into(),
+                reason: "notes no longer restrict it".into(),
+            }
+        );
+        // It queues a fetch, so the licence gate covers its source.
+        assert_eq!(review.upstream_sources(), [SourceId::Fred]);
+        // Only an adapter known to check restriction markers on every fetch can confirm a
+        // review; any other claiming it is a deliberate change.
+        let registry = default_registry();
+        let checking: Vec<SourceId> = registry
+            .ids()
+            .into_iter()
+            .filter(|&s| {
+                registry
+                    .get(s)
+                    .is_some_and(|a| a.checks_restriction_markers())
+            })
+            .collect();
+        assert_eq!(checking, [SourceId::Fred]);
+        assert!(parse(&["clear-restriction", "--source", "FRED", "--series", "X"]).is_err());
+        assert!(parse(&["clear-restriction", "--source", "FRED", "--reason", "r"]).is_err());
     }
 
     #[test]

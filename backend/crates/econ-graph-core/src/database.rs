@@ -888,7 +888,7 @@ mod tests {
     }
 
     /// The tables of each set, as listed in docs/development/MIGRATIONS.md.
-    const DATA_TABLES: [&str; 31] = [
+    const DATA_TABLES: [&str; 32] = [
         "data_sources",
         "datasets",
         "economic_series",
@@ -899,6 +899,7 @@ mod tests {
         "reference_file_cache",
         "series_fetch_validators",
         "series_lifecycle",
+        "series_lifecycle_events",
         "catalog_lifecycle_scopes",
         "catalog_reference_snapshots",
         "discovery_runs",
