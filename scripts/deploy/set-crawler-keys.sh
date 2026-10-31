@@ -285,8 +285,11 @@ fi
 if [ "$DRY_RUN" = true ]; then
     echo "==> Dry run: would prompt (hidden) for each key above, then run create-secrets.sh"
     [ "$START_CRAWLER" = true ] && echo "  then: kubectl -n ${NAMESPACE} scale deployment/crawler-worker --replicas=1 and restart it"
+    # The realm allows the public host only when there is one, else http://localhost.
+    realm_origin="http://localhost"
+    [ -n "${PUBLIC_HOST:-}" ] && realm_origin="https://${PUBLIC_HOST}"
     [ "$REIMPORT_REALM" = true ] && echo "  then: kubectl -n ${NAMESPACE} rollout restart deployment/keycloak," \
-        "then delete and re-apply job/keycloak-realm-import (for ${PUBLIC_HOST:+https://${PUBLIC_HOST} and }http://localhost) and wait for it"
+        "then delete and re-apply job/keycloak-realm-import (for ${realm_origin}) and wait for it"
     [ "$TUNNEL" = true ] && echo "  then: start cloudflared through apply_cloudflared for the public host the cluster serves, and restart it"
     exit 0
 fi
