@@ -76,6 +76,27 @@ class TalosTests(unittest.TestCase):
         with self.assertRaisesRegex(common.Refused, "control planes"):
             common.load_config(source)
 
+    def test_scratch_owner_cannot_authorize_production_inventory(self):
+        source = self.altered_config(lambda data: data.update(purpose="production"))
+        with self.assertRaisesRegex(common.Refused, "scratch_owner"):
+            common.load_config(source)
+
+    def test_scratch_owner_must_match_explicit_operational_owner(self):
+        source = self.altered_config(lambda data: data.update(scratch_owner="different"))
+        with self.assertRaisesRegex(common.Refused, "must match owner_id"):
+            common.load_config(source)
+
+    def test_ordinary_production_inventory_gets_no_implicit_scratch_authorization(self):
+        def production(data):
+            data["purpose"] = "production"
+            data.pop("scratch_owner")
+        config = common.load_config(self.altered_config(production))
+        self.assertNotIn("scratch_owner", config)
+        module = cluster.stage_module(self.state, config)
+        value = json.loads((module / "terraform.tfvars.json").read_text())["cluster"]
+        self.assertEqual(value["purpose"], "production")
+        self.assertIsNone(value["scratch_owner"])
+
     def test_runtime_under_repository_is_refused(self):
         with self.assertRaisesRegex(common.Refused, "outside the checkout"):
             common.external_path(str(common.ROOT / "private-state"))

@@ -40,7 +40,8 @@ def stage_module(state, config):
             if source.is_symlink():
                 raise Refused("pinned module source entries must not be symlinks")
             shutil.copy2(source, module / source.name)
-    values = {key: config[key] for key in ("name", "owner_id", "bridge", "disk_path", "api_vip", "pod_cidr", "service_cidr", "data_gib", "nodes")}
+    values = {key: config[key] for key in ("name", "owner_id", "purpose", "bridge", "disk_path", "api_vip", "pod_cidr", "service_cidr", "data_gib", "nodes")}
+    values["scratch_owner"] = config.get("scratch_owner")
     (module / "terraform.tfvars.json").write_text(json.dumps({"cluster": values}, indent=2) + "\n")
     return module
 

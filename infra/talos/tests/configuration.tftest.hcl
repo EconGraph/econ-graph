@@ -5,6 +5,33 @@ mock_provider "libvirt" {}
 override_resource {
   target = talos_machine_configuration_apply.node
 }
+
+run "production_cannot_opt_into_scratch_bootstrap" {
+  command = plan
+  variables {
+    state_passphrase = "test-only-encryption-passphrase-no-runtime-secrets"
+    cluster = {
+      name          = "econgraph-production-schema"
+      owner_id      = "f075f737-7f7e-4a41-aa14-16830a1db6f7"
+      purpose       = "production"
+      scratch_owner = "f075f737-7f7e-4a41-aa14-16830a1db6f7"
+      bridge        = "br-eg-fit"
+      disk_path     = "/does-not-exist/econgraph-production-schema"
+      api_vip       = "192.0.2.20"
+      pod_cidr      = "10.244.0.0/16"
+      service_cidr  = "10.96.0.0/12"
+      data_gib      = 200
+      nodes = {
+        cp-1     = { role = "controlplane", ip = "192.0.2.21", mac = "52:54:00:ec:01:21" }
+        cp-2     = { role = "controlplane", ip = "192.0.2.22", mac = "52:54:00:ec:01:22" }
+        cp-3     = { role = "controlplane", ip = "192.0.2.23", mac = "52:54:00:ec:01:23" }
+        worker-1 = { role = "worker", ip = "192.0.2.31", mac = "52:54:00:ec:01:31" }
+        worker-2 = { role = "worker", ip = "192.0.2.32", mac = "52:54:00:ec:01:32" }
+      }
+    }
+  }
+  expect_failures = [var.cluster]
+}
 override_resource {
   target = talos_machine_bootstrap.cluster
 }
@@ -18,14 +45,16 @@ run "generate_current_talos_configuration" {
   variables {
     state_passphrase = "test-only-encryption-passphrase-no-runtime-secrets"
     cluster = {
-      name         = "econgraph-fit-schema"
-      owner_id     = "f075f737-7f7e-4a41-aa14-16830a1db6f7"
-      bridge       = "br-eg-fit"
-      disk_path    = "/does-not-exist/econgraph-fit-schema"
-      api_vip      = "192.0.2.20"
-      pod_cidr     = "10.244.0.0/16"
-      service_cidr = "10.96.0.0/12"
-      data_gib     = 200
+      name          = "econgraph-fit-schema"
+      owner_id      = "f075f737-7f7e-4a41-aa14-16830a1db6f7"
+      purpose       = "fit"
+      scratch_owner = "f075f737-7f7e-4a41-aa14-16830a1db6f7"
+      bridge        = "br-eg-fit"
+      disk_path     = "/does-not-exist/econgraph-fit-schema"
+      api_vip       = "192.0.2.20"
+      pod_cidr      = "10.244.0.0/16"
+      service_cidr  = "10.96.0.0/12"
+      data_gib      = 200
       nodes = {
         cp-1     = { role = "controlplane", ip = "192.0.2.21", mac = "52:54:00:ec:01:21" }
         cp-2     = { role = "controlplane", ip = "192.0.2.22", mac = "52:54:00:ec:01:22" }
@@ -34,6 +63,10 @@ run "generate_current_talos_configuration" {
         worker-2 = { role = "worker", ip = "192.0.2.32", mac = "52:54:00:ec:01:32" }
       }
     }
+  }
+  assert {
+    condition     = alltrue([for node in keys(var.cluster.nodes) : strcontains(data.talos_machine_configuration.node[node].machine_configuration, "econgraph.io/drill-owner: f075f737-7f7e-4a41-aa14-16830a1db6f7")])
+    error_message = "Opt-in scratch ownership must reach every control-plane and worker configuration."
   }
   assert {
     condition     = strcontains(data.talos_machine_configuration.node["worker-1"].machine_configuration, "kind: UserVolumeConfig")

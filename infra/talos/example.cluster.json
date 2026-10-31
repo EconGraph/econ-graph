@@ -3,6 +3,7 @@
   "name": "econgraph-fit-talos",
   "owner_id": "f075f737-7f7e-4a41-aa14-16830a1db6f7",
   "purpose": "fit",
+  "scratch_owner": "f075f737-7f7e-4a41-aa14-16830a1db6f7",
   "bridge": "br-eg-fit",
   "uplink": "REPLACE_WITH_UNUSED_LAN_NIC",
   "bridge_address": "192.0.2.10/24",

@@ -119,10 +119,12 @@ data "talos_machine_configuration" "node" {
           }] : []
         }
         features = { kubePrism = { enabled = true, port = 7445 } }
-        nodeLabels = each.value.role == "worker" ? {
+        nodeLabels = merge(var.cluster.scratch_owner == null ? {} : {
+          "econgraph.io/drill-owner" = var.cluster.scratch_owner
+          }, each.value.role == "worker" ? {
           "econgraph.io/storage"        = "postgres"
           "topology.kubernetes.io/zone" = "${var.cluster.name}-${each.key}"
-        } : {}
+        } : {})
         kubelet = {
           extraMounts = each.value.role == "worker" ? [{
             destination = "/var/mnt/postgres"
@@ -185,14 +187,16 @@ resource "talos_cluster_kubeconfig" "cluster" {
 
 output "inventory" {
   value = {
-    cluster_name = var.cluster.name
-    owner_id     = var.cluster.owner_id
-    api_endpoint = "https://${var.cluster.api_vip}:6443"
-    nodes        = var.cluster.nodes
-    pod_cidr     = var.cluster.pod_cidr
-    service_cidr = var.cluster.service_cidr
-    talos        = local.talos_version
-    kubernetes   = local.kubernetes_version
+    cluster_name  = var.cluster.name
+    owner_id      = var.cluster.owner_id
+    purpose       = var.cluster.purpose
+    scratch_owner = var.cluster.scratch_owner
+    api_endpoint  = "https://${var.cluster.api_vip}:6443"
+    nodes         = var.cluster.nodes
+    pod_cidr      = var.cluster.pod_cidr
+    service_cidr  = var.cluster.service_cidr
+    talos         = local.talos_version
+    kubernetes    = local.kubernetes_version
   }
 }
 output "talosconfig" {

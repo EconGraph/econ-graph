@@ -6,6 +6,17 @@ this directory migrates production, retires kind, changes a production tunnel,
 touches host object-store data, or accepts the platform on the strength of a
 mocked test. All commands below default to dry run unless stated otherwise.
 
+For a freshly created scratch candidate, optional `scratch_owner` explicitly
+opts into the platform bootstrap ownership check. It must equal `owner_id` and
+is accepted only with `purpose: fit`; it labels **every** control-plane and
+worker node `econgraph.io/drill-owner`. Omitting it adds no scratch label, and
+production inventories cannot opt in. This identifies the operational cluster
+for CNI/Flux installation, not permission to erase data: CNPG drills still need
+their own explicitly disposable namespace, database and object-store resources,
+and VM destruction still requires the fit-only inventory/state/UUID checks.
+No script retroactively labels existing clusters; do not use this field to
+reclassify an existing production cluster as disposable.
+
 ## Pinned interfaces
 
 | Component | Pin | Purpose |
@@ -49,7 +60,8 @@ that schematic and Talos patch version. Do not substitute `latest`.
 ## Prepare a public inventory
 
 Copy [example.cluster.json](example.cluster.json) to an operator-controlled
-location. Give it a unique `econgraph-*` name, a fresh UUID owner token, reserved
+location. Give it a unique `econgraph-*` name, a fresh UUID owner token (and the
+same explicit `scratch_owner` only for the new fit candidate), reserved
 LAN addresses, unique MACs and an unused dedicated physical uplink. The example
 uses documentation addresses and **cannot be executed unchanged**.
 

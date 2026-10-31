@@ -49,6 +49,8 @@ def load_config(path):
     uuid.UUID(config["owner_id"])
     if config.get("purpose") not in ("fit", "production"):
         raise Refused("purpose must be fit or production")
+    if config.get("scratch_owner") is not None and (config["purpose"] != "fit" or config["scratch_owner"] != config["owner_id"]):
+        raise Refused("scratch_owner is explicit opt-in for fit clusters and must match owner_id")
     if not re.fullmatch(r"[a-zA-Z0-9_-]{1,15}", config["bridge"]):
         raise Refused("invalid Linux bridge name")
     host = ipaddress.ip_interface(config["bridge_address"])

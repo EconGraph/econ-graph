@@ -44,14 +44,16 @@ variable "state_passphrase" {
 
 variable "cluster" {
   type = object({
-    name         = string
-    owner_id     = string
-    bridge       = string
-    disk_path    = string
-    api_vip      = string
-    pod_cidr     = string
-    service_cidr = string
-    data_gib     = number
+    name          = string
+    owner_id      = string
+    purpose       = string
+    scratch_owner = optional(string)
+    bridge        = string
+    disk_path     = string
+    api_vip       = string
+    pod_cidr      = string
+    service_cidr  = string
+    data_gib      = number
     nodes = map(object({
       role = string
       ip   = string
@@ -61,12 +63,14 @@ variable "cluster" {
   validation {
     condition = (
       can(regex("^econgraph-[a-z0-9-]+$", var.cluster.name)) &&
+      contains(["fit", "production"], var.cluster.purpose) &&
+      (var.cluster.scratch_owner == null || (var.cluster.purpose == "fit" && var.cluster.scratch_owner == var.cluster.owner_id)) &&
       length([for node in var.cluster.nodes : node if node.role == "controlplane"]) == 3 &&
       contains([2, 3], length([for node in var.cluster.nodes : node if node.role == "worker"])) &&
       alltrue([for node in var.cluster.nodes : contains(["controlplane", "worker"], node.role)]) &&
       var.cluster.data_gib >= 100
     )
-    error_message = "Use an explicitly named econgraph cluster with three control planes, two or three workers and at least 100GiB data disks."
+    error_message = "Use an explicit econgraph cluster with three control planes, two or three workers and 100GiB+ data disks. scratch_owner is opt-in, must match owner_id, and is fit-only."
   }
 }
 
