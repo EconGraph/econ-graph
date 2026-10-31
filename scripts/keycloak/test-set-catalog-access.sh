@@ -245,7 +245,7 @@ grep -qF "admit catalog.fred:read through its own scope" "$out" ||
 reset
 set_state '{"scope_realm": ["catalog.fred:read"], "reader_direct": ["catalog.fred:read"]}'
 run -- --context kind-econ-graph --dry-run --withdraw catalog.fred:read
-grep -qF "only after the change; the real run checks it" "$out" ||
+grep -qF "note: the real run also checks the econgraph-anonymous scope for other mappings that admit catalog.fred:read" "$out" ||
   fail "a dry run doesn't say the reader's own scope is checked after the change: $(cat "$out")"
 reset
 set_state '{"reader_scopes": {"basic": []}, "reader_direct": ["catalog.fred:read"]}'
