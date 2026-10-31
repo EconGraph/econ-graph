@@ -95,7 +95,8 @@
 #     database still holds app tables. A database that can't be checked refuses
 #     the change unless ALLOW_UNCHECKED_APP_DATABASE=1, except that a kept
 #     shared passes when the app database answers it holds no app tables or does
-#     not exist. scripts/deploy/convert-app-data.sh rewrites the key with
+#     not exist, and is refused even with the override when the data database
+#     answers it holds none but the app database can't be asked. scripts/deploy/convert-app-data.sh rewrites the key with
 #     --app-database-only when it moves the app tables, so it records where they are.
 #   - Likewise, if grafana-admin/admin-password would be generated but a
 #     Grafana volume (PVC grafana-storage-grafana-*) exists, the script stops

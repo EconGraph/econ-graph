@@ -20,7 +20,8 @@
 # seconds, default 60, or an unexpected answer) refuses a change, unless
 # ALLOW_UNCHECKED_APP_DATABASE=1 says to go ahead deliberately (for example to redeploy
 # while repairing a database); a positive answer that the tables are elsewhere is always
-# refused.
+# refused, and so is shared when econ_graph answers that it holds none while econ_graph_app
+# can't be asked (half of a positive answer).
 
 APP_DB_GUARD_RETRY="wait until postgresql-0 and app-postgres-0 run and accept connections, then rerun; to go ahead without the check (for example to repair a database), rerun with ALLOW_UNCHECKED_APP_DATABASE=1"
 
@@ -94,9 +95,22 @@ require_app_tables_not_moved() {
         # Not in econ_graph_app, or no econ_graph_app: they can't be only there.
         f | absent) ;;
         # econ_graph_app can't be asked: the tables may be only there.
-        *) if [[ "$data" == unknown:* ]]; then
+        *) if [[ "$data" == f ]]; then
+            # econ_graph answered that it holds no app tables: half of a positive answer that
+            # they moved to econ_graph_app, so the override does not apply.
+            die "the data database econ_graph holds no app tables (public.users), and the app" \
+                "database econ_graph_app can't be asked (${app#unknown: }): the conversion may" \
+                "have moved the accounts there, for example if it stopped after removing them" \
+                "and before switching app-database-url. APP_DATABASE=shared would point the" \
+                "backend at econ_graph, which would create empty app tables and lose every" \
+                "account. Start app-postgres-0 and rerun; or use APP_DATABASE=separate if the" \
+                "conversion finished, or if this cluster never had accounts in econ_graph (a lab," \
+                "or a data-only dump) (docs/deployment/APP_DATA_CONVERSION.md)." \
+                "ALLOW_UNCHECKED_APP_DATABASE=1 does not bypass this; nothing more was written"
+        elif [[ "$data" == unknown:* ]]; then
             app_db_guard_unchecked "${data#unknown: }, and ${app#unknown: }"
         else
+            # econ_graph absent (no pod or volume): it says nothing about where the tables are.
             app_db_guard_unchecked "${app#unknown: }"
         fi ;;
     esac

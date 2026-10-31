@@ -43,8 +43,12 @@ can also be run on its own against any two libpq services.
   60 seconds) refuses a change, with one exception: a kept `shared` passes when
   `econ_graph_app` answers that it holds no app tables, or does not exist, since the
   tables can't then be only there. To go ahead without the check, for example to redeploy
-  while repairing a database, set `ALLOW_UNCHECKED_APP_DATABASE=1`; a database that
-  positively holds the tables elsewhere is refused even then.
+  while repairing a database, set `ALLOW_UNCHECKED_APP_DATABASE=1`. Two refusals stand even
+  then: a database that positively holds the tables elsewhere, and a kept `shared` when
+  `econ_graph` answers that it holds no app tables while `econ_graph_app` can't be asked,
+  since the conversion may have moved the accounts there. For the second, start
+  `app-postgres-0` and rerun, or use `separate` if the conversion finished or the cluster
+  never had accounts in `econ_graph` (a lab, or a data-only dump).
 - **Every deploy names its cluster**: `KIND_CLUSTER=<name> ... scripts/deploy/deploy.sh`.
   `deploy.sh` runs `create-secrets.sh` on the context `kind-<name>`, so a rehearsal
   cannot write a setting into production.

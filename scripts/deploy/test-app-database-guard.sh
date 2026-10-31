@@ -7,8 +7,9 @@
 #     runbook and APP_DATABASE=shared; on a Secret without app-database-url (strict) an absent
 #     econ_graph is refused too;
 #   - before shared, on every run: econ_graph without public.users while econ_graph_app has it
-#     is refused, naming APP_DATABASE=separate and the rollback; when econ_graph can't be
-#     asked, econ_graph_app answering f, or not existing, lets it through;
+#     is refused, naming APP_DATABASE=separate and the rollback; so is econ_graph without
+#     public.users while econ_graph_app exists but can't be asked, even with the override; when
+#     econ_graph can't be asked, econ_graph_app answering f, or not existing, lets it through;
 #   - before a kept separate: econ_graph holding public.users is refused, naming the
 #     --app-database-only command; a database that can't be asked does not block it;
 #   - a database that can't be asked (lookup or query failing, an unexpected answer, a volume
@@ -146,6 +147,22 @@ check $g "...and pass with the override" "$up fails" "$up t" 0 "not checked" ALL
 check $g "econ_graph without tables, econ_graph_app down is refused" "$up f" "$up fails" 1 "could not check econ_graph_app"
 check $g "an app volume without app-postgres-0 is refused" "$up f" "missing present -" 1 "is not running"
 check $g "an unexpected app answer is refused" "$up f" "$up junk" 1 "unexpected answer"
+# econ_graph = f is half of a positive answer that the tables moved: the override can't pass it.
+for app_state in "$up fails" "missing present -" "$up junk" "$up hang"; do
+  check $g "econ_graph without tables, econ_graph_app unknown ($app_state), override refused" \
+    "$up f" "$app_state" 1 "does not bypass this" ALLOW_UNCHECKED_APP_DATABASE=1 APP_DB_GUARD_TIMEOUT=2
+done
+check $g "the refusal names the moved accounts and the ways out" "$up f" "$up fails" 1 \
+  "Start app-postgres-0 and rerun; or use APP_DATABASE=separate if the conversion finished" ALLOW_UNCHECKED_APP_DATABASE=1
+check $g "econ_graph without tables, econ_graph_app down, no override, same refusal" "$up f" "$up fails" 1 \
+  "conversion may have moved the accounts"
+check $g "the refusal offers separate for a cluster that never had accounts" "$up f" "$up fails" 1 \
+  "never had accounts in econ_graph" ALLOW_UNCHECKED_APP_DATABASE=1
+check $g "no econ_graph, econ_graph_app unknown, passes with the override" "$none" "$up fails" 0 "not checked" \
+  ALLOW_UNCHECKED_APP_DATABASE=1
+check $g "no econ_graph, econ_graph_app unknown, refused without it" "$none" "$up fails" 1 "ALLOW_UNCHECKED_APP_DATABASE=1"
+check $g "both unknown still pass with the override" "$up fails" "$up fails" 0 "not checked" ALLOW_UNCHECKED_APP_DATABASE=1
+check $g "both unknown are refused without it" "$up fails" "$up fails" 1 "ALLOW_UNCHECKED_APP_DATABASE=1"
 
 # Before a kept separate.
 g=require_app_tables_not_left_behind
