@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "name": "econgraph-fit-talos",
+  "owner_id": "f075f737-7f7e-4a41-aa14-16830a1db6f7",
+  "purpose": "fit",
+  "bridge": "br-eg-fit",
+  "uplink": "REPLACE_WITH_UNUSED_LAN_NIC",
+  "bridge_address": "192.0.2.10/24",
+  "api_vip": "192.0.2.20",
+  "pod_cidr": "10.244.0.0/16",
+  "service_cidr": "10.96.0.0/12",
+  "disk_parent": "/srv/econgraph/vm-images",
+  "data_gib": 200,
+  "dhcp_reservations_confirmed": false,
+  "nodes": {
+    "cp-1": {"role": "controlplane", "ip": "192.0.2.21", "mac": "52:54:00:ec:01:21"},
+    "cp-2": {"role": "controlplane", "ip": "192.0.2.22", "mac": "52:54:00:ec:01:22"},
+    "cp-3": {"role": "controlplane", "ip": "192.0.2.23", "mac": "52:54:00:ec:01:23"},
+    "worker-1": {"role": "worker", "ip": "192.0.2.31", "mac": "52:54:00:ec:01:31"},
+    "worker-2": {"role": "worker", "ip": "192.0.2.32", "mac": "52:54:00:ec:01:32"}
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "customization": {
+    "systemExtensions": {
+      "officialExtensions": [
+        "siderolabs/btrfs",
+        "siderolabs/qemu-guest-agent",
+        "siderolabs/util-linux-tools"
+      ]
+    }
+  }
+}
