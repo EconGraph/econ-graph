@@ -11,7 +11,8 @@
 #   - the Keycloak discovery document, whose issuer must be
 #     https://HOST/idp/realms/econ-graph;
 #   - the sign-in page for the web client: Keycloak accepts the public
-#     redirect URI and does not answer "HTTPS required";
+#     redirect URI and does not answer "HTTPS required", and refuses a
+#     http://localhost redirect URI (the live realm, not just the rendered one);
 #   - CORS for the public origin, and the www.HOST redirect: a 301 to
 #     https://HOST with the path and query kept and no port;
 #   - spoofing: X-Forwarded-Proto/-Host/-Port sent by the client change
@@ -187,6 +188,16 @@ if [ "$status" = 200 ] && grep -q 'id="kc-' "$tmp/login" &&
 else
     reason="$(grep -o 'HTTPS required\|Invalid parameter: redirect_uri\|Client not found' "$tmp/login" 2>/dev/null | head -1 || true)"
     fail "sign-in page returned ${status}${reason:+ (${reason})}"
+fi
+
+# 4b. A localhost redirect URI is refused: the production realm accepts the public host
+# only (ECO-753). This checks the live client, whatever an earlier import left on it.
+local_login_path="${login_path%%&redirect_uri=*}&redirect_uri=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "http://localhost/auth/callback")&${login_path#*&redirect_uri=*&}"
+status="$(fetch local-login "${BASE}${local_login_path}")"
+if grep -q 'Invalid parameter: redirect_uri' "$tmp/local-login"; then
+    pass "sign-in page refuses http://localhost/auth/callback"
+else
+    fail "sign-in page returned ${status} for http://localhost/auth/callback; the realm still accepts localhost"
 fi
 
 # 5. CORS: the API answers a preflight from the public origin.

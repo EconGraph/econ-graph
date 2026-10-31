@@ -384,9 +384,12 @@ jobs:
       run: scripts/deploy/test-install-kind.sh
 
     # The pre-deploy database check (backup running, crawler stop, long transactions),
-    # against a stub kubectl.
+    # and deploy.sh's use of it when data migrations are pending, against a stub kubectl.
     - name: Check the pre-deploy database check
-      run: scripts/deploy/test-precheck-db-migration.sh
+      run: |
+        python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+        scripts/deploy/test-precheck-db-migration.sh
+        scripts/deploy/test-data-migrations.sh
 
     # Loading a release candidate's GHCR images into the kind cluster, the
     # restart and image check after deploy.sh, and the rollback, against stub
@@ -605,6 +608,11 @@ jobs:
         scripts/keycloak/test-render-realm.sh
         python3 scripts/keycloak/test_preserve_catalog_grants.py
         scripts/check-keycloak-roles
+
+    - name: Check the catalog-access operator script against stubs
+      run: |
+        shellcheck -x scripts/keycloak/set-catalog-access.sh scripts/keycloak/test-set-catalog-access.sh
+        scripts/keycloak/test-set-catalog-access.sh
 
     - name: Check the branch-clone delete safety checks
       run: scripts/backup/test-branch-clone.sh
@@ -825,6 +833,18 @@ jobs:
         ref: ${{ github.event.inputs.branch || github.ref }}
         persist-credentials: false
 
+    # The runner image's SDKs this job never uses: about 34 GB on ubuntu-24.04, more than
+    # the job's own peak (a 12 GB target dir). Runners don't all have the same free space,
+    # and a full disk fails the job with only "No space left on device" from the runner.
+    # The deletion takes about two minutes, so it runs in the background: the disk peaks
+    # much later. The prune keeps the running Postgres service's image.
+    - name: Free runner disk
+      run: |
+        df -h /
+        nohup sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/hostedtoolcache /usr/local/.ghcup \
+          /usr/share/swift /usr/local/share/powershell >/dev/null 2>&1 &
+        docker image prune --all --force || true
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
@@ -965,6 +985,21 @@ jobs:
         done
       working-directory: backend
 
+    # Checkpoints, not only the report at the end: they show where the disk filled. When it
+    # fills, the runner can lose the step logs, but annotations survive (they did on main).
+    - name: Disk checkpoint (after the required regressions)
+      if: ${{ !cancelled() }}
+      env:
+        CHECKPOINT: after the required regressions
+      run: &disk_checkpoint |
+        # As annotations, which outlast the step logs when the disk fills.
+        free_gb="$(df --output=avail -BG / | tail -1 | tr -dc 0-9)" || free_gb=
+        target="$(du -sh backend/target 2>/dev/null | cut -f1)" || target=
+        echo "::notice::disk ${CHECKPOINT}: ${free_gb:-?} GB free, target dir ${target:-none}"
+        if [ -n "$free_gb" ] && [ "$free_gb" -lt 20 ]; then
+          echo "::warning::only ${free_gb} GB free on /"
+        fi
+
     # No lint exemptions for the new crawler crate (the workspace-wide clippy in
     # backend-smoke-tests still carries ~23 -A exemptions for legacy code).
     # --no-deps keeps -D warnings scoped to the crawler crates; without it the
@@ -1033,6 +1068,12 @@ jobs:
       env:
         FLAGS_PROFILE: release
 
+    - name: Disk checkpoint (after the feature and release builds)
+      if: ${{ !cancelled() }}
+      env:
+        CHECKPOINT: after the feature and release builds
+      run: *disk_checkpoint
+
     # The complete workspace suite is required, including integration tests.
     - name: Run all workspace tests (lib, bins, integration tests)
       run: |
@@ -1043,6 +1084,12 @@ jobs:
         cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --tests -- --test-threads=1 || status=$?
         exit $status
       working-directory: backend
+
+    - name: Disk checkpoint (before the doctests)
+      if: ${{ !cancelled() }}
+      env:
+        CHECKPOINT: before the doctests
+      run: *disk_checkpoint
 
     # Report documentation failures even when the broader test step failed.
     - name: Run workspace doctests
@@ -1055,6 +1102,17 @@ jobs:
         cargo test -p econ-graph-sec-crawler --features xbrl-parser --no-fail-fast --doc || status=$?
         exit $status
       working-directory: backend
+
+    # Headroom left at the end of the job, and what used it.
+    - name: Disk usage
+      if: always()
+      env:
+        CHECKPOINT: end of job
+      run: |
+        df -h / || true
+        du -sh backend/target backend/target/* ~/.cargo/registry ~/.rustup 2>/dev/null || true
+        docker system df || true
+        echo "::notice::disk end of job: $(df --output=avail -BG / | tail -1 | tr -dc 0-9) GB free"
 
   backend-db-tests:
     # One job for all database-backed lib tests. They used to be 13 jobs that

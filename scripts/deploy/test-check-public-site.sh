@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Tests for scripts/deploy/check-public-site.sh's www redirect checks (ECO-709), offline:
+# Tests for scripts/deploy/check-public-site.sh's www redirect checks (ECO-709) and its
+# localhost redirect URI check (ECO-753), offline:
 # a stub curl first on PATH answers www.econgraph.com with a canned status and Location
 # (and every other request with 404), so nothing reaches the network. Only the www
 # check and the spoofed X-Forwarded-* www check are asserted; the other checks fail
@@ -11,7 +12,8 @@
 #   - the same 308 without nginx's page (a Cloudflare redirect rule) fails, as does any
 #     other port, status, or a dropped query, and a spoofed request that gets anything
 #     but the 301;
-#   - plain http's redirect must name https://econgraph.com/ with no port.
+#   - plain http's redirect must name https://econgraph.com/ with no port;
+#   - the sign-in page must refuse a http://localhost redirect URI.
 #
 # Usage: scripts/deploy/test-check-public-site.sh
 set -euo pipefail
@@ -52,6 +54,10 @@ case "$url" in
         fi
         printf '%s' "${STUB_WWW_BODY:-}" >"$out"
         printf 'HTTP/1.1 %s Redirect\r\nLocation: %s\r\n\r\n' "$status" "$location" >"$hdr" ;;
+    https://econgraph.com/idp/realms/econ-graph/protocol/openid-connect/auth\?*redirect_uri=http%3A%2F%2Flocalhost*)
+        status="${STUB_LOCAL_LOGIN_STATUS:-404}"
+        printf '%s' "${STUB_LOCAL_LOGIN_BODY:-}" >"$out"
+        printf 'HTTP/1.1 %s\r\n\r\n' "$status" >"$hdr" ;;
     http://econgraph.com/*)
         status="${STUB_PLAIN_STATUS:-404}"
         printf 'HTTP/1.1 %s Redirect\r\nLocation: %s\r\n\r\n' "$status" "${STUB_PLAIN_LOCATION:-}" >"$hdr" ;;
@@ -137,6 +143,16 @@ expect plain-ok ok "$PLAIN is redirected" "plain http redirected to https://econ
 STUB_PLAIN_STATUS=301 STUB_PLAIN_LOCATION='https://econgraph.com:443/idp/realms/econ-graph/.well-known/openid-configuration' \
     run plain-port 301 "$TARGET"
 expect plain-port FAIL "plain http redirects" "plain http redirected with :443 spelled out fails"
+
+LOCAL='sign-in page'
+STUB_LOCAL_LOGIN_STATUS=400 STUB_LOCAL_LOGIN_BODY='<p class="instruction">Invalid parameter: redirect_uri</p>' \
+    run local-refused 301 "$TARGET"
+expect local-refused ok "$LOCAL refuses http://localhost/auth/callback" \
+    "a realm that refuses the localhost redirect URI passes"
+STUB_LOCAL_LOGIN_STATUS=200 STUB_LOCAL_LOGIN_BODY='<form id="kc-form-login">' \
+    run local-accepted 301 "$TARGET"
+expect local-accepted FAIL "$LOCAL returned 200 for http://localhost/auth/callback" \
+    "a realm that still shows the sign-in form for it fails"
 
 if [ "$failures" -eq 0 ]; then
     echo "all passed"
