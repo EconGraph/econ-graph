@@ -135,7 +135,7 @@ if [ "$TUNNEL" = true ] &&
         "(ECO-457); update the checkout first"
 fi
 
-CRAWLER_KEYS=(FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY)
+CRAWLER_KEYS=(FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY WTO_API_KEY)
 GOOGLE_KEYS=(KEYCLOAK_GOOGLE_CLIENT_ID KEYCLOAK_GOOGLE_CLIENT_SECRET)
 FACEBOOK_KEYS=(KEYCLOAK_FACEBOOK_CLIENT_ID KEYCLOAK_FACEBOOK_CLIENT_SECRET)
 TUNNEL_KEYS=(CLOUDFLARE_TUNNEL_TOKEN)
@@ -154,6 +154,7 @@ key_of() {
         BLS_API_KEY) echo bls-api-key ;;
         BEA_API_KEY) echo bea-api-key ;;
         CENSUS_API_KEY) echo census-api-key ;;
+        WTO_API_KEY) echo wto-api-key ;;
         KEYCLOAK_GOOGLE_CLIENT_ID) echo google-idp-client-id ;;
         KEYCLOAK_GOOGLE_CLIENT_SECRET) echo google-idp-client-secret ;;
         KEYCLOAK_FACEBOOK_CLIENT_ID) echo facebook-idp-client-id ;;

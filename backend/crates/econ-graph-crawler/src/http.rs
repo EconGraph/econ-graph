@@ -42,6 +42,8 @@ const SECRET_PARAMS: &[&str] = &[
     "userid",
     "key",
     "token",
+    // WTO API portal (Azure API Management) subscription key.
+    "subscription-key",
 ];
 const REDACTED: &str = "REDACTED";
 
@@ -136,8 +138,9 @@ pub enum ConditionalText {
 /// - maps non-success statuses with [`CrawlError::from_status`] and body decode failures to
 ///   [`CrawlError::Parse`] (never retried);
 /// - records `CRAWLER_METRICS` (crawler type = lowercase source id, source = URL host), and
-///   redacts the values of `api_key`, `apikey`, `registrationkey`, `userid`, `key` and `token`
-///   query parameters (case-insensitive) from anything it logs or puts in an error.
+///   redacts the values of `api_key`, `apikey`, `registrationkey`, `userid`, `key`, `token` and
+///   `subscription-key` query parameters (case-insensitive) from anything it logs or puts in an
+///   error.
 #[derive(Clone, Debug)]
 pub struct HttpFetcher {
     inner: Arc<Inner>,
@@ -298,6 +301,23 @@ impl HttpFetcher {
         query: &[(&str, &str)],
     ) -> Result<String, CrawlError> {
         let target = Target::new(source, Method::GET, url, query, None, false)?;
+        Ok(self.execute(&target).await?.body)
+    }
+
+    /// [`get_text`](Self::get_text) with a timeout of at least `timeout` (never less than
+    /// [`HttpConfig::timeout`]), for a source endpoint known to take longer than ordinary requests
+    /// to produce one large response. Made once, with no in-process retry: a failure goes back to
+    /// the queue rather than holding the source's concurrency slot for several long attempts.
+    pub async fn get_text_slow(
+        &self,
+        source: SourceId,
+        url: &str,
+        query: &[(&str, &str)],
+        timeout: Duration,
+    ) -> Result<String, CrawlError> {
+        let mut target = Target::new(source, Method::GET, url, query, None, false)?;
+        target.timeout = Some(timeout.max(self.inner.config.timeout));
+        target.extra_attempts = 0;
         Ok(self.execute(&target).await?.body)
     }
 
@@ -826,11 +846,13 @@ mod tests {
     fn redacts_secret_query_params() {
         let url = Url::parse(
             "https://user:pw@api.example.com/x?series_id=GDP&api_key=s1&ApiKey=s2&registrationKey=s3\
-             &UserID=s4&key=s5&TOKEN=s6&keyword=keep&file_type=json#frag",
+             &UserID=s4&key=s5&TOKEN=s6&Subscription-Key=s7&keyword=keep&file_type=json#frag",
         )
         .unwrap();
         let r = redact_url(&url);
-        for secret in ["s1", "s2", "s3", "s4", "s5", "s6", "pw", "user", "frag"] {
+        for secret in [
+            "s1", "s2", "s3", "s4", "s5", "s6", "s7", "pw", "user", "frag",
+        ] {
             assert!(!r.contains(secret), "{secret} leaked in {r}");
         }
         assert!(r.contains("series_id=GDP"), "{r}");
@@ -1179,6 +1201,38 @@ mod tests {
             "{err:?}"
         );
         assert_eq!(hits(&server).await, 3);
+    }
+
+    /// `get_text_slow` waits past the configured timeout, up to its own.
+    #[tokio::test]
+    async fn get_text_slow_extends_the_timeout() {
+        let server = MockServer::start().await;
+        Mock::given(path("/slow"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("done")
+                    .set_delay(Duration::from_millis(400)),
+            )
+            .mount(&server)
+            .await;
+        let fetcher = fetcher_with(Duration::from_millis(100), 4);
+        let url = format!("{}/slow", server.uri());
+        let body = fetcher
+            .get_text_slow(SourceId::Fred, &url, &[], Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert_eq!(body, "done");
+        // Never shorter than the configured timeout: 0s still waits the configured 100ms.
+        let err = fetcher
+            .get_text_slow(SourceId::Fred, &url, &[], Duration::ZERO)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CrawlError::Transient(m) if m.contains("timed out after 100ms")),
+            "{err:?}"
+        );
+        // No in-process retry: one request each.
+        assert_eq!(hits(&server).await, 2);
     }
 
     #[tokio::test]

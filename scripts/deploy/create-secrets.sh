@@ -38,9 +38,11 @@
 #   (the data database)            app-password              APP_DB_PASSWORD (generated)
 #   econ-graph-app-postgres        postgres-password         APP_POSTGRES_PASSWORD (generated)
 #   (the app database)             app-password              APP_POSTGRES_APP_PASSWORD (generated)
-#   crawler-api-keys               fred-api-key, bls-api-key, bea-api-key, census-api-key
+#   crawler-api-keys               fred-api-key, bls-api-key, bea-api-key, census-api-key,
+#                                  wto-api-key
 #                                                            FRED_API_KEY, BLS_API_KEY,
-#                                                            BEA_API_KEY, CENSUS_API_KEY (optional)
+#                                                            BEA_API_KEY, CENSUS_API_KEY,
+#                                                            WTO_API_KEY (optional)
 #   econ-graph-keycloak            admin-username            KEYCLOAK_ADMIN_USERNAME (default admin)
 #                                  admin-password            KEYCLOAK_ADMIN_PASSWORD (generated)
 #                                  db-password               KEYCLOAK_DB_PASSWORD (generated)
@@ -617,7 +619,7 @@ fi
 # Validate every supplied value before anything is written, so a bad input
 # never leaves the Secrets half updated.
 for var in POSTGRES_PASSWORD APP_DB_PASSWORD APP_POSTGRES_PASSWORD APP_POSTGRES_APP_PASSWORD \
-    FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY KEYCLOAK_ADMIN_USERNAME \
+    FRED_API_KEY BLS_API_KEY BEA_API_KEY CENSUS_API_KEY WTO_API_KEY KEYCLOAK_ADMIN_USERNAME \
     KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_GOOGLE_CLIENT_ID \
     KEYCLOAK_GOOGLE_CLIENT_SECRET KEYCLOAK_FACEBOOK_CLIENT_ID \
     KEYCLOAK_FACEBOOK_CLIENT_SECRET GRAFANA_ADMIN_PASSWORD MONITORING_BASIC_AUTH \
@@ -757,6 +759,7 @@ add_optional FRED_API_KEY fred-api-key
 add_optional BLS_API_KEY bls-api-key
 add_optional BEA_API_KEY bea-api-key
 add_optional CENSUS_API_KEY census-api-key
+add_optional WTO_API_KEY wto-api-key
 apply_secret
 
 # --- econ-graph-keycloak ---------------------------------------------------

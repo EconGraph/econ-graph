@@ -921,6 +921,7 @@ mod tests {
                 SourceId::Bea,
                 SourceId::Census,
                 SourceId::WorldBank,
+                SourceId::Wto,
                 SourceId::Fhfa
             ]
         );

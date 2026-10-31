@@ -5,13 +5,15 @@
 //! `crawler-worker`: drains `crawl_queue` until SIGINT/SIGTERM.
 //!
 //! Handles `fetch_series` / `discover_catalog` jobs for every adapter in
-//! `econ_graph_crawler::sources::default_registry()`, plus SEC `fetch_filing` jobs (series_id =
-//! company CIK) through `econ_graph_sec_crawler::SecFilingHandler`. It lives in its own crate
-//! because `econ-graph-crawler` must not depend on the SEC crate.
+//! `econ_graph_crawler::sources::registry_for_keys()` (the default registry, less the sources
+//! skipped while their key is unset), plus SEC `fetch_filing` jobs (series_id = company CIK)
+//! through `econ_graph_sec_crawler::SecFilingHandler`. It lives in its own crate because
+//! `econ-graph-crawler` must not depend on the SEC crate.
 //!
 //! Environment: `DATA_DATABASE_URL` (required; `DATABASE_URL` alone is a startup error),
-//! `FRED_API_KEY` / `BLS_API_KEY` / `BEA_API_KEY` / `CENSUS_API_KEY` (the worker starts without
-//! them; FRED, BEA and Census jobs fail with `Auth` when their key is missing), `RUST_LOG` (default `info`), `CRAWLER_DATA_DIR` (reference data
+//! `FRED_API_KEY` / `BLS_API_KEY` / `BEA_API_KEY` / `CENSUS_API_KEY` / `WTO_API_KEY` (the worker
+//! starts without them; FRED, BEA and Census jobs fail with `Auth` when their key is missing, and
+//! without `WTO_API_KEY` the WTO source is skipped entirely, with a warning at startup), `RUST_LOG` (default `info`), `CRAWLER_DATA_DIR` (reference data
 //! files such as `bls_series.csv`; defaults to the crawler crate's `data/` directory in the source
 //! tree, and the image sets `/app/data`), `REFERENCE_DATA_DIR` (shared reference data such as
 //! `countries.csv`; defaults to econ-graph-core's `data/` directory, and the image sets
@@ -41,7 +43,7 @@ use std::time::Duration;
 use clap::Parser;
 use econ_graph_core::models::JobKind;
 use econ_graph_core::DataPool;
-use econ_graph_crawler::sources::default_registry;
+use econ_graph_crawler::sources::registry_for_keys;
 use econ_graph_crawler::{
     ApiKeys, CrawlCtx, HttpConfig, HttpFetcher, SourceId, SourcePolicy, Worker, WorkerConfig,
 };
@@ -142,9 +144,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = econ_graph_core::config::data_database_url()?;
     let pool = DataPool(econ_graph_core::create_pool(&database_url).await?);
 
+    let keys = ApiKeys::from_env();
     // Licence-gated sources get no adapter, so nothing below (startup reference-data refresh,
-    // scheduler, coverage, job dispatch) can reach their upstream.
-    let registry = econ_graph_crawler::licence::ungated_registry(default_registry());
+    // scheduler, coverage, job dispatch) can reach their upstream. Without its key, a source in
+    // SKIPPED_WITHOUT_KEY (WTO) is left out too, with a warning.
+    let registry = econ_graph_crawler::licence::ungated_registry(registry_for_keys(&keys));
     for source in registry.ids() {
         econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS.initialize_source(source.as_str());
     }
@@ -204,7 +208,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ctx = CrawlCtx {
         http,
         pool: pool.0,
-        keys: ApiKeys::from_env(),
+        keys,
         bypass_validators: false,
     };
 

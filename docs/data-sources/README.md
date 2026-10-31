@@ -2,7 +2,7 @@
 
 These guides compare the data publishers return with what EconGraph discovers, fetches
 and stores. Each source page covers response samples, frequency and revisions, retained
-and dropped flags, and the current dataset mapping. The six main-crawler adapters store
+and dropped flags, and the current dataset mapping. The seven main-crawler adapters store
 series and observations in Postgres; SEC ingestion stores company profiles and raw
 filings separately.
 
@@ -22,6 +22,7 @@ The source pages identify the particular files and endpoints behind their sample
 | BEA | [BEA](bea.md) | Curated tables and frequencies expanded into lines and areas through API calls; full-history fetches | Illustrative NIPA and Regional fixtures; error fixture excerpt |
 | FHFA HPI | [FHFA HPI](fhfa.md) | Series enumerated and fetched from the publisher's HPI master CSV | Downloaded 12-column source excerpt; test fixture values are synthetic |
 | World Bank WDI | [World Bank](world-bank.md) | Curated indicators expanded into supported countries and aggregates through API calls | Checked-in observation fixture excerpt; response fields also checked live |
+| WTO Timeseries | [WTO](wto.md) | Curated indicators expanded into reporting economies through keyed API calls | Synthetic fixtures in the response shape the API portal documents |
 | SEC XBRL | [SEC XBRL](sec-xbrl.md) | Separate SEC filing handler fetches submissions and raw XBRL documents | Synthetic submissions fixture; downloaded companyfacts excerpt from an endpoint the crawler does not use |
 
 The downloaded FHFA file includes `rstderr` and `note` alongside the two index columns;
@@ -36,7 +37,7 @@ public ALFRED downloads use different interval semantics and do not establish it
 the [FRED fixture guide](../../backend/crates/econ-graph-crawler/tests/fixtures/fred/README.md)
 for the modeled window and filtering behavior.
 
-The other ten sources in `SourceId` (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO)
+The other nine sources in `SourceId` (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS)
 are [static catalogs](../../backend/crates/econ-graph-crawler/src/sources/static_catalogs.rs):
 fixed series lists without HTTP requests, whose `fetch_series` always fails. They are
 disabled in release builds by the `static_catalogs` build flag and available in development
@@ -46,7 +47,7 @@ crawls them unless its `crawl_<source>` flag is on.
 
 ## Publisher shapes and stored datasets
 
-All six main-crawler adapters use the [dataset contracts](../../backend/crates/econ-graph-crawler/data/datasets/README.md).
+All seven main-crawler adapters use the [dataset contracts](../../backend/crates/econ-graph-crawler/data/datasets/README.md).
 Every dataset is stored long: `data_points` holds one `value` per observation. Named
 dimensions identify series within a dataset; their values are stored in the JSONB
 `dimensions` fields on `series_metadata` and `economic_series`, with definitions in
@@ -60,6 +61,7 @@ dimensions identify series within a dataset; their values are stored in the JSON
 | BEA | NIPA rows by table line and period; Regional rows also identify an area | `bea_nipa` uses `table_name`, `line_number`, `frequency`; `bea_regional` uses `table_name`, `line_code`, `geo_fips` |
 | FHFA HPI | CSV rows with `index_nsa` and `index_sa` value columns | `fhfa_hpi` uses `hpi_type`, `hpi_flavor`, `frequency`, `level`, `place_id`, `seasonal_adjustment`; each index column becomes a separate series |
 | World Bank WDI | Response metadata followed by rows for an indicator and area | One `wdi` dataset with `indicator` and `area` dimensions |
+| WTO Timeseries | Rows for an indicator, reporting economy, partner, product and period | One `timeseries` dataset with `indicator` and `area` dimensions; the curated list fixes each indicator's product and partner |
 
 For example, BLS's `CUUR0000SA0` splits into survey `CU`, seasonal adjustment `U`,
 periodicity `R`, area `0000` and item `SA0`. Census variables and FHFA's two index columns
@@ -74,7 +76,7 @@ populating `financial_line_items` with parsed facts.
 
 The [main crawler's persistence code](../../backend/crates/econ-graph-crawler/src/persist.rs)
 upserts observations on `(series_id, date, revision_date, is_original_release)`.
-A conflicting observation receives the new value. BLS, Census BDS, BEA and FHFA set
+A conflicting observation receives the new value. BLS, Census BDS, BEA, FHFA and WTO set
 `revision_date = date` and `is_original_release = true`, so revised estimates overwrite
 that key rather than retaining earlier releases. This matters for sources that revise
 past observations, including Census annual releases, BEA updates and FHFA re-estimates.
@@ -89,9 +91,9 @@ it does not recover missed editions or provide an upstream archive comparable to
 
 Observation attributes are distinct from dimensions and vintage dates. BLS parses footnotes
 such as `P` (preliminary) and `X` (unavailable), but does not persist them.
-BEA's `NoteRef`, World Bank's `obs_status` and `decimal`, and FHFA's `rstderr` and `note`
-are also not stored as observation attributes. WDI declares attributes in its dataset
-contract, but that declaration does not populate them. FRED has no per-observation flags;
+BEA's `NoteRef`, World Bank's `obs_status` and `decimal`, FHFA's `rstderr` and `note`, and
+WTO's `ValueFlagCode` are also not stored as observation attributes. WDI and WTO declare
+attributes in their dataset contracts, but those declarations do not populate them. FRED has no per-observation flags;
 its `"."` missing-value marker becomes `NULL`.
 
 ## Checking selections against the live catalogs

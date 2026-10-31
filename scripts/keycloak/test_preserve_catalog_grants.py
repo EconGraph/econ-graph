@@ -248,9 +248,15 @@ class CatalogPolicyTests(unittest.TestCase):
             for name in ("admin", "super_admin"):
                 self.assertNotIn(role, self.realm_granted(name), name)
 
+    def test_realm_file_restricts_the_world_trade_organization_catalog(self):
+        # Defined so it can be granted, but public to nobody by default.
+        self.assertIn("catalog.world_trade_organization:read",
+                      {r["name"] for r in self.realm["roles"]["client"]["econ-graph-api"]})
+        self.assert_not_public("catalog.world_trade_organization:read")
+
     def test_realm_file_public_catalogs_are_exactly_the_reviewed_ones(self):
         expected = {"catalog.%s:read" % source
-                    for source in ("bls", "bea", "census", "fhfa", "world_bank", "wto", "boc")}
+                    for source in ("bls", "bea", "census", "fhfa", "world_bank", "boc")}
         public = self.role(self.realm, "catalog-public")["composites"]["client"]["econ-graph-api"]
         self.assertEqual(set(public), expected)
         self.assertEqual(len(public), len(expected))

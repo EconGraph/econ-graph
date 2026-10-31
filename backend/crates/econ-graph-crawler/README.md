@@ -58,7 +58,7 @@ The queue's unique index rejects concurrent duplicates, so no leader election is
 ## `crawler` CLI
 
 Reads `DATA_DATABASE_URL` (or `--database-url`; `DATABASE_URL` is not read) and source API keys from `FRED_API_KEY`, `BLS_API_KEY`,
-`BEA_API_KEY`, `CENSUS_API_KEY`.
+`BEA_API_KEY`, `CENSUS_API_KEY`, `WTO_API_KEY`.
 
 ```bash
 crawler enqueue  --source FRED --series GDP,UNRATE [--priority 1-10]   # fetch_series jobs
@@ -126,7 +126,7 @@ change takes effect on the next build.
 
 ## Development-only static catalogs
 
-Ten hardcoded catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS, WTO) register behind
+Nine hardcoded catalogs (BOC, BOE, BOJ, ECB, ILO, OECD, RBA, SNB, UN_STATS) register behind
 the `static_catalogs` build flag; see [feature flags](../../../config/flags/README.md).
 They are on in the `dev` flag profile used by local Cargo builds and tests, and off in the
 `release` flag profile used by the Dockerfile and deployments. Cargo's `--release` option

@@ -55,6 +55,12 @@ impl SourcePolicy {
     /// years), everything else 365 days. Every source starts with `max_batch` 1; an adapter that
     /// implements batching raises it for its source: BEA fetches up to 64 series (a NIPA table's
     /// lines, or a Regional line's states) per request.
+    ///
+    /// WTO: the Timeseries API's free "Standard" subscription (the only product on
+    /// apiportal.wto.org) allows 10 calls/second and 10,000 calls/hour per key, and 1 call/second
+    /// for the time-series data endpoints (`/data`, `/data_count`). Every WTO request is held to
+    /// that strictest limit, 1/s with no burst and one at a time, which also keeps the hourly
+    /// total at 3,600. The key is required: the API answers 401 without one.
     pub fn default_for(source: SourceId) -> Self {
         let base = SourcePolicy {
             requests_per_second: 1.0,
@@ -101,6 +107,13 @@ impl SourcePolicy {
                 requests_per_second: 8.0,
                 burst: 8,
                 max_concurrency: 4,
+                ..base
+            },
+            SourceId::Wto => SourcePolicy {
+                requests_per_second: 1.0,
+                burst: 1,
+                max_concurrency: 1,
+                needs_api_key: true,
                 ..base
             },
             _ => base,
@@ -207,7 +220,19 @@ mod tests {
         assert!(SourcePolicy::default_for(SourceId::Fred).needs_api_key);
         assert!(SourcePolicy::default_for(SourceId::Bea).needs_api_key);
         assert!(SourcePolicy::default_for(SourceId::Census).needs_api_key);
+        assert!(SourcePolicy::default_for(SourceId::Wto).needs_api_key);
         assert!(!SourcePolicy::default_for(SourceId::Bls).needs_api_key);
+    }
+
+    /// The WTO API's tightest documented limit is 1 call/second (its data endpoints); 10,000
+    /// calls/hour caps the rest. Stay at or under both, one request at a time.
+    #[test]
+    fn wto_stays_under_the_subscription_limits() {
+        let p = SourcePolicy::default_for(SourceId::Wto);
+        assert!(p.requests_per_second <= 1.0);
+        assert_eq!(p.burst, 1);
+        assert_eq!(p.max_concurrency, 1);
+        assert!(p.requests_per_second * 3600.0 <= 10_000.0);
     }
 
     #[test]

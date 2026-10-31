@@ -120,7 +120,6 @@
               "catalog.world_bank:read",
               "catalog.bea:read",
               "catalog.fhfa:read",
-              "catalog.wto:read",
               "catalog.boc:read"
             ]
           }
@@ -230,7 +229,7 @@
           "description": "Read the Bank of England (BoE) catalog"
         },
         {
-          "name": "catalog.wto:read",
+          "name": "catalog.world_trade_organization:read",
           "description": "Read the World Trade Organization (WTO) catalog"
         },
         {
@@ -436,7 +435,6 @@
           "catalog.world_bank:read",
           "catalog.bea:read",
           "catalog.fhfa:read",
-          "catalog.wto:read",
           "catalog.boc:read"
         ]
       }
