@@ -166,13 +166,19 @@ def clients_config_cli_deletes(realm, attributes):
 def roles_config_cli_deletes(realm, attributes, client=None):
     """Roles of CLIENT (realm roles when None) that config-cli created and the realm file no
     longer declares. A grant of one written into the import would fail it part way ("Cannot
-    find client role")."""
+    find client role"). As config-cli 6.5.1 does it (RoleImportService): without a roles.realm
+    or roles.client list it deletes none of that kind, and with roles.client every role of a
+    client missing from it, as when the file drops the client. The default role is Keycloak's."""
     roles = realm.get("roles", {})
-    declared = roles.get("realm") if client is None else roles.get("client", {}).get(client)
+    if client is None:
+        declared = roles.get("realm")
+    else:
+        declared = roles["client"].get(client, []) if "client" in roles else None
     if declared is None:
-        return set()  # config-cli manages, and deletes, none of them.
+        return set()
     kind = "roles-realm" if client is None else "roles-client-" + client
-    return config_cli_state(attributes, kind) - {role["name"] for role in declared}
+    return (config_cli_state(attributes, kind) - {role["name"] for role in declared}
+            - {realm.get("defaultRole", {}).get("name")})
 
 
 def without_deleted(names, deleted, where):
@@ -260,7 +266,7 @@ def declared_catalog_reads(realm, role_names):
     return found
 
 
-def check_anonymous_client_scopes(realm, get, prefix, anon_id, api_id, live=True):
+def check_anonymous_client_scopes(realm, get, prefix, anon_id, api_id, live=True, deleted_roles=()):
     """Refuse catalog reads that reach anonymous tokens other than through the anonymous
     client's own direct scope mapping of each catalog read.
 
@@ -271,11 +277,12 @@ def check_anonymous_client_scopes(realm, get, prefix, anon_id, api_id, live=True
     anonymous access. The client scopes are those assigned to it live and in the realm file;
     realm default scopes, assigned to a recreated reader, are named with a warning. Live
     scopes are read with composites expanded; the realm file's mappings through the
-    declared realm composites. Without a live realm only the file is read.
+    declared realm composites. Without a live realm only the file is read. Catalog reads the
+    import deletes (DELETED_ROLES) reach no token after it, so they aren't refused.
     """
     admitted = {}  # (kind, name) -> catalog reads admitted other than directly by the reader
     def admit(key, roles):
-        roles = {r for r in roles if catalog_read(r)}
+        roles = {r for r in roles if catalog_read(r) and r not in deleted_roles}
         if roles:
             admitted.setdefault(key, set()).update(roles)
     for entry in realm.get("clientScopeMappings", {}).get(API_CLIENT, []):
@@ -298,6 +305,10 @@ def check_anonymous_client_scopes(realm, get, prefix, anon_id, api_id, live=True
                 scopes = required(get(prefix + "/clients/" + anon_id + "/" + kind + "-client-scopes"))
                 assigned.update(s["name"] for s in scopes)
                 ids.update((s["name"], s["id"]) for s in scopes)
+    if live:
+        # A scope the realm file newly assigns is read too, if it exists already.
+        ids.update((s["name"], s["id"]) for s in required(get(prefix + "/client-scopes"))
+                   if s["name"] in assigned | defaults)
     if api_id:
         for name, scope_id in ids.items():
             admit(("clientScope", name), [r["name"] for r in required(
@@ -421,7 +432,8 @@ def merge_catalog_policy(realm, get):
 
     if api_id:
         preserve_scope_mappings(realm, get, prefix, api_id, observed_attrs, seed_defaults, deleted_roles)
-    check_anonymous_client_scopes(realm, get, prefix, anonymous[0]["id"] if anonymous else None, api_id)
+    check_anonymous_client_scopes(realm, get, prefix, anonymous[0]["id"] if anonymous else None, api_id,
+                                  deleted_roles=deleted_roles)
 
     if seed["reader"]:
         return realm  # The reader was absent at bootstrap; retry its declared defaults.
