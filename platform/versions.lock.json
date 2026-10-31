@@ -127,6 +127,11 @@
       "url": "https://raw.githubusercontent.com/cilium/cilium/v1.20.4/pkg/k8s/apis/cilium.io/client/crds/v2alpha1/ciliuml2announcementpolicies.yaml",
       "sha256": "5a5ada1455e5169d1f95d4814302677ebff4bf477b5298483e9b827a70feee7a",
       "file": "cilium-l2-crd.yaml"
+    },
+    "cilium-network-policy-crd": {
+      "url": "https://raw.githubusercontent.com/cilium/cilium/v1.20.4/pkg/k8s/apis/cilium.io/client/crds/v2/ciliumnetworkpolicies.yaml",
+      "sha256": "62c6de8f358da125b94468d39187edb1cea157d79503fdc50ccec8a6aaa79a76",
+      "file": "cilium-network-policy-crd.yaml"
     }
   },
   "postgres_image": "ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:39add80f5b1e573e2f6b641c66fd1a2f8dede67ca0330e870285bc1078551390"

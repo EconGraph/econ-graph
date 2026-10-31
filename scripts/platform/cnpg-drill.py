@@ -153,7 +153,7 @@ def drain(kube, args, source, report):
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
         try:
             drain_start = dt.datetime.now(dt.timezone.utc)
-            kube.run('drain', args.node, '--ignore-daemonsets', '--timeout=10m', timeout=660)
+            kube.run('drain', args.node, '--ignore-daemonsets', '--delete-emptydir-data', '--timeout=10m', timeout=660)
             drain_end = dt.datetime.now(dt.timezone.utc)
             code = process.wait(timeout=1200)
             if code:
@@ -161,12 +161,20 @@ def drain(kube, args, source, report):
             poll(lambda: kube.get('cluster', args.source_cluster, args.namespace),
                  lambda c: bool(c.get('status', {}).get('currentPrimary')) and any(x.get('type') == 'Ready' and x.get('status') == 'True' for x in c.get('status', {}).get('conditions', [])), seconds=300)
         finally:
-            if process.poll() is None:
-                process.terminate(); process.wait(timeout=30)
-            current = kube.disposable_owned('node', args.node, args.owner)
-            if current['metadata']['uid'] != node['metadata']['uid']:
-                raise ValueError('node replaced: refusing uncordon of replacement')
-            kube.run('uncordon', args.node)
+            try:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=30)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=30)
+            finally:
+                # E2E shutdown failure must not strand the same owned node cordoned.
+                current = kube.disposable_owned('node', args.node, args.owner)
+                if current['metadata']['uid'] != node['metadata']['uid']:
+                    raise ValueError('node replaced: refusing uncordon of replacement')
+                kube.run('uncordon', args.node)
     coverage = False
     if args.e2e_evidence:
         evidence = json.loads(args.e2e_evidence.read_text())

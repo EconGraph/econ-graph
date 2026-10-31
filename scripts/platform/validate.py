@@ -144,6 +144,14 @@ def main():
         if name == 'cilium':
             assert 'enable-host-legacy-routing: \"true\"' in rendered, 'Talos HostDNS requires Cilium legacy host routing'
         chart_docs.extend(load_all(rendered))
+    # The chart's actual Prometheus selector must include our alert rule resource.
+    prometheus = next(d for d in chart_docs if d['kind'] == 'Prometheus')
+    rules = [d for d in documents if d['kind'] == 'PrometheusRule']
+    selector = prometheus['spec']['ruleSelector']
+    assert not selector.get('matchExpressions'), 'extend rule selector validation for expressions'
+    for rule in rules:
+        labels = rule['metadata'].get('labels', {})
+        assert all(labels.get(k) == v for k, v in selector.get('matchLabels', {}).items()), 'Prometheus does not select platform rules'
     schemas = {}
     swagger = normalize(json.loads((args.cache / 'kubernetes-openapi.json').read_text()))
     swagger['definitions']['io.k8s.apimachinery.pkg.api.resource.Quantity']['type'] = ['string', 'number']
@@ -153,7 +161,8 @@ def main():
             schemas[(version, gvk['kind'])] = {'$ref': '#/definitions/' + name}
     definitions = [*chart_docs, *load_all((args.cache / 'flux-install.yaml').read_text()),
                    *load_all((args.cache / 'cilium-pool-crd.yaml').read_text()),
-                   *load_all((args.cache / 'cilium-l2-crd.yaml').read_text())]
+                   *load_all((args.cache / 'cilium-l2-crd.yaml').read_text()),
+                   *load_all((args.cache / 'cilium-network-policy-crd.yaml').read_text())]
     for definition in definitions:
         if definition['kind'] == 'CustomResourceDefinition':
             for version in definition['spec']['versions']:

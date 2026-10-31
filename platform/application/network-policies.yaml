@@ -170,12 +170,6 @@ spec:
       protocol: TCP
   - to:
     - ipBlock:
-        cidr: ${CONTROL_PLANE_CIDR}
-    ports:
-    - port: 6443
-      protocol: TCP
-  - to:
-    - ipBlock:
         cidr: ${OBJECT_STORE_CIDR}
     ports:
     - port: ${OBJECT_STORE_PORT}
@@ -245,12 +239,6 @@ spec:
       protocol: TCP
   - to:
     - ipBlock:
-        cidr: ${CONTROL_PLANE_CIDR}
-    ports:
-    - port: 6443
-      protocol: TCP
-  - to:
-    - ipBlock:
         cidr: ${OBJECT_STORE_CIDR}
     ports:
     - port: ${OBJECT_STORE_PORT}
@@ -308,12 +296,6 @@ spec:
     - *id001
     ports:
     - port: 5432
-      protocol: TCP
-  - to:
-    - ipBlock:
-        cidr: ${CONTROL_PLANE_CIDR}
-    ports:
-    - port: 6443
       protocol: TCP
   - to:
     - ipBlock:
@@ -515,13 +497,7 @@ spec:
       app: cnpg-backup-health
   policyTypes:
   - Egress
-  egress:
-  - to:
-    - ipBlock:
-        cidr: ${CONTROL_PLANE_CIDR}
-    ports:
-    - port: 6443
-      protocol: TCP
+  egress: []
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

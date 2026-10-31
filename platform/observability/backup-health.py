@@ -23,14 +23,20 @@ def assess(clusters, backups, now):
         if not any(c.get("type") == "ContinuousArchiving" and c.get("status") == "True"
                    for c in status.get("conditions", [])):
             failures.append(f"{name}: WAL archiving is not confirmed healthy")
-        timestamp = status.get("lastSuccessfulBackup")
+        # CNPG-I plugins do not maintain the legacy Cluster backup timestamps.
+        # Namespace-scoped Backup objects retain the actual plugin completion time.
+        own = [b for b in backups if b.get("spec", {}).get("cluster", {}).get("name") == name
+               and b.get("spec", {}).get("method") == "plugin"
+               and b.get("spec", {}).get("pluginConfiguration", {}).get("name") == "barman-cloud.cloudnative-pg.io"]
+        completed = [b for b in own if b.get("status", {}).get("phase") == "completed"]
+        latest_completed = max(completed, key=lambda b: b.get("metadata", {}).get("creationTimestamp", ""), default={})
+        timestamp = latest_completed.get("status", {}).get("stoppedAt")
         try:
             age = (now - dt.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))).total_seconds()
             if age > maximum_age or age < -300:
                 failures.append(f"{name}: backup age outside approved check window")
         except (AttributeError, TypeError, ValueError):
             failures.append(f"{name}: no valid successful backup timestamp")
-        own = [b for b in backups if b.get("spec", {}).get("cluster", {}).get("name") == name]
         if own:
             latest = max(own, key=lambda b: b.get("metadata", {}).get("creationTimestamp", ""))
             if latest.get("status", {}).get("phase", "").lower() == "failed":

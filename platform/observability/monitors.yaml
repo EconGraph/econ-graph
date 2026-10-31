@@ -45,6 +45,8 @@ kind: PrometheusRule
 metadata:
   name: econgraph-platform
   namespace: monitoring
+  labels:
+    release: monitoring
 spec:
   groups:
   - name: econgraph-platform

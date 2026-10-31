@@ -80,25 +80,130 @@ class PlatformTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 kube.owned('namespace', 'test', 'owner')
 
-    def test_health_requires_all_planes_wal_and_recent_backup(self):
+    def healthy_plugin_fixtures(self, now):
+        clusters = [{'metadata': {'name': name}, 'status': {'conditions': [{'type': 'ContinuousArchiving', 'status': 'True'}]}} for name in health.LIMITS]
+        backups = [{'metadata': {'creationTimestamp': (now - dt.timedelta(minutes=1)).isoformat()},
+                    'spec': {'cluster': {'name': name}, 'method': 'plugin',
+                             'pluginConfiguration': {'name': 'barman-cloud.cloudnative-pg.io'}},
+                    'status': {'phase': 'completed', 'stoppedAt': now.isoformat()}} for name in health.LIMITS]
+        return clusters, backups
+
+    def test_health_requires_all_planes_wal_and_recent_plugin_backup(self):
         now = dt.datetime.now(dt.timezone.utc)
-        clusters = [{'metadata': {'name': name}, 'status': {'lastSuccessfulBackup': now.isoformat(), 'conditions': [{'type': 'ContinuousArchiving', 'status': 'True'}]}} for name in health.LIMITS]
-        self.assertEqual(health.assess(clusters, [], now), [])
+        clusters, backups = self.healthy_plugin_fixtures(now)
+        self.assertEqual(health.assess(clusters, backups, now), [])
         for name in health.LIMITS:
             broken = copy.deepcopy(clusters)
             next(x for x in broken if x['metadata']['name'] == name)['status']['conditions'] = []
-            self.assertTrue(any(name in x for x in health.assess(broken, [], now)))
-        self.assertTrue(health.assess([], [], now))
-        clusters[0]['status']['lastSuccessfulBackup'] = (now - dt.timedelta(days=1)).isoformat()
+            self.assertTrue(any(name in x for x in health.assess(broken, backups, now)))
+        self.assertTrue(health.assess([], backups, now))
         self.assertTrue(health.assess(clusters, [], now))
+        backups[0]['status']['stoppedAt'] = (now - dt.timedelta(days=1)).isoformat()
+        self.assertTrue(health.assess(clusters, backups, now))
 
     def test_latest_failed_backup_alerts_without_permanent_old_failure(self):
         now = dt.datetime.now(dt.timezone.utc)
-        clusters = [{'metadata': {'name': name}, 'status': {'lastSuccessfulBackup': now.isoformat(), 'conditions': [{'type': 'ContinuousArchiving', 'status': 'True'}]}} for name in health.LIMITS]
-        def backup(date, phase):
-            return {'metadata': {'creationTimestamp': date}, 'spec': {'cluster': {'name': 'econgraph-app'}}, 'status': {'phase': phase}}
-        self.assertTrue(health.assess(clusters, [backup('2026-10-30', 'failed')], now))
-        self.assertEqual(health.assess(clusters, [backup('2026-10-29', 'failed'), backup('2026-10-30', 'completed')], now), [])
+        clusters, backups = self.healthy_plugin_fixtures(now)
+        failed = copy.deepcopy(backups[0])
+        failed['metadata']['creationTimestamp'] = (now + dt.timedelta(seconds=1)).isoformat()
+        failed['status'] = {'phase': 'failed'}
+        self.assertTrue(health.assess(clusters, backups + [failed], now))
+        failed['metadata']['creationTimestamp'] = (now - dt.timedelta(days=1)).isoformat()
+        self.assertEqual(health.assess(clusters, backups + [failed], now), [])
+
+    def test_plugin_backup_missing_invalid_future_timestamps_fail_closed(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        for timestamp in [None, 'invalid', now.replace(tzinfo=None).isoformat(),
+                          (now + dt.timedelta(minutes=6)).isoformat()]:
+            clusters, backups = self.healthy_plugin_fixtures(now)
+            # A legacy Cluster timestamp must never mask missing plugin evidence.
+            clusters[0]['status']['lastSuccessfulBackup'] = now.isoformat()
+            backups[0]['status']['stoppedAt'] = timestamp
+            self.assertTrue(health.assess(clusters, backups, now))
+
+    def test_only_completed_correct_plugin_backups_satisfy_age_check(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        for changed in ['pending', 'other-cluster', 'other-plugin']:
+            clusters, backups = self.healthy_plugin_fixtures(now)
+            if changed == 'pending':
+                backups[0]['status']['phase'] = 'running'
+            elif changed == 'other-cluster':
+                backups[0]['spec']['cluster']['name'] = 'different-cluster'
+            else:
+                backups[0]['spec']['pluginConfiguration']['name'] = 'different-plugin'
+            self.assertTrue(health.assess(clusters, backups, now))
+
+    def test_latest_completed_backup_recovers_from_old_stale_and_failed_records(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        clusters, backups = self.healthy_plugin_fixtures(now)
+        stale = copy.deepcopy(backups[0])
+        stale['metadata']['creationTimestamp'] = (now - dt.timedelta(days=1)).isoformat()
+        stale['status']['stoppedAt'] = (now - dt.timedelta(days=1)).isoformat()
+        running = copy.deepcopy(backups[0])
+        running['metadata']['creationTimestamp'] = now.isoformat()
+        running['status'] = {'phase': 'running'}
+        self.assertEqual(health.assess(clusters, [stale, running, *backups], now), [])
+
+    def test_backup_checker_rbac_stays_namespace_scoped_read_only(self):
+        documents = list(yaml.safe_load_all((ROOT / 'platform/observability/backup-health.yaml').read_text()))
+        roles = [d for d in documents if d['kind'] in ['Role', 'ClusterRole']]
+        self.assertEqual(len(roles), 1)
+        self.assertEqual(roles[0]['kind'], 'Role')
+        self.assertEqual(roles[0]['metadata']['namespace'], 'econ-graph')
+        self.assertEqual(roles[0]['rules'], [{'apiGroups': ['postgresql.cnpg.io'], 'resources': ['clusters', 'backups'], 'verbs': ['get', 'list']}])
+
+    def test_cilium_api_egress_is_entity_and_port_scoped(self):
+        policies = list(yaml.safe_load_all((ROOT / 'platform/application/api-egress.yaml').read_text()))
+        self.assertEqual(len(policies), 2)
+        for policy in policies:
+            self.assertEqual(policy['spec']['egress'], [{'toEntities': ['kube-apiserver'], 'toPorts': [{'ports': [{'port': '6443', 'protocol': 'TCP'}]}]}])
+        cnpg, checker = [p['spec']['endpointSelector'] for p in policies]
+        self.assertEqual(cnpg['matchExpressions'][0]['values'], sorted(health.LIMITS))
+        self.assertEqual(checker, {'matchLabels': {'app': 'cnpg-backup-health'}})
+        self.assertNotIn('${CONTROL_PLANE_CIDR}', (ROOT / 'platform/application/network-policies.yaml').read_text())
+
+    def test_disposable_drain_allows_scratch_emptydir_and_preserves_eviction(self):
+        for scenario in ['success', 'drain-failure', 'stubborn-e2e']:
+            failure = scenario != 'success'
+            with tempfile.TemporaryDirectory() as temporary:
+                command = Path(temporary) / 'argv.json'
+                command.write_text(json.dumps(['real-release-e2e']))
+                args = SimpleNamespace(node='worker-1', owner='proof', e2e_argv=command,
+                                       e2e_evidence=None, report=Path(temporary) / 'report.json',
+                                       source_cluster='copy', namespace='proof')
+                kube = Mock()
+                kube.disposable_owned.return_value = {'metadata': {'uid': 'same-node'}, 'spec': {}}
+                kube.get.return_value = {'status': {'currentPrimary': 'copy-1', 'conditions': [{'type': 'Ready', 'status': 'True'}]}}
+                def operation(*argv, **kwargs):
+                    if argv[0] == 'drain':
+                        self.assertIn('--delete-emptydir-data', argv)
+                        self.assertIn('--ignore-daemonsets', argv)
+                        self.assertIn('--timeout=10m', argv)
+                        self.assertNotIn('--force', argv)
+                        self.assertNotIn('--disable-eviction', argv)
+                        if failure:
+                            raise RuntimeError('PDB refuses drain')
+                    return ''
+                kube.run.side_effect = operation
+                process = Mock()
+                process.wait.return_value = 0
+                process.poll.return_value = None if scenario == 'stubborn-e2e' else 0
+                if scenario == 'stubborn-e2e':
+                    process.wait.side_effect = subprocess.TimeoutExpired('real-release-e2e', 30)
+                with patch.object(drill.subprocess, 'Popen', return_value=process):
+                    if failure:
+                        expected_error = subprocess.TimeoutExpired if scenario == 'stubborn-e2e' else RuntimeError
+                        with self.assertRaises(expected_error):
+                            drill.drain(kube, args, {'spec': {'instances': 2}}, {})
+                    else:
+                        report = {}
+                        drill.drain(kube, args, {'spec': {'instances': 2}}, report)
+                        self.assertEqual(report['status'], 'drain-completed-coverage-pending')
+                if scenario == 'stubborn-e2e':
+                    process.terminate.assert_called_once()
+                    process.kill.assert_called_once()
+                kube.run.assert_any_call('uncordon', 'worker-1')
+                self.assertFalse(any(call.args[0] == 'delete' for call in kube.run.call_args_list))
 
     def test_recovery_uses_source_only_for_reading_own_archive_namespace(self):
         source = next(yaml.safe_load_all((ROOT / 'platform/databases/clusters.yaml').read_text()))
