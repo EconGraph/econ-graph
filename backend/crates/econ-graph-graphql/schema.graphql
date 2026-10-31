@@ -294,6 +294,150 @@ type ChartCollaboratorType {
 	lastAccessedAt: DateTime
 }
 
+type CompanyDerivationUnavailable {
+	taxonomy: String!
+	concept: String!
+	unit: String!
+	periodStart: NaiveDate
+	periodEnd: NaiveDate!
+	derivation: String!
+	reason: String!
+}
+
+type CompanyFact {
+	id: ID!
+	cik: String!
+	taxonomy: String!
+	concept: String!
+	unit: String!
+	periodStart: NaiveDate
+	periodEnd: NaiveDate!
+	accession: String!
+	filed: NaiveDate!
+	value: String!
+	form: String!
+	fiscalYear: Int
+	fiscalPeriod: String
+	frame: String
+	label: String
+	description: String
+	anchor: String!
+}
+
+type CompanyFactConnection {
+	nodes: [CompanyFact!]!
+	hasNextPage: Boolean!
+	endCursor: String
+}
+
+type CompanyFactEvidence {
+	anchor: String
+	filingAnchor: String
+	factId: ID!
+	cik: String!
+	taxonomy: String!
+	concept: String!
+	unit: String!
+	periodStart: NaiveDate
+	periodEnd: NaiveDate!
+	accession: String!
+	filed: NaiveDate!
+	value: String!
+}
+
+input CompanyFactFilterInput {
+	taxonomy: String
+	concept: String
+	unit: String
+	periodStart: NaiveDate
+	periodEnd: NaiveDate
+	instantOnly: Boolean! = false
+	includeRevisions: Boolean! = false
+	revision: CompanyRevisionInput
+}
+
+type CompanyFinancialRatio {
+	name: String!
+	value: String
+	unit: String!
+	provenance: [CompanyFactEvidence!]!
+	unavailableReason: String
+}
+
+type CompanyPeerComparison {
+	company: CompanyResearchCompany!
+	ratios: [CompanyFinancialRatio!]!
+}
+
+type CompanyPeriod {
+	start: NaiveDate
+	end: NaiveDate!
+	kind: String!
+}
+
+type CompanyResearchCompany {
+	id: ID!
+	cik: String!
+	name: String!
+	ticker: String
+	sicCode: String
+	sicDescription: String
+	fiscalYearEnd: String
+	updatedAt: DateTime!
+}
+
+type CompanyResearchCompanyConnection {
+	nodes: [CompanyResearchCompany!]!
+	hasNextPage: Boolean!
+	endCursor: String
+}
+
+type CompanyResearchStatement {
+	unclassifiedHasNextPage: Boolean!
+	unclassifiedEndCursor: String
+	notice: String!
+	unclassifiedFacts: [CompanyStatementLine!]!
+	unavailableDerivations: [CompanyDerivationUnavailable!]!
+	kind: CompanyStatementKind!
+	lines: [CompanyStatementLine!]!
+	periods: [CompanyPeriod!]!
+}
+
+input CompanyRevisionInput {
+	mode: CompanyRevisionMode! = LATEST
+	asOf: NaiveDate
+	accession: String
+}
+
+enum CompanyRevisionMode {
+	LATEST
+	ORIGINAL
+	AS_OF
+	ACCESSION
+}
+
+enum CompanyStatementKind {
+	INCOME_STATEMENT
+	BALANCE_SHEET
+	CASH_FLOW
+}
+
+type CompanyStatementLine {
+	key: String!
+	label: String!
+	taxonomy: String!
+	concept: String!
+	periodStart: NaiveDate
+	periodEnd: NaiveDate!
+	unit: String!
+	value: String!
+	provenance: [CompanyFactEvidence!]!
+	derivation: String
+	restated: Boolean!
+	anchor: String
+	subjectAnchor: String
+}
+
 """
 Queue counts for one crawl source.
 """
@@ -838,6 +982,22 @@ type ParsedUnit {
 }
 
 type Query {
+	"""
+	Search structured SEC companies (requires the SEC catalog grant).
+	"""
+	companies(search: String, first: Int, after: String): CompanyResearchCompanyConnection!
+	company(cik: String!): CompanyResearchCompany
+	companyFacts(cik: String!, filter: CompanyFactFilterInput, first: Int, after: String): CompanyFactConnection!
+	"""
+	Normalized companyfacts statements; original filing layouts ship separately.
+	"""
+	financialStatement(cik: String!, kind: CompanyStatementKind!, revision: CompanyRevisionInput, periodStart: NaiveDate, periodEnd: NaiveDate, instantOnly: Boolean! = false, unclassifiedFirst: Int, unclassifiedAfter: String): CompanyResearchStatement!
+	companyRatios(cik: String!, periodStart: NaiveDate, periodEnd: NaiveDate!, revision: CompanyRevisionInput): [CompanyFinancialRatio!]!
+	companyPeers(cik: String!, periodStart: NaiveDate, periodEnd: NaiveDate!, revision: CompanyRevisionInput, first: Int): [CompanyPeerComparison!]!
+	"""
+	Validate a company note's target on the authoritative data plane.
+	"""
+	companyResearchTargetExists(anchor: String!): Boolean!
 	"""
 	Get a specific economic series by ID
 	"""
