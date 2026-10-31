@@ -16,7 +16,9 @@ source "${repo_root}/scripts/backup/test-stubs.sh"
 
 failures=0
 tmp="$(mktemp -d)"
-trap 'rm -rf "${tmp}"' EXIT
+holder="" lholder=""
+# shellcheck disable=SC2154 # pid is the trap's own loop variable
+trap 'for pid in ${holder} ${lholder}; do kill "${pid}" 2>/dev/null || true; done; rm -rf "${tmp}"' EXIT
 make_stubs "${tmp}/bin"
 # restore-snapshot.sh mounts the filesystem top level on a mktemp directory
 # under /mnt once its checks pass. The checks run here are meant to stop it
@@ -34,6 +36,10 @@ printf '#!/bin/bash\ncase " $* " in *" /mnt/"*) echo "mktemp $*" >>"${STUB_LOG:-
 chmod +x "${tmp}/bin/mount" "${tmp}/bin/umount" "${tmp}/bin/mktemp"
 export PATH="${tmp}/bin:${PATH}"
 export STUB_LOG="${tmp}/calls.log"
+# The lock file's owner as the scripts expect it under ECONGRAPH_TEST_ROOT
+# (root's, outside tests).
+BACKUP_LOCK_OWNER="$(id -u):$(id -g)"
+export BACKUP_LOCK_OWNER
 # Never read the operator's backup.env.
 export ECONGRAPH_CONFIG_DIR="${tmp}/config"
 mkdir -p "${ECONGRAPH_CONFIG_DIR}"
@@ -219,7 +225,7 @@ refuse() {
         env "$@" "${restore}" --yes "${RESTORE_SNAP:-${app_snap}}"
     check "... and changes nothing" [ "$(tree_state "${root}")" == "${before}" ]
     check "... and touches no subvolume and mounts nothing" \
-        bash -c "! grep -qE '^(btrfs (subvolume snapshot|send|receive)|mount|umount|mktemp)' '${STUB_LOG}'"
+        bash -c "! grep -qE '^(btrfs (subvolume snapshot|send|receive)|mount|umount|mktemp) ' '${STUB_LOG}'"
 }
 # accept NAME [VAR=value...]: a dry run of the same restore gets past the check.
 accept() {
@@ -291,6 +297,199 @@ refuse "data-plane while a pod mounts postgresql's claim" "still in use by: econ
     'FAKE_POD_LIST=econ-graph/x\tdata=postgresql-data-postgresql-0=\n'
 accept "data-plane while the app plane's Postgres pods exist" "FAKE_PODS=app-postgres-0 keycloak-postgres-0"
 unset RESTORE_SNAP
+
+echo "== restore-snapshot.sh: holds the backup lock from before its first check"
+lock="${root}/run/econgraph/backup-snapshots.lock"
+# hold_lock SECONDS: hold the lock from the background for that long (until
+# release_lock); returns once it is held.
+hold_lock() {
+    rm -f "${tmp}/lock-held"
+    [ -d "$(dirname "${lock}")" ] || mkdir -m 0700 "$(dirname "${lock}")"
+    bash -c 'umask 077; exec 8>>"$1"; flock 8; : >"$2"; exec sleep "$3"' _ "${lock}" "${tmp}/lock-held" "$1" &
+    holder=$!
+    local tries=0
+    while [ ! -e "${tmp}/lock-held" ]; do
+        tries=$((tries + 1))
+        [ "${tries}" -le 200 ] || { echo "FAIL could not hold ${lock} for the test"; exit 1; }
+        sleep 0.05
+    done
+}
+release_lock() { kill "${holder}" 2>/dev/null || true; wait "${holder}" 2>/dev/null || true; holder=""; }
+hold_lock 60
+before="$(tree_state "${root}")"
+run_script "restore-snapshot refuses while the backup lock is held" 1 "${lock} is held" \
+    "${restore}" --yes "${app_snap}"
+check "... before any findmnt, mountpoint, btrfs or docker call" [ ! -s "${STUB_LOG}" ]
+check "... and changes nothing" [ "$(tree_state "${root}")" == "${before}" ]
+run_script "restore-snapshot --dry-run takes no lock" 0 "(dry run: nothing restored)" \
+    "${restore}" --dry-run "${app_snap}"
+release_lock
+hold_lock 1
+FAKE_PODS=app-postgres-0 run_script "restore-snapshot --lock-wait waits for the lock, then checks" 1 \
+    "still in use by: econ-graph/app-postgres-0." "${restore}" --yes --lock-wait=30 "${app_snap}"
+release_lock
+FAKE_LOCK_PROBE="${lock}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot asks the cluster with the lock held" 1 \
+    "still in use by" "${restore}" --yes "${app_snap}"
+# shellcheck disable=SC2016 # $1 expands in the inner bash
+check "... held at every findmnt, mountpoint and cluster call, from the first" bash -c 'grep -q "^lock-probe held" "$1" && ! grep -qE "^lock-(probe free|fd stale)" "$1"' _ "${STUB_LOG}"
+# shellcheck disable=SC2016 # $1 expands in the inner bash
+check "... the first call is a findmnt" bash -c '[ "$(head -n 1 "$1" | cut -d" " -f1)" = findmnt ]' _ "${STUB_LOG}"
+for wait in soon "" 86401 9999999999999999999999 18446744073709551617; do
+    run_script "restore-snapshot rejects --lock-wait=${wait}" 2 "SECONDS: 0 to 86400" \
+        "${restore}" --yes "--lock-wait=${wait}" "${app_snap}"
+done
+# 09 is not octal: read as decimal, the lock is taken and it goes on to the
+# pod check.
+FAKE_LOCK_PROBE="${lock}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot takes --lock-wait=09 as nine seconds" 1 \
+    "still in use by" "${restore}" --yes --lock-wait=09 "${app_snap}"
+# shellcheck disable=SC2016 # $1 expands in the inner bash
+check "... with the lock held" bash -c 'grep -q "^lock-probe held" "$1" && ! grep -qE "^lock-(probe free|fd stale)" "$1"' _ "${STUB_LOG}"
+
+echo "== the lock is in a root-only directory; delete-snapshots.sh and snapshot-now.sh take it too"
+mode_of() { stat -c '%u:%g %a' "$1"; }
+lock_dir="$(dirname "${lock}")"
+installed="${root}/usr/local/sbin/econgraph-backup-snapshots"
+rm -rf "${lock_dir}"
+FAKE_PODS=app-postgres-0 run_script "restore-snapshot creates a missing lock directory" 1 "still in use by" \
+    "${restore}" --yes "${app_snap}"
+check "... owned by root (here the test user), mode 0700" [ "$(mode_of "${lock_dir}")" == "${BACKUP_LOCK_OWNER} 700" ]
+check "... with the lock file in it, mode 0600" [ "$(stat -c %a "${lock}")" == 600 ]
+# refuse_lock NAME TEXT: restore-snapshot stops at the lock with TEXT, before
+# anything else and changing nothing.
+refuse_lock() {
+    local before
+    before="$(tree_state "${root}")"
+    run_script "restore-snapshot refuses ${1}" 1 "$2" "${restore}" --yes "${app_snap}"
+    check "... before any findmnt, mountpoint, btrfs or docker call" [ ! -s "${STUB_LOG}" ]
+    check "... and changes nothing" [ "$(tree_state "${root}")" == "${before}" ]
+}
+for bad in 755 750 711; do
+    chmod "${bad}" "${lock_dir}"
+    refuse_lock "a lock directory with mode ${bad}" "is not a directory owned by ${BACKUP_LOCK_OWNER} with mode 0700"
+done
+chmod 700 "${lock_dir}"
+mv "${lock_dir}" "${lock_dir}.real"
+ln -s "${lock_dir}.real" "${lock_dir}"
+refuse_lock "a lock directory that is a symlink" "is not a directory owned by"
+rm "${lock_dir}"
+mv "${lock_dir}.real" "${lock_dir}"
+rm -f "${lock}"
+ln -s "${tmp}/elsewhere" "${lock}"
+refuse_lock "a lock file that is a symlink" "is not a regular file"
+check "... creating nothing where it points" [ ! -e "${tmp}/elsewhere" ]
+rm -f "${lock}"
+# The installed hourly job must take the same lock.
+mkdir -p "$(dirname "${installed}")"
+# shellcheck disable=SC2016 # the old copy's text, not expanded
+printf '%s\n' '#!/bin/bash' 'LOCK_FILE="$TEST_ROOT/run/econgraph-backup-snapshots.lock"' >"${installed}"
+refuse_lock "while the installed hourly job takes the old lock" "takes an older lock"
+check "... and says to re-run the installer" grep -qF "install-backup-timer.sh" <<<"${out}"
+printf '%s\n' '#!/bin/bash' '# BACKUP_LOCK_VERSION=2 (only in a comment)' >"${installed}"
+refuse_lock "while the installed job only mentions the lock version in a comment" "takes an older lock"
+cp "${repo_root}/scripts/host/backup-snapshots.sh" "${installed}"
+FAKE_PODS=app-postgres-0 run_script "restore-snapshot goes on when the installed job takes this lock" 1 "still in use by" \
+    "${restore}" --yes "${app_snap}"
+rm -f "${installed}"
+
+# The old lock path, which older checkouts and installed jobs take: always
+# held too, root's and 0600; held by root it is waited for, held by anyone
+# else the file is replaced.
+legacy="${root}/run/econgraph-backup-snapshots.lock"
+# hold_legacy SECONDS: as hold_lock, for the old lock file, made 0644 as the
+# old scripts made it (release_legacy ends it).
+hold_legacy() {
+    rm -f "${tmp}/legacy-held"
+    bash -c 'umask 022; exec 7>>"$1"; flock 7; : >"$2"; exec sleep "$3"' _ "${legacy}" "${tmp}/legacy-held" "$1" &
+    lholder=$!
+    local tries=0
+    while [ ! -e "${tmp}/legacy-held" ]; do
+        tries=$((tries + 1))
+        [ "${tries}" -le 200 ] || { echo "FAIL could not hold ${legacy} for the test"; exit 1; }
+        sleep 0.05
+    done
+}
+release_legacy() { kill "${lholder}" 2>/dev/null || true; wait "${lholder}" 2>/dev/null || true; lholder=""; }
+rm -f "${legacy}"
+FAKE_LOCK_PROBE="${legacy}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot creates and holds the old lock" 1 "still in use by" \
+    "${restore}" --yes "${app_snap}"
+check "... at every call" bash -c "grep -q '^lock-probe held' '${STUB_LOG}' && ! grep -q '^lock-probe free' '${STUB_LOG}'"
+check "... made 0600" [ "$(mode_of "${legacy}")" == "${BACKUP_LOCK_OWNER} 600" ]
+chmod 644 "${legacy}"
+old_inode="$(stat -c %i "${legacy}")"
+FAKE_PODS=app-postgres-0 run_script "restore-snapshot makes a free 0644 old lock 0600" 1 "still in use by" \
+    "${restore}" --yes "${app_snap}"
+check "... the same file" [ "$(stat -c '%i %a' "${legacy}")" == "${old_inode} 600" ]
+rm -f "${legacy}"
+hold_legacy 60
+refuse_lock "while root holds the old lock" "${legacy} is held"
+check "... and says older copies take it" grep -qF "the lock older copies of these scripts take" <<<"${out}"
+release_legacy
+rm -f "${legacy}"
+hold_legacy 60
+old_inode="$(stat -c %i "${legacy}")"
+started="$(date +%s)"
+BACKUP_LOCK_ROOT_UID=0 FAKE_LOCK_PROBE="${legacy}" FAKE_PODS=app-postgres-0 run_script "restore-snapshot replaces an old lock another user holds" 1 \
+    "still in use by" "${restore}" --yes --lock-wait=30 "${app_snap}"
+check "... without waiting for it" [ "$(($(date +%s) - started))" -lt 10 ]
+# shellcheck disable=SC2016 # $1 and $2 expand in the inner bash
+check "... with a new 0600 file" bash -c '[ "$(stat -c %i "$1")" != "$2" ] && [ "$(stat -c %a "$1")" = 600 ]' _ "${legacy}" "${old_inode}"
+check "... which it held throughout" bash -c "grep -q '^lock-probe held' '${STUB_LOG}' && ! grep -q '^lock-probe free' '${STUB_LOG}'"
+release_legacy
+hold_legacy 1
+FAKE_PODS=app-postgres-0 run_script "restore-snapshot --lock-wait waits for root's old lock" 1 "still in use by" \
+    "${restore}" --yes --lock-wait=30 "${app_snap}"
+release_legacy
+# One --lock-wait covers both locks: 3 seconds, the new lock free after 2,
+# the old one after 5, so it gives up at about 3.
+hold_lock 2
+hold_legacy 5
+started="$(date +%s)"
+run_script "restore-snapshot --lock-wait is one budget for both locks" 1 "${legacy} is held" \
+    "${restore}" --yes --lock-wait=3 "${app_snap}"
+check "... giving up within it" [ "$(($(date +%s) - started))" -lt 5 ]
+release_lock
+release_legacy
+rm -f "${legacy}"
+
+hold_lock 60
+run_script "backup-snapshots refuses while the backup lock is held" 1 "holds ${lock}" \
+    "${repo_root}/scripts/host/backup-snapshots.sh"
+check "... before any btrfs call" bash -c "! grep -q '^btrfs' '${STUB_LOG}'"
+release_lock
+
+delete="${repo_root}/scripts/host/delete-snapshots.sh"
+hold_lock 60
+run_script "delete-snapshots refuses while the backup lock is held" 1 "${lock} is held" \
+    "${delete}" data-plane.20261024T010000Z
+check "... before any btrfs call" bash -c "! grep -q '^btrfs' '${STUB_LOG}'"
+release_lock
+rm -f "${lock}"
+run_script "delete-snapshots takes the lock, then still wants a terminal" 1 "this is a manual tool" \
+    "${delete}" data-plane.20261024T010000Z
+check "... and created the lock file 0600" [ "$(mode_of "${lock}")" == "${BACKUP_LOCK_OWNER} 600" ]
+
+snapshot_now="${repo_root}/scripts/backup/snapshot-now.sh"
+hold_lock 60
+SNAPSHOT_DIR="${tmp}/no-such-dir" run_script "snapshot-now as root refuses while the lock is held" 1 "${lock} is held" \
+    "${snapshot_now}" before-test
+check "... before taking anything" bash -c "! grep -q '^btrfs' '${STUB_LOG}'"
+SNAPSHOT_DIR="${tmp}/no-such-dir" FAKE_ROOT=0 run_script "snapshot-now as the operator takes no lock" 1 "${tmp}/no-such-dir does not exist" \
+    "${snapshot_now}" before-test
+SNAPSHOT_DIR="${tmp}/no-such-dir" run_script "snapshot-now --dry-run takes no lock" 1 "${tmp}/no-such-dir does not exist" \
+    "${snapshot_now}" --dry-run before-test
+release_lock
+rm -f "${lock}"
+SNAPSHOT_DIR="${tmp}/no-such-dir" run_script "snapshot-now as root takes the lock, then checks" 1 "${tmp}/no-such-dir does not exist" \
+    "${snapshot_now}" before-test
+check "... and created the lock file 0600" [ "$(mode_of "${lock}")" == "${BACKUP_LOCK_OWNER} 600" ]
+
+lock_block() { sed -n '/^# >>> backup lock/,/^# <<< backup lock/p' "$1"; }
+first_block="$(lock_block "${repo_root}/scripts/host/backup-snapshots.sh")"
+check "the lock block is in backup-snapshots.sh" [ -n "${first_block}" ]
+for f in scripts/host/restore-snapshot.sh scripts/host/delete-snapshots.sh scripts/backup/snapshot-now.sh; do
+    check "the lock block in ${f} is the same as backup-snapshots.sh's" \
+        [ "$(lock_block "${repo_root}/${f}")" == "${first_block}" ]
+done
 unset ECONGRAPH_TEST_ROOT FAKE_ROOT SUDO_USER
 
 echo "== check-freshness.sh: the status file's failures and run_epoch"

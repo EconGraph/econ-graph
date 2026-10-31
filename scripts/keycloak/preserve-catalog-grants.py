@@ -365,6 +365,16 @@ def merge_catalog_policy(realm, get):
     observed_attrs = (observed or {}).get("attributes") or {}
     attributes = dict(observed_attrs)
     attributes.update(realm.get("attributes") or {})
+    # The deploy owns the realm-level frontendUrl, which overrides KC_HOSTNAME: a
+    # public deploy sets it to its issuer URL (KC_REALM_FRONTEND_URL), and any other
+    # import (localhost only, compose, a production dump restored elsewhere) clears
+    # it, so a stale public URL never keeps being issued. Keycloak treats an empty
+    # frontendUrl as unset; an absent key would leave the stored value in place.
+    frontend_url = os.environ.get("KC_REALM_FRONTEND_URL")
+    if frontend_url:
+        attributes["frontendUrl"] = frontend_url
+    elif attributes.get("frontendUrl"):
+        attributes["frontendUrl"] = ""
     # Completion is recorded by a separate container only after config-cli succeeds.
     attributes.pop(INITIALIZED, None)
     attributes.pop(PENDING, None)

@@ -4,6 +4,10 @@ Use this runbook for an existing EconGraph deployment in the kind cluster
 `econ-graph`. A rollout restart replaces application pods using their configured
 images. To deploy changes from a checkout, build and load the images, run the
 deployment procedure, then restart deployments whose image tags have been reused.
+A change to the `econ-graph-config` ConfigMap made through `deploy.sh` needs no restart:
+`deploy.sh` rolls the backend, crawler worker and frontend itself when it changes (each
+pod template carries a hash of its data, `econgraph.io/app-config-hash`). A ConfigMap
+edited by hand is not rolled.
 
 Run commands from the repository root in Bash on the cluster host. This procedure
 does not use `restart-k8s-rollout.sh`, which targets MicroK8s.
@@ -122,7 +126,10 @@ compatible with the resulting database schema before restoring it. If a deployme
 fails before reaching migrations and you abandon it, restore the recorded count
 only after checking that the failure left the worker safe to run.
 
-Choose **one** deployment command according to the intended public host:
+Choose **one** deployment command according to the intended public host.
+`PUBLIC_HOST=econgraph.com` serves `https://www.econgraph.com` by default; `MAIN_HOST`
+selects www or the apex independently. Preserve an explicit apex choice when rolling
+back; see [Main public address](MAIN_HOST.md).
 
 ```bash
 # Keep the public site on its production cluster (use its actual hostname).

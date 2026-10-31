@@ -136,7 +136,9 @@ kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
 
 The public site is served through the Cloudflare Tunnel: TLS for visitors ends at Cloudflare,
 and the tunnel reaches the gateway's https listener. `PUBLIC_HOST=econgraph.com
-./scripts/deploy/deploy.sh` sets it up; see "Public site" in `k8s/README.md`.
+./scripts/deploy/deploy.sh` serves `https://www.econgraph.com` by default. `PUBLIC_HOST`
+keeps the base domain; `MAIN_HOST` selects the main address. See [Main public
+address](MAIN_HOST.md) and "Public site" in `k8s/README.md`.
 
 ## Service URLs
 

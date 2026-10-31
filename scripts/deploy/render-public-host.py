@@ -1,65 +1,21 @@
 #!/usr/bin/env python3
-"""Point the k8s manifests at a public host name, for scripts/deploy/lib/public-host.sh
-and scripts/deploy/apply-gateway-routes.sh.
+"""Render public manifests while keeping PUBLIC_HOST as the base DNS name.
 
-Usage: scripts/deploy/render-public-host.py HOST [MANIFEST ...]
-
-Reads each manifest (or stdin when none or "-"), and prints the documents as YAML with
-the public host https://HOST applied. The committed manifests stay localhost-only and
-are printed unchanged apart from the env values below, so http://localhost keeps
-working on the host:
-
-  HTTPRoute NAME (host localhost,           plus a new HTTPRoute NAME-public for HOST on
-  listener http)                            listener https (see below), labelled
-                                            econgraph.io/public-host
-  BackendTrafficPolicy                      also targets the -public copies of its routes,
-                                            so the rate limits apply on HOST too
-  (with any HTTPRoute)                      HTTPRoute econ-graph-public-redirect: plain
-                                            http for HOST or www.HOST answers with a
-                                            permanent redirect to https://HOST, same path;
-                                            HTTPRoute econ-graph-www-redirect: https for
-                                            www.HOST redirects to https://HOST
-  Keycloak, realm import (env)              KC_HOSTNAME=https://HOST/idp
-                                            KC_WEB_BASE_URL=https://HOST and
-                                            KC_WEB_E2E_BASE_URL=https://HOST, so the
-                                            econ-graph-web client's redirect URIs and web
-                                            origins are the public host only (no
-                                            http://localhost: a sign-in on the public
-                                            host never returns to a local listener)
-  Backend (env)                             OIDC_ISSUER=https://HOST/idp/realms/econ-graph
-                                            (OIDC_JWKS_URL stays the in-cluster Service)
-  ConfigMap econ-graph-config               CORS_ORIGIN=https://HOST,https://www.HOST,
-                                            http://localhost: the public site, its www
-                                            name and the app on the host; the dev
-                                            server's http://localhost:3000 is dropped
-
-The public routes are separate objects so that they can differ from the localhost
-ones without touching them:
-  - they attach to the gateway's https listener only, which the cloudflared tunnel
-    connector reaches over https (k8s/manifests/cloudflared.yaml), so the scheme the
-    gateway passes on (X-Forwarded-Proto) is the connection's real one, and a
-    plain-http request for HOST, say from the LAN to the host's port 80, is
-    redirected to https://HOST instead of reaching the app or Keycloak in clear
-    text. No client header decides the scheme or host
-    (k8s/manifests/gateway/client-traffic-policy.yaml).
-  - the admin and debug paths (/admin, /api/admin, /playground) are left out; on
-    http://localhost the routes do not serve them either.
-
-www is redirected rather than served: sign-in goes through Keycloak on the app's own
-origin, and Keycloak has one issuer that the backend checks exactly. Serving www too
-would add a second origin to every redirect URI and web origin and split sessions
-between two hosts, for nothing. The CORS list names https://www.HOST anyway: while
-www redirects, no page is served from it, so the entry is unused, and it allows only
-the site's own www name.
-
-Keycloak's issuer must equal the backend's OIDC_ISSUER, which is why both are set from
-the one HOST here.
-
-Needs python3 with PyYAML (also needed by k8s/monitoring/check-prometheus-rules.sh).
-Tests: scripts/deploy/test-render-public-host.sh.
+Usage: render-public-host.py HOST [MANIFEST ...]
+MAIN_HOST (required: HOST or www.HOST) is the main host; lib/public-host.sh's
+main_host_init resolves it for the deploy scripts.
+Only the canonical HTTPS host serves public routes and Keycloak. HTTP on both
+names and HTTPS on the alternate name redirect to that host, retaining path and
+query. The redirects are permanent (301) to the apex, and to www.HOST only when
+MAIN_HOST_PERMANENT names it (scripts/deploy/switch-main-host.sh --finalize);
+otherwise they are temporary (302), so a rollback is not undone by redirects that
+browsers and Cloudflare have cached. Localhost routes and the in-cluster JWKS URL remain unchanged.
+Keycloak and backend share the canonical issuer; public CORS allows both names
+and http://localhost. Tests: scripts/deploy/test-render-public-host.sh.
 """
 
 import copy
+import os
 import re
 import sys
 
@@ -83,6 +39,7 @@ def env_values(host):
     base = f"https://{host}"
     return {
         "KC_HOSTNAME": f"{base}/idp",
+        "KC_REALM_FRONTEND_URL": f"{base}/idp",
         "KC_WEB_BASE_URL": base,
         # The realm's second origin; without a public host it stays http://localhost.
         "KC_WEB_E2E_BASE_URL": base,
@@ -94,6 +51,15 @@ def set_env(doc, host):
     spec = (doc.get("spec") or {}).get("template", {}).get("spec") or {}
     values = env_values(host)
     for container in (spec.get("containers") or []) + (spec.get("initContainers") or []):
+        if (
+            doc.get("kind") == "Job"
+            and doc.get("metadata", {}).get("name") == "keycloak-realm-import"
+            and container.get("name") == "render-realm"
+            and not any(e.get("name") == "KC_REALM_FRONTEND_URL" for e in container.get("env", []))
+        ):
+            container.setdefault("env", []).append(
+                {"name": "KC_REALM_FRONTEND_URL", "value": values["KC_REALM_FRONTEND_URL"]}
+            )
         for var in container.get("env") or []:
             if var.get("name") in values and "value" in var:
                 var["value"] = values[var["name"]]
@@ -143,8 +109,15 @@ def public_route(doc, host):
     }
 
 
-def redirect_routes(namespace, host):
-    """Plain http for the public names, and https for www, redirect to https://HOST."""
+def redirect_status(host, main_host):
+    """301 to the apex, or to a main host MAIN_HOST_PERMANENT names; else 302."""
+    permanent = os.environ.get("MAIN_HOST_PERMANENT", "").strip().lower()
+    return 301 if main_host == host or permanent == main_host else 302
+
+
+def redirect_routes(namespace, host, main_host):
+    """HTTP on both names and HTTPS on the alternate name go to MAIN_HOST."""
+    status = redirect_status(host, main_host)
 
     def route(name, section, hostnames):
         return {
@@ -161,8 +134,8 @@ def redirect_routes(namespace, host):
                                 "type": "RequestRedirect",
                                 "requestRedirect": {
                                     "scheme": "https",
-                                    "hostname": host,
-                                    "statusCode": 301,
+                                    "hostname": main_host,
+                                    "statusCode": status,
                                 },
                             }
                         ]
@@ -173,7 +146,7 @@ def redirect_routes(namespace, host):
 
     return [
         route(REDIRECT_ROUTE, "http", [host, f"www.{host}"]),
-        route(WWW_REDIRECT_ROUTE, "https", [f"www.{host}"]),
+        route(WWW_REDIRECT_ROUTE, "https", [host if main_host != host else f"www.{host}"]),
     ]
 
 
@@ -194,21 +167,29 @@ def set_cors_origin(doc, host):
     doc.setdefault("data", {})["CORS_ORIGIN"] = ",".join(origins)
 
 
-def render(doc, host, present=()):
+def render(doc, host, main_host, present=()):
     """The documents to apply for DOC; PRESENT names the HTTPRoutes already in the input."""
     kind = doc.get("kind")
     meta = doc.get("metadata") or {}
     if kind == "HTTPRoute":
         if (meta.get("labels") or {}).get(PUBLIC_LABEL) == "true":
-            return [doc]  # already rendered
+            # Rerendered manifests may come from the other canonical choice.
+            # Keep their routes aligned with the issuer when switching either way.
+            if meta.get("name") in (REDIRECT_ROUTE, WWW_REDIRECT_ROUTE):
+                return [next(
+                    route for route in redirect_routes(meta.get("namespace"), host, main_host)
+                    if route["metadata"]["name"] == meta["name"]
+                )]
+            doc["spec"]["hostnames"] = [main_host]
+            return [doc]
         if f"{meta.get('name')}-public" in present:
             return [doc]
-        public = public_route(doc, host)
+        public = public_route(doc, main_host)
         return [doc] + ([public] if public else [])
     if kind == "BackendTrafficPolicy":
         add_public_targets(doc)
     elif kind in ("Deployment", "StatefulSet", "Job"):
-        set_env(doc, host)
+        set_env(doc, main_host)
     elif kind == "ConfigMap" and meta.get("name") == "econ-graph-config":
         set_cors_origin(doc, host)
     return [doc]
@@ -223,7 +204,22 @@ def main(argv):
         print(f"render-public-host: {argv[1]!r} is not a public DNS name", file=sys.stderr)
         return 2
     if host.startswith("www."):
-        print("render-public-host: give the apex name; www.<host> redirects to it", file=sys.stderr)
+        print("render-public-host: give the base name, without the www prefix", file=sys.stderr)
+        return 2
+    # No default: the main host decides the issuer, so a render that guessed www for a
+    # cluster serving the apex would move sign-in. lib/public-host.sh's main_host_init
+    # resolves it (environment, deploy config, else www.HOST) for the deploy scripts.
+    if "MAIN_HOST" not in os.environ:
+        print(
+            "render-public-host: MAIN_HOST is not set; set it to the main host the cluster "
+            "serves (HOST or www.HOST; scripts/deploy/lib/public-host.sh main_host_init "
+            "resolves it from the deploy config)",
+            file=sys.stderr,
+        )
+        return 2
+    main_host = os.environ["MAIN_HOST"].strip().lower()
+    if main_host not in (host, f"www.{host}"):
+        print("render-public-host: MAIN_HOST must be HOST or www.HOST", file=sys.stderr)
         return 2
     docs = []
     for path in argv[2:] or ["-"]:
@@ -232,9 +228,9 @@ def main(argv):
             docs.extend(d for d in yaml.safe_load_all(stream) if d)
     routes = [d for d in docs if d.get("kind") == "HTTPRoute"]
     present = {(d.get("metadata") or {}).get("name") for d in routes}
-    out = [r for d in docs for r in render(d, host, present)]
+    out = [r for d in docs for r in render(d, host, main_host, present)]
     if routes and REDIRECT_ROUTE not in present:
-        out.extend(redirect_routes(routes[0]["metadata"].get("namespace"), host))
+        out.extend(redirect_routes(routes[0]["metadata"].get("namespace"), host, main_host))
     yaml.safe_dump_all(out, sys.stdout, sort_keys=False, default_flow_style=False)
     return 0
 

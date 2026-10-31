@@ -4,6 +4,8 @@ import copy
 import io
 import importlib.util
 import json
+import os
+from unittest.mock import patch
 from pathlib import Path
 import unittest
 
@@ -178,9 +180,52 @@ class CatalogPolicyTests(unittest.TestCase):
     def test_realm_attributes_survive_without_premature_completion(self):
         self.state[self.prefix]["attributes"]={"frontendUrl":"https://custom.test","cli-state":"existing-state"}
         merged=self.merge()
-        self.assertEqual(merged["attributes"]["frontendUrl"],"https://custom.test")
+        # Without KC_REALM_FRONTEND_URL a stored frontendUrl is cleared; see below.
+        self.assertEqual(merged["attributes"]["frontendUrl"],"")
         self.assertEqual(merged["attributes"]["cli-state"],"existing-state")
         self.assertNotIn(preserve.INITIALIZED,merged["attributes"])
+
+    def test_import_without_public_frontend_url_clears_a_stale_one(self):
+        # A localhost-only deploy after a public one, or a production dump restored on
+        # another cluster: the stored public frontendUrl would keep being issued.
+        for stored in ("https://econgraph.com/idp", "https://www.econgraph.com/idp"):
+            for unset in ({}, {"KC_REALM_FRONTEND_URL": ""}):
+                with self.subTest(stored=stored, environment=unset), patch.dict(os.environ, unset, clear=False):
+                    if not unset:
+                        os.environ.pop("KC_REALM_FRONTEND_URL", None)
+                    self.state[self.prefix]["attributes"].update({
+                        "frontendUrl": stored, "cli-state": "existing-state"})
+                    merged = self.merge()
+                    self.assertEqual(merged["attributes"]["frontendUrl"], "")
+                    self.assertEqual(merged["attributes"]["cli-state"], "existing-state")
+                    self.assertEqual(merged["attributes"][preserve.INITIALIZED], "true")
+
+    def test_import_without_frontend_url_adds_none(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("KC_REALM_FRONTEND_URL", None)
+            self.state[self.prefix]["attributes"].pop("frontendUrl", None)
+            self.assertNotIn("frontendUrl", self.merge()["attributes"])
+            self.state[self.prefix]["attributes"]["frontendUrl"] = ""
+            self.assertEqual(self.merge()["attributes"]["frontendUrl"], "")
+            self.state[self.prefix] = None
+            self.assertNotIn("frontendUrl", self.merge()["attributes"])
+
+    def test_public_import_sets_frontend_url_on_a_realm_without_one(self):
+        self.state[self.prefix]["attributes"].pop("frontendUrl", None)
+        with patch.dict(os.environ, {"KC_REALM_FRONTEND_URL": "https://www.econgraph.com/idp"}):
+            self.assertEqual(self.merge()["attributes"]["frontendUrl"], "https://www.econgraph.com/idp")
+
+    def test_public_import_overrides_old_frontend_url_and_preserves_policy(self):
+        self.state[self.prefix]["attributes"].update({
+            "frontendUrl": "https://econgraph.com/idp", "cli-state": "existing-state"})
+        for origin in ("https://www.econgraph.com/idp", "https://econgraph.com/idp"):
+            with self.subTest(origin=origin), patch.dict(os.environ, {"KC_REALM_FRONTEND_URL": origin}):
+                merged = self.merge()
+                self.assertEqual(merged["attributes"]["frontendUrl"], origin)
+                self.assertEqual(merged["attributes"]["cli-state"], "existing-state")
+                self.assertEqual(merged["attributes"][preserve.INITIALIZED], "true")
+                self.assertEqual(self.role(merged, "catalog-public")["composites"],
+                                 {"realm": [], "client": {}})
 
     def test_interrupted_old_realm_bootstrap_retries_only_originally_missing_resources(self):
         self.state[self.prefix]["attributes"]={}

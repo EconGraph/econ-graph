@@ -131,6 +131,28 @@ automatically.
 | when needed | `scripts/backup/restore-dump.sh`, `scripts/backup/branch-clone.sh` | operator | by hand |
 | when needed | `scripts/host/restore-snapshot.sh`, `scripts/host/delete-snapshots.sh` | root | by hand only |
 
+`backup-snapshots.sh`, `restore-snapshot.sh`, `delete-snapshots.sh` and
+`snapshot-now.sh` (when run as root) take one lock,
+`/run/econgraph/backup-snapshots.lock`, before they change anything, and
+hold it until they exit, so none of them overlaps another. That includes
+the time `restore-snapshot.sh` and `delete-snapshots.sh` wait at their typed
+confirmation; an hourly run that starts meanwhile fails and that hour is
+skipped. One that finds the lock held stops without changing anything
+(`restore-snapshot.sh` can wait with `--lock-wait`); dry runs and
+`delete-snapshots.sh --list` take no lock.
+
+`/run/econgraph` is root's, mode 0700, so no other user can open the lock
+file to hold it; a directory or lock file that isn't as the scripts make
+them is refused, never used. The hourly job is a copy installed by
+`install-backup-timer.sh`, so the other three refuse to run while that copy
+takes an older lock: re-run `sudo scripts/host/install-backup-timer.sh`
+after pulling. It stops the timer and refuses, starting it again, while a
+backup run is in progress; re-run it when the run has finished. Copies older
+than this lock take `/run/econgraph-backup-snapshots.lock` instead; while a
+root process holds that file (a restore from an older checkout, say) the
+others wait for it too. Any user can open that old file, so a lock on it
+held by anyone but root is ignored.
+
 Everything that needs root is a script under `scripts/host/`; each refuses
 to run without sudo, takes `--dry-run`, prints every action, and is safe to
 re-run. They are listed in order in [Needs sudo](#needs-sudo).
@@ -392,7 +414,15 @@ is set aside, not deleted.
    The refusal names each pod. It also refuses when the cluster can't be
    asked, and it checks again after the confirmation. Containers started
    outside Kubernetes are not seen, and the check does not stop the writers
-   for you: step 2 still comes first. It then asks you to type the subvolume name (`@econgraph-data-plane` or
+   for you: step 2 still comes first. Before its first check it takes the
+   lock the hourly `backup-snapshots.sh` holds
+   (`/run/econgraph/backup-snapshots.lock`) and keeps it until it exits, so
+   no backup run or second restore overlaps it. If the lock is held, it stops
+   without changing anything; `--lock-wait=SECONDS` (up to 86400) waits up
+   to that long first. A dry run takes no lock. The lock is held while it
+   waits at the typed confirmation too: an hourly backup run that starts
+   meanwhile fails at once (`systemctl status econgraph-backup-snapshots`
+   shows it failed) and that hour's snapshot is skipped. It then asks you to type the subvolume name (`@econgraph-data-plane` or
    `@econgraph-app-prod`), unmounts the subvolume, renames it to
    `@econgraph-<name>.replaced-<stamp>`, puts a writable snapshot of the
    chosen snapshot in its place under the original name, and remounts it.

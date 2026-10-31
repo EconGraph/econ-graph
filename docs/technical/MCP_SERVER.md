@@ -134,7 +134,7 @@ Retrieve observations and basic metadata for one economic series.
 
 - `series_id` (string, required): Series UUID.
 - `start_date` and `end_date` (strings, optional): Inclusive bounds in `YYYY-MM-DD` format. An omitted bound leaves that side unrestricted.
-- `limit` (integer, optional): Maximum observations; default 100, capped at 10,000. Zero returns no observations; negative values are rejected.
+- `limit` (integer, optional): Maximum observations, the latest ones; default 100, capped at 10,000. Zero returns no observations; negative values are rejected.
 
 ```json
 {
@@ -148,9 +148,9 @@ Retrieve observations and basic metadata for one economic series.
 }
 ```
 
-The parsed payload contains `data.series` with `id`, `name`, `description`, and `dataPoints`. Each point contains `date` and `value`; a missing value is `null`. Points run from the earliest matching date forward, ordered by date and then revision date. The limit counts observations, including stored revisions, rather than distinct dates.
+The parsed payload contains `data.series` with `id`, `name`, `description`, `dataPoints`, `totalCount`, and `truncated`. Each point contains `date` and `value`; a missing value is `null`. Each date appears once, at its latest revision, as on the site's charts; pre-vintage synthetic rows are left out. Points are in date order.
 
-This tool returns all stored revisions within the selected bounds. Several points can therefore have the same date, but their revision dates are not included in the result. There is no `asOf`, latest-revision selector, transformation argument, continuation cursor, total count, or truncation flag. Do not interpret a full-length result as the complete history or assume that one point represents the latest estimate for each date. Use the [GraphQL API](../api/GRAPHQL_API.md) when analysis requires those controls.
+When more dates match than `limit`, the tool returns the **latest** `limit` of them, sets `truncated` to `true`, and gives the number that matched in `totalCount`. Narrow the dates or raise `limit` (at most 10,000) for the rest. There is no `asOf`, original-release selector, transformation argument, or continuation cursor, and the revision date of each value is not included. Use the [GraphQL API](../api/GRAPHQL_API.md) when analysis requires those controls.
 
 An unknown series, or a series without observations, produces a tool error. An existing series with no observations within the requested date range returns an empty `dataPoints` array.
 
@@ -196,9 +196,9 @@ Prepare a chart comparing one or more series. The caller renders the returned ch
 }
 ```
 
-Each series contributes at most its earliest 1,000 matching observations, with the same date selection and revision behavior as `get_series_data`. A missing series or a data-query failure prevents visualization; chart-service fallback does not cover those errors.
+Each series contributes at most its latest 1,000 matching dates, with the same date selection and revision behavior as `get_series_data`, including `totalCount` and `truncated`. A missing series or a data-query failure prevents visualization; chart-service fallback does not cover those errors.
 
-When the chart service returns a `chartConfig`, the tool's text contains a **Chart Configuration** JSON section and a **Metadata** JSON section. If the service request fails or its response lacks `chartConfig`, the tool instead returns text containing **Visualization Data**: `chart_type`, `title`, `series_data`, and `metadata` with `series_count`, `total_data_points`, and a fallback `note`. Each entry in `series_data` has the same fields as the data tool's `data.series`.
+When the chart service returns a `chartConfig`, the tool's text contains a **Chart Configuration** JSON section, a **Metadata** JSON section, and a **Coverage** JSON section listing each series' `dataPoints` count, `totalCount`, and `truncated`. If the service request fails or its response lacks `chartConfig`, the tool instead returns text containing **Visualization Data**: `chart_type`, `title`, `series_data`, and `metadata` with `series_count`, `total_data_points`, and a fallback `note`. Each entry in `series_data` has the same fields as the data tool's `data.series`.
 
 Both outcomes set `is_error: false`. Inspect the text to distinguish a generated configuration from fallback data; a successful tool call does not prove that the chart service is available.
 

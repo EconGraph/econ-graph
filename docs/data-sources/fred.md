@@ -8,8 +8,8 @@ include recorded series metadata and illustrative observation responses.
 
 FRED is readable by admins only: `catalog.fred:read` is granted to the `admin` composite
 (and so to `super_admin`), not to `catalog-public` or the anonymous reader. Visitors and
-signed-in users who aren't admins see no FRED source, series, search result, observation or
-dashboard value. Admins read it as usual. An operator changes this on a running cluster with
+signed-in users who aren't admins see no FRED source, series, search result or observation.
+The dashboard's cards use public BEA and BLS series instead. Admins read it as usual. An operator changes this on a running cluster with
 `scripts/keycloak/set-catalog-access.sh`; see
 [catalog access](../../config/keycloak/README.md#catalog-access-including-anonymous-visitors).
 

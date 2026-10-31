@@ -9,7 +9,7 @@
 #   - listener https on the Gateway, its certificate (Secret econ-graph-tls,
 #     from ClusterIssuer GATEWAY_TLS_ISSUER) and its rate-limit bursts
 #     (k8s/manifests/gateway/gateway-https.yaml);
-#   - the public copies of the routes, the http-to-https and www redirects,
+#   - the public copies of the routes and redirects to MAIN_HOST (default www.PUBLIC_HOST),
 #     and the rate limits on them (scripts/deploy/render-public-host.py).
 # Without one, all of that is removed. The localhost routes are applied either
 # way.
@@ -23,6 +23,9 @@
 #   PUBLIC_HOST         A host name: serve it. `none` or empty: no public host;
 #                       one served before is removed. Unset: keep what the
 #                       cluster serves now (its public routes).
+#   MAIN_HOST           Canonical HTTPS name: PUBLIC_HOST or www.PUBLIC_HOST.
+#                       Default www.PUBLIC_HOST; preserves the served name when
+#                       PUBLIC_HOST is unset. Environment overrides deploy config.
 #   GATEWAY_TLS_ISSUER  ClusterIssuer for the https listener's certificate. An
 #                       explicit choice: it may change the certificate's issuer.
 #                       Without it: a GATEWAY_TLS_ISSUER= line in the host's deploy
@@ -82,8 +85,8 @@ die() {
 # lib/cluster-role.sh); without those copies the script stops. Never plain
 # `kubectl`: it may be another cluster's, such as the MicroK8s snap wrapper.
 # kc below replaces the library's.
-# shellcheck source=scripts/deploy/lib/cluster-role.sh
-source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
+# shellcheck source=scripts/deploy/lib/public-host.sh
+source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
 cluster_role_default_kubectl || exit 1
 kc() {
     if [ -n "$KUBE_CONTEXT" ]; then
@@ -110,10 +113,18 @@ if kc get crd httproutes.gateway.networking.k8s.io >/dev/null 2>&1; then
 fi
 if [ -z "${PUBLIC_HOST+x}" ]; then
     host="$current_host"
+    if [ -n "$host" ] && [ -z "${MAIN_HOST+x}" ]; then
+        MAIN_HOST="$(kc -n econ-graph get httproute econ-graph-frontend-public --ignore-not-found \
+            -o jsonpath='{.spec.hostnames[0]}')" || die "could not read the canonical public route"
+        MAIN_HOST="${MAIN_HOST:-$host}"
+    fi
 else
     host="${PUBLIC_HOST}"
     [ "$host" = none ] && host=""
 fi
+# Resolve the same canonical name as deploy/restart, before applying anything.
+PUBLIC_HOST="$host"
+main_host_init || die "invalid main host"
 if [ -n "$host" ]; then
     # Validates the name, as the deploy scripts do.
     "$PROJECT_ROOT/scripts/deploy/render-public-host.py" "$host" /dev/null >/dev/null ||
@@ -132,7 +143,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 if [ -n "$host" ]; then
-    echo "==> Public host ${host}: listener https, certificate (ClusterIssuer ${issuer}, from ${TLS_ISSUER_SOURCE}), public routes"
+    echo "==> Public host ${MAIN_HOST} (base ${host}): listener https, certificate (ClusterIssuer ${issuer}, from ${TLS_ISSUER_SOURCE}), public routes"
     if [ "$issuer" = econ-graph-selfsigned ]; then
         run_kc apply -f "$GATEWAY_DIR/selfsigned-issuer.yaml"
     elif [ "$issuer" = econ-graph-origin-ca ]; then
