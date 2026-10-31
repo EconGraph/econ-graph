@@ -13,6 +13,9 @@ members = [
     "crates/econ-graph-metrics",
     "crates/econ-graph-flags-build",
 ]
+# Dependency facades are excluded so --workspace --all-features does not enable
+# unused upstream bindgen/experimental features merely because they are local.
+exclude = ["compat/zstd", "compat/quick-xml"]
 resolver = "3"
 
 [workspace.package]
@@ -22,7 +25,7 @@ license = "MS-PL"
 
 [workspace.dependencies]
 # Common dependencies shared across crates
-tokio = { version = "1.53", features = ["full"] }
+tokio = { version = "1.54.1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["arbitrary_precision"] }
 toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
@@ -100,3 +103,9 @@ testcontainers-modules = { version = "0.15", features = ["postgres"] }
 serial_test = "4.0"
 rust_decimal_macros = "1.40.0"
 imara-diff = "0.2"
+
+# Compatibility facades contain only re-exports from patched registry releases.
+# Their source and resolved dependencies are enforced by check_security_adapters.py.
+[patch.crates-io]
+zstd = { path = "compat/zstd" }
+quick-xml = { path = "compat/quick-xml" }
