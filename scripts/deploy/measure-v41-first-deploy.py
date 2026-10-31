@@ -8,8 +8,9 @@ Usage:
 Prints a Markdown report to paste into ECO-803:
   1. Inactive BEA series, in total and by each rule of the crawler's BEA catalog selection
      (backend/crates/econ-graph-crawler/data/catalog_selection/bea.toml, read at run time), as
-     the crawler matches stored series to rules: the table prefix, `exclude`, the rule's
-     frequencies (NIPA) or a state-level area (Regional).
+     the crawler matches stored series to rules: the external id as SeriesKey::parse reads it,
+     the table prefix, `exclude`, the rule's frequencies (NIPA) or a state-level area
+     (Regional); plus series known only from series_metadata that a rule matches.
   2. FRED: `crawler check-selection --source FRED --json` against the live API: the series the
      rules select, against max_series, and the requests one full fetch of them takes. Run only
      when FRED_API_KEY is set; otherwise the report says it was skipped. The crawler gets only
@@ -21,10 +22,14 @@ Prints a Markdown report to paste into ECO-803:
 --database-url is required and names the data database to measure: the rehearsal copy or a
 restored dump. Give the password in PGPASSWORD (or PGPASSFILE) rather than in the URL, where
 the process list would show it; either way it reaches psql as PGPASSWORD and is never printed. The script refuses
-a target that reaches the production cluster's data database unless --i-know-this-is-production
-is given: an in-cluster host name (*.svc, data-postgres-service, postgres-service, postgresql-0),
-or a port on this machine served by `kubectl port-forward` into namespace econ-graph (or the
-context's default) of the kind cluster econ-graph (or a cluster it cannot tell). Every statement runs in a READ ONLY
+a target that may reach the production cluster's data database unless --i-know-this-is-production
+is given: an in-cluster host name (*.svc, data-postgres-service, postgres-service, postgresql,
+postgresql-0), a host that does not resolve, or a port on this machine served by anything but a
+local Postgres server, a container port (docker-proxy, rootlesskit, rootlessport, slirp4netns,
+pasta) or a port-forward into another cluster or namespace. A port-forward into namespace
+econ-graph (or its context's default) of the kind cluster econ-graph, or of a cluster it cannot
+tell from --context or the kind-env.sh kubeconfig-<cluster>, is refused, and so is a listener
+this user cannot see. Every statement runs in a READ ONLY
 transaction (SET TRANSACTION READ ONLY, with default_transaction_read_only on as well) under a
 statement timeout (default 600 seconds). Idempotent: it writes nothing anywhere.
 
@@ -57,7 +62,8 @@ DEFAULT_CRAWLER = (f'cargo run -q --manifest-path {ROOT}/backend/Cargo.toml '
 PRODUCTION_CLUSTER = 'econ-graph'
 PRODUCTION_NAMESPACE = 'econ-graph'
 IN_CLUSTER_HOSTS = ('data-postgres-service', 'postgres-service', 'postgresql-0', 'postgresql')
-BEA_SOURCE = "ds.name ILIKE '%Bureau of Economic Analysis%'"
+# The crawler's data source for BEA (data_source_template(SourceId::Bea) in econ-graph-crawler).
+BEA_SOURCE = "ds.name = 'Bureau of Economic Analysis (BEA)'"
 # Dataset codes in BEA external ids: bea_nipa/{table}.{line}.{frequency} and
 # bea_regional/{table}.{line}.{area} (econ-graph-crawler/src/sources/bea.rs).
 DATASET_CODES = {'NIPA': 'bea_nipa', 'Regional': 'bea_regional'}
@@ -77,14 +83,20 @@ def literal(value: str) -> str:
 
 
 def parse_target(url: str):
-    """(host, port, database, user, password) of a postgres:// URL."""
-    parts = urllib.parse.urlsplit(url)
-    if parts.scheme not in ('postgres', 'postgresql') or not parts.hostname:
-        raise ValueError('--database-url must be a postgres:// or postgresql:// URL with a host')
+    """(host, port, database, user, password) of a postgres:// URL. Errors never quote the URL,
+    which may hold a password."""
+    bad = ValueError('--database-url must be postgres://[user@]host[:port]/database with one '
+                     'host (give the password in PGPASSWORD)')
+    try:
+        parts = urllib.parse.urlsplit(url)
+        port = parts.port or 5432
+    except ValueError:
+        raise bad from None
     database = urllib.parse.unquote(parts.path.lstrip('/'))
-    if not database:
-        raise ValueError('--database-url must name a database')
-    return (parts.hostname, parts.port or 5432, database,
+    if (parts.scheme not in ('postgres', 'postgresql') or not parts.hostname or not database
+            or ',' in parts.netloc or '/' in database):
+        raise bad
+    return (parts.hostname, port, database,
             urllib.parse.unquote(parts.username or ''), urllib.parse.unquote(parts.password or ''))
 
 
@@ -114,14 +126,18 @@ def is_local(host: str) -> bool:
     return False
 
 
-def listener_pids(port: int) -> list[int]:
-    """Pids of processes listening on TCP `port` that this user can see (ss -ltnp)."""
+def listeners(port: int) -> tuple[int, list[int]] | None:
+    """(listening sockets on TCP `port`, the pids of those this user can see), or None when
+    `ss` can't be run."""
     try:
-        out = subprocess.run(['ss', '-Hltnp', f'sport = :{port}'], capture_output=True,
-                             text=True, timeout=10).stdout
+        done = subprocess.run(['ss', '-Hltnp', f'sport = :{port}'], capture_output=True,
+                              text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
-        return []
-    return sorted({int(pid) for pid in re.findall(r'pid=(\d+)', out)})
+        return None
+    if done.returncode:
+        return None
+    lines = [line for line in done.stdout.splitlines() if line.strip()]
+    return len(lines), sorted({int(pid) for pid in re.findall(r'pid=(\d+)', done.stdout)})
 
 
 def proc_argv(pid: int) -> list[str]:
@@ -163,25 +179,47 @@ def port_forward_cluster(argv: list[str], env: dict[str, str]) -> str | None:
     return match.group(1) if match else None
 
 
+# Local listeners that serve a database on this machine rather than forward to one elsewhere:
+# Postgres itself, and the processes Docker and Podman publish container ports with.
+LOCAL_SERVERS = ('postgres', 'docker-proxy', 'rootlesskit', 'rootlessport', 'slirp4netns', 'pasta')
+
+
 def production_reason(host: str, port: int) -> str | None:
-    """Why the target looks like the production cluster's data database, or None."""
+    """Why the target may be the production cluster's data database, or None when it is known
+    not to be. Fails closed: a local port whose listener can't be identified counts."""
     name = host.lower().rstrip('.')
     if '.svc' in name or name.split('.')[0] in IN_CLUSTER_HOSTS:
         return f'{host} is an in-cluster name of the data database'
+    try:
+        socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        return f'{host} does not resolve, so it cannot be checked'
     if not is_local(host):
         return None
-    for pid in listener_pids(port):
+    found = listeners(port)
+    if found is None:
+        return f'cannot list what listens on port {port} (`ss` failed)'
+    count, pids = found
+    if not count:
+        return None  # nothing listens: psql will fail to connect
+    if len(pids) < count:
+        return f'port {port} is served by a process this user cannot see (another user, or root)'
+    for pid in pids:
         argv = proc_argv(pid)
-        if not argv or Path(argv[0]).name != 'kubectl' or 'port-forward' not in argv:
+        program = Path(argv[0]).name if argv else ''
+        if 'port-forward' in argv:
+            # Unknown counts as production: without -n it uses its context's namespace.
+            namespace = option(argv, '-n', '--namespace')
+            cluster = port_forward_cluster(argv, proc_env(pid))
+            if namespace not in (None, PRODUCTION_NAMESPACE) or cluster not in (None, PRODUCTION_CLUSTER):
+                continue
+            where = f'cluster {cluster}' if cluster else 'a cluster it cannot tell'
+            return (f'port {port} on {host} is a port-forward ({program}, pid {pid}) into '
+                    f'namespace {namespace or "(the context default)"} of {where}')
+        if program in LOCAL_SERVERS:
             continue
-        # Unknown counts as production: a port-forward without -n uses its context's namespace.
-        namespace = option(argv, '-n', '--namespace')
-        cluster = port_forward_cluster(argv, proc_env(pid))
-        if namespace not in (None, PRODUCTION_NAMESPACE) or cluster not in (None, PRODUCTION_CLUSTER):
-            continue
-        where = f'cluster {cluster}' if cluster else 'a cluster it cannot tell'
-        return (f'port {port} on {host} is `kubectl port-forward` (pid {pid}) into namespace '
-                f'{namespace or "(the context default)"} of {where}')
+        return (f'port {port} on {host} is served by {program or "an unknown process"} '
+                f'(pid {pid}), which may forward to production')
     return None
 
 
@@ -242,18 +280,28 @@ def bea_rules():
     return rules, exclude
 
 
-def rule_predicate(rule, exclude) -> str:
-    """SQL: economic_series `es` is matched by `rule`, as the crawler matches stored series."""
-    code = DATASET_CODES[rule['dataset']]
-    table = "split_part(split_part(es.external_id, '/', 2), '.', 1)"
-    last = "split_part(split_part(es.external_id, '/', 2), '.', 3)"
-    parts = [f"split_part(es.external_id, '/', 1) = {literal(code)}",
+# The parts of a BEA external id as SeriesKey::parse reads them (econ-graph-crawler's
+# sources/bea.rs): the dataset code before the first '/', then exactly three '.'-separated
+# parts after it, the table and line non-empty ASCII alphanumerics.
+REST = "substr({t}.external_id, strpos({t}.external_id, '/') + 1)"
+PARSES = ("(strpos({t}.external_id, '/') > 0 AND "
+          + REST + " ~ '^[A-Za-z0-9]+\\.[A-Za-z0-9]+\\.[^.]*$')")
+CODE = "split_part({t}.external_id, '/', 1)"
+TABLE = "split_part(" + REST + ", '.', 1)"
+LAST = "split_part(" + REST + ", '.', 3)"
+
+
+def rule_predicate(rule, exclude, t: str = 'es') -> str:
+    """SQL: the row aliased `t` (economic_series or series_metadata) is matched by `rule`, as the
+    crawler matches stored series (SeriesKey::parse, then includes_stored_series)."""
+    code, table, last = DATASET_CODES[rule['dataset']], TABLE.format(t=t), LAST.format(t=t)
+    parts = [PARSES.format(t=t), f"{CODE.format(t=t)} = {literal(code)}",
              f"{table} LIKE {literal(rule['prefix'] + '%')}"]
     if exclude:
-        parts.append(f"{table} NOT IN ({', '.join(literal(t) for t in exclude)})")
+        parts.append(f"{table} NOT IN ({', '.join(literal(x) for x in exclude)})")
     if rule['dataset'] == 'NIPA':
-        freqs = ', '.join(literal(f) for f in rule['frequencies']) or 'NULL'
-        parts.append(f'{last} IN ({freqs})')
+        freqs = [f for f in rule['frequencies'] if f in ('A', 'Q', 'M')]
+        parts.append(f"{last} IN ({', '.join(literal(f) for f in freqs) or 'NULL'})")
     else:
         # Regional series are annual, and only state-level areas (five digits ending 000).
         if 'A' not in rule['frequencies']:
@@ -268,16 +316,24 @@ def measure_bea(db: Database) -> list[str]:
                 f'WHERE {BEA_SOURCE} AND NOT es.is_active')
     columns = [f'count(*) FILTER (WHERE {rule_predicate(r, exclude)})' for r in rules]
     any_rule = ' OR '.join(rule_predicate(r, exclude) for r in rules) or 'FALSE'
-    table = "split_part(split_part(es.external_id, '/', 2), '.', 1)"
-    excluded = (f"count(*) FILTER (WHERE {table} IN ({', '.join(literal(t) for t in exclude)}))"
-                if exclude else '0')
+    table = TABLE.format(t='es')
+    excluded = (f"count(*) FILTER (WHERE {PARSES.format(t='es')} AND {table} IN "
+                f"({', '.join(literal(t) for t in exclude)}))" if exclude else '0')
     row = db.rows(f'SELECT count(*), count(*) FILTER (WHERE {any_rule}), {excluded}'
                   f'{", " if columns else ""}{", ".join(columns)} {inactive}')[0]
     total, matched, in_excluded, per_rule = row[0], row[1], row[2], row[3:]
+    # stored_scope_members also enrols series_metadata rows with no economic_series row yet.
+    metadata_any = ' OR '.join(rule_predicate(r, exclude, 'sm') for r in rules) or 'FALSE'
+    metadata_only = db.rows(
+        f'SELECT count(*) FROM series_metadata sm JOIN data_sources ds ON ds.id = sm.source_id '
+        f'WHERE {BEA_SOURCE} AND ({metadata_any}) AND NOT EXISTS (SELECT 1 FROM economic_series e '
+        f'WHERE e.source_id = sm.source_id AND e.external_id = sm.external_id)')[0][0]
     lines = [f'- Inactive BEA series: **{total}**',
              f'- Matched by a current rule (could be enrolled again): **{matched}**',
              f'- Not matched by any rule: {int(total) - int(matched)}'
              f' (of which in excluded tables {", ".join(exclude) or "(none)"}: {in_excluded})',
+             f'- BEA series known only from series_metadata (no economic_series row) that a '
+             f'rule matches: {metadata_only}',
              '', '| Dataset | Rule prefix | Frequencies | Inactive series |', '|---|---|---|---|']
     for rule, count in zip(rules, per_rule):
         lines.append(f"| {rule['dataset']} | {rule['prefix']} | "

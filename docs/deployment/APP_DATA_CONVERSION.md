@@ -198,10 +198,12 @@ differs from UUIDv5 of `SOURCE:external_id`; do not change IDs to make it pass.
    ```
 
    It prints a Markdown report: inactive BEA series by catalog-selection rule, the
-   (series, date) pairs ECO-807 asks about, and the FRED selection against its cap. It
-   refuses production's data database (an in-cluster name, or a `kubectl port-forward` into
-   the production cluster's `econ-graph` namespace) unless given
-   `--i-know-this-is-production`, and runs every statement in a read-only transaction with a
+   (series, date) pairs ECO-807 asks about, and the FRED selection against its cap. Unless
+   given `--i-know-this-is-production`, it refuses any target that may be production's data
+   database: an in-cluster name, a host that doesn't resolve, or a local port served by
+   anything but a local Postgres, a container port or a port-forward into another cluster or
+   namespace (a port-forward into the production cluster's `econ-graph` namespace, or one it
+   can't place, is refused). It runs every statement in a read-only transaction with a
    statement timeout. Without `FRED_API_KEY` the FRED check is reported as skipped.
 
 The scratch backup root then holds full copies of production records; it has the same

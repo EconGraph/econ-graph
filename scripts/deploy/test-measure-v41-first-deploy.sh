@@ -2,13 +2,16 @@
 # Stub-only tests for measure-v41-first-deploy.sh. They never touch a cluster or a real
 # database: psql, the crawler and a `kubectl port-forward` are stand-ins on PATH or local ports,
 # and every database URL names a stub. They check:
-#   - the target guard: no URL, in-cluster names and a port-forward into production's namespace
-#     are refused (exit 64 / 65) before psql runs; other clusters and namespaces are allowed;
-#     --i-know-this-is-production runs and says so;
+#   - the target guard: no URL, a bad URL (without echoing it), in-cluster names, a comma host
+#     list, a host that doesn't resolve, an unidentified local listener and a port-forward into
+#     production's namespace are refused (exit 64 / 65) before psql runs; a local Postgres and
+#     port-forwards into other clusters and namespaces are allowed; --i-know-this-is-production
+#     runs and says so;
 #   - every psql script is one READ ONLY transaction with the statement timeout, the password
 #     reaches psql only as PGPASSWORD, and no secret is printed;
-#   - the BEA rules come from bea.toml, the FRED check runs only with FRED_API_KEY and without
-#     any database URL, and the script's synthetic-row SQL matches data_point.rs.
+#   - the BEA rules come from bea.toml and the query applies SeriesKey::parse's rules, the FRED
+#     check runs only with FRED_API_KEY and without any database URL, and the script's
+#     synthetic-row SQL matches data_point.rs.
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$ROOT/scripts/deploy/measure-v41-first-deploy.sh"
@@ -34,6 +37,8 @@ with open(os.environ['STUB_LOG'], 'a') as log:
 sep = '\x1f'
 if 'server_version' in script:
     print('18.0 (stub)')
+elif 'FROM series_metadata sm' in script:
+    print('1')
 elif 'is_active' in script:
     rules = script.count('count(*) FILTER') - 2
     print(sep.join(['7', '2', '2'] + ['1'] * rules))
@@ -68,26 +73,32 @@ run() {
 }
 psql_ran() { [ -s "$STUB_LOG" ]; }
 
-# A `kubectl port-forward` stand-in, listening on a free local port: a python3 started
-# under the name kubectl, with port-forward arguments for the guard to read.
+# Listener stand-ins on free local ports: python3 started under another program's name
+# (kubectl, postgres, socat), with that program's arguments for the guard to read.
 free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
-ln -s "$(command -v python3)" "$scratch/bin/kubectl"
-forward() {  # forward PORT ARGS...: start the stand-in, wait until it listens
-    local port="$1"; shift
-    "$scratch/bin/kubectl" -c "import socket,time; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(('127.0.0.1', $port)); s.listen(); time.sleep(120)" \
-        port-forward "$@" "$port:5432" &
+for name in kubectl postgres socat; do ln -s "$(command -v python3)" "$scratch/bin/$name"; done
+serve() {  # serve NAME PORT ARGS...: start NAME listening on PORT, wait until it listens
+    local name="$1" port="$2"; shift 2
+    "$scratch/bin/$name" -c "import socket,time; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(('127.0.0.1', $port)); s.listen(); time.sleep(120)" \
+        "$@" &
     pids+=("$!")
     for _ in $(seq 1 50); do
         ss -Hltn "sport = :$port" | grep -q . && return 0
         sleep 0.1
     done
-    fail "the port-forward stand-in did not listen on $port"
+    fail "the $name stand-in did not listen on $port"
 }
+forward() { local port="$1"; shift; serve kubectl "$port" port-forward "$@" "$port:5432"; }
+postgres_on() { serve postgres "$1" -D /var/lib/postgresql/data; }
 
 # --- The target guard ---
 run
 [ "$status" = 64 ] || fail "no --database-url: exit $status"
 psql_ran && fail "psql ran without a target"
+
+run --database-url 'postgres://u:Ab3/xYz9@127.0.0.1:5432/econ_graph'
+[ "$status" = 64 ] || fail "a password with '/': exit $status"
+grep -qE "Ab3|xYz9" "$scratch/err" && fail "a bad URL's password was printed: $(cat "$scratch/err")"
 
 for host in data-postgres-service postgres-service.econ-graph.svc.cluster.local \
     postgresql-0.postgres-service; do
@@ -96,6 +107,32 @@ for host in data-postgres-service postgres-service.econ-graph.svc.cluster.local 
     grep -qF "refusing" "$scratch/err" || fail "no refusal message for $host"
     psql_ran && fail "psql ran against $host"
 done
+
+port="$(free_port)"
+postgres_on "$port"
+run --database-url "postgres://postgres@127.0.0.2,127.0.0.1:${port}/econ_graph"
+[ "$status" = 64 ] || fail "a comma host list: exit $status"
+psql_ran && fail "psql ran with a comma host list"
+run --database-url "postgres://postgres@no-such-host.invalid:${port}/econ_graph"
+[ "$status" = 65 ] || fail "a host that doesn't resolve: exit $status"
+run --database-url "postgres://postgres@127.0.0.1:${port}/econ_graph"
+[ "$status" = 0 ] || fail "a local Postgres refused: exit $status $(cat "$scratch/err")"
+
+port="$(free_port)"
+serve socat "$port" "TCP-LISTEN:$port,fork" TCP:10.0.0.1:5432
+run --database-url "postgres://postgres@127.0.0.1:${port}/econ_graph"
+[ "$status" = 65 ] || fail "an unidentified listener (socat): exit $status"
+grep -qF "socat" "$scratch/err" || fail "the refusal does not name the listener"
+
+# An `ss` that sees a listener but not its owner (another user's or root's), and one that fails.
+mkdir "$scratch/ss-hidden" "$scratch/ss-broken"
+printf '#!/bin/sh\necho "LISTEN 0 4096 127.0.0.1:5999 0.0.0.0:*"\n' >"$scratch/ss-hidden/ss"
+printf '#!/bin/sh\nexit 1\n' >"$scratch/ss-broken/ss"
+chmod +x "$scratch/ss-hidden/ss" "$scratch/ss-broken/ss"
+PATH="$scratch/ss-hidden:$PATH" run --database-url "postgres://postgres@127.0.0.1:5999/econ_graph"
+[ "$status" = 65 ] || fail "a listener this user cannot see: exit $status"
+PATH="$scratch/ss-broken:$PATH" run --database-url "postgres://postgres@127.0.0.1:5999/econ_graph"
+[ "$status" = 65 ] || fail "ss failing: exit $status"
 
 port="$(free_port)"
 forward "$port" -n econ-graph svc/data-postgres-service --context kind-econ-graph
@@ -134,12 +171,13 @@ done
 
 # --- A measured run: read-only scripts, no secrets, rules from bea.toml, FRED skipped ---
 port="$(free_port)"
+postgres_on "$port"
 run --database-url "postgresql://measure:pw-S3CRET-1@127.0.0.1:${port}/rehearsal" --statement-timeout 42
 [ "$status" = 0 ] || fail "measured run: exit $status $(cat "$scratch/err")"
 python3 - "$STUB_LOG" <<'PY'
 import json, sys
 calls = [json.loads(line) for line in open(sys.argv[1])]
-assert len(calls) == 3, len(calls)
+assert len(calls) == 4, len(calls)
 for call in calls:
     script = call['script']
     assert script.startswith('BEGIN;\nSET TRANSACTION READ ONLY;\n'), script[:80]
@@ -156,6 +194,24 @@ for call in calls:
 PY
 grep -q "S3CRET" "$scratch/out" "$scratch/err" && fail "the password was printed"
 grep -qF "Inactive BEA series: **7**" "$scratch/out" || fail "BEA total missing"
+# The BEA queries apply SeriesKey::parse, the crawler's source name and every rule from bea.toml.
+python3 - "$STUB_LOG" "$ROOT" <<'PY'
+import json, re, sys, tomllib
+from pathlib import Path
+calls = [json.loads(line)['script'] for line in open(sys.argv[1])]
+rules = tomllib.loads((Path(sys.argv[2]) / 'backend/crates/econ-graph-crawler/data/catalog_selection/bea.toml').read_text())
+bea = next(c for c in calls if 'is_active' in c)
+meta = next(c for c in calls if 'FROM series_metadata sm' in c)
+for sql in (bea, meta):
+    assert "ds.name = 'Bureau of Economic Analysis (BEA)'" in sql, sql[:300]
+    assert r"~ '^[A-Za-z0-9]+\.[A-Za-z0-9]+\.[^.]*$'" in sql, 'SeriesKey::parse shape missing'
+    for rule in rules['rule']:
+        assert f"LIKE '{rule['prefix']}%'" in sql, rule['prefix']
+    for table in rules['exclude']:
+        assert f"'{table}'" in sql, table
+assert "~ '^[0-9]{2}000$'" in bea, 'state-level area check missing'
+assert "IN ('A', 'Q')" in bea, 'NIPA frequencies missing'
+PY
 grep -qF "one synthetic legacy row, and no other row: **3**" "$scratch/out" || fail "ECO-807 count missing"
 grep -qF "skipped: needs FRED_API_KEY" "$scratch/out" || fail "FRED not reported as skipped"
 [ ! -e "$scratch/home/crawler.log" ] || fail "the crawler ran without FRED_API_KEY"
