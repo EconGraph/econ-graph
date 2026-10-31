@@ -692,7 +692,7 @@ pub async fn company_ratios(
     let cik = checked_cik(&cik)?;
     let selection = revision(revision_input)?.1;
     let period = period(period_start, period_end)?;
-    let facts = service::calculation_facts(pool, &cik).await?;
+    let facts = service::ratio_facts(pool, &cik, &period).await?;
     Ok(
         company_financials::calculate_ratios(&facts, &period, &selection)
             .map_err(|e| bad_user_input(e.to_string()))?
@@ -723,7 +723,7 @@ pub async fn company_peers(
     let peers = service::sic_peers(pool, &cik, first).await?;
     let mut results = Vec::new();
     for peer in peers {
-        let facts = service::calculation_facts(pool, &peer.cik).await?;
+        let facts = service::ratio_facts(pool, &peer.cik, &period).await?;
         let ratios = company_financials::calculate_ratios(&facts, &period, &selection)
             .map_err(|e| bad_user_input(e.to_string()))?;
         results.push(CompanyPeerComparison {

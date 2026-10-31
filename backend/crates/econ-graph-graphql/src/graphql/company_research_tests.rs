@@ -546,3 +546,410 @@ async fn company_research_postgres_revision_pagination_statement_peer_and_anchor
     drop(pool);
     drop(db);
 }
+
+#[cfg(flag_financial_components)]
+async fn persist_ratio_fixture(pool: &DatabasePool, facts: &[CompanyFact]) {
+    let rows=facts.iter().map(|fact| {
+        let(start,end)=dates(&fact.subject.period);
+        json!({"id":fact.id,"cik":fact.subject.cik,"taxonomy":fact.subject.taxonomy,"concept":fact.subject.concept,"unit":fact.subject.unit,"start":start,"end":end,"accession":fact.accession,"filed":fact.filed,"value":fact.value.to_string()})
+    }).collect::<Vec<_>>();
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query("INSERT INTO company_facts(id,cik,taxonomy,concept,period_start,period_end,unit,accession,filed,value,form)
+        SELECT (r->>'id')::uuid,r->>'cik',r->>'taxonomy',r->>'concept',(r->>'start')::date,(r->>'end')::date,r->>'unit',r->>'accession',(r->>'filed')::date,(r->>'value')::numeric,'10-K'
+        FROM jsonb_array_elements($1) r").bind::<diesel::sql_types::Jsonb,_>(Value::Array(rows)).execute(&mut conn).await.unwrap();
+}
+
+#[cfg(flag_financial_components)]
+#[allow(clippy::too_many_arguments)]
+fn ratio_fixture(
+    cik: &str,
+    taxonomy: &str,
+    concept: &str,
+    unit: &str,
+    start: Option<&str>,
+    end: &str,
+    accession: &str,
+    filed: &str,
+    value: i64,
+) -> CompanyFact {
+    CompanyFact::new(
+        CompanyFactSubject {
+            cik: cik.into(),
+            taxonomy: taxonomy.into(),
+            concept: concept.into(),
+            unit: unit.into(),
+            period: match start {
+                Some(start) => ResearchPeriod::Duration {
+                    start: start.parse().unwrap(),
+                    end: end.parse().unwrap(),
+                },
+                None => ResearchPeriod::Instant {
+                    date: end.parse().unwrap(),
+                },
+            },
+        },
+        accession.into(),
+        filed.parse().unwrap(),
+        value.into(),
+        "10-K".into(),
+    )
+    .unwrap()
+}
+
+#[cfg(flag_financial_components)]
+#[tokio::test]
+async fn company_research_ratio_sql_preserves_all_revision_and_derivation_semantics() {
+    let db = tokio::task::spawn_blocking(|| ScratchDatabase::create("company_ratio_operands"))
+        .await
+        .unwrap();
+    run_migration_set(&db.url, MigrationSet::Data)
+        .await
+        .unwrap();
+    let pool = create_pool(&db.url).await.unwrap();
+    let mut facts = Vec::new();
+    // July-year-end issuer: off-calendar Q4 and a TTM comprising three derived quarters.
+    let periods = [
+        (
+            "2023-07-01",
+            "2023-09-30",
+            "0000000101-23-000001",
+            "2023-11-01",
+            100,
+        ),
+        (
+            "2023-07-01",
+            "2023-12-31",
+            "0000000101-24-000001",
+            "2024-02-01",
+            220,
+        ),
+        (
+            "2023-07-01",
+            "2024-03-31",
+            "0000000101-24-000002",
+            "2024-05-01",
+            350,
+        ),
+        (
+            "2023-07-01",
+            "2024-06-30",
+            "0000000101-24-000003",
+            "2024-08-01",
+            490,
+        ),
+        (
+            "2024-07-01",
+            "2024-09-30",
+            "0000000101-24-000004",
+            "2024-11-01",
+            150,
+        ),
+    ];
+    for (concept, factor) in [
+        ("Revenues", 10),
+        ("GrossProfit", 5),
+        ("OperatingIncomeLoss", 3),
+        ("NetIncomeLoss", 2),
+    ] {
+        for (start, end, accession, filed, value) in periods {
+            facts.push(ratio_fixture(
+                "0000000101",
+                "us-gaap",
+                concept,
+                "USD",
+                Some(start),
+                end,
+                accession,
+                filed,
+                value * factor,
+            ));
+            facts.push(ratio_fixture(
+                "0000000101",
+                "us-gaap",
+                concept,
+                "USD",
+                Some(start),
+                end,
+                "0000000101-25-000001",
+                "2025-02-01",
+                value * factor + factor,
+            ));
+        }
+    }
+    for (concept, value) in [
+        ("AssetsCurrent", 100),
+        ("LiabilitiesCurrent", 50),
+        ("Liabilities", 200),
+        ("StockholdersEquity", 100),
+    ] {
+        facts.push(ratio_fixture(
+            "0000000101",
+            "us-gaap",
+            concept,
+            "USD",
+            None,
+            "2024-06-30",
+            "0000000101-24-000003",
+            "2024-08-01",
+            value,
+        ));
+    }
+    // IFRS aliases; the first TTM quarter is Q4 and needs a prior nine-month cumulative.
+    for (concept, factor) in [
+        ("Revenue", 10),
+        ("GrossProfit", 5),
+        ("ProfitLossFromOperatingActivities", 3),
+        ("ProfitLoss", 2),
+    ] {
+        for (start, end, accession, filed, value) in [
+            (
+                "2023-01-01",
+                "2023-09-30",
+                "0000000102-23-000001",
+                "2023-11-01",
+                33,
+            ),
+            (
+                "2023-01-01",
+                "2023-12-31",
+                "0000000102-24-000001",
+                "2024-02-01",
+                46,
+            ),
+            (
+                "2024-01-01",
+                "2024-03-31",
+                "0000000102-24-000002",
+                "2024-05-01",
+                10,
+            ),
+            (
+                "2024-01-01",
+                "2024-06-30",
+                "0000000102-24-000003",
+                "2024-08-01",
+                21,
+            ),
+            (
+                "2024-01-01",
+                "2024-09-30",
+                "0000000102-24-000004",
+                "2024-11-01",
+                33,
+            ),
+        ] {
+            facts.push(ratio_fixture(
+                "0000000102",
+                "ifrs-full",
+                concept,
+                "USD",
+                Some(start),
+                end,
+                accession,
+                filed,
+                value * factor,
+            ));
+        }
+    }
+    // These rows increase the full-company load and maximum filed date, but cannot
+    // be ratio operands. The query must not load them or depend on their cutoff.
+    for cik in ["0000000101", "0000000102"] {
+        for i in 0..100 {
+            facts.push(ratio_fixture(
+                cik,
+                "us-gaap",
+                &format!("UnknownConcept{i}"),
+                "USD",
+                Some("2024-01-01"),
+                "2024-09-30",
+                "0000000101-25-000002",
+                "2025-06-01",
+                1,
+            ));
+        }
+        facts.push(ratio_fixture(
+            cik,
+            "us-gaap",
+            "Revenues",
+            "USD",
+            Some("2010-01-01"),
+            "2010-12-31",
+            "0000000101-11-000001",
+            "2011-02-01",
+            1,
+        ));
+        facts.push(ratio_fixture(
+            cik,
+            "us-gaap",
+            "Revenues",
+            "USD",
+            Some("2026-01-01"),
+            "2026-12-31",
+            "0000000101-27-000001",
+            "2027-02-01",
+            1,
+        ));
+    }
+    persist_ratio_fixture(&pool, &facts).await;
+    let q4 = period(
+        Some("2024-04-01".parse().unwrap()),
+        "2024-06-30".parse().unwrap(),
+    )
+    .unwrap();
+    let ttm = period(
+        Some("2023-10-01".parse().unwrap()),
+        "2024-09-30".parse().unwrap(),
+    )
+    .unwrap();
+    let instant = period(None, "2024-06-30".parse().unwrap()).unwrap();
+    let selections = [
+        RevisionSelection::Latest,
+        RevisionSelection::Original,
+        RevisionSelection::AsOf("2024-12-01".parse().unwrap()),
+        RevisionSelection::AsOf("2024-09-01".parse().unwrap()),
+        RevisionSelection::Accession("0000000101-25-000001".into()),
+    ];
+    for cik in ["0000000101", "0000000102"] {
+        let full = service::calculation_facts(&pool, cik).await.unwrap();
+        for requested in [&q4, &ttm, &instant] {
+            let filtered = service::ratio_facts(&pool, cik, requested).await.unwrap();
+            assert!(filtered.len() < full.len() / 2);
+            assert!(filtered
+                .iter()
+                .all(|f| !f.subject.concept.starts_with("Unknown")));
+            for selection in &selections {
+                assert_eq!(
+                    company_financials::calculate_ratios(&full, requested, selection).unwrap(),
+                    company_financials::calculate_ratios(&filtered, requested, selection).unwrap(),
+                    "{cik} {requested:?} {selection:?}"
+                );
+            }
+        }
+    }
+    let base = service::ratio_facts(&pool, "0000000101", &q4)
+        .await
+        .unwrap();
+    assert!(
+        company_financials::calculate_ratios(&base, &q4, &RevisionSelection::Original)
+            .unwrap()
+            .iter()
+            .all(|r| r.value.is_some())
+    );
+    let ifrs = service::ratio_facts(&pool, "0000000102", &ttm)
+        .await
+        .unwrap();
+    assert!(
+        company_financials::calculate_ratios(&ifrs, &ttm, &RevisionSelection::Latest)
+            .unwrap()
+            .iter()
+            .all(|r| r.value.is_some())
+    );
+    // Keep additional currency/taxonomy alternatives, and an almost-nine-month
+    // cumulative that makes Q4 ambiguous. Filtering must not fabricate certainty.
+    let ambiguous = [
+        ratio_fixture(
+            "0000000101",
+            "us-gaap",
+            "Revenues",
+            "EUR",
+            Some("2023-07-01"),
+            "2024-06-30",
+            "0000000101-24-000003",
+            "2024-08-01",
+            4900,
+        ),
+        ratio_fixture(
+            "0000000101",
+            "us-gaap",
+            "Revenues",
+            "EUR",
+            Some("2023-07-01"),
+            "2024-03-31",
+            "0000000101-24-000002",
+            "2024-05-01",
+            3500,
+        ),
+        ratio_fixture(
+            "0000000101",
+            "ifrs-full",
+            "Revenue",
+            "USD",
+            Some("2023-07-01"),
+            "2024-06-30",
+            "0000000101-24-000003",
+            "2024-08-01",
+            4900,
+        ),
+        ratio_fixture(
+            "0000000101",
+            "ifrs-full",
+            "Revenue",
+            "USD",
+            Some("2023-07-01"),
+            "2024-03-31",
+            "0000000101-24-000002",
+            "2024-05-01",
+            3500,
+        ),
+        ratio_fixture(
+            "0000000101",
+            "us-gaap",
+            "GrossProfit",
+            "USD",
+            Some("2023-07-01"),
+            "2024-03-20",
+            "0000000101-24-000002",
+            "2024-05-01",
+            1700,
+        ),
+    ];
+    persist_ratio_fixture(&pool, &ambiguous).await;
+    let full = service::calculation_facts(&pool, "0000000101")
+        .await
+        .unwrap();
+    for requested in [&q4, &ttm] {
+        let filtered = service::ratio_facts(&pool, "0000000101", requested)
+            .await
+            .unwrap();
+        assert!(filtered.iter().any(|f| f.subject.unit == "EUR"));
+        assert!(filtered.iter().any(|f| f.subject.taxonomy == "ifrs-full"));
+        for selection in &selections {
+            assert_eq!(
+                company_financials::calculate_ratios(&full, requested, selection).unwrap(),
+                company_financials::calculate_ratios(&filtered, requested, selection).unwrap(),
+                "ambiguous {requested:?} {selection:?}"
+            );
+        }
+    }
+    let filtered = service::ratio_facts(&pool, "0000000101", &q4)
+        .await
+        .unwrap();
+    assert!(
+        company_financials::calculate_ratios(&filtered, &q4, &RevisionSelection::Original)
+            .unwrap()
+            .iter()
+            .all(|r| r.value.is_none() && r.unavailable_reason.is_some())
+    );
+    // An issuer whose relevant revisions exceed the per-request budget fails
+    // explicitly; it never returns a ratio computed from a partial source page.
+    let oversized = (0..=service::MAX_RATIO_FACTS)
+        .map(|i| {
+            ratio_fixture(
+                "0000000103",
+                "us-gaap",
+                "AssetsCurrent",
+                "USD",
+                None,
+                "2024-06-30",
+                &format!("{:010}-25-000001", i + 1),
+                "2025-02-01",
+                1,
+            )
+        })
+        .collect::<Vec<_>>();
+    persist_ratio_fixture(&pool, &oversized).await;
+    let err = service::ratio_facts(&pool, "0000000103", &instant)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("ratio operand limit"));
+}
