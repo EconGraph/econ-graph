@@ -1257,7 +1257,7 @@ async fn mirror_series_inner_conn(
     let mirror_error = |stage: &'static str, error: anyhow::Error| {
         // Raw error chains may contain signed URLs or credentials. Retain typed cause
         // diagnostics and operation context without rendering untrusted error messages.
-        tracing::warn!(%series_id, %dataset_id, stage,
+        tracing::error!(%series_id, %dataset_id, stage,
             cause = %mirror_cause(&error), "Iceberg mirror transaction failed");
         AppError::ServiceUnavailable(
             "Iceberg mirror failed; PostgreSQL transaction rolled back".into(),
