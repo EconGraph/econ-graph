@@ -56,6 +56,11 @@ class SubvolumeUuidTests(unittest.TestCase):
             helper.subvolume_uuid('/qa/storage')
         self.assertEqual(self.calls, [('close', 9)])
 
+    def test_preflight_accepts_top_level_tree_without_uuid(self):
+        self.inode = 123
+        self.zero_uuid = True
+        self.assertEqual(helper.subvolume_uuid('/qa', require_root=False), str(uuid.UUID(int=0)))
+
     def test_zero_uuid_is_refused(self):
         self.zero_uuid = True
         with self.assertRaisesRegex(ValueError, 'no subvolume UUID'):

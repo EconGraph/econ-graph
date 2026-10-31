@@ -27,7 +27,9 @@ def subvolume_uuid(path, *, require_root=True):
         info = bytearray(SUBVOL_INFO_SIZE)
         fcntl.ioctl(fd, BTRFS_IOC_GET_SUBVOL_INFO, info, True)
         value = uuid.UUID(bytes=bytes(info[UUID_OFFSET:UUID_OFFSET + 16]))
-        if value.int == 0:
+        # The top-level btrfs tree (ID 5) has a zero UUID. Its metadata is still
+        # readable for preflight; only managed child subvolumes need a UUID.
+        if require_root and value.int == 0:
             raise ValueError(f'{path} has no subvolume UUID')
         return str(value)
     finally:
