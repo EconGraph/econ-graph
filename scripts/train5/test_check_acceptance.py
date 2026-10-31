@@ -46,7 +46,9 @@ class AcceptanceTest(unittest.TestCase):
             runs.append({"id": str(UUID(int=i+1)), "started_at": started.isoformat(),
                          "completed_at": (started + timedelta(hours=1)).isoformat(), "status": "succeeded", "error": None,
                          "companies_count": 20, "facts_count": 100, "filings_count": 20,
-                         "companyfacts_sha256": "b" * 64, "submissions_sha256": "c" * 64})
+                         "companyfacts_sha256": "b" * 64, "submissions_sha256": "c" * 64,
+                         "source_mode": "downloaded", "companyfacts_last_modified": started.isoformat(),
+                         "submissions_last_modified": started.isoformat()})
         self.manifest["nightly_loads"] = self.save("loads.json", {"candidate_sha": SHA, "runs": runs})
         events = []
         for kind in ("failed_load", "stale_load"):
@@ -161,16 +163,32 @@ class AcceptanceTest(unittest.TestCase):
             self.mutate("nightly_loads", lambda data: data["runs"][-1].update(status=status))
             self.rejected("latest seven load attempts")
 
+    def test_staged_fixture_import_cannot_count_as_nightly_evidence(self):
+        self.mutate("nightly_loads", lambda data: data["runs"][-1].update(source_mode="staged"))
+        self.rejected("never staged fixtures")
+
+    def test_missing_upstream_freshness_rejects(self):
+        self.mutate("nightly_loads", lambda data: data["runs"][-1].update(companyfacts_last_modified=None))
+        self.rejected("invalid timestamp")
+
+    def test_stale_upstream_archive_rejects_even_when_run_is_recent(self):
+        self.mutate("nightly_loads", lambda data: data["runs"][-1].update(submissions_last_modified=(NOW-timedelta(days=2)).isoformat()))
+        self.rejected("archive must be fresh")
+
+    def test_future_upstream_archive_rejects(self):
+        self.mutate("nightly_loads", lambda data: data["runs"][-1].update(companyfacts_last_modified=(NOW+timedelta(hours=1)).isoformat()))
+        self.rejected("archive must be fresh")
+
     def test_duplicate_nights_reject(self):
-        self.mutate("nightly_loads", lambda data: data["runs"][1].update(started_at=data["runs"][0]["started_at"], completed_at=data["runs"][0]["completed_at"]))
+        self.mutate("nightly_loads", lambda data: data["runs"][1].update(started_at=data["runs"][0]["started_at"], completed_at=data["runs"][0]["completed_at"], companyfacts_last_modified=data["runs"][0]["companyfacts_last_modified"], submissions_last_modified=data["runs"][0]["submissions_last_modified"]))
         self.rejected("overlap|distinct consecutive")
 
     def test_gap_in_nightly_dates_rejects(self):
-        self.mutate("nightly_loads", lambda data: data["runs"][0].update(started_at=(NOW-timedelta(days=8, hours=2)).isoformat(), completed_at=(NOW-timedelta(days=8, hours=1)).isoformat()))
+        self.mutate("nightly_loads", lambda data: data["runs"][0].update(started_at=(NOW-timedelta(days=8, hours=2)).isoformat(), completed_at=(NOW-timedelta(days=8, hours=1)).isoformat(), companyfacts_last_modified=(NOW-timedelta(days=8, hours=2)).isoformat(), submissions_last_modified=(NOW-timedelta(days=8, hours=2)).isoformat()))
         self.rejected("distinct consecutive")
 
     def test_stale_load_rejects(self):
-        self.mutate("nightly_loads", lambda data: [run.update(started_at=(checker.timestamp(run["started_at"])-timedelta(days=2)).isoformat(), completed_at=(checker.timestamp(run["completed_at"])-timedelta(days=2)).isoformat()) for run in data["runs"]])
+        self.mutate("nightly_loads", lambda data: [run.update(started_at=(checker.timestamp(run["started_at"])-timedelta(days=2)).isoformat(), completed_at=(checker.timestamp(run["completed_at"])-timedelta(days=2)).isoformat(), companyfacts_last_modified=(checker.timestamp(run["companyfacts_last_modified"])-timedelta(days=2)).isoformat(), submissions_last_modified=(checker.timestamp(run["submissions_last_modified"])-timedelta(days=2)).isoformat()) for run in data["runs"]])
         self.rejected("older than 24 hours")
 
     def test_missing_alert_delivery_rejects(self):

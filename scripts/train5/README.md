@@ -118,7 +118,15 @@ than just selecting successful rows. Each row contains:
 
 - `id`, `started_at`, `completed_at`, `status`, and nullable `error`;
 - positive `companies_count`, `facts_count`, and `filings_count`;
-- `companyfacts_sha256` and `submissions_sha256` from the actual downloaded archives.
+- `companyfacts_sha256` and `submissions_sha256` from the actual downloaded archives;
+- `source_mode: "downloaded"`, with `companyfacts_last_modified` and
+  `submissions_last_modified` from the upstream response headers.
+
+Every accepted run must have downloaded its archives from upstream. Staged ZIP
+imports and missing/unknown source modes are rejected even when the import itself
+succeeded. Both upstream Last-Modified timestamps must be within the 24 hours
+before completion (with the same five-minute future clock allowance). A freshly
+completed import of a stale archive cannot establish freshness.
 
 The latest seven attempts must succeed, have distinct UUIDs, not overlap and
 start on seven distinct consecutive UTC dates. The latest completion must be no

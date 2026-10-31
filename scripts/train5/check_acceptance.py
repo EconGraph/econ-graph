@@ -153,6 +153,11 @@ def validate(directory, candidate, now):
         started, completed = timestamp(run["started_at"]), timestamp(run.get("completed_at"))
         require(run.get("status") == "succeeded" and run.get("error") is None, "latest seven load attempts must all succeed")
         require(started <= completed <= now + timedelta(minutes=5), "invalid nightly run completion time")
+        require(run.get("source_mode") == "downloaded", "nightly evidence must use downloaded archives, never staged fixtures")
+        for field in ("companyfacts_last_modified", "submissions_last_modified"):
+            modified = timestamp(run.get(field))
+            require(completed - timedelta(hours=24) <= modified <= completed + timedelta(minutes=5),
+                    f"{field}: downloaded archive must be fresh at load completion")
         require(previous_completion is None or previous_completion <= started, "nightly load attempts overlap")
         previous_completion = completed
         require(all(isinstance(run.get(field), int) and not isinstance(run[field], bool) and run[field] > 0
