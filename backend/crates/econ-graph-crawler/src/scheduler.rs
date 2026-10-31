@@ -36,7 +36,9 @@
 //!
 //!    Series whose `crawl_status` is `not_found` (the source returned `CrawlError::NotFound`, a
 //!    firmer signal than a generic failure) back off **ten times** the interval instead, so a
-//!    confirmed-absent series is rechecked far less eagerly than one that merely errored. A series
+//!    confirmed-absent series is rechecked far less eagerly than one that merely errored. Series
+//!    whose `crawl_status` is `absent` (`CrawlError::Absent`: a complete response omitted them)
+//!    back off just as long. A series
 //!    the source reports NotFound before it ever gets an `economic_series` row has its
 //!    `series_metadata` row deactivated instead (`persist::deactivate_metadata_conn`) and so
 //!    isn't a candidate at all; it comes back only when a later catalog discovery lists the id
@@ -44,8 +46,8 @@
 //!    denominator).
 //!
 //!    A series with a publication state other than active (see [`lifecycle`](crate::lifecycle))
-//!    is not a candidate, except one retired solely by consecutive fetch NotFound results
-//!    (`series_lifecycle.fetch_retired`). That series is probed once
+//!    is not a candidate, except one retired solely by consecutive fetch results (NotFound, or
+//!    a BEA line omitted from the response; `series_lifecycle.fetch_retired`). That series is probed once
 //!    [`FETCH_RETIRED_PROBE_FACTOR`] intervals after its last attempt (a discovered series
 //!    without an `economic_series` row uses its last failed queue row, so at most the queue
 //!    retention), and a successful probe makes it active again.
@@ -107,7 +109,23 @@ pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(300);
 /// Default maximum `fetch_series` jobs enqueued per tick.
 pub const DEFAULT_BATCH_LIMIT: i64 = 500;
 
-/// A series retired only by consecutive fetch NotFound results is still probed, once per this
+/// Backoff, in refresh intervals, after a fetch that ended in `not_found`.
+pub const NOT_FOUND_BACKOFF_FACTOR: i64 = 10;
+/// Backoff after `absent` (a complete response omitted the series). Weaker evidence than
+/// NotFound needs more misses to fetch-retire a series, and never retires it sooner in time.
+pub const ABSENT_BACKOFF_FACTOR: i64 = 10;
+/// Backoff after any other failed fetch.
+pub const FAILED_BACKOFF_FACTOR: i64 = 2;
+
+/// `CASE` over a crawl_status column giving the backoff factor for a failed fetch.
+pub(crate) fn failure_backoff_sql(status: &str) -> String {
+    format!(
+        "(CASE WHEN {status} = 'not_found' THEN {NOT_FOUND_BACKOFF_FACTOR} \
+         WHEN {status} = 'absent' THEN {ABSENT_BACKOFF_FACTOR} ELSE {FAILED_BACKOFF_FACTOR} END)"
+    )
+}
+
+/// A series retired only by consecutive fetch NotFound (or omitted-line) results is still probed, once per this
 /// many refresh intervals, so a later successful fetch can reactivate it.
 pub const FETCH_RETIRED_PROBE_FACTOR: i64 = 12;
 
@@ -266,13 +284,12 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
                                       WHERE ca.series_id = c.id)), \
                             '-infinity'::timestamptz) \
                        <= NOW() - {probe_factor} * c.refresh \
-               WHEN c.crawl_status IN ('failed', 'not_found') THEN \
+               WHEN c.crawl_status IN ('failed', 'not_found', 'absent') THEN \
                    COALESCE(GREATEST(c.last_crawled_at, c.failed_at, \
                                      (SELECT max(ca.attempted_at) FROM crawl_attempts ca \
                                       WHERE ca.series_id = c.id)), \
                             '-infinity'::timestamptz) \
-                       <= NOW() - (CASE WHEN c.crawl_status = 'not_found' THEN 10 ELSE 2 END) \
-                          * c.refresh \
+                       <= NOW() - {failure_backoff} * c.refresh \
                ELSE c.last_crawled_at IS NULL OR c.last_crawled_at <= NOW() - c.refresh \
                END \
          ) \
@@ -285,6 +302,7 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
         census = SourceId::Census.as_str(),
         fetch_retired = "(lc.status = 'retired' AND lc.fetch_retired)",
         probe_factor = FETCH_RETIRED_PROBE_FACTOR,
+        failure_backoff = failure_backoff_sql("c.crawl_status"),
     )
 });
 
@@ -1080,6 +1098,50 @@ mod tests {
             "DELETE FROM series_lifecycle WHERE external_id LIKE 't15c_lifecycle_%'",
         )
         .await;
+    }
+
+    /// A series whose last fetch was Absent backs off as long as NotFound (10 intervals),
+    /// not the 2 intervals of an ordinary failure.
+    #[tokio::test]
+    async fn absent_series_back_off_like_not_found() {
+        let Some(db) = db().await else {
+            return;
+        };
+        let pool = &db.pool;
+        // Monthly refreshes every 7 days: failed is due after 14, absent after 70.
+        for (id, days_ago, status) in [
+            ("t15c_backoff_failed", 30.0, "failed"),
+            ("t15c_backoff_absent_recent", 30.0, "absent"),
+            ("t15c_backoff_absent_due", 80.0, "absent"),
+        ] {
+            seed(
+                pool,
+                SourceId::Fred,
+                id,
+                "Monthly",
+                Some(days_ago),
+                Some(status),
+            )
+            .await;
+        }
+        scheduler(pool, &[SourceId::Fred], 100)
+            .tick()
+            .await
+            .unwrap();
+        let ours: BTreeSet<_> = queued_series(pool)
+            .await
+            .into_iter()
+            .filter(|id| id.starts_with("FRED/t15c_backoff_"))
+            .collect();
+        assert_eq!(
+            ours,
+            [
+                "FRED/t15c_backoff_absent_due".to_string(),
+                "FRED/t15c_backoff_failed".to_string()
+            ]
+            .into_iter()
+            .collect()
+        );
     }
 
     /// A series retired only by fetch NotFound results is still probed on a slow schedule,

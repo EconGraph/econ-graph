@@ -2,9 +2,20 @@
 # Offline regression checks: no Kubernetes or Docker connection is made.
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# The path checks' unit tests: the owner, private-group, ACL-error, sticky
+# symlink and symlink-loop rules, independent of this host's directories.
+python3 "$ROOT/scripts/deploy/lib/test_agent_paths.py"
+# A private base, whatever the umask and primary group: directories made below
+# are 0700 unless a check sets a mode, and the chain to the base must pass.
+umask 077
 scratch="$(mktemp -d)"
 trap 'chmod -R u+rwx "$scratch" 2>/dev/null; rm -rf "$scratch"' EXIT
 trap 'echo "test-agent-access: failed at line $LINENO" >&2' ERR
+chmod 0700 "$scratch"
+if ! python3 "$ROOT/scripts/deploy/lib/agent_paths.py" check-chain "$scratch"; then
+    echo "test-agent-access: $scratch is not under directories only you or root can change; set TMPDIR" >&2
+    exit 1
+fi
 export AGENT_TEST_CALLS="$scratch/calls"
 mkdir "$scratch/bin"
 cat >"$scratch/bin/kubectl" <<'STUB'
@@ -251,16 +262,7 @@ refused symlink-target "$scratch/ww can be changed by other users" --output-dir 
 ln -s priv "$scratch/priv-link"
 bootstrap --output-dir "$scratch/priv-link/agent" >/dev/null
 [ -f "$scratch/priv/agent/kubeconfig-econ-graph" ]
-# A directory above it owned by another user (one that exists on this host).
-foreign="$(find /var /srv /opt /run -maxdepth 3 -type d ! -uid 0 ! -uid "$(id -u)" 2>/dev/null | head -n1 || true)"
-if [ -n "$foreign" ]; then
-    if python3 "$ROOT/scripts/deploy/lib/agent_paths.py" check-chain "$foreign/agent" 2>"$scratch/foreign.out"; then
-        echo "accepted a directory owned by another user: $foreign" >&2; exit 1
-    fi
-    grep -qF "can be changed by other users" "$scratch/foreign.out"
-else
-    echo 'note: no directory owned by another user found; skipping that check'
-fi
+# A directory above it owned by another user: test_agent_paths.py, above.
 # Sticky directories (like /tmp) are fine.
 mkdir "$scratch/sticky"
 chmod 1777 "$scratch/sticky"
@@ -273,7 +275,8 @@ if [ -n "$other_group" ]; then
     chmod 0770 "$scratch/shared"
     refused group-parent "$scratch/shared can be changed by other users" --output-dir "$scratch/shared/agent"
 fi
-if [ "$(id -gn)" = "$(id -un)" ]; then
+if python3 -c 'import os, sys; sys.path.insert(0, sys.argv[1]); import agent_paths
+sys.exit(not agent_paths.own_private_group(os.getgid()))' "$ROOT/scripts/deploy/lib"; then
     mkdir "$scratch/private-group"
     chmod 0770 "$scratch/private-group"
     bootstrap --output-dir "$scratch/private-group/agent" >/dev/null

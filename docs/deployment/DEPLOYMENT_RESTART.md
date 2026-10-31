@@ -103,6 +103,10 @@ egk get deployment/crawler-worker -o jsonpath='{.spec.replicas}{"\n"}'
 ./scripts/deploy/precheck-db-migration.sh --stop-crawler
 ```
 
+`deploy.sh` runs the same precheck itself when any data migration is pending, just
+before the `crawler-migrate` Job. Run it by hand first to find a problem before
+anything is applied.
+
 The precheck stops the crawler worker after checking for active Jobs, then checks
 for long-running or idle transactions. It lists blocking sessions without ending
 them. If it fails after scaling the worker down, it prints a command to restore the

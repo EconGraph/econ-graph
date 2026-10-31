@@ -23,10 +23,22 @@
 #   PUBLIC_HOST         A host name: serve it. `none` or empty: no public host;
 #                       one served before is removed. Unset: keep what the
 #                       cluster serves now (its public routes).
-#   GATEWAY_TLS_ISSUER  ClusterIssuer for the https listener's certificate
-#                       (default: the certificate's current one, else
-#                       econ-graph-selfsigned, k8s/manifests/gateway/selfsigned-issuer.yaml,
-#                       which the tunnel connector accepts unverified).
+#   GATEWAY_TLS_ISSUER  ClusterIssuer for the https listener's certificate. An
+#                       explicit choice: it may change the certificate's issuer.
+#                       Without it: a GATEWAY_TLS_ISSUER= line in the host's deploy
+#                       config (ECONGRAPH_DEPLOY_ENV, else ECONGRAPH_CONFIG_DIR/deploy.env,
+#                       else ~/.config/econgraph/deploy.env), only when it matches
+#                       the certificate's current issuer or there is no certificate
+#                       (a recreated cluster), and refused when it differs; else the
+#                       current issuer; else econ-graph-selfsigned
+#                       (k8s/manifests/gateway/selfsigned-issuer.yaml, which the tunnel
+#                       connector accepts unverified). See tls_issuer_choose in
+#                       lib/deploy-config.sh. Read only with a public host. For
+#                       econ-graph-origin-ca, the private CA and the connector's
+#                       public trust bundle are staged first
+#                       (scripts/deploy/stage-tunnel-origin-ca.sh --apply; idempotent),
+#                       so a fresh cluster gets them before its certificate does; if
+#                       staging fails, the certificate is not changed.
 
 set -euo pipefail
 
@@ -102,26 +114,39 @@ else
     host="${PUBLIC_HOST}"
     [ "$host" = none ] && host=""
 fi
-current_issuer="$(kc -n econ-graph-gateway get certificate econ-graph-tls \
-    -o jsonpath='{.spec.issuerRef.name}' 2>/dev/null || true)"
-issuer="${GATEWAY_TLS_ISSUER:-${current_issuer:-econ-graph-selfsigned}}"
 if [ -n "$host" ]; then
     # Validates the name, as the deploy scripts do.
     "$PROJECT_ROOT/scripts/deploy/render-public-host.py" "$host" /dev/null >/dev/null ||
         die "PUBLIC_HOST='${host}' is not a public DNS name"
-    [[ "$issuer" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] ||
-        die "GATEWAY_TLS_ISSUER='${issuer}' is not a resource name"
+    kc get crd certificates.cert-manager.io >/dev/null 2>&1 ||
+        die "cert-manager is not installed; the https listener's certificate needs it"
+    # shellcheck source=scripts/deploy/lib/deploy-config.sh
+    source "$PROJECT_ROOT/scripts/deploy/lib/deploy-config.sh"
+    current_issuer="$(gateway_tls_current_issuer)" ||
+        die "could not read the issuer of certificate econ-graph-tls"
+    tls_issuer_choose "$current_issuer" || exit 1
+    issuer="$TLS_ISSUER"
 fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 if [ -n "$host" ]; then
-    echo "==> Public host ${host}: listener https, certificate (ClusterIssuer ${issuer}), public routes"
-    kc get crd certificates.cert-manager.io >/dev/null 2>&1 ||
-        die "cert-manager is not installed; the https listener's certificate needs it"
+    echo "==> Public host ${host}: listener https, certificate (ClusterIssuer ${issuer}, from ${TLS_ISSUER_SOURCE}), public routes"
     if [ "$issuer" = econ-graph-selfsigned ]; then
         run_kc apply -f "$GATEWAY_DIR/selfsigned-issuer.yaml"
+    elif [ "$issuer" = econ-graph-origin-ca ]; then
+        # The tunnel verifies this certificate against the staged public root, so
+        # the CA and trust bundle must exist before the certificate names them.
+        stage_context="$KUBE_CONTEXT"
+        [ -n "$stage_context" ] || stage_context="$(kc config current-context)" ||
+            die "could not read the current kubectl context for staging the origin CA"
+        stage=(scripts/deploy/stage-tunnel-origin-ca.sh --context "$stage_context" --apply)
+        echo "+ ${stage[*]}"
+        if [ "$DRY_RUN" != true ]; then
+            "$PROJECT_ROOT/${stage[0]}" "${stage[@]:1}" ||
+                die "staging the origin CA failed, so certificate econ-graph-tls was not changed; fix it and rerun, or run ${stage[*]} first"
+        fi
     fi
     sed -e "s/__PUBLIC_HOST__/${host}/g" -e "s/__TLS_ISSUER__/${issuer}/g" \
         "$GATEWAY_DIR/gateway-https.yaml" >"$WORK/gateway-https.yaml"

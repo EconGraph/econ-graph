@@ -20,9 +20,12 @@ working on the host:
                                             HTTPRoute econ-graph-www-redirect: https for
                                             www.HOST redirects to https://HOST
   Keycloak, realm import (env)              KC_HOSTNAME=https://HOST/idp
-                                            KC_WEB_BASE_URL=https://HOST (redirect URIs,
-                                            web origins); KC_WEB_E2E_BASE_URL keeps
-                                            http://localhost as the second allowed origin
+                                            KC_WEB_BASE_URL=https://HOST and
+                                            KC_WEB_E2E_BASE_URL=https://HOST, so the
+                                            econ-graph-web client's redirect URIs and web
+                                            origins are the public host only (no
+                                            http://localhost: a sign-in on the public
+                                            host never returns to a local listener)
   Backend (env)                             OIDC_ISSUER=https://HOST/idp/realms/econ-graph
                                             (OIDC_JWKS_URL stays the in-cluster Service)
   ConfigMap econ-graph-config               https://HOST prepended to CORS_ORIGIN
@@ -76,6 +79,8 @@ def env_values(host):
     return {
         "KC_HOSTNAME": f"{base}/idp",
         "KC_WEB_BASE_URL": base,
+        # The realm's second origin; without a public host it stays http://localhost.
+        "KC_WEB_E2E_BASE_URL": base,
         "OIDC_ISSUER": f"{base}/idp/realms/{REALM}",
     }
 

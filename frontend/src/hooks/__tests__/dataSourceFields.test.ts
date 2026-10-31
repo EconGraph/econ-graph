@@ -20,6 +20,7 @@ const DATA_SOURCE_FIELDS = {
   lifecycleCounts: true,
   createdAt: true,
   updatedAt: true,
+  notice: true,
 } satisfies Record<keyof DataSource, true>;
 
 describe('DataSource', () => {

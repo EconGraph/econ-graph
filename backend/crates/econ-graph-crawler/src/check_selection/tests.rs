@@ -502,7 +502,7 @@ fn bls_discontinued_allows_annual_series_a_year_of_lag() {
         .map(String::from)
         .into_iter()
         .collect();
-    let rows = bls::parse_series_file(text, &wanted).unwrap();
+    let rows = bls::parse_series_file(text, &wanted, bls::TitleFrom::File).unwrap();
     let today = date("2025-02-01");
     let stale: Vec<&str> = ["M24", "M23", "A23", "A22", "S23", "NONE"]
         .into_iter()

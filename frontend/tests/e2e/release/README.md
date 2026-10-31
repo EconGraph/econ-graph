@@ -110,11 +110,11 @@ RELEASE_QA_USER1_PASSWORD=... RELEASE_QA_USER2_PASSWORD=... \
 In this mode ([environment and user mapping](env.ts)):
 
 - Playwright starts no backend or frontend and needs no database URL.
-- The journey and six-source sweep replace exact fixture observations with
-  live checks. The journey checks that GDP's newest point is within FRED's
+- The journey and source sweep replace exact fixture observations with
+  live checks. The journey checks that BLS CPI's newest point is within its
   publication cadence (`liveMaxAgeDays` in [fixture expectations](fixtures.ts)) and that each
   computed transformation shows a finite number different from the level. The
-  six-source sweep checks each source’s newest point against its own cadence
+  source sweep checks each source’s newest point against its own cadence
   (`liveMaxAgeDays` in `SWEPT_SOURCES`). The sweep requires enough live history
   to compute every offered transformation. The deployed database must contain
   those series with current catalog metadata, including the Census BDS titles.
@@ -130,6 +130,9 @@ In this mode ([environment and user mapping](env.ts)):
   series spec skip themselves in deployed mode. The mocked map checks still
   use mocked responses, and the atlas checks cover outline loading. These map
   checks do not establish live country-value coverage.
+- The deployed realm has no admin or ordinary dev user to read as by token, so
+  the specs that read FRED (admin-only) skip themselves, and deployed mode
+  checks only that visitors see no FRED.
 - The signed-in specs use the two QA-only realm users, `qa-alice` and `qa-bob`
   ([QA realm configuration](../../../../config/keycloak/qa/)). Their passwords
   come from `RELEASE_QA_USER1_PASSWORD` and `RELEASE_QA_USER2_PASSWORD`; `RELEASE_QA_USER<n>`, `_NAME` and `_EMAIL`
@@ -156,10 +159,17 @@ it does not verify the deployed data or sign-in.
 
 ## What the suite covers
 
-- `smoke.spec.ts`: the home page loads, the seeded series are reachable through
-  the frontend's `/graphql` proxy, and explore search finds one.
+- `smoke.spec.ts`: the home page loads, the seeded series of the public sources
+  are reachable through the frontend's `/graphql` proxy, and explore search
+  finds one.
+- `catalog-access.spec.ts`: FRED is readable by admins only
+  ([catalog access](../../../../config/keycloak/README.md#catalog-access-including-anonymous-visitors)).
+  A visitor, and a signed-in user who isn't an admin (`grace`), see no FRED
+  source, series, search result or `/sources` entry, while BLS stays readable; an
+  admin (`staff-admin`) reads FRED's source, its GDP and `USREC` series, finds
+  GDP by search and opens its series page.
 - `journey.spec.ts`: exit criterion 5's cross-area journey in one
-  browser session. Search for GDP, open it, check the chart's newest point,
+  browser session. Search for BLS CPI, open it, check the chart's newest point,
   apply every transformation and check the value it shows, download the CSV and
   compare its newest row with the charted levels, then sign in and annotate.
 - `crawl/`: every visible control with a control's ARIA role (link, button, tab,
@@ -177,8 +187,9 @@ it does not verify the deployed data or sign-in.
   `stale allowlist entry` annotations. A new route in `App.tsx` fails the crawl
   until `ROUTE_URLS` in `crawl/every-control.spec.ts` says which URLs to visit
   for it.
-- `sources/six-source-sweep.spec.ts`: one series from each source (FRED,
-  BLS, Census BDS, BEA, FHFA, World Bank WDI), signed out. Search for it on the
+- `sources/six-source-sweep.spec.ts`: one series from each public source
+  (BLS, Census BDS, BEA, FHFA, World Bank WDI), signed out. FRED's series page
+  is opened by `catalog-access.spec.ts` instead. Search for it on the
   explore page and open it, check its newest point, apply every transformation
   the page offers and download the CSV. In fixture mode, `SWEPT_SOURCES` in
   `fixtures.ts` supplies exact values, insufficient-history cases and CSV row
@@ -188,7 +199,8 @@ it does not verify the deployed data or sign-in.
   pages; the map has separate checks in `world-map/`.
 - `series-ui/multipage-series.spec.ts` (fixture mode only, ECO-261): the spec
   uses a synthetic daily FRED series of 22,000 points (`SEEDED_MULTIPAGE`), which
-  the series page reads in three `seriesData` pages. It compares the downloaded
+  the series page reads in three `seriesData` pages. FRED is admin-only, so the
+  page's GraphQL requests carry `staff-admin`'s token. It compares the downloaded
   CSV row by row after loading the page, selecting a date range and applying
   the change-since-first-value transformation. Expected values come from the raw
   upstream response loaded by the seed, with the latest vintage per date and
@@ -275,7 +287,13 @@ Put them in `tests/e2e/release/<area>/`, for example
   a time; configure any new user role for that mode too.
 - **Need a seeded series' id?** `seededSeriesId(request, SEEDED.x)` from
   [auth/helpers.ts](auth/helpers.ts) finds it by search, so it works in deployed
-  mode too.
+  mode too. For a FRED series, pass an admin's token as its third argument.
+- **Need to read an admin-only catalog?** In fixture mode, `devUserToken(request,
+  'staff-admin')` gets an admin's token by password grant, and
+  `readAsDevUser(page, token)` makes the page's GraphQL requests carry it while
+  the app stays signed out. No browser sign-in, so specs can do this in
+  parallel. Register it before any fault route. Deployed mode has no such
+  user: skip there.
 - **Keep specs independent.** In fixture mode, tests run in parallel against
   one shared database except within explicitly serial groups, including auth,
   public annotations and signed-in failures. A spec that writes, such as an

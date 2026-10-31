@@ -104,7 +104,7 @@ cluster with the crawler's API keys.
 |---|---|---|
 | FRED | Release and category series pages, plus `/series` for each include override | `catalog_selection/fred.toml` |
 | BEA | `GetParameterValues(TableName)` for NIPA and Regional, then each selected table (NIPA `GetData`, Regional line codes and areas) | `catalog_selection/bea.toml` |
-| BLS | The survey series files (`cu.series`, `ce.series`, `la.series`, `ln.series`) | `bls_series.csv` |
+| BLS | The survey series files (`cu.series`, `la.series`, ... under download.bls.gov) | `bls_series.csv` |
 | World Bank WDI | Each indicator's `/indicator/{id}` | `wdi_indicators.csv` |
 | Census BDS | `variables.json` and `geography.json`, and the state file | The adapter's economic-variable keyword rules |
 | FHFA HPI | The HPI master CSV (its required columns and in-scope rows) | The adapter's fixed scope |
@@ -147,6 +147,11 @@ matched, and the requests one refresh of every selected series takes at its poli
 `catalog_selection/bea.toml` (`[[rule]]`). Discovery does not enforce it and it is not part of
 the selection fingerprint; it states how many entries the rule is meant to match, so a rule that
 starts matching more is reported.
+
+## Attribution
+
+The citation and notice each source's terms require, and where they appear, are in
+[Source notices](source-notices.md).
 
 ## Related notes
 

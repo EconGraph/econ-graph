@@ -9,8 +9,24 @@
 //! Locking: catalog reconciliation and successor confirmation take an exclusive
 //! per-source transaction advisory lock. Per-series writers (fetch success, NotFound,
 //! restriction) take that lock shared, then an exclusive per-series advisory lock, so
-//! they run concurrently across series and serialize only on the same series. Every
-//! writer takes the source lock first and at most one series lock per transaction.
+//! they run concurrently across series and serialize only on the same series. The worker
+//! takes the shared source lock at the start of every fetch job's commit, for every source,
+//! before any row write: a discovery holds the exclusive lock while it updates series rows, so
+//! a fetch that wrote rows before locking could deadlock with it. Every writer takes the
+//! source lock first and at most one series lock per transaction.
+//!
+//! Known limits, accepted by design:
+//! - The worker reads a catalog's facts (`catalog_scope`, [`CatalogLifecycle`]) from the
+//!   adapter after the walk returns, not with the walk's result. The queue's active-item index
+//!   allows one active discovery job per source, so normally no other walk in the process
+//!   replaces them in between. The exception is a job whose lease expired mid-walk: its own
+//!   commit is rejected as a lost lease, but a walk it finishes late can replace the facts a
+//!   newer job of the same source then reads. Both walks saw a complete upstream catalog.
+//! - A normal fetch and a forced refetch of the same series may both answer NotFound and so
+//!   record two consecutive misses for one upstream state. That can retire a series one
+//!   attempt early; a later successful fetch reactivates it.
+//! - `observed_at` is the worker's clock when the walk finished. A worker whose clock runs
+//!   behind can have its snapshot ignored as older than one already applied.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -148,6 +164,19 @@ pub(crate) async fn lock_source_exclusive(
     Ok(())
 }
 
+/// Shared source lock: excludes only a reconciliation of the same source.
+pub(crate) async fn lock_source_shared(
+    conn: &mut AsyncPgConnection,
+    source_id: Uuid,
+) -> AppResult<()> {
+    diesel::sql_query("SELECT pg_advisory_xact_lock_shared($1, hashtext($2::text))")
+        .bind::<diesel::sql_types::Integer, _>(SOURCE_LOCK_CLASS)
+        .bind::<SqlUuid, _>(source_id)
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
 /// Shared source lock plus an exclusive lock on one series. Held until commit.
 pub(crate) async fn lock_series(
     conn: &mut AsyncPgConnection,
@@ -250,6 +279,7 @@ async fn apply_snapshot(
     let fingerprint = snapshot.fingerprint.as_str();
     let observed_at = snapshot.observed_at;
     let existing = load_existing(conn, source_id, snapshot).await?;
+    let fetch_retired = fetch_retired_ids(conn, source_id, &existing).await?;
     let (mut states, guarded) = plan_listed(
         &existing,
         &snapshot.listed,
@@ -257,6 +287,7 @@ async fn apply_snapshot(
         same_scope,
         observed_at,
         policy,
+        &fetch_retired,
     );
     if guarded {
         // Explicit legal restrictions are positive evidence, independent of an incomplete-
@@ -268,6 +299,7 @@ async fn apply_snapshot(
             false,
             observed_at,
             policy,
+            &fetch_retired,
         );
         states = positive
             .into_iter()
@@ -284,22 +316,15 @@ async fn apply_snapshot(
         .filter(|id| !facts.restricted_ids.contains(id))
         .cloned()
         .collect();
+    let ended: Vec<String> = states
+        .iter()
+        .filter(|s| s.status == "missing_from_catalog" || s.status == "retired")
+        .map(|s| s.external_id.clone())
+        .collect();
+    let proposals = successor_proposals(conn, source_id, &ended, &candidates_listed).await?;
     for state in &mut states {
         if state.status == "missing_from_catalog" || state.status == "retired" {
-            let candidates: Vec<Uuid> = diesel::sql_query(
-                "SELECT DISTINCT COALESCE(es.id,sm.id) AS id FROM series_metadata old \
-                 JOIN series_metadata sm ON sm.source_id=old.source_id \
-                    AND lower(trim(sm.title))=lower(trim(old.title)) \
-                    AND sm.frequency IS NOT DISTINCT FROM old.frequency \
-                 LEFT JOIN economic_series es ON es.source_id=sm.source_id AND es.external_id=sm.external_id \
-                 WHERE old.source_id=$1 AND old.external_id=$2 AND sm.external_id<>$2 \
-                   AND sm.external_id = ANY($3) AND NOT EXISTS (SELECT 1 FROM series_lifecycle candidate \
-                       WHERE candidate.source_id=sm.source_id AND candidate.external_id=sm.external_id \
-                         AND candidate.status IN ('restricted','superseded')) ORDER BY id LIMIT 2")
-                .bind::<SqlUuid,_>(source_id).bind::<Text,_>(&state.external_id)
-                .bind::<diesel::sql_types::Array<Text>,_>(&candidates_listed)
-                .load::<Id>( &mut *conn).await?.into_iter().map(|r| r.id).collect();
-            state.proposed_successor_id = (candidates.len() == 1).then(|| candidates[0]);
+            state.proposed_successor_id = proposals.get(&state.external_id).copied();
         }
     }
     let transition_statuses: Vec<String> = states
@@ -314,7 +339,15 @@ async fn apply_snapshot(
         })
         .map(|s| s.status.clone())
         .collect();
-    write_states(conn, source_id, fingerprint, &states, !guarded).await?;
+    write_states(
+        conn,
+        source_id,
+        fingerprint,
+        &states,
+        &snapshot.listed,
+        !guarded,
+    )
+    .await?;
     let listed: BTreeSet<&str> = snapshot.listed.iter().map(String::as_str).collect();
     let unselected_tracked = facts
         .unselected(&listed, existing.iter().map(|s| s.external_id.as_str()))
@@ -368,13 +401,14 @@ pub struct GuardedReview {
 }
 
 /// Review, and with `accept` apply, the newest snapshot the mass-disappearance guard
-/// rejected for `source`. Accepting records one absence for each newly missing series,
+/// rejected for `source`. `accept` is the guarded-at time the operator reviewed; a newer
+/// guarded snapshot stored since then is refused rather than applied unreviewed. Accepting records one absence for each newly missing series,
 /// exactly as an unguarded catalog would; three accepted absences are still required
 /// before a series is marked missing. No rows or observations are deleted.
 pub async fn review_guarded_catalog(
     pool: &DatabasePool,
     source: SourceId,
-    accept: bool,
+    accept: Option<DateTime<Utc>>,
 ) -> AppResult<GuardedReview> {
     #[derive(QueryableByName)]
     struct Pending {
@@ -446,8 +480,15 @@ pub async fn review_guarded_catalog(
                     .collect(),
                 transitions: 0,
             };
-            if !accept {
+            let Some(reviewed_at) = accept else {
                 return Ok((review, None));
+            };
+            if reviewed_at != guarded_at {
+                return Err(AppError::ValidationError(format!(
+                    "the waiting snapshot was guarded at {}, not {}; review it again",
+                    guarded_at.to_rfc3339(),
+                    reviewed_at.to_rfc3339()
+                )));
             }
             let metrics = apply_snapshot(
                 conn,
@@ -475,6 +516,52 @@ pub async fn review_guarded_catalog(
     Ok(review)
 }
 
+/// For each ended series, the one listed, public series with the same normalized title and
+/// frequency, if exactly one exists. One set-based query: reconciliation holds the
+/// exclusive source lock, so its cost must not grow with one query per ended series.
+async fn successor_proposals(
+    conn: &mut AsyncPgConnection,
+    source_id: Uuid,
+    ended: &[String],
+    listed: &[String],
+) -> AppResult<BTreeMap<String, Uuid>> {
+    #[derive(QueryableByName)]
+    struct Proposal {
+        #[diesel(sql_type = Text)]
+        external_id: String,
+        #[diesel(sql_type = SqlUuid)]
+        id: Uuid,
+    }
+    if ended.is_empty() || listed.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let rows: Vec<Proposal> = diesel::sql_query(
+        "WITH old AS ( \
+             SELECT external_id, lower(trim(title)) AS title, frequency FROM series_metadata \
+             WHERE source_id=$1 AND external_id = ANY($2)), \
+         listed AS ( \
+             SELECT COALESCE(es.id, sm.id) AS id, sm.external_id, lower(trim(sm.title)) AS title, \
+                 sm.frequency \
+             FROM series_metadata sm \
+             LEFT JOIN economic_series es ON es.source_id=sm.source_id AND es.external_id=sm.external_id \
+             WHERE sm.source_id=$1 AND sm.external_id = ANY($3) \
+               AND NOT EXISTS (SELECT 1 FROM series_lifecycle candidate \
+                   WHERE candidate.source_id=sm.source_id AND candidate.external_id=sm.external_id \
+                     AND candidate.status IN ('restricted','superseded'))) \
+         SELECT old.external_id, (array_agg(DISTINCT listed.id))[1] AS id \
+         FROM old JOIN listed ON listed.title=old.title \
+             AND listed.frequency IS NOT DISTINCT FROM old.frequency \
+             AND listed.external_id<>old.external_id \
+         GROUP BY old.external_id HAVING count(DISTINCT listed.id)=1",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<diesel::sql_types::Array<Text>, _>(ended)
+    .bind::<diesel::sql_types::Array<Text>, _>(listed)
+    .load(conn)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.external_id, r.id)).collect())
+}
+
 #[derive(QueryableByName)]
 struct Id {
     #[diesel(sql_type = SqlUuid)]
@@ -491,7 +578,38 @@ fn plan(
     policy: LifecyclePolicy,
 ) -> (Vec<State>, bool) {
     let listed: Vec<String> = found.iter().map(|d| d.external_id.clone()).collect();
-    plan_listed(existing, &listed, facts, same_scope, now, policy)
+    plan_listed(
+        existing,
+        &listed,
+        facts,
+        same_scope,
+        now,
+        policy,
+        &BTreeSet::new(),
+    )
+}
+
+/// Ids among `existing` currently retired by fetch evidence alone.
+async fn fetch_retired_ids(
+    conn: &mut AsyncPgConnection,
+    source_id: Uuid,
+    existing: &[State],
+) -> AppResult<BTreeSet<String>> {
+    #[derive(QueryableByName)]
+    struct Row {
+        #[diesel(sql_type = Text)]
+        external_id: String,
+    }
+    let ids: Vec<String> = existing.iter().map(|s| s.external_id.clone()).collect();
+    let rows: Vec<Row> = diesel::sql_query(
+        "SELECT external_id FROM series_lifecycle \
+         WHERE source_id=$1 AND fetch_retired AND external_id = ANY($2)",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<diesel::sql_types::Array<Text>, _>(ids)
+    .load(conn)
+    .await?;
+    Ok(rows.into_iter().map(|r| r.external_id).collect())
 }
 
 fn plan_listed(
@@ -501,6 +619,7 @@ fn plan_listed(
     same_scope: bool,
     now: DateTime<Utc>,
     policy: LifecyclePolicy,
+    fetch_retired: &BTreeSet<String>,
 ) -> (Vec<State>, bool) {
     let listed: BTreeSet<&str> = listed.iter().map(String::as_str).collect();
     // Compare the new snapshot with the last accepted one, not all retained history or
@@ -569,6 +688,9 @@ fn plan_listed(
             state.status = "restricted".into();
         } else if state.successor_id.is_some() {
             state.status = "superseded".into();
+        } else if drifted && !present && fetch_retired.contains(&state.external_id) {
+            // Still published outside the rules, but retired by fetch evidence: only an
+            // outright listing or a successful fetch may reactivate it.
         } else if present || drifted {
             state.status = if discontinued.contains(state.external_id.as_str())
                 || (drifted && state.status == "discontinued")
@@ -614,43 +736,62 @@ async fn write_states(
     source_id: Uuid,
     fingerprint: &str,
     states: &[State],
+    listed: &[String],
     accepted: bool,
 ) -> AppResult<()> {
     let payload =
         serde_json::to_value(states).map_err(|e| AppError::InternalError(e.to_string()))?;
     // Only an accepted snapshot moves the guard's baseline; a guarded one writes positive
     // legal evidence alone and leaves in_accepted_catalog as the last accepted catalog set it.
-    diesel::sql_query(
+    // Only an outright listing or a successful fetch clears fetch evidence; so does any
+    // return to active from another state, so stale counters cannot retire it at once.
+    diesel::sql_query(format!(
         "INSERT INTO series_lifecycle(source_id,external_id,status,since,missing_refreshes,last_seen_at, \
-            proposed_successor_id,successor_id,scope_fingerprint,in_accepted_catalog) \
+            proposed_successor_id,successor_id,scope_fingerprint,in_accepted_catalog, \
+            listed_in_accepted_catalog) \
          SELECT $1,x.external_id,x.status,x.since,x.missing_refreshes,x.last_seen_at, \
-            x.proposed_successor_id,x.successor_id,$2,x.in_accepted_catalog AND $4 \
+            x.proposed_successor_id,x.successor_id,$2,x.in_accepted_catalog AND $4, \
+            x.external_id = ANY($5) AND $4 \
          FROM jsonb_to_recordset($3) AS x(external_id text,status text,since timestamptz, \
             missing_refreshes integer,last_seen_at timestamptz,proposed_successor_id uuid,successor_id uuid, \
             in_accepted_catalog boolean) \
          ON CONFLICT(source_id,external_id) DO UPDATE SET status=EXCLUDED.status,since=EXCLUDED.since, \
             in_accepted_catalog=CASE WHEN $4 THEN EXCLUDED.in_accepted_catalog \
                 ELSE series_lifecycle.in_accepted_catalog END, \
+            listed_in_accepted_catalog=CASE WHEN $4 THEN EXCLUDED.listed_in_accepted_catalog \
+                ELSE series_lifecycle.listed_in_accepted_catalog END, \
             missing_refreshes=EXCLUDED.missing_refreshes,last_seen_at=EXCLUDED.last_seen_at, \
             proposed_successor_id=EXCLUDED.proposed_successor_id,successor_id=EXCLUDED.successor_id, \
             scope_fingerprint=EXCLUDED.scope_fingerprint, \
             fetch_retired=CASE WHEN EXCLUDED.status='retired' AND EXCLUDED.missing_refreshes<3 \
-                THEN series_lifecycle.fetch_retired ELSE FALSE END")
+                THEN series_lifecycle.fetch_retired ELSE FALSE END, \
+            fetch_not_found_count=CASE WHEN {reset} THEN 0 \
+                ELSE series_lifecycle.fetch_not_found_count END, \
+            fetch_absent_count=CASE WHEN {reset} THEN 0 \
+                ELSE series_lifecycle.fetch_absent_count END",
+        reset = "(EXCLUDED.external_id = ANY($5) AND $4) \
+            OR (series_lifecycle.status<>'active' AND EXCLUDED.status='active')"
+    ))
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(fingerprint).bind::<Jsonb,_>(payload)
-        .bind::<diesel::sql_types::Bool,_>(accepted).execute(&mut *conn).await?;
+        .bind::<diesel::sql_types::Bool,_>(accepted)
+        .bind::<diesel::sql_types::Array<Text>,_>(listed).execute(&mut *conn).await?;
     // A lifecycle badge must not remove historical data from normal series browsing.
     // Only a verified legal restriction makes a row inactive; the API additionally
-    // checks restricted status so includeInactive cannot bypass that restriction.
+    // checks restricted status so includeInactive cannot bypass that restriction. A row
+    // that was already inactive (for example deactivated by an earlier unlisted-series
+    // sweep) stays inactive, and unscheduled, until a catalog lists it outright.
     diesel::sql_query("UPDATE economic_series es SET \
         crawl_status=CASE WHEN l.status='active' THEN \
             CASE WHEN es.crawl_status IN ('discontinued','missing_from_catalog','retired','restricted','superseded') \
                  THEN 'success' ELSE es.crawl_status END ELSE l.status END, \
-        is_active=(l.status<>'restricted') \
+        is_active=CASE WHEN l.status='restricted' THEN FALSE \
+            WHEN l.listed_in_accepted_catalog THEN TRUE ELSE es.is_active END \
         FROM series_lifecycle l WHERE l.source_id=es.source_id AND l.external_id=es.external_id \
             AND l.source_id=$1 AND l.scope_fingerprint=$2")
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(fingerprint).execute(&mut *conn).await?;
     diesel::sql_query(
-        "UPDATE series_metadata sm SET is_active=(l.status<>'restricted') \
+        "UPDATE series_metadata sm SET is_active=CASE WHEN l.status='restricted' THEN FALSE \
+            WHEN l.listed_in_accepted_catalog THEN TRUE ELSE sm.is_active END \
         FROM series_lifecycle l WHERE l.source_id=sm.source_id AND l.external_id=sm.external_id \
             AND l.source_id=$1 AND l.scope_fingerprint=$2",
     )
@@ -677,7 +818,7 @@ async fn update_gauges(
         "SELECT status,count(*) AS n FROM series_lifecycle WHERE source_id=$1 GROUP BY status",
     )
     .bind::<SqlUuid, _>(source_id)
-    .load(conn)
+    .load(&mut *conn)
     .await?;
     for status in [
         "active",
@@ -697,6 +838,22 @@ async fn update_gauges(
                     .map_or(0, |c| c.n),
             );
     }
+    #[derive(QueryableByName)]
+    struct Pending {
+        #[diesel(sql_type = diesel::sql_types::Bool)]
+        pending: bool,
+    }
+    let pending: Option<Pending> = diesel::sql_query(
+        "SELECT guarded_at IS NOT NULL AS pending FROM catalog_lifecycle_scopes WHERE source_id=$1",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .get_result(&mut *conn)
+    .await
+    .optional()?;
+    CRAWLER_CATALOG_METRICS
+        .guarded_snapshot_pending
+        .with_label_values(&[source.as_str()])
+        .set(i64::from(pending.is_some_and(|p| p.pending)));
     Ok(())
 }
 
@@ -744,12 +901,65 @@ impl Reconciled {
 }
 
 /// Record confirmed NotFound as one consecutive fetch miss, even when no observations
-/// were ever fetched. This evidence never changes the catalog absence counter. Failed
-/// HTTP requests and parse errors must never call this function.
+/// were ever fetched. Three in a row retire the series from fetching. This evidence never
+/// changes the catalog absence counter. Failed HTTP requests and parse errors must never
+/// call this function.
 pub(crate) async fn record_not_found_conn(
     conn: &mut AsyncPgConnection,
     source: SourceId,
     external_id: &str,
+) -> AppResult<Option<String>> {
+    record_fetch_miss_conn(conn, source, external_id, FetchMiss::NotFound).await
+}
+
+/// Record that a successful, complete whole-table response omitted this series
+/// ([`CrawlError::Absent`](crate::CrawlError::Absent)). Weaker than NotFound, so it has its
+/// own counter and takes six in a row to retire the series from fetching. A series the
+/// current accepted catalog lists is never counted: the catalog alone decides whether it was
+/// removed, so a selected series cannot flip between fetch-retired and catalog-reactivated.
+pub(crate) async fn record_absent_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    external_id: &str,
+) -> AppResult<Option<String>> {
+    record_fetch_miss_conn(conn, source, external_id, FetchMiss::Absent).await
+}
+
+/// Consecutive confirmed NotFound fetches that retire a series from fetching.
+pub(crate) const NOT_FOUND_RETIRE_AFTER: i32 = 3;
+/// Consecutive Absent fetches that retire a series the accepted catalog does not list.
+pub(crate) const ABSENT_RETIRE_AFTER: i32 = 6;
+
+#[derive(Clone, Copy)]
+enum FetchMiss {
+    NotFound,
+    Absent,
+}
+
+impl FetchMiss {
+    /// Counter column and the consecutive misses that retire a series.
+    fn counter(self) -> (&'static str, i32) {
+        match self {
+            Self::NotFound => ("fetch_not_found_count", NOT_FOUND_RETIRE_AFTER),
+            Self::Absent => ("fetch_absent_count", ABSENT_RETIRE_AFTER),
+        }
+    }
+
+    /// Extra condition for counting this miss at all.
+    /// The current accepted catalog is the only authority for series it lists outright:
+    /// fetch misses for those are not counted (they still fail the fetch and raise the
+    /// ordinary crawl-failure alerts), so a listed series cannot flip between fetch-retired
+    /// and catalog-reactivated.
+    const COUNTS_WHEN: &'static str =
+        "NOT (listed_in_accepted_catalog AND scope_fingerprint IS NOT DISTINCT FROM \
+         (SELECT fingerprint FROM catalog_lifecycle_scopes s WHERE s.source_id=$1))";
+}
+
+async fn record_fetch_miss_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    external_id: &str,
+    miss: FetchMiss,
 ) -> AppResult<Option<String>> {
     let source_id = persist::data_source_id_conn(conn, source).await?;
     lock_series(conn, source_id, external_id).await?;
@@ -760,13 +970,24 @@ pub(crate) async fn record_not_found_conn(
             OR EXISTS(SELECT 1 FROM series_metadata WHERE source_id=$1 AND external_id=$2)
         ON CONFLICT(source_id,external_id) DO NOTHING")
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).execute(&mut *conn).await?;
-    let change:Option<StatusChange> = diesel::sql_query("UPDATE series_lifecycle SET \
-        fetch_not_found_count=LEAST(fetch_not_found_count::bigint+1,2147483647)::integer, \
-        status=CASE WHEN fetch_not_found_count>=2 AND status='active' THEN 'retired' ELSE status END, \
-        fetch_retired=CASE WHEN fetch_not_found_count>=2 AND status='active' THEN TRUE ELSE fetch_retired END, \
-        since=CASE WHEN fetch_not_found_count>=2 AND status='active' THEN NOW() ELSE since END \
-        WHERE source_id=$1 AND external_id=$2 RETURNING CASE WHEN old.status<>status THEN status ELSE NULL END AS status")
-        .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).get_result(&mut *conn).await.optional()?;
+    let (counter, threshold) = miss.counter();
+    let retire = format!("{counter}+1>=$3 AND status='active'");
+    let change: Option<StatusChange> = diesel::sql_query(format!(
+        "UPDATE series_lifecycle SET \
+        {counter}=LEAST({counter}::bigint+1,2147483647)::integer, \
+        status=CASE WHEN {retire} THEN 'retired' ELSE status END, \
+        fetch_retired=CASE WHEN {retire} THEN TRUE ELSE fetch_retired END, \
+        since=CASE WHEN {retire} THEN NOW() ELSE since END \
+        WHERE source_id=$1 AND external_id=$2 AND {counts} \
+        RETURNING CASE WHEN old.status<>status THEN status ELSE NULL END AS status",
+        counts = FetchMiss::COUNTS_WHEN
+    ))
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(external_id)
+    .bind::<diesel::sql_types::Integer, _>(threshold)
+    .get_result(&mut *conn)
+    .await
+    .optional()?;
     diesel::sql_query(
         "UPDATE economic_series es SET crawl_status=l.status FROM series_lifecycle l \
         WHERE l.source_id=es.source_id AND l.external_id=es.external_id \
@@ -787,7 +1008,8 @@ pub(crate) async fn record_not_found_conn(
 /// concurrently and wait only for a catalog reconciliation of their source.
 ///
 /// A source that does not track lifecycle and has no lifecycle row has no evidence to
-/// reset, so it takes no lock at all.
+/// reset, so it takes no series lock here. The worker already holds the shared source lock
+/// for every fetch job (see the module docs).
 pub(crate) async fn record_fetch_success_conn(
     conn: &mut AsyncPgConnection,
     source_id: Uuid,
@@ -811,11 +1033,12 @@ pub(crate) async fn record_fetch_success_conn(
         }
     }
     lock_series(conn, source_id, external_id).await?;
-    diesel::sql_query("UPDATE series_lifecycle SET fetch_not_found_count=0,fetch_retired=FALSE,
+    diesel::sql_query("UPDATE series_lifecycle SET fetch_not_found_count=0,fetch_absent_count=0,fetch_retired=FALSE,
         status=CASE WHEN fetch_retired AND status='retired'
             THEN CASE WHEN missing_refreshes>=3 THEN 'missing_from_catalog' ELSE 'active' END ELSE status END,
         since=CASE WHEN fetch_retired AND status='retired' AND missing_refreshes<3 THEN NULL ELSE since END
-        WHERE source_id=$1 AND external_id=$2 AND (fetch_not_found_count>0 OR fetch_retired)")
+        WHERE source_id=$1 AND external_id=$2
+            AND (fetch_not_found_count>0 OR fetch_absent_count>0 OR fetch_retired)")
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).execute(&mut *conn).await?;
     Ok(())
 }

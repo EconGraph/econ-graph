@@ -142,6 +142,17 @@ pub fn validate_catalog_rules() -> Result<(), CrawlError> {
     load_catalog_rules().map(|_| ())
 }
 
+/// Metric labels of the configured selection rules (see `crawler_catalog_rule_matches`).
+pub fn configured_rule_labels() -> Result<Vec<String>, CrawlError> {
+    let rules = load_catalog_rules()?;
+    Ok(rules
+        .rules
+        .iter()
+        .enumerate()
+        .map(|(index, rule)| rule.label(index))
+        .collect())
+}
+
 /// The catalog rules in [`CATALOG_RULES_FILE`].
 pub(crate) fn load_catalog_rules() -> Result<FredCatalogRules, CrawlError> {
     let path = data_dir().join(CATALOG_RULES_FILE);
@@ -2606,6 +2617,49 @@ mod tests {
         assert!(!rules.rules.is_empty());
         assert!(rules.max_series <= 1000);
         assert!(rules.include.len() <= 32);
+    }
+
+    /// The NBER recession indicator: `discover()` finds `USREC` in the
+    /// shipped list, and the copyright safety net keeps it given FRED's real notes for it.
+    #[tokio::test]
+    async fn discover_keeps_usrec_with_its_real_notes() {
+        const SERIES_USREC: &str = include_str!("../../tests/fixtures/fred/series_usrec.json");
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &Route::get("/series").query("series_id", "USREC"),
+            Reply::json_str(SERIES_USREC),
+            1,
+        )
+        .await;
+        // USREC is an explicit override in catalog_selection/fred.toml, outside the GDP release.
+        mock.mount(
+            &Route::get("/release/series").query("release_id", "53"),
+            catalog_page(1, 0, vec![catalog_row("GDP", "Gross Domestic Product")]),
+        )
+        .await;
+        mock.mount(&Route::get("/series"), Reply::json_str(SERIES_GDP))
+            .await;
+        let found = FredAdapter::new(mock.base_url())
+            .discover(&test_ctx())
+            .await
+            .unwrap();
+        let usrec = found
+            .iter()
+            .find(|s| s.external_id == "USREC")
+            .expect("USREC kept by discover()");
+        assert_eq!(
+            usrec.title,
+            "NBER based Recession Indicators for the United States from the Period following \
+             the Peak through the Trough"
+        );
+        assert_eq!(usrec.frequency.as_deref(), Some("Monthly"));
+        assert_eq!(usrec.units.as_deref(), Some("+1 or 0"));
+        assert!(usrec
+            .description
+            .as_deref()
+            .unwrap()
+            .contains("National Bureau of Economic Research"));
+        mock.server().verify().await;
     }
 
     #[test]

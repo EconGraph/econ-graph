@@ -1,0 +1,4 @@
+series_id	seasonal	industry_code	state_code	area_code	sizeclass_code	dataelement_code	ratelevel_code	footnote_codes	begin_year	begin_period	end_year	end_period
+JTS000000000000000JOL	S	000000	00	00000	00	JO	L		2000	M12	2024	M02
+JTS000000000000000JOR	S	000000	00	00000	00	JO	R		2000	M12	2024	M02
+JTU000000000000000JOR	U	000000	00	00000	00	JO	R		2000	M12	2024	M02

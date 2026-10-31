@@ -150,7 +150,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // their first job. Catalog selection rules are validated before any discovery is enqueued.
     let bls_series = econ_graph_crawler::reference::bls_series()?;
     econ_graph_crawler::sources::fred::validate_catalog_rules()?;
-    econ_graph_crawler::catalog_selection::bea_rules()?;
+    let bea_rules = econ_graph_crawler::catalog_selection::bea_rules()?;
+    // Alerts on rule matches join on the rules this worker loaded, so an edited rule's
+    // old label stops alerting once no worker reports it as configured.
+    if registry.ids().contains(&econ_graph_crawler::SourceId::Fred) {
+        econ_graph_crawler::catalog_selection::publish_configured_rules(
+            "FRED",
+            &econ_graph_crawler::sources::fred::configured_rule_labels()?,
+        );
+    }
+    if registry.ids().contains(&econ_graph_crawler::SourceId::Bea) {
+        econ_graph_crawler::catalog_selection::publish_configured_rules(
+            "BEA",
+            &bea_rules.rule_labels(),
+        );
+    }
     tracing::info!(
         data_dir = %econ_graph_crawler::reference::data_dir().display(),
         bls_series = bls_series.len(),

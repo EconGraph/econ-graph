@@ -36,8 +36,9 @@ const getDataSourceIcon = (name: string): React.ReactElement => {
 
 /**
  * REQUIREMENT: Show the data sources and how many series each one has.
- * PURPOSE: Let users see where the data comes from. Only figures the API actually reports are
- * shown (series counts, publication lifecycle and rate limits).
+ * PURPOSE: Let users see where the data comes from and browse available series. Only figures
+ * the API reports are shown (series counts and publication lifecycle); crawler configuration
+ * and operational details belong in administrative surfaces.
  * @returns The DataSourcesContent component.
  */
 const DataSourcesContent: React.FC = () => {
@@ -194,17 +195,6 @@ const DataSourcesContent: React.FC = () => {
                     ))}
                   </Box>
                 )}
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Typography variant='body2'>Crawl rate limit</Typography>
-                  <Typography
-                    variant='body2'
-                    sx={{
-                      fontWeight: 'bold',
-                    }}
-                  >
-                    {source.rateLimitPerMinute.toLocaleString()}/min
-                  </Typography>
-                </Box>
               </CardContent>
 
               <CardActions>

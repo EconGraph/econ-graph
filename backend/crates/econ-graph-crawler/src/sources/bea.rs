@@ -59,11 +59,18 @@
 //! Every fetch asks for the whole history (`Year` `X` for NIPA, `ALL` for Regional) and ignores
 //! `since`: BEA's annual updates revise several years and comprehensive updates revise (and
 //! re-base) the whole history, so an incremental window would keep stale values. A table's full
-//! history is still one modest request. A requested series with no rows in an otherwise
-//! successful response is `Permanent`, not `NotFound`: a response that omits one line or area
-//! is weak evidence, so it records no publication lifecycle evidence, and it isn't retried
-//! (each retry would request the whole table again). The scheduler tries the series again after
-//! its failure backoff, and complete catalog discovery decides whether it was removed.
+//! history is still one modest request. A requested series with no rows in a successful
+//! response is `Absent`, not `NotFound`: omitting a line or area is weaker evidence than an
+//! explicit "does not exist". That includes an empty response: a Regional request is filtered
+//! to the batch's areas, so it is empty when every requested area is gone (legacy counties),
+//! and BEA answers a NIPA table it no longer publishes at that frequency with no rows. A
+//! briefly empty table during a BEA update cannot retire anything: six misses about ten
+//! refresh intervals apart are needed, and listed series are not counted.
+//! It isn't retried (each retry would request the whole table again); the scheduler tries again
+//! after the same long backoff as NotFound. For a series the current accepted catalog lists,
+//! `Absent` is not counted at all: catalog discovery alone decides whether it was removed. For
+//! an unlisted or legacy series, six consecutive `Absent` results retire it from fetching (see
+//! [`lifecycle`](crate::lifecycle)), and it is then probed on a slow schedule.
 //!
 //! `DataValue` has thousands separators and is scaled by `10^UNIT_MULT`, so values are in base
 //! units (dollars, not millions of dollars). Units come from `CL_UNIT`, or `METRIC_NAME` when
@@ -841,8 +848,8 @@ impl BeaAdapter {
                 continue;
             };
             let result = match by_line.get(line.as_str()) {
-                // Partial response: not NotFound (see the module docs).
-                None => Err(CrawlError::Permanent(format!(
+                // Weaker than NotFound (see the module docs).
+                None => Err(CrawlError::Absent(format!(
                     "BEA {id}: no line {line} in {table_name} ({})",
                     frequency.code()
                 ))),
@@ -924,8 +931,8 @@ impl BeaAdapter {
                 continue;
             };
             let result = match by_geo.get(geo.as_str()) {
-                // Partial response: not NotFound (see the module docs).
-                None => Err(CrawlError::Permanent(format!(
+                // Weaker than NotFound (see the module docs).
+                None => Err(CrawlError::Absent(format!(
                     "BEA {id}: no data for area {geo} in {table_name} line {line}"
                 ))),
                 Some(rows) => regional_series(
@@ -2391,12 +2398,43 @@ mod tests {
             "Personal consumption expenditures (GDP, current dollars, quarterly)"
         );
         assert_eq!(out["bea_nipa/T10105.1.Q"].as_ref().unwrap().points.len(), 4);
-        // A line the response omits is a partial result, not lifecycle NotFound evidence.
+        // A line the response omits is weaker evidence than NotFound.
         assert_eq!(
             out["bea_nipa/T10105.99.Q"].as_ref().unwrap_err().kind(),
-            "permanent"
+            "absent"
         );
         mock.server().verify().await;
+    }
+
+    /// An empty response (every requested Regional area gone, or a NIPA table BEA no longer
+    /// publishes at that frequency) is `Absent` for each requested id, which lifecycle counts
+    /// only for series the accepted catalog does not list.
+    #[tokio::test]
+    async fn fetch_batch_marks_every_id_of_an_empty_response_absent() {
+        const EMPTY: &str = r#"{"BEAAPI":{"Results":{"Data":[]}}}"#;
+        let mock = MockSource::start().await;
+        mock.mount(&nipa_route("T10105", "Q"), Reply::json_str(EMPTY))
+            .await;
+        mock.mount(&regional_data(), Reply::json_str(EMPTY)).await;
+        mock.mount(
+            &regional_params("LineCode"),
+            Reply::json_str(REGIONAL_LINES),
+        )
+        .await;
+        for ids in [
+            vec!["bea_nipa/T10105.1.Q", "bea_nipa/T10105.2.Q"],
+            vec!["bea_regional/SAGDP2.1.09001", "bea_regional/SAGDP2.1.09003"],
+        ] {
+            let ids: Vec<String> = ids.into_iter().map(String::from).collect();
+            let out = adapter(&mock)
+                .fetch_batch(&test_ctx(), &ids, None)
+                .await
+                .unwrap();
+            assert_eq!(out.len(), ids.len());
+            for id in &ids {
+                assert_eq!(out[id].as_ref().unwrap_err().kind(), "absent", "{id}");
+            }
+        }
     }
 
     #[tokio::test]
@@ -2445,13 +2483,13 @@ mod tests {
         let wy = out["bea_regional/SAGDP2.1.56000"].as_ref().unwrap();
         assert_eq!(wy.points.len(), 1);
         assert_eq!(wy.points[0].value, None);
-        // An area the response omits is a partial result, not lifecycle NotFound evidence.
+        // An area the response omits is weaker evidence than NotFound.
         assert_eq!(
             out["bea_regional/SAGDP2.1.72000"]
                 .as_ref()
                 .unwrap_err()
                 .kind(),
-            "permanent"
+            "absent"
         );
         mock.server().verify().await;
     }

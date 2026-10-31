@@ -546,9 +546,15 @@ pub struct CrawlerCatalogMetrics {
     /// rule (its position and catalog, e.g. `2:NIPA:T20100`). Zero means the rule selects
     /// nothing, for example after an upstream rename.
     pub rule_matches: IntGaugeVec,
+    /// 1 for each selection rule the worker loaded at startup, labelled like `rule_matches`.
+    /// Alerts join on it so a rule removed or renamed in the rules file stops alerting.
+    pub rule_configured: IntGaugeVec,
     /// Tracked series the last complete catalog still lists upstream but the selection rules
     /// no longer select. They stay published and scheduled.
     pub unselected_series: IntGaugeVec,
+    /// 1 while a catalog snapshot rejected by the mass-disappearance guard waits for operator
+    /// review (`crawler accept-guarded-catalog`), from the database.
+    pub guarded_snapshot_pending: IntGaugeVec,
 }
 
 impl CrawlerCatalogMetrics {
@@ -570,6 +576,7 @@ impl CrawlerCatalogMetrics {
             self.transitions_total.with_label_values(&[source, status]);
         }
         self.unselected_series.with_label_values(&[source]);
+        self.guarded_snapshot_pending.with_label_values(&[source]);
     }
 
     /// Register catalog metrics with the supplied registry.
@@ -604,6 +611,20 @@ impl CrawlerCatalogMetrics {
             ),
             &["source", "rule"],
         )?;
+        let rule_configured = IntGaugeVec::new(
+            Opts::new(
+                "crawler_catalog_rule_configured",
+                "1 for each catalog selection rule this worker loaded",
+            ),
+            &["source", "rule"],
+        )?;
+        let guarded_snapshot_pending = IntGaugeVec::new(
+            Opts::new(
+                "crawler_catalog_guarded_snapshot_pending",
+                "1 while a guarded catalog snapshot waits for operator review",
+            ),
+            &["source"],
+        )?;
         let unselected_series = IntGaugeVec::new(
             Opts::new(
                 "crawler_catalog_unselected_series",
@@ -613,13 +634,17 @@ impl CrawlerCatalogMetrics {
         )?;
         registry.register(Box::new(series.clone()))?;
         registry.register(Box::new(rule_matches.clone()))?;
+        registry.register(Box::new(rule_configured.clone()))?;
+        registry.register(Box::new(guarded_snapshot_pending.clone()))?;
         registry.register(Box::new(unselected_series.clone()))?;
         Ok(Self {
             guard_rejections_total,
             transitions_total,
             series,
             rule_matches,
+            rule_configured,
             unselected_series,
+            guarded_snapshot_pending,
         })
     }
 }
@@ -801,6 +826,9 @@ mod queue_metrics_tests {
         m.rule_matches
             .with_label_values(&["BEA", "0:Regional:SAGDP2"])
             .set(0);
+        m.rule_configured
+            .with_label_values(&["BEA", "0:Regional:SAGDP2"])
+            .set(1);
         assert_eq!(m.unselected_series.with_label_values(&["BEA"]).get(), 0);
         let families = registry.gather();
         for name in [
@@ -808,6 +836,8 @@ mod queue_metrics_tests {
             "crawler_series_lifecycle_transitions_total",
             "crawler_series_lifecycle",
             "crawler_catalog_rule_matches",
+            "crawler_catalog_rule_configured",
+            "crawler_catalog_guarded_snapshot_pending",
             "crawler_catalog_unselected_series",
         ] {
             assert!(families.iter().any(|f| f.name() == name));

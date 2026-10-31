@@ -40,9 +40,13 @@ vi.mock('../../utils/graphql', async () => {
   return { ...actual, executeGraphQL: vi.fn() };
 });
 
+// The history state the page was opened with, and where it navigates
+const router = vi.hoisted(() => ({ state: null as unknown, navigate: vi.fn() }));
+
 vi.mock('react-router-dom', () => ({
   useParams: vi.fn(),
-  useNavigate: () => vi.fn(),
+  useNavigate: () => router.navigate,
+  useLocation: () => ({ pathname: '/series', search: '', hash: '', state: router.state }),
 }));
 
 // Chart.js needs a canvas; render the points it would plot instead.
@@ -168,6 +172,51 @@ describe('SeriesDetail', () => {
 
   beforeEach(() => {
     mockExecute.mockReset();
+    router.state = null;
+    router.navigate.mockReset();
+  });
+
+  // ECO-732: the Explore breadcrumb went to an empty explorer, dropping the search and page.
+  test('the Explore links return to the explorer results the series was opened from', async () => {
+    serve();
+    router.state = { explorerUrl: '/explore?q=rate&page=2' };
+    renderPage(UNRATE_ID);
+    await screen.findByRole('heading', { name: 'Unemployment Rate', level: 1 });
+
+    const explore = within(screen.getByRole('navigation', { name: 'breadcrumb' })).getByRole('link', {
+      name: 'Explore',
+    });
+    expect(explore).toHaveAttribute('href', '/explore?q=rate&page=2');
+    await userEvent.setup().click(explore);
+    expect(router.navigate).toHaveBeenCalledWith('/explore?q=rate&page=2');
+  });
+
+  test('Back to Explorer on a missing series returns to those results too', async () => {
+    serve();
+    router.state = { explorerUrl: '/explore?source=fred&page=3' };
+    renderPage(UNKNOWN_ID);
+
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Back to Explorer' }));
+    expect(router.navigate).toHaveBeenCalledWith('/explore?source=fred&page=3');
+  });
+
+  test.each([
+    ['no history state', null],
+    ['no explorer URL', {}],
+    ['a non-string', { explorerUrl: 42 }],
+    ['another site', { explorerUrl: 'https://evil.example/explore' }],
+    ['a protocol-relative URL', { explorerUrl: '//evil.example/explore' }],
+    ['another page', { explorerUrl: '/admin' }],
+    ['a path that only starts like it', { explorerUrl: '/explorer-elsewhere' }],
+  ])('with %s, the Explore link goes to the explorer itself', async (_case, state) => {
+    serve();
+    router.state = state;
+    renderPage(UNRATE_ID);
+    await screen.findByRole('heading', { name: 'Unemployment Rate', level: 1 });
+
+    expect(within(screen.getByRole('navigation', { name: 'breadcrumb' })).getByRole('link', {
+      name: 'Explore',
+    })).toHaveAttribute('href', '/explore');
   });
 
   test('shows the series and its observations from the API', async () => {

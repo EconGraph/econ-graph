@@ -176,17 +176,30 @@ crawler-worker image it is `/app/crawler migrate`.
 
 In Kubernetes, `scripts/deploy/deploy.sh` runs it as the Job `crawler-migrate`
 (`k8s/manifests/crawler-migrate-job.yaml`, from the crawler-worker image) before it applies the
-backend and the crawler-worker, and stops the deploy if the Job fails. It runs the Job only in a
-namespace that owns a data database: one whose Secret `econ-graph-secrets` has the key
-`data-database-url`. Without that key it skips the Job. `deploy.sh --dry-run` lists the Job with
-the rest of the deploy.
+backend and the crawler-worker, and stops the deploy if the Job fails. It needs a namespace
+that owns a data database: one whose Secret `econ-graph-secrets` has the key
+`data-database-url`. Without that key the deploy stops, since the backend would refuse to start.
+
+Before that Job, `deploy.sh` runs `crawler migrate --dry-run` in the Job `crawler-migrate-check`
+(the same manifest, changing nothing; `scripts/deploy/lib/data-migrations.sh`):
+
+- **Some pending:** it stops the old crawler-worker with
+  `scripts/deploy/precheck-db-migration.sh --stop-crawler`, so the worker doesn't write while
+  the migrations run. The worker comes back on the new image when `deploy.sh` applies
+  `crawler-worker.yaml` after `crawler-migrate` completes, and stays stopped if the Job fails.
+  The precheck refuses while a `postgres-backup` or `crawler-migrate` Job is running or a
+  long transaction holds the data database, and then the deploy stops before the migrations.
+- **None pending:** the worker keeps running.
+
+`deploy.sh --dry-run` lists both Jobs with the rest of the deploy.
 
 A data migration that bounds its table locks (`lock_timeout`, `statement_timeout`) fails its
 run, changing nothing, when other transactions hold its tables. The Job gives it one more pod
 (`backoffLimit: 1`) and then fails, and `deploy.sh` stops before the backend and the
-crawler-worker are applied. `scripts/deploy/precheck-db-migration.sh`, run immediately before
-`deploy.sh`, checks the data database for such transactions and can stop the crawler-worker
-first; see
+crawler-worker are applied. `scripts/deploy/precheck-db-migration.sh` checks the data database
+for such transactions and stops the crawler-worker. `deploy.sh` runs it when migrations are
+pending, and running it by hand before `deploy.sh` finds the same problems before anything is
+applied; see
 [Deploying the migration](../technical/OBSERVATION_PRECISION_REFETCH.md#deploying-the-migration)
 for the observation-values migration, which does this.
 

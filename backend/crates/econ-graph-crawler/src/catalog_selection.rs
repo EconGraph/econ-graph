@@ -102,6 +102,15 @@ impl BeaSelection {
         Ok(rules)
     }
 
+    /// Bounded metric label per rule: its position, dataset and table prefix.
+    pub fn rule_labels(&self) -> Vec<String> {
+        self.rule
+            .iter()
+            .enumerate()
+            .map(|(index, rule)| format!("{index}:{}:{}", rule.dataset, rule.prefix))
+            .collect()
+    }
+
     /// Stable selection scope; changing operational limits preserves absence evidence.
     pub fn fingerprint(&self) -> String {
         let digest = Sha256::digest(serde_json::to_vec(self).expect("serializable selection"));
@@ -116,6 +125,7 @@ impl BeaSelection {
     ) -> Result<Vec<BeaTable>, CrawlError> {
         let excluded: HashSet<&str> = self.exclude.iter().map(String::as_str).collect();
         let mut selected: BTreeMap<(String, String), Vec<Frequency>> = BTreeMap::new();
+        let labels = self.rule_labels();
         for (index, rule) in self.rule.iter().enumerate() {
             let dataset = rule.dataset();
             let catalog = catalogs.get(&dataset).ok_or_else(|| {
@@ -128,11 +138,7 @@ impl BeaSelection {
                 .iter()
                 .filter(|(name, title)| rule.matches_table(name, title, &excluded))
                 .count();
-            record_rule_matches(
-                "BEA",
-                &format!("{index}:{}:{}", rule.dataset, rule.prefix),
-                matched,
-            );
+            record_rule_matches("BEA", &labels[index], matched);
             for (name, title) in catalog {
                 if !rule.matches_table(name, title, &excluded) {
                     continue;
@@ -255,6 +261,17 @@ pub(crate) fn record_rule_matches(source: &str, rule: &str, matched: usize) {
     }
 }
 
+/// Publish `crawler_catalog_rule_configured` for every rule the worker loaded, so alerts on
+/// `crawler_catalog_rule_matches` ignore rules that were since edited or removed.
+pub fn publish_configured_rules(source: &str, labels: &[String]) {
+    for label in labels {
+        econ_graph_metrics::crawler::CRAWLER_CATALOG_METRICS
+            .rule_configured
+            .with_label_values(&[source, label])
+            .set(1);
+    }
+}
+
 const VOLUME_GUARD: &str = "BEA catalog volume guard";
 const EMPTY_SELECTION: &str = "BEA selection matched no current tables";
 
@@ -309,6 +326,43 @@ mod tests {
         .into_iter()
         .collect()
     }
+    /// The shipped Regional rule follows SAGDP2 through its N-suffix rename but not to the
+    /// discontinued SIC-basis SAGDP2S or to other families.
+    #[test]
+    fn shipped_regional_rule_selects_sagdp2_and_sagdp2n_only() {
+        let shipped = BeaSelection::parse(
+            &std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("data")
+                    .join(BEA_RULES_FILE),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let nipa: HashMap<String, String> = shipped
+            .rule
+            .iter()
+            .filter(|r| r.dataset == "NIPA")
+            .map(|r| (r.prefix.clone(), "NIPA table".to_string()))
+            .collect();
+        let regional = ["SAGDP2", "SAGDP2N", "SAGDP2S", "SAINC1", "CAGDP2"]
+            .into_iter()
+            .map(|n| (n.to_string(), "GDP".to_string()))
+            .collect();
+        let catalogs = [(BeaDataset::Nipa, nipa), (BeaDataset::Regional, regional)]
+            .into_iter()
+            .collect();
+        let mut selected: Vec<_> = shipped
+            .select(&catalogs)
+            .unwrap()
+            .into_iter()
+            .filter(|t| t.dataset == BeaDataset::Regional)
+            .map(|t| t.table_name)
+            .collect();
+        selected.sort();
+        assert_eq!(selected, ["SAGDP2", "SAGDP2N"]);
+    }
+
     #[test]
     fn rename_and_new_table_are_selected_without_config_changes() {
         let r = rules();

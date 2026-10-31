@@ -1,0 +1,41 @@
+# Opt-in: scripts/deploy/stage-tunnel-origin-ca.sh applies these resources.
+# cert-manager's default cluster resource namespace must be cert-manager.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: econ-graph-origin-bootstrap
+  namespace: cert-manager
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: econ-graph-origin-ca
+  namespace: cert-manager
+spec:
+  secretName: econ-graph-origin-ca
+  commonName: EconGraph tunnel origin CA
+  isCA: true
+  duration: 87600h
+  renewBefore: 2160h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Never
+  usages:
+    - cert sign
+    - crl sign
+    - digital signature
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: econ-graph-origin-bootstrap
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: econ-graph-origin-ca
+spec:
+  ca:
+    secretName: econ-graph-origin-ca

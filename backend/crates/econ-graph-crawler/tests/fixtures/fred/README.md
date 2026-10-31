@@ -40,6 +40,16 @@ writes the observations file and documents its shape; edit and rerun the generat
 than editing the JSON. The rows omit `realtime_end`, which the adapter does not read, to keep
 the file small.
 
+`series_usrec.json`, `observations_usrec_e2e.json` and `vintagedates_usrec_e2e.json` define FRED's
+NBER-based recession indicator (`USREC`), monthly 0/1 values from 1854-12-01, which the release
+end-to-end stack is seeded with. `series_usrec.json` has FRED's documented `/fred/series`
+shape with the series' real title, units, date range and notes text (its `popularity` is
+illustrative); the FRED adapter's `discover_keeps_usrec_with_its_real_notes` test uses it to show
+the copyright-notes safety net keeps the series. The observations use FRED's documented shape with
+a single vintage and match FRED's published values; the
+[fixture generator](make_observations_usrec.py) writes them from the list of recession months, so
+edit and rerun it rather than editing the JSON.
+
 `release_series_53.json` uses the documented
 [`/fred/release/series` response format](https://fred.stlouisfed.org/docs/api/fred/release_series.html)
 for one catalog page of release 53 (Gross Domestic Product), in `series_id` order. It is

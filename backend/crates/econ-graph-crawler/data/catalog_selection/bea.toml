@@ -2,7 +2,10 @@
 # Expansion beyond these bounds stops the discovery rather than silently truncating it.
 max_tables = 32
 max_series = 20000
-exclude = []
+# SAGDP2S is the discontinued SIC-basis GDP by state (1963-1997); its industry lines do not
+# match the NAICS tables the SAGDP2 prefix is meant to follow (SAGDP2, and SAGDP2N while BEA
+# listed the table under that name).
+exclude = ["SAGDP2S"]
 
 [[rule]]
 dataset = "NIPA"

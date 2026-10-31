@@ -3,10 +3,11 @@
 # Catalog inspection and eventual observation crawls have independent source-wide bounds.
 max_catalog_series = 20000
 max_series = 500
-# Small headline exceptions outside the GDP release. Their metadata is checked each run.
+# Small headline exceptions outside the GDP release, including the NBER recession indicator
+# (USREC) used for recession shading. Their metadata is checked each run.
 # The last two retain known retired ids as explicit probes, so an existing history gains
 # confirmed missing evidence and a badge rather than silently disappearing from discovery.
-include = ["CPIAUCSL", "UNRATE", "PAYEMS", "FEDFUNDS", "DGS10", "INDPRO", "HOUST", "M2SL", "WPU00000000", "CAPUTLG2211S1"]
+include = ["CPIAUCSL", "UNRATE", "USREC", "PAYEMS", "FEDFUNDS", "DGS10", "INDPRO", "HOUST", "M2SL", "WPU00000000", "CAPUTLG2211S1"]
 # These bounded, explicit probes still count toward lifecycle evidence when absent. Unlike
 # an unexpectedly missing headline override, known retirement must not alert on every crawl.
 expected_missing = ["WPU00000000", "CAPUTLG2211S1"]

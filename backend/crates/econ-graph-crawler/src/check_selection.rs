@@ -708,7 +708,7 @@ impl Checker {
         check.curated = Some(curated.len());
         let files = self.bls.series_files();
         let mut listed = Vec::new();
-        for (survey, url) in &files {
+        for (survey, url, titles) in &files {
             let wanted: BTreeSet<String> = curated
                 .iter()
                 .filter(|id| id.starts_with(survey))
@@ -718,7 +718,7 @@ impl Checker {
                 continue;
             }
             let body = changed_body(&self.ctx.http, SourceId::Bls, url).await?;
-            let rows = bls::parse_series_file(&body, &wanted)?;
+            let rows = bls::parse_series_file(&body, &wanted, *titles)?;
             for id in &wanted {
                 match rows.get(id) {
                     None => check.problem(
@@ -737,7 +737,7 @@ impl Checker {
         }
         for id in curated
             .iter()
-            .filter(|id| !files.iter().any(|(survey, _)| id.starts_with(survey)))
+            .filter(|id| !files.iter().any(|(survey, _, _)| id.starts_with(survey)))
         {
             check.problem(
                 FindingKind::Missing,
