@@ -468,11 +468,15 @@ impl SqlCatalog {
                 locations.insert(s.statistics_path.clone());
             }
             for snapshot in metadata.snapshots() {
-                locations.insert(snapshot.manifest_list().to_string());
+                if !locations.insert(snapshot.manifest_list().to_string()) {
+                    continue;
+                }
                 let reader = table.manifest_list_reader(snapshot);
                 let manifests = iceberg::spec::ManifestListReader::load(&reader).await?;
                 for file in manifests.entries() {
-                    locations.insert(file.manifest_path.clone());
+                    if !locations.insert(file.manifest_path.clone()) {
+                        continue;
+                    }
                     let manifest = file.load_manifest(&io).await?;
                     for entry in manifest.entries() {
                         locations.insert(entry.data_file.file_path().to_string());

@@ -449,11 +449,18 @@ async fn real_iceberg_roundtrip_parity_upserts_conflicts_and_atomicity() -> Resu
         encoding::canonical_rows(&catalog.read_rows(&expiry.next).await?)?,
         encoding::canonical_rows(&latest)?
     );
-    assert!(catalog
-        .reachable_objects(&expiry.next)
-        .await?
-        .iter()
-        .any(|o| o.location == prepared.next.metadata_location));
+    let retained_objects = catalog.reachable_objects(&expiry.next).await?;
+    // Shared snapshots repeat their manifest lists/manifests throughout metadata history.
+    // Traversal may skip repeated loads, but must retain every previously reachable object
+    // and its independent integrity digest even after compaction and snapshot expiry.
+    for historical in &objects {
+        let retained = retained_objects
+            .iter()
+            .find(|o| o.location == historical.location)
+            .expect("historical recovery object must remain reachable");
+        assert_eq!(retained.size_bytes, historical.size_bytes);
+        assert_eq!(retained.sha256, historical.sha256);
+    }
     // A read pinned before the correction keeps its original exact value and metadata.
     assert_eq!(
         encoding::canonical_rows(&catalog.read_rows(&prepared.next).await?)?,
