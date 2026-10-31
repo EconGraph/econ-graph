@@ -8,10 +8,10 @@
 //! The XBRL parser, DTS (taxonomy) download, financial ratio calculator and their JSON config
 //! are unfinished and compiled out by default. Enable the `xbrl-parser` feature to build them.
 
+pub mod companyfacts;
 #[cfg(feature = "xbrl-parser")]
 pub mod config_loader;
 pub mod crawler;
-pub mod companyfacts;
 #[cfg(feature = "xbrl-parser")]
 pub mod dts_manager;
 #[cfg(feature = "xbrl-parser")]
