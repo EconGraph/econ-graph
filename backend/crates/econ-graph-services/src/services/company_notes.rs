@@ -222,6 +222,65 @@ mod database_tests {
     use super::*;
     use econ_graph_core::{models::User, test_utils::ScratchDatabase};
     #[tokio::test]
+    async fn refiled_facts_never_retarget_original_filing_notes() {
+        use econ_graph_core::models::{CompanyFactSubject, FilingRef, ResearchPeriod};
+        let db = ScratchDatabase::create("company_notes_filed");
+        econ_graph_core::run_migrations(&db.url).await.unwrap();
+        let pool = econ_graph_core::create_pool(&db.url).await.unwrap();
+        let owner = Uuid::new_v4();
+        let subject = CompanyFactSubject {
+            cik: "0000320193".into(),
+            taxonomy: "us-gaap".into(),
+            concept: "Assets".into(),
+            unit: "USD".into(),
+            period: ResearchPeriod::Instant {
+                date: chrono::NaiveDate::from_ymd_opt(2025, 9, 30).unwrap(),
+            },
+        };
+        let original = AnnotationAnchor::V1 {
+            target: SubjectRef::FiledFact {
+                subject: subject.reference().unwrap(),
+                filing: FilingRef {
+                    cik: subject.cik.clone(),
+                    accession: "0000320193-25-000001".into(),
+                },
+            },
+            chart_id: None,
+            observation_date: None,
+            observation_value: None,
+        };
+        let amended = AnnotationAnchor::V1 {
+            target: SubjectRef::FiledFact {
+                subject: subject.reference().unwrap(),
+                filing: FilingRef {
+                    cik: subject.cik.clone(),
+                    accession: "0000320193-25-000002".into(),
+                },
+            },
+            chart_id: None,
+            observation_date: None,
+            observation_value: None,
+        };
+        let note = create(&pool, owner, original.clone(), "Original evidence".into())
+            .await
+            .unwrap();
+        create(&pool, owner, amended.clone(), "Amendment evidence".into())
+            .await
+            .unwrap();
+        let original_notes = list(&pool, owner, &subject.cik, Some(&original), 0)
+            .await
+            .unwrap();
+        assert_eq!(original_notes.len(), 1);
+        assert_eq!(original_notes[0].id, note.id);
+        let edited = update(&pool, owner, note.id, "Edited original evidence".into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(AnnotationAnchor::try_from(&edited).unwrap(), original);
+        assert_ne!(AnnotationAnchor::try_from(&edited).unwrap(), amended);
+    }
+
+    #[tokio::test]
     async fn owners_cannot_read_edit_or_delete_each_others_notes_and_legacy_notes_survive() {
         let db = ScratchDatabase::create("company_notes");
         econ_graph_core::run_migrations(&db.url).await.unwrap();
