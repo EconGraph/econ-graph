@@ -1021,6 +1021,18 @@ jobs:
         done
       working-directory: backend
 
+    - name: Run crawler administration contracts (required)
+      run: |
+        set -euo pipefail
+        : "${DATABASE_URL:?DATABASE_URL is required for crawler administration contracts}"
+        log="$RUNNER_TEMP/crawler-administration.log"
+        cargo test -p econ-graph-graphql --test crawler_admin -- --test-threads=1 --nocapture | tee "$log"
+        grep -Fq 'test real_job_history_is_bounded_filtered_and_role_guarded ... ok' "$log"
+        grep -Fq 'test scheduling_changes_require_manage_role_are_audited_and_leave_queued_work_alone ... ok' "$log"
+        grep -Fq 'test admin_reads_fail_closed_without_the_data_database ... ok' "$log"
+        grep -Eq '^test result: ok\. 3 passed; 0 failed; 0 ignored;' "$log"
+      working-directory: backend
+
     - name: Run publication lifecycle and public visibility regressions (required)
       run: |
         set -euo pipefail
