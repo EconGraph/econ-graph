@@ -724,7 +724,7 @@ async fn query_count_does_not_grow_with_the_number_of_keys() {
         assert_eq!(rows.len(), keys);
         assert_eq!(
             AtomicUsize::load(&queries, Ordering::SeqCst),
-            2,
+            5, // BEGIN RR/read-only, durable selection, dataset, batched observation read, COMMIT
             "{indicator}"
         );
     }
