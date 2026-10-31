@@ -116,11 +116,20 @@ ignored `temp/` directory, and opt in explicitly:
 mkdir -p temp/objectstore
 /tmp/econgraph-objectstore-venv/bin/python scripts/objectstore/smoke.py \
   --execute --btrfs-scratch --scratch-parent "$PWD/temp/objectstore" \
-  --crawler-command '["path/to/actual-crawler", "smoke"]' \
+  --crawler-command '["path/to/actual-crawler", "smoke", "--disposable-target", "11111111-2222-4333-8444-555555555555", "--migrate"]' \
   --report /tmp/objectstore-btrfs-report.json
 ```
 
-Use the actual compiled crawler command and its required arguments. The harness does not
+Use the actual compiled crawler command. The smoke CLI requires the same UUID in
+`--disposable-target` and `TIMESERIES_TARGET_ID`, plus an explicit `DATA_DATABASE_URL` whose
+actual database name is `eg_smoke_` followed by that UUID without dashes. For the example UUID,
+that name is `eg_smoke_11111111222243338444555555555555`. Provision that empty database only
+inside an ownership-checked disposable PostgreSQL fixture. `--migrate` bootstraps its exact
+`disposable-timeseries-smoke:<UUID>` recovery label. An existing production, paused or mismatched
+target is rejected before migration; `DATABASE_URL` is not a fallback. The warehouse is scoped
+under its matching `eg_smoke_<UUID without dashes>` prefix automatically.
+
+The harness does not
 access primary subvolumes, production buckets, or host devices. It preserves the pre-restore
 subvolume while creating a writable snapshot from the read-only copy. If CNPG has written
 backups, these copies are retained. Otherwise they contain generated test data only and are

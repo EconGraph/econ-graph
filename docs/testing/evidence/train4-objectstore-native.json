@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "scope": "Disposable stores only; partial native compatibility evidence, not seven-gate acceptance",
+  "scope": "Six-gate compatibility evidence on disposable Docker stores; CNPG/PITR remains unproved and no persistent host service or native host binary was installed/tested",
   "overall_status": "incomplete",
   "native_bytes": 2164260864,
   "stores": [
@@ -52,32 +52,32 @@
             ],
             "requires_conditional_create": false,
             "rows": 5,
-            "sha256": "5fe77ac4440649b58a4dc25f7ae6fcaaa117bb39c606cd36c7ddf06fd27502c6",
+            "sha256": "28c0f53bfbc605857dcc2e4da2b2189cc0adb03fe43be9f1e891d9023e8ea383",
             "sql_catalog_commit": true,
             "status": "passed"
           },
-          "seconds": 0.204
+          "seconds": 0.355
         },
         "independent_readers": {
           "status": "passed",
           "evidence": {
             "rows": 5,
-            "sha256": "5fe77ac4440649b58a4dc25f7ae6fcaaa117bb39c606cd36c7ddf06fd27502c6",
+            "sha256": "28c0f53bfbc605857dcc2e4da2b2189cc0adb03fe43be9f1e891d9023e8ea383",
             "readers": [
               "PyIceberg",
               "DuckDB"
             ]
           },
-          "seconds": 0.371
+          "seconds": 0.353
         },
         "btrfs_restore": {
           "status": "passed",
           "evidence": {
             "readonly": true,
             "restored": true,
-            "table_reread_sha256": "5fe77ac4440649b58a4dc25f7ae6fcaaa117bb39c606cd36c7ddf06fd27502c6"
+            "table_reread_sha256": "28c0f53bfbc605857dcc2e4da2b2189cc0adb03fe43be9f1e891d9023e8ea383"
           },
-          "seconds": 1.23
+          "seconds": 0.928
         }
       },
       "conditional_create_probe": {
@@ -97,7 +97,11 @@
         "readonly": true,
         "restored": true
       },
-      "crawler_source_commit": "847d7db64"
+      "crawler_source_commit": "6c60852e8098775257acae2e8e5e6776ee5bd48a",
+      "crawler_binary_sha256": "c6ea3086cd1156cf291177b85c2caffe9a061f34d40b2b2831db75ec50350ef3",
+      "disposable_target_verified": true,
+      "warehouse_scope_verified": true,
+      "owned_database_cleanup": "passed"
     },
     {
       "store": "garage",
@@ -147,32 +151,32 @@
             ],
             "requires_conditional_create": false,
             "rows": 5,
-            "sha256": "3f67247ffbc3a752356d256941cb14f14c3faa8830078a8e3a04a603eac22346",
+            "sha256": "5e290330131ec75b9f0d546a37ca592dc4b702521d2a7226909f9649a42626fd",
             "sql_catalog_commit": true,
             "status": "passed"
           },
-          "seconds": 0.283
+          "seconds": 0.439
         },
         "independent_readers": {
           "status": "passed",
           "evidence": {
             "rows": 5,
-            "sha256": "3f67247ffbc3a752356d256941cb14f14c3faa8830078a8e3a04a603eac22346",
+            "sha256": "5e290330131ec75b9f0d546a37ca592dc4b702521d2a7226909f9649a42626fd",
             "readers": [
               "PyIceberg",
               "DuckDB"
             ]
           },
-          "seconds": 0.115
+          "seconds": 0.407
         },
         "btrfs_restore": {
           "status": "passed",
           "evidence": {
             "readonly": true,
             "restored": true,
-            "table_reread_sha256": "3f67247ffbc3a752356d256941cb14f14c3faa8830078a8e3a04a603eac22346"
+            "table_reread_sha256": "5e290330131ec75b9f0d546a37ca592dc4b702521d2a7226909f9649a42626fd"
           },
-          "seconds": 22.702
+          "seconds": 22.134
         }
       },
       "conditional_create_probe": {
@@ -186,10 +190,14 @@
         "readonly": true,
         "restored": true
       },
-      "crawler_source_commit": "847d7db64"
+      "crawler_source_commit": "6c60852e8098775257acae2e8e5e6776ee5bd48a",
+      "crawler_binary_sha256": "c6ea3086cd1156cf291177b85c2caffe9a061f34d40b2b2831db75ec50350ef3",
+      "disposable_target_verified": true,
+      "warehouse_scope_verified": true,
+      "owned_database_cleanup": "passed"
     }
   ],
   "remaining_acceptance": [
-    "CNPG base backup plus WAL archive and point-in-time recovery against each actual store remains unavailable; no seven-gate acceptance claimed"
+    "Actual CNPG base backup plus WAL archive and point-in-time recovery against each store; full seven-gate acceptance and persistent/native host deployment remain blocked"
   ]
 }
