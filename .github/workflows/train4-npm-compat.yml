@@ -1,6 +1,8 @@
 name: Patched npm compatibility
 
 on:
+  merge_group:
+    types: [checks_requested]
   pull_request:
     paths:
       - ".github/workflows/train4-npm-compat.yml"
