@@ -1,0 +1,36 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cnpg
+  namespace: flux-system
+spec:
+  interval: 15m
+  timeout: 10m
+  releaseName: cnpg
+  targetNamespace: cnpg-system
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: cloudnative-pg
+      version: 0.29.1
+      sourceRef:
+        kind: HelmRepository
+        name: cnpg
+        namespace: flux-system
+      reconcileStrategy: ChartVersion
+  values:
+    replicaCount: 2
+    image:
+      tag: 1.30.1
+    crds:
+      create: true
+    monitoring:
+      podMonitorEnabled: false

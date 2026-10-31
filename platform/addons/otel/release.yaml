@@ -1,0 +1,80 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: otel
+  namespace: flux-system
+spec:
+  interval: 15m
+  timeout: 10m
+  releaseName: otel-collector
+  targetNamespace: monitoring
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: opentelemetry-collector
+      version: 0.178.1
+      sourceRef:
+        kind: HelmRepository
+        name: otel
+        namespace: flux-system
+      reconcileStrategy: ChartVersion
+  values:
+    mode: daemonset
+    image:
+      repository: otel/opentelemetry-collector-contrib
+      tag: 0.163.2
+    config:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+        jaeger: null
+        zipkin: null
+        prometheus: null
+      exporters:
+        debug: null
+        otlphttp/loki:
+          endpoint: http://loki.monitoring.svc.cluster.local:3100/otlp
+        prometheus:
+          endpoint: 0.0.0.0:8889
+      service:
+        pipelines:
+          logs:
+            receivers:
+            - otlp
+            - filelog
+            processors:
+            - memory_limiter
+            - batch
+            exporters:
+            - otlphttp/loki
+          metrics:
+            receivers:
+            - otlp
+            processors:
+            - memory_limiter
+            - batch
+            exporters:
+            - prometheus
+          traces: null
+    ports:
+      prometheus:
+        enabled: true
+        containerPort: 8889
+        servicePort: 8889
+        protocol: TCP
+    presets:
+      logsCollection:
+        enabled: true
+        includeCollectorLogs: false

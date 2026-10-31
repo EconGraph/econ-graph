@@ -1,0 +1,414 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-sources
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/sources
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-cilium
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/addons/cilium
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-sources
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-storage
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/addons/storage
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-cilium
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-cert-manager
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/addons/cert-manager
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-cilium
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-envoy
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/addons/envoy
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-cilium
+  - name: platform-cert-manager
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-cnpg
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/addons/cnpg
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-cert-manager
+  - name: platform-storage
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-barman
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/addons/barman
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-cnpg
+  - name: platform-cert-manager
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-monitoring
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/addons/monitoring
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-storage
+  - name: platform-secrets
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-loki
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/addons/loki
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-monitoring
+  - name: platform-secrets
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-otel
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/addons/otel
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-monitoring
+  - name: platform-loki
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-network
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/network
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: false
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-cilium
+  - name: platform-envoy
+  healthChecks:
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: Gateway
+    name: econ-graph-gateway
+    namespace: econ-graph-gateway
+  healthCheckExprs:
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: Gateway
+    current: has(status.conditions) && status.conditions.exists(c, c.type == 'Programmed'
+      && c.status == 'True')
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-secrets
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/secrets
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-sources
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-databases
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/databases
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: false
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-barman
+  - name: platform-storage
+  - name: platform-secrets
+  healthChecks:
+  - apiVersion: postgresql.cnpg.io/v1
+    kind: Cluster
+    name: econgraph-app
+    namespace: econ-graph
+  - apiVersion: postgresql.cnpg.io/v1
+    kind: Cluster
+    name: econgraph-data
+    namespace: econ-graph
+  - apiVersion: postgresql.cnpg.io/v1
+    kind: Cluster
+    name: econgraph-keycloak
+    namespace: econ-graph
+  healthCheckExprs:
+  - apiVersion: postgresql.cnpg.io/v1
+    kind: Cluster
+    inProgress: '!has(status.readyInstances) || status.readyInstances < spec.instances'
+    current: has(status.readyInstances) && status.readyInstances == spec.instances
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-data-schema
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/data-schema
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-databases
+  - name: platform-envoy
+  - name: platform-secrets
+  force: true
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-application
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/application
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-databases
+  - name: platform-envoy
+  - name: platform-secrets
+  - name: platform-data-schema
+  - name: platform-network
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: platform-observability
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 15m
+  path: ./platform/observability
+  sourceRef:
+    kind: GitRepository
+    name: econgraph-platform
+  prune: false
+  deletionPolicy: Orphan
+  wait: true
+  postBuild:
+    substituteFrom:
+    - kind: ConfigMap
+      name: platform-settings
+  dependsOn:
+  - name: platform-monitoring
+  - name: platform-databases

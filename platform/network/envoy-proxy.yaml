@@ -1,0 +1,29 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: econ-graph-proxy
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        name: econ-graph-gateway-proxy
+        type: LoadBalancer
+      envoyDeployment:
+        replicas: 2
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxUnavailable: 1
+            maxSurge: 1
+        pod:
+          nodeSelector:
+            econgraph.io/storage: postgres
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+                topologyKey: kubernetes.io/hostname

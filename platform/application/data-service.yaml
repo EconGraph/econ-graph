@@ -1,0 +1,199 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: econ-graph-data-backend
+  labels:
+    app: econ-graph-backend
+    component: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: econ-graph-data-backend
+  template:
+    metadata:
+      labels:
+        app: econ-graph-data-backend
+        component: backend
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9876'
+        prometheus.io/path: /metrics
+    spec:
+      initContainers:
+      - name: wait-for-postgres
+        image: busybox:1.38
+        command:
+        - sh
+        - -c
+        args:
+        - "echo \"Waiting for PostgreSQL to be ready...\"\nuntil nc -z app-postgres-service\
+          \ 5432; do\n  echo \"PostgreSQL is unavailable - sleeping\"\n  sleep 2\n\
+          done\necho \"PostgreSQL is ready!\"\n"
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 10m
+          limits:
+            memory: 32Mi
+            cpu: 50m
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      containers:
+      - name: backend
+        image: ${BACKEND_IMAGE}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9876
+          name: http
+        env:
+        - name: BACKEND_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: BACKEND_PORT
+        - name: FRONTEND_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: FRONTEND_PORT
+        - name: APP_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-secrets
+              key: app-database-url
+        - name: DATA_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: econ-graph-secrets
+              key: data-database-url
+              optional: true
+        - name: RUST_LOG
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: RUST_LOG
+        - name: REFERENCE_DATA_DIR
+          value: /app/reference
+        - name: CRAWLER_DATA_DIR
+          value: /app/data
+        - name: CORS_ALLOWED_ORIGINS
+          valueFrom:
+            configMapKeyRef:
+              name: econ-graph-config
+              key: CORS_ORIGIN
+        - name: OIDC_ISSUER
+          value: ${PUBLIC_ORIGIN}/idp/realms/econ-graph
+        - name: OIDC_JWKS_URL
+          value: http://keycloak-service:8080/idp/realms/econ-graph/protocol/openid-connect/certs
+        - name: OIDC_REQUIRED
+          value: 'true'
+        - name: GRAPHQL_SERVICE_PLANE
+          value: data
+        - name: OIDC_AUDIENCE
+          value: econ-graph-data
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 500m
+        startupProbe:
+          httpGet:
+            path: /readyz
+            port: 9876
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: 9876
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 9876
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      restartPolicy: Always
+      automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: econ-graph-data-backend-service
+  labels:
+    app: econ-graph-data-backend
+spec:
+  type: ClusterIP
+  selector:
+    app: econ-graph-data-backend
+  ports:
+  - name: http
+    port: 9876
+    targetPort: 9876
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: econ-graph-independent-data
+spec:
+  parentRefs:
+  - name: econ-graph-gateway
+    namespace: econ-graph-gateway
+    sectionName: http
+  hostnames:
+  - ${PUBLIC_HOST}
+  rules:
+  - matches:
+    - path:
+        type: Exact
+        value: /independent-data/graphql
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          type: ReplaceFullPath
+          replaceFullPath: /graphql
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        remove:
+        - Cookie
+        set:
+        - name: X-Forwarded-For
+          value: '%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%'
+    backendRefs:
+    - name: econ-graph-data-backend-service
+      port: 9876
+    timeouts:
+      request: 30s

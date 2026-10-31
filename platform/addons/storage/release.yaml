@@ -1,0 +1,72 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: storage
+  namespace: flux-system
+spec:
+  interval: 15m
+  timeout: 10m
+  releaseName: storage
+  targetNamespace: local-path-storage
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: local-path-provisioner
+      version: 0.0.37
+      sourceRef:
+        kind: HelmRepository
+        name: storage
+        namespace: flux-system
+      reconcileStrategy: ChartVersion
+  values:
+    image:
+      tag: v0.0.37
+    helperImage:
+      repository: docker.io/library/busybox
+      tag: '1.38'
+    storageClass:
+      create: true
+      name: econgraph-local
+      defaultClass: false
+      defaultVolumeType: local
+      reclaimPolicy: Retain
+      volumeBindingMode: WaitForFirstConsumer
+      allowedTopologies:
+      - matchLabelExpressions:
+        - key: econgraph.io/storage
+          values:
+          - postgres
+    nodeSelector:
+      econgraph.io/storage: postgres
+    nodePathMap:
+    - node: DEFAULT_PATH_FOR_NON_LISTED_NODES
+      paths:
+      - /var/mnt/postgres
+    configmap:
+      setup: '#!/bin/sh
+
+        set -eu
+
+        case "$VOL_DIR" in /var/mnt/postgres/*) ;; *) echo "outside dedicated data
+        volume" >&2; exit 1;; esac
+
+        mkdir -m 0770 -p "$VOL_DIR"
+
+        '
+      teardown: '#!/bin/sh
+
+        set -eu
+
+        echo "Retained volume requires an explicit reviewed operator cleanup" >&2
+
+        exit 1
+
+        '

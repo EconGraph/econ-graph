@@ -1,0 +1,13 @@
+# The cluster's one GatewayClass, served by Envoy Gateway and configured by
+# EnvoyProxy econ-graph-proxy (envoy-proxy.yaml).
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: econ-graph
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: econ-graph-proxy
+    namespace: envoy-gateway-system
