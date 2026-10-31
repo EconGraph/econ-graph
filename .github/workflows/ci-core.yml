@@ -191,6 +191,8 @@ jobs:
             - 'k8s/manifests/keycloak/realm-import-job.yaml'
             - 'k8s/manifests/keycloak/deployment.yaml'
             - 'scripts/deploy/deploy.sh'
+            # test-realm-import.sh runs its realm frontendUrl query.
+            - 'scripts/deploy/switch-main-host.sh'
           migrations:
             - '.github/workflows/ci-core.yml'
             - 'backend/migrations/**'

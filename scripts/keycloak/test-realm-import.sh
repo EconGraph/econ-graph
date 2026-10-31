@@ -336,7 +336,11 @@ KC_REALM_FRONTEND_URL="$PUBLIC_IDP" import_realm public drop-ilo
 plain="$(keycloak_admin get "realms/$REALM" --fields attributes | json '(d.get("attributes") or {}).get("frontendUrl", "")')"
 [ -z "$plain" ] || echo "note: --fields attributes now returns frontendUrl ($plain)" >&2
 import_realm local drop-ilo
-[ -z "$(realm_frontend_url)" ] || fail "an import without KC_REALM_FRONTEND_URL left frontendUrl '$(realm_frontend_url)'"
+if ! cleared="$(realm_frontend_url)"; then
+    fail "switch-main-host.sh's query failed after an import without KC_REALM_FRONTEND_URL"
+elif [ -n "$cleared" ]; then
+    fail "an import without KC_REALM_FRONTEND_URL left frontendUrl '$cleared'"
+fi
 [ "$(issuer)" = "$BASE/realms/$REALM" ] || fail "without KC_REALM_FRONTEND_URL the issuer is $(issuer), not $BASE/realms/$REALM"
 
 if [ "$failures" -ne 0 ]; then

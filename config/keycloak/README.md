@@ -204,11 +204,13 @@ k -n econ-graph patch secret econ-graph-keycloak --type=json -p='[
 k -n econ-graph rollout restart deployment/keycloak
 k -n econ-graph rollout status deployment/keycloak --timeout=600s
 k -n econ-graph delete job keycloak-realm-import --ignore-not-found
-# On the production cluster, rendered for its public host and the main host it serves now
-# (the frontend route's host name; render-public-host.py refuses without MAIN_HOST);
-# elsewhere apply the file as it is.
-main_host="$(k -n econ-graph get httproute econ-graph-frontend-public -o 'jsonpath={.spec.hostnames[0]}')"
-MAIN_HOST="${main_host:?no public frontend route}" \
+# On the production cluster, rendered for its public host and the main host Keycloak
+# serves now (from its KC_HOSTNAME, which the issuer follows; render-public-host.py
+# refuses without MAIN_HOST); elsewhere apply the file as it is.
+kc_hostname="$(k -n econ-graph get deployment keycloak \
+    -o 'jsonpath={.spec.template.spec.containers[?(@.name=="keycloak")].env[?(@.name=="KC_HOSTNAME")].value}')"
+main_host="${kc_hostname#https://}"
+MAIN_HOST="${main_host%/idp}" \
     scripts/deploy/render-public-host.py econgraph.com k8s/manifests/keycloak/realm-import-job.yaml | k apply -f -
 k -n econ-graph wait --for=condition=complete job/keycloak-realm-import --timeout=600s
 ```
