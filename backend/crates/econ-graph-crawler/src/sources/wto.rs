@@ -500,6 +500,8 @@ fn redact_key(e: CrawlError, key: &str) -> CrawlError {
     match e {
         CrawlError::Transient(m) => CrawlError::Transient(scrub(m)),
         CrawlError::NotFound(m) => CrawlError::NotFound(scrub(m)),
+        CrawlError::Absent(m) => CrawlError::Absent(scrub(m)),
+        CrawlError::Restricted(m) => CrawlError::Restricted(scrub(m)),
         CrawlError::Auth(m) => CrawlError::Auth(scrub(m)),
         CrawlError::Parse(m) => CrawlError::Parse(scrub(m)),
         CrawlError::Permanent(m) => CrawlError::Permanent(scrub(m)),
