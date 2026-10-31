@@ -363,8 +363,36 @@ replaces the Job. To keep such a mapping, declare it:
 The client or client scope must exist, either in Keycloak or in the realm file. Remove its
 entry before deleting it. Scope mappings of realm roles, such as `catalog-public` mapped on a
 client scope, are not managed and stay as they are.
-`scripts/keycloak/test-realm-import.sh` runs the import against a throwaway Keycloak and checks
-what it keeps and removes; CI runs it when the realm, its import or the Keycloak manifests change.
+
+Anonymous tokens are built with the anonymous client's client scopes (`basic`, and any other
+default or optional scope assigned to it) as well as its own scope mapping, with composite roles
+expanded. The supported switch for anonymous access to a catalog is its read mapped directly on
+the client's own scope. A catalog read admitted any other way would reach visitors whatever that
+mapping says, including after `set-catalog-access.sh` withdraws it. That covers a catalog read
+mapped on a client scope, a realm role such as `catalog-public` or `user` mapped on one or on the
+client's own scope, a composite role holding a catalog read, and full scope (`fullScopeAllowed`)
+on the anonymous client. Full scope stops even the deploy that would turn it off, so turn it off
+in Keycloak first. Protocol mappers that write roles into tokens are not checked: don't add one to
+the anonymous client or its client scopes. So a deploy stops, before
+importing anything, while one does, and the error names each scope and the catalog reads it
+admits. Keycloak is checked live, and the realm file's `clientScopeMappings` and `scopeMappings`
+through its realm composites. Remove those scope mappings, and make a catalog public with
+`set-catalog-access.sh --make-public` instead; `set-catalog-access.sh` names such a scope too. A
+realm default client scope admitting catalog reads is named with a warning: a recreated anonymous
+client would be assigned it.
+
+When a role leaves the realm file, the import deletes it if config-cli created it. config-cli
+records those in the realm's `de.adorsys.keycloak.config.state-default-*` attributes, and when that
+list shrinks it leaves an old chunk behind, which both it and the import ignore (the import names it
+in a warning). The role's live grants are then left out of the import, each named with a warning,
+because importing a grant of a deleted role fails the import part way. That covers grants on
+composites, on scope mappings and on the anonymous service account (its realm and client roles
+alike). A role an operator created in Keycloak isn't deleted, and its grants are kept. A state that
+can't be read stops the deploy.
+
+`scripts/keycloak/test-realm-import.sh` runs the import against a throwaway Keycloak, starting
+from the last release's realm as production does, and checks what it keeps, removes and refuses.
+CI runs it when the realm, its import, the Keycloak manifests or `scripts/deploy/deploy.sh` change.
 
 Snapshot failures abort the import instead of falling back to defaults. Snapshot and import are
 separate admin API operations, so preservation is best effort under concurrent administrator edits;

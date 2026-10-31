@@ -25,6 +25,12 @@ class CatalogPolicyTests(unittest.TestCase):
                                        {"id": "anon", "clientId": "econgraph-anonymous"}],
             self.prefix + "/clients/api/scope-mappings/clients/api": [],
             self.prefix + "/client-scopes": [],
+            self.prefix + "/clients/anon/default-client-scopes": [{"id": "basic", "name": "basic"}],
+            self.prefix + "/clients/anon/optional-client-scopes": [],
+            self.prefix + "/default-default-client-scopes": [{"id": "profile", "name": "profile"}],
+            self.prefix + "/default-optional-client-scopes": [],
+            self.prefix + "/client-scopes/basic/scope-mappings/clients/api": [],
+            self.prefix + "/client-scopes/profile/scope-mappings/clients/api": [],
             self.prefix + "/clients/anon/service-account-user": {"id": "reader", "enabled": True},
             self.prefix + "/users/reader/role-mappings": {"realmMappings": []},
             self.prefix + "/users/reader/groups": [],
@@ -39,8 +45,14 @@ class CatalogPolicyTests(unittest.TestCase):
             self.state[path] = {"name": role["name"], "composite": False}
             self.state[path + "/composites"] = []
 
+    def get(self, path):
+        """The fake Keycloak: a composite listing not set by a test is the direct one."""
+        if path not in self.state and path.endswith("/composite"):
+            path = path[:-len("/composite")]
+        return copy.deepcopy(self.state.get(path))
+
     def merge(self):
-        return preserve.merge_catalog_policy(copy.deepcopy(self.realm), lambda path: copy.deepcopy(self.state.get(path)))
+        return preserve.merge_catalog_policy(copy.deepcopy(self.realm), self.get)
 
     @staticmethod
     def role(realm, name):
@@ -291,7 +303,7 @@ class CatalogPolicyTests(unittest.TestCase):
             {"name": "catalog.fred:read", "clientRole": True, "containerId": "api"}]
         self.state[self.prefix + "/clients/anon/scope-mappings/clients/api"] = [{"name": "catalog.bls:read"}]
         for realm in (self.realm, self.with_fred_public()):
-            merged = preserve.merge_catalog_policy(copy.deepcopy(realm), lambda path: copy.deepcopy(self.state.get(path)))
+            merged = preserve.merge_catalog_policy(copy.deepcopy(realm), self.get)
             self.assertEqual(self.role(merged, "catalog-public")["composites"]["client"]["econ-graph-api"],
                              ["catalog.bls:read", "catalog.bea:read"])
             self.assertIn("catalog.fred:read", self.role(merged, "admin")["composites"]["client"]["econ-graph-api"])
@@ -327,7 +339,7 @@ class CatalogPolicyTests(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             merged = preserve.merge_catalog_policy(copy.deepcopy(realm or self.realm),
-                                                   lambda path: copy.deepcopy(self.state.get(path)))
+                                                   self.get)
         return merged, err.getvalue()
 
     @staticmethod
@@ -455,6 +467,139 @@ class CatalogPolicyTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.merge()
         self.state[self.prefix + "/client-scopes"] = None
+        with self.assertRaises(RuntimeError):
+            self.merge()
+
+    def test_catalog_reads_on_a_client_scope_the_reader_uses_fail_the_deploy(self):
+        # Anonymous tokens are built with the reader's client scopes: a catalog read mapped on
+        # one reaches visitors whatever the reader's own scope mapping says.
+        self.add_target("clientScope", "basic", "basic", ["catalog.fred:read"])
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn("basic (catalog.fred:read)", str(raised.exception))
+        # Optional scopes, and scopes the realm file assigns, count too.
+        self.state[self.prefix + "/client-scopes/basic/scope-mappings/clients/api"] = []
+        self.state[self.prefix + "/clients/anon/optional-client-scopes"] = [{"id": "extra", "name": "catalog-extra"}]
+        self.add_target("clientScope", "extra", "catalog-extra", ["catalog.imf:read"])
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn("catalog-extra (catalog.imf:read)", str(raised.exception))
+        self.state[self.prefix + "/clients/anon/optional-client-scopes"] = []
+        self.merge()
+        realm = copy.deepcopy(self.realm)
+        next(c for c in realm["clients"] if c["clientId"] == "econgraph-anonymous")[
+            "defaultClientScopes"].append("catalog-extra")
+        with self.assertRaises(RuntimeError):
+            self.merge_with_warnings(realm)
+        # A new realm is checked against the realm file alone.
+        self.state[self.prefix] = None
+        realm["clientScopeMappings"]["econ-graph-api"].append({"clientScope": "catalog-extra", "roles": ["catalog.imf:read"]})
+        with self.assertRaises(RuntimeError):
+            self.merge_with_warnings(realm)
+
+    def test_other_api_roles_on_the_readers_client_scopes_and_partner_scopes_are_allowed(self):
+        self.add_target("clientScope", "basic", "basic", ["api:mcp"])
+        self.add_target("clientScope", "extra", "catalog-extra", ["catalog.imf:read"])
+        self.merge()
+
+    def test_catalog_reads_on_a_realm_default_client_scope_are_named(self):
+        self.add_target("clientScope", "profile", "profile", ["catalog.imf:read"])
+        merged, warnings = self.merge_with_warnings()
+        self.assertIn("realm default client scope profile admits catalog.imf:read", warnings)
+        self.assertEqual(self.scope_entries(merged)[("clientScope", "profile")], ["catalog.imf:read"])
+
+    def test_grants_of_roles_the_import_deletes_are_dropped_and_named(self):
+        # A role config-cli created and the realm file dropped is deleted by the import; a grant
+        # of it written into the import would fail it part way.
+        self.state[self.prefix]["attributes"]["de.adorsys.keycloak.config.state-default-roles-client-econ-graph-api-0"] = \
+            json.dumps([r["name"] for r in self.realm["roles"]["client"]["econ-graph-api"]])
+        self.realm["roles"]["client"]["econ-graph-api"] = [
+            r for r in self.realm["roles"]["client"]["econ-graph-api"] if r["name"] != "catalog.ilo:read"]
+        edge = {"name": "catalog.ilo:read", "clientRole": True, "containerId": "api"}
+        operator_made = {"name": "catalog.partner:read", "clientRole": True, "containerId": "api"}
+        self.state[self.prefix + "/roles/catalog-public/composites"] = [edge, operator_made]
+        self.state[self.prefix + "/roles/admin/composites"] = [edge]
+        self.state[self.prefix + "/clients/anon/scope-mappings/clients/api"] = [{"name": "catalog.ilo:read"}]
+        self.state[self.prefix + "/users/reader/role-mappings"] = {
+            "realmMappings": [], "clientMappings": {"econ-graph-api": {"mappings": [{"name": "catalog.ilo:read"}]}}}
+        self.add_target("client", "partner", "partner-x", ["catalog.ilo:read", "catalog.imf:read"])
+        merged, warnings = self.merge_with_warnings()
+        # An operator-made role isn't config-cli's to delete, so its grant stays.
+        self.assertEqual(self.role(merged, "catalog-public")["composites"]["client"]["econ-graph-api"],
+                         ["catalog.partner:read"])
+        self.assertNotIn("catalog.ilo:read", self.role(merged, "admin")["composites"]["client"]["econ-graph-api"])
+        entries = self.scope_entries(merged)
+        self.assertEqual(entries[("client", "partner-x")], ["catalog.imf:read"])
+        self.assertEqual(entries[("client", "econgraph-anonymous")], [])
+        self.assertEqual(merged["users"][0]["clientRoles"], {"econ-graph-api": []})
+        for where in ("role catalog-public", "role admin", "client partner-x", "client econgraph-anonymous",
+                      "the econgraph-anonymous service account"):
+            self.assertIn("catalog.ilo:read is no longer in the realm file, so the import deletes it and its grant on "
+                          + where, warnings)
+        self.assertNotIn("catalog.partner:read", warnings)
+
+    def test_realm_and_composite_roles_admitting_catalog_reads_to_the_reader_fail_the_deploy(self):
+        # Keycloak expands composites when it builds a token: catalog-public (or user, or a
+        # composite API role) mapped on `basic` gives visitors every catalog read it holds.
+        composite = self.prefix + "/client-scopes/basic/scope-mappings/clients/api/composite"
+        self.state[composite] = [{"name": "catalog.bls:read"}]
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn("client scope basic (catalog.bls:read)", str(raised.exception))
+        del self.state[composite]
+        # The reader's own scope may admit a catalog read only by mapping it directly.
+        own = self.prefix + "/clients/anon/scope-mappings/clients/api"
+        self.state[own] = [{"name": "catalog.bea:read"}]
+        self.state[own + "/composite"] = [{"name": "catalog.bea:read"}, {"name": "catalog.bls:read"}]
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn("its own scope, through realm roles, its own client roles or full scope (catalog.bls:read)",
+                      str(raised.exception))
+        self.assertNotIn("catalog.bea:read", str(raised.exception))
+        del self.state[own + "/composite"]
+        self.merge()
+
+    def test_realm_file_realm_role_scope_mappings_are_checked_through_its_composites(self):
+        self.state[self.prefix] = None
+        self.realm["scopeMappings"] = [{"clientScope": "basic", "roles": ["user"]}]
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn("client scope basic (catalog.bea:read", str(raised.exception))
+        self.realm["scopeMappings"] = [{"clientScope": "basic", "roles": ["offline_access"]}]
+        self.merge()
+
+    def test_leftover_state_chunks_are_ignored_as_config_cli_ignores_them(self):
+        # Shrinking by a chunk, config-cli rewrites the earlier chunks and leaves the last one.
+        state = "de.adorsys.keycloak.config.state-default-roles-client-econ-graph-api-"
+        names = [r["name"] for r in self.realm["roles"]["client"]["econ-graph-api"]] + ["catalog.gone:read"]
+        self.state[self.prefix]["attributes"].update({
+            state + "0": json.dumps(names), state + "1": 'atalog.unstats:read","catalog.ilo:read"]'})
+        self.add_target("client", "partner", "partner-x", ["catalog.gone:read", "catalog.imf:read"])
+        merged, warnings = self.merge_with_warnings()
+        self.assertEqual(self.scope_entries(merged)[("client", "partner-x")], ["catalog.imf:read"])
+        self.assertIn("ignoring 40 characters after the keycloak-config-cli state list", warnings)
+        self.assertNotIn("unstats", warnings)
+        # A state that doesn't start with a readable list still stops the deploy.
+        self.state[self.prefix]["attributes"][state + "0"] = '{"not": "a list"}'
+        with self.assertRaises(RuntimeError):
+            self.merge()
+
+    def test_the_readers_deleted_realm_and_other_client_roles_are_dropped(self):
+        attributes = self.state[self.prefix]["attributes"]
+        attributes["de.adorsys.keycloak.config.state-default-roles-realm-0"] = json.dumps(
+            [r["name"] for r in self.realm["roles"]["realm"]] + ["retired-policy"])
+        self.state[self.prefix + "/users/reader/role-mappings"] = {
+            "realmMappings": [{"name": "retired-policy"}, {"name": "custom-public-policy"}],
+            "clientMappings": {"econ-graph-web": {"mappings": [{"name": "web-only"}]}}}
+        merged, warnings = self.merge_with_warnings()
+        self.assertEqual(merged["users"][0]["realmRoles"], ["custom-public-policy"])
+        # No econ-graph-web roles in the realm file: config-cli manages none, so none is dropped.
+        self.assertEqual(merged["users"][0]["clientRoles"], {"econ-graph-web": ["web-only"]})
+        self.assertIn("retired-policy is no longer in the realm file", warnings)
+
+    def test_scope_mapping_entries_naming_both_a_client_and_a_scope_fail_the_deploy(self):
+        self.realm["clientScopeMappings"]["econ-graph-api"].append(
+            {"client": "partner-x", "clientScope": "basic", "roles": ["api:mcp"]})
         with self.assertRaises(RuntimeError):
             self.merge()
 

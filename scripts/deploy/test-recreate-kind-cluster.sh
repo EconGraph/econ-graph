@@ -7,8 +7,11 @@
 #     `docker exec` into its control plane, on the rootful daemon whatever
 #     DOCKER_HOST (here a rootless socket) the shell has; never plain kind or
 #     kubectl;
-#   - a cluster with a production marker (any role other than `none`, valid or
-#     not), or whose marker can't be read, is deleted only with the first 8
+#   - a cluster with a production marker (any ConfigMap
+#     kube-system/econgraph-cluster-role except role exactly `none` with no
+#     UID or one without whitespace: an empty ConfigMap, whitespace or a
+#     newline anywhere, any other role, valid or not), or whose marker can't
+#     be read, is deleted only with the first 8
 #     characters of its kube-system UID, typed at a terminal or given as
 #     --confirm-production; --yes alone is refused, and so is a prefix that
 #     doesn't match, on any cluster;
@@ -20,6 +23,7 @@
 #   - every check runs before the backup, the delete and the create; the backup
 #     still runs before the delete unless --no-backup;
 #   - --dry-run deletes and creates nothing;
+#   - --help prints the header, up to its first non-comment line;
 #   - a host directory the kind config bind-mounts that is not a mount point
 #     stops the run before any backup, delete or create.
 #
@@ -81,10 +85,16 @@ echo "kind stub: unexpected call \$*" >&2
 exit 1
 EOF
 
-# docker. FAKE_UID: the kube-system UID. FAKE_MARKER: what the marker reads as
-# ("ROLE UID"; unset: no marker). FAKE_MARKER_FAILS set: the marker can't be
-# read. FAKE_EXEC_FAILS set: nothing can be read inside the control plane.
-# FAKE_UNREACHABLE set: the copied kubectl can't reach the API server.
+# docker. FAKE_UID: the kube-system UID. The marker ConfigMap: FAKE_MARKER
+# "ROLE UID" (split at the first space, nothing trimmed; unset: no ConfigMap),
+# or FAKE_ROLE and FAKE_MARKER_UID for exact values (newlines included), or
+# FAKE_MARKER_EMPTY set for a ConfigMap with no data, FAKE_ROLE_NUL set to
+# follow the role with a NUL byte. FAKE_MARKER_FAILS set: the marker can't be
+# read; FAKE_MARKER_GONE set: the ConfigMap exists when asked, then is gone
+# when its values are read; FAKE_ROLE_READ_FAILS set: only reading the role
+# fails. FAKE_EXEC_FAILS set: nothing
+# can be read inside the control plane. FAKE_UNREACHABLE set: the copied
+# kubectl can't reach the API server.
 cat >"$WORK/bin/docker" <<EOF
 #!/bin/sh
 echo "DOCKER_HOST=\${DOCKER_HOST:-} docker \$*" >>"$CALLS"
@@ -94,11 +104,23 @@ case "\$*" in
     "exec econ-graph-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=30s get namespace kube-system -o jsonpath={.metadata.uid}")
         [ -z "\${FAKE_EXEC_FAILS:-}" ] || exit 1
         printf '%s' "\$uid"; exit 0 ;;
-    "exec econ-graph-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=30s -n kube-system get configmap econgraph-cluster-role --ignore-not-found -o jsonpath={.data.role}{\" \"}{.data.kube-system-uid}")
+    "exec econ-graph-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=30s -n kube-system get configmap econgraph-cluster-role --ignore-not-found -o name")
         [ -z "\${FAKE_EXEC_FAILS:-}" ] || exit 1
         [ -z "\${FAKE_MARKER_FAILS:-}" ] || exit 1
-        [ -z "\${FAKE_MARKER+x}" ] || printf '%s' "\$FAKE_MARKER"
+        if [ -n "\${FAKE_MARKER+x}\${FAKE_ROLE+x}\${FAKE_MARKER_UID+x}\${FAKE_MARKER_EMPTY:-}\${FAKE_MARKER_GONE:-}\${FAKE_ROLE_READ_FAILS:-}" ]; then
+            echo configmap/econgraph-cluster-role
+        fi
         exit 0 ;;
+    "exec econ-graph-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=30s -n kube-system get configmap econgraph-cluster-role -o jsonpath={.data.role}{\"#\"}")
+        [ -z "\${FAKE_MARKER_GONE:-}\${FAKE_ROLE_READ_FAILS:-}" ] || exit 1
+        if [ -n "\${FAKE_ROLE+x}" ]; then role="\$FAKE_ROLE"; else role="\${FAKE_MARKER-}"; role="\${role%% *}"; fi
+        printf '%s' "\$role"; [ -z "\${FAKE_ROLE_NUL:-}" ] || printf '\\000'
+        printf '#'; exit 0 ;;
+    "exec econ-graph-control-plane kubectl --kubeconfig /etc/kubernetes/admin.conf --request-timeout=30s -n kube-system get configmap econgraph-cluster-role -o jsonpath={.data.kube-system-uid}{\"#\"}")
+        [ -z "\${FAKE_MARKER_GONE:-}" ] || exit 1
+        if [ -n "\${FAKE_MARKER_UID+x}" ]; then muid="\$FAKE_MARKER_UID"
+        else case "\${FAKE_MARKER-}" in *" "*) muid="\${FAKE_MARKER#* }" ;; *) muid="" ;; esac; fi
+        printf '%s#' "\$muid"; exit 0 ;;
     "cp -q -L econ-graph-control-plane:/usr/bin/kubectl "*)
         cat >"\$5" <<'KUBECTL'
 #!/bin/sh
@@ -286,6 +308,57 @@ reset
 out="$(FAKE_MARKER="Production uid-kind-cluster" recreate --no-backup --confirm-production uid-kind)"; rc=$?
 expect_recreate "the marker 'Production' with --confirm-production uid-kind"
 
+# 4b. Malformed markers guard too (ECO-723): an existing ConfigMap with no data,
+# a role that is only whitespace, a newline anywhere, `none` with whitespace
+# around it or in its UID, and a ConfigMap that is gone by the time its values
+# are read.
+malformed_case() {  # malformed_case NAME ENV...
+    local name="$1"; shift
+    reset
+    out="$(env "${RECREATE_ENV[@]}" "$@" "$PROJECT_ROOT/scripts/deploy/recreate-kind-cluster.sh" \
+        --config "$CONFIG" --yes </dev/null 2>&1)"; rc=$?
+    expect_refusal "$name with --yes" "needs --confirm-production"
+    grep -q "treated as production" <<<"$out" || fail "$name is not shown as treated as production"
+}
+malformed_case "an empty marker ConfigMap" FAKE_MARKER_EMPTY=1
+malformed_case "a role of only whitespace" "FAKE_ROLE=   "
+malformed_case "a role with a leading newline" "FAKE_ROLE=$(printf '\nproduction')" FAKE_MARKER_UID=uid-kind-cluster
+malformed_case "a role of none then a newline and production" "FAKE_ROLE=$(printf 'none\nproduction')"
+malformed_case "a role of ' none'" "FAKE_ROLE= none"
+malformed_case "a role of 'none '" "FAKE_ROLE=none "
+malformed_case "role none with a trailing newline" "FAKE_ROLE=none"$'\n'
+malformed_case "role none with a UID containing a newline" FAKE_ROLE=none "FAKE_MARKER_UID=$(printf 'uid-a\nproduction')"
+malformed_case "role none with a UID with a leading space" FAKE_ROLE=none "FAKE_MARKER_UID= uid-a"
+malformed_case "role none with a UID with a trailing newline" FAKE_ROLE=none "FAKE_MARKER_UID=uid-a"$'\n'
+malformed_case "role none followed by a NUL byte" FAKE_ROLE=none FAKE_ROLE_NUL=1 FAKE_MARKER_UID=uid-a
+malformed_case "a ConfigMap that is gone when read" FAKE_MARKER_GONE=1
+grep -q "could not read ConfigMap kube-system/econgraph-cluster-role" <<<"$out" ||
+    fail "a ConfigMap gone when read is not reported as unreadable:"$'\n'"$out"
+malformed_case "a ConfigMap whose role can't be read" FAKE_ROLE_READ_FAILS=1 FAKE_MARKER_UID=uid-a
+grep -q "could not read ConfigMap kube-system/econgraph-cluster-role" <<<"$out" ||
+    fail "a role that can't be read is not reported as unreadable:"$'\n'"$out"
+reset
+out="$(env "${RECREATE_ENV[@]}" FAKE_ROLE="$(printf '\nproduction')" FAKE_MARKER_UID=uid-kind-cluster \
+    "$PROJECT_ROOT/scripts/deploy/recreate-kind-cluster.sh" --config "$CONFIG" --yes </dev/null 2>&1)"
+grep -qF "role=\$'\\nproduction'" <<<"$out" ||
+    fail "a newline in the role is not shown quoted:"$'\n'"$out"
+reset
+out="$(FAKE_MARKER="none uid-kind-cluster" recreate --yes --no-backup)"; rc=$?
+expect_recreate "a cluster marked exactly 'none uid-kind-cluster', with --yes"
+grep -qF "not production (role=none, kube-system-uid=uid-kind-cluster)" <<<"$out" ||
+    fail "the none marker is not shown:"$'\n'"$out"
+
+# 4c. --help prints the header, up to its first non-comment line.
+help="$(env "${RECREATE_ENV[@]}" "$PROJECT_ROOT/scripts/deploy/recreate-kind-cluster.sh" --help 2>&1)"; rc=$?
+first="$(sed -n '3p' "$PROJECT_ROOT/scripts/deploy/recreate-kind-cluster.sh" | sed 's/^# //')"
+last="$(awk '/^#/ { l = $0 } /^set -euo pipefail/ { print l; exit }' "$PROJECT_ROOT/scripts/deploy/recreate-kind-cluster.sh" | sed 's/^# //')"
+if [ "$rc" -eq 0 ] && [ "$(head -n1 <<<"$help")" = "$first" ] && [ "$(tail -n1 <<<"$help")" = "$last" ] &&
+    ! grep -qE '^#|set -euo|PROJECT_ROOT' <<<"$help" && grep -q -- "--confirm-production UID-PREFIX" <<<"$help"; then
+    echo "ok   --help prints the header, up to its first non-comment line"
+else
+    fail "--help (exit $rc) does not print the header:"$'\n'"$help"
+fi
+
 # 5. A wrong prefix is refused on an unmarked cluster too.
 reset
 out="$(recreate --yes --no-backup --confirm-production uid-othe)"; rc=$?
@@ -392,15 +465,30 @@ else
 fi
 check "without a cluster and an unmounted host directory"
 
-# 11. The marker test the script uses (lib/cluster-role.sh).
+# 11. The marker test the scripts use (lib/cluster-role.sh), on (EXISTS ROLE
+# UID). Only no ConfigMap, `none` and `none <uid>` (exact) let a delete through.
 # shellcheck source=scripts/deploy/lib/cluster-role.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/cluster-role.sh"
-for marker in "production uid-a" "production" "Production uid-a" "staging uid-a" " uid-a" "None uid-a" "NONE"; do
-    cluster_role_marker_guards_delete "$marker" || fail "cluster_role_marker_guards_delete '$marker' is false"
+nl=$'\n'
+guards=(
+    "true||" "true||uid-a" "true|production|uid-a" "true|production|" "true|Production|uid-a"
+    "true|staging|uid-a" "true|None|uid-a" "true|NONE|" "true| |" "true|   |"
+    "true|${nl}production|uid-a" "true|none${nl}production|" "true| none|" "true|none |"
+    "true|none${nl}|" "true|none| uid-a" "true|none|uid-a " "true|none|uid-a${nl}production"
+    "true|none|uid a" "true|production${nl}|uid-a"
+)
+for case_ in "${guards[@]}"; do
+    IFS='|' read -r -d '' exists role uid < <(printf '%s' "$case_") || true
+    cluster_role_marker_guards_delete "$exists" "$role" "$uid" ||
+        fail "cluster_role_marker_guards_delete $(printf '%q' "$case_") is false"
 done
-for marker in "" " " "none" "none uid-a"; do
-    if cluster_role_marker_guards_delete "$marker"; then fail "cluster_role_marker_guards_delete '$marker' is true"; fi
+for case_ in "false||" "false|production|uid-a" "true|none|" "true|none|uid-a"; do
+    IFS='|' read -r -d '' exists role uid < <(printf '%s' "$case_") || true
+    if cluster_role_marker_guards_delete "$exists" "$role" "$uid"; then
+        fail "cluster_role_marker_guards_delete $(printf '%q' "$case_") is true"
+    fi
 done
+echo "ok   cluster_role_marker_guards_delete: only no ConfigMap, none and none <uid> let a delete through"
 
 if [ "$failed" -ne 0 ]; then
     echo "recreate-kind-cluster checks failed"

@@ -7,8 +7,9 @@
 //! - `GET /metrics`: Prometheus text exposition of `econ_graph_metrics::DEFAULT_REGISTRY`, the
 //!   registry `CRAWLER_METRICS` (HTTP-level `econgraph_crawler_*`), `CRAWLER_QUEUE_METRICS`
 //!   (`crawler_jobs_total`, `crawler_queue_*`, `crawler_last_{success,failure}_timestamp_seconds`)
-//!   `CRAWLER_COVERAGE_METRICS` (`crawler_coverage_*`) and `CRAWLER_SCHEDULER_METRICS`
-//!   (`crawler_scheduler_*`) use.
+//!   `CRAWLER_COVERAGE_METRICS` (`crawler_coverage_*`), `CRAWLER_SCHEDULER_METRICS`
+//!   (`crawler_scheduler_*`) and `CRAWLER_UNITS_METRICS` (`crawler_units_*`, every source from 0)
+//!   use.
 //! - `GET /healthz`: 200 while the worker loop runs, 503 before it starts and once it stops.
 //!
 //! [`queue_gauge_loop`] refreshes the queue gauges from
@@ -65,6 +66,7 @@ pub fn init_metrics() {
     let _ = &*CRAWLER_COVERAGE_METRICS;
     let _ = &*CRAWLER_SCHEDULER_METRICS;
     let _ = &*CRAWLER_DISCOVERY_RUN_METRICS;
+    econ_graph_crawler::units::init_metrics();
 }
 
 /// Unix seconds of `t`, as a gauge value.

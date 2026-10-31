@@ -42,9 +42,14 @@ if " get nodes " in joined:
 if " get namespace kube-system " in joined:
     done("11111111-2222-3333-4444-555555555555")
 if " get configmap econgraph-cluster-role " in joined:
-    if os.environ.get("STUB_PRODUCTION", "true") == "true":
-        sys.stdout.write("production 11111111-2222-3333-4444-555555555555")
-    done()
+    # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
+    if os.environ.get("STUB_PRODUCTION", "true") != "true":
+        done()
+    if " -o name" in joined:
+        done("configmap/econgraph-cluster-role")
+    if "{.data.role}" in joined:
+        done("production#")
+    done("11111111-2222-3333-4444-555555555555#")
 if " get job keycloak-realm-import " in joined:
     state = os.environ.get("STUB_IMPORT", "")
     if state == "unreadable":

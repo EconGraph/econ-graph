@@ -140,22 +140,26 @@ note_production() {
 }
 
 # recreate-kind-cluster.sh asks for the kube-system UID prefix before deleting
-# a cluster with a production marker (any role other than `none`) or one whose
-# marker can't be read, and --yes does not answer it. Get it here, before any
+# a cluster with a production marker (any ConfigMap
+# kube-system/econgraph-cluster-role except role exactly `none`; see
+# cluster_role_marker_guards_delete) or one whose marker can't be read, and
+# --yes does not answer it. Get it here, before any
 # confirmation that starts the downtime: from --confirm-production, which must
 # match this cluster, or typed at a terminal; without either, stop. It is then
 # passed on as --confirm-production, so recreate-kind-cluster.sh, which checks
 # it against the cluster again, asks nothing once the writers are stopped.
 # Call after ensure_kind_kubectl and note_production.
 require_recreate_confirmation() {
-    local uid marker answer
+    local uid answer
     [ "${DRY_RUN}" != "true" ] || return 0
     # The kind kubectl on its own context, as kind_cluster_is_production asks.
     local -x KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
     local -x CLUSTER_ROLE_CONTEXT="kind-${KIND_CLUSTER}"
     if [ -z "${CONFIRM_PRODUCTION}" ]; then
-        marker="$(cluster_role_marker)" || marker="unreadable"
-        if [ "${WAS_PRODUCTION}" != "true" ] && ! cluster_role_marker_guards_delete "$marker"; then
+        # A marker that can't be read asks, as a production marker does.
+        if [ "${WAS_PRODUCTION}" != "true" ] && cluster_role_read_marker kc &&
+            ! cluster_role_marker_guards_delete "${CLUSTER_ROLE_MARKER_EXISTS}" \
+                "${CLUSTER_ROLE_MARKER_ROLE}" "${CLUSTER_ROLE_MARKER_UID}"; then
             return 0
         fi
     fi

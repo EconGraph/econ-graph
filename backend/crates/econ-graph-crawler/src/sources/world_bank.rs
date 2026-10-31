@@ -424,6 +424,7 @@ impl WorldBankAdapter {
                     .to_string(),
             ),
             seasonal_adjustment: None,
+            ..NewSeriesMetadataLite::default()
         }
     }
 

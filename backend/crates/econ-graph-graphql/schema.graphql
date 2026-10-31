@@ -624,6 +624,23 @@ type EconomicSeriesType {
 	title: String!
 	description: String
 	units: String
+	"""
+	Where `units` came from. For a series whose source was never recorded: UNKNOWN when it
+	has no units, else STRUCTURED.
+	"""
+	unitsSource: UnitsSource!
+	"""
+	The source's units text exactly as received, which `units` may reword (BEA's drops the
+	"Millions of" that its values were already multiplied by). Null when it was not
+	recorded.
+	"""
+	unitsRaw: String
+	"""
+	The units in a fixed vocabulary: kind, currency, scale of the values and index base.
+	Null when the series has no units or the crawler does not recognise them; it never
+	guesses.
+	"""
+	parsedUnit: ParsedUnit
 	frequency: String!
 	seasonalAdjustment: String
 	lastUpdated: DateTime
@@ -780,6 +797,32 @@ input PaginationInput {
 	after: String
 	last: Int
 	before: String
+}
+
+"""
+A series' units in a fixed vocabulary.
+"""
+type ParsedUnit {
+	"""
+	What the series measures.
+	"""
+	kind: UnitKind!
+	"""
+	ISO 4217 code of a currency, when the source names it. Null for a bare "dollars".
+	"""
+	currencyCode: String
+	"""
+	The power of ten the values are in.
+	"""
+	scale: UnitScale!
+	"""
+	For an index: the period it equals its base value in, and that value, e.g. `2017=100`.
+	"""
+	indexBase: String
+	"""
+	For a constant-price amount: the year whose prices it uses.
+	"""
+	priceReferenceYear: Int
 }
 
 type Query {
@@ -1267,6 +1310,94 @@ input TriggerCrawlInput {
 	Source that every entry of `series_ids` belongs to.
 	"""
 	source: String
+}
+
+"""
+What kind of quantity a series measures.
+"""
+enum UnitKind {
+	"""
+	An amount of money at the prices of each period.
+	"""
+	CURRENCY
+	"""
+	An amount of money at the prices of a reference period (constant or chained).
+	"""
+	CONSTANT_PRICE_CURRENCY
+	"""
+	A percentage level or share.
+	"""
+	PERCENT
+	"""
+	A percentage change between periods.
+	"""
+	PERCENT_CHANGE
+	"""
+	A difference between two percentages.
+	"""
+	PERCENTAGE_POINTS
+	"""
+	An index number.
+	"""
+	INDEX
+	"""
+	A number of people or things.
+	"""
+	COUNT
+	"""
+	Events per fixed number of a population, such as per 1000 people.
+	"""
+	RATE
+	"""
+	A duration in years.
+	"""
+	YEARS
+}
+
+"""
+The power of ten a series' values are in.
+"""
+enum UnitScale {
+	"""
+	Values as they are.
+	"""
+	UNITS
+	"""
+	Values in thousands.
+	"""
+	THOUSANDS
+	"""
+	Values in millions.
+	"""
+	MILLIONS
+	"""
+	Values in billions (10^9).
+	"""
+	BILLIONS
+	"""
+	Values in trillions (10^12).
+	"""
+	TRILLIONS
+}
+
+"""
+Where a series' units came from.
+"""
+enum UnitsSource {
+	"""
+	A field of the source's own that holds units (FRED's units, BEA's CL_UNIT), or the
+	crawler's curated list of what it fetches.
+	"""
+	STRUCTURED
+	"""
+	Parsed by the crawler out of free text that also says other things, such as a
+	description.
+	"""
+	PARSED_FROM_TEXT
+	"""
+	The series has no units.
+	"""
+	UNKNOWN
 }
 
 """

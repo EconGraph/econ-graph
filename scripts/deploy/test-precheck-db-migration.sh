@@ -62,7 +62,12 @@ case "$*" in
   *"get namespace kube-system"*) printf 'uid-this-cluster' ;;
   *"get configmap econgraph-cluster-role"*)
     [ "${STUB_MARKER_FAILS:-0}" != 1 ] || exit 1
-    printf 'production uid-this-cluster' ;;
+    # The marker (lib/cluster-role.sh): exists, then each value with a trailing "#".
+    case "$*" in
+      *"-o name"*) echo configmap/econgraph-cluster-role ;;
+      *"{.data.role}"*) printf 'production#' ;;
+      *) printf 'uid-this-cluster#' ;;
+    esac ;;
   *"get jobs"*)
     echo "postgres-backup-29123456 "
     echo "keycloak-realm-import 1"

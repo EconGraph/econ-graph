@@ -57,6 +57,7 @@ mod simple_tests {
             dataset_id: Uuid::new_v4(),
             dimensions: Default::default(),
             default_measure: None,
+            units_source: None,
         };
 
         assert_eq!(series.external_id, "TEST_001");

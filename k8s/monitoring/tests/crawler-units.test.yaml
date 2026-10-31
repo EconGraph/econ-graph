@@ -1,0 +1,33 @@
+# promtool unit tests for the crawler.units group of prometheus-rules-crawler.yaml.
+# Run through ../check-prometheus-rules.sh, which writes each rule ConfigMap's files to a temp
+# directory and copies this file next to them.
+rule_files:
+  - crawler.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # BEA records one mismatch at 1h and fires straight away; the alert holds for a day and
+  # clears once the 1d window passes with no more. FRED's counter never moves and never fires.
+  - interval: 1h
+    input_series:
+      - series: 'crawler_units_mismatch_total{kubernetes_namespace="econ-graph", source="BEA", pod="crawler-worker-1"}'
+        values: '0 1x40'
+      - series: 'crawler_units_mismatch_total{kubernetes_namespace="econ-graph", source="FRED", pod="crawler-worker-1"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CrawlerUnitsMismatch
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: CrawlerUnitsMismatch
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: BEA
+            exp_annotations:
+              summary: BEA units text disagrees with its structured units
+              description: In the last day about 1 BEA stored series fetches had a units text that parses but disagrees with the units the source's structured fields state (kind, currency, scale or index base). The structured units were stored. The crawler-worker log has one error line per series ("units text disagrees with the source's structured units") with the series id, the text and both units. A persist that rolls back and is retried counts and logs again, so the count is at least the number of mismatching fetches.
+      - eval_time: 30h
+        alertname: CrawlerUnitsMismatch
+        exp_alerts: []

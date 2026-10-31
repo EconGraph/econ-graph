@@ -44,6 +44,7 @@ use crate::dataset::{DatasetCatalog, SeriesDataset};
 use crate::http::Validators;
 use crate::series_id::stable_series_id;
 use crate::source::SourceId;
+use crate::units::{self, UnitsSource};
 
 diesel::define_sql_function! {
     /// `substr(string, start, count)`, used by [`retire_unlisted`] to match a scope prefix
@@ -60,6 +61,9 @@ pub const INSERT_CHUNK: usize = 1000;
 
 /// Frequency stored for a new series whose source gave none (`economic_series.frequency` is NOT NULL).
 pub const UNKNOWN_FREQUENCY: &str = "Unknown";
+
+/// Longest `economic_series.units_raw` stored, in characters.
+const MAX_UNITS_RAW: usize = 2000;
 
 /// Result of [`persist_series`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1029,6 +1033,16 @@ async fn upsert_points(
 ///   fetch response carries no metadata (Census BDS) rely on that row. A new row with neither
 ///   gets `external_id` as its title and [`UNKNOWN_FREQUENCY`]. Always sets `last_crawled_at`,
 ///   `last_updated`, `crawl_status = 'success'` and clears `crawl_error_message`.
+/// - Units: `units` comes from the fetch, else the `series_metadata` row, else stays as stored,
+///   like the other fields, and `units_source`, `units_raw` and `units_parsed` always describe
+///   the `units` kept. Units from the fetch take its `units_source`, its `units_raw` (else the
+///   units text) and `units_parsed`, the unit [`units::check_and_record`] returns after checking
+///   the text against the metadata's `structured_unit`. Units from the `series_metadata` row
+///   are `structured`, with that text as `units_raw` and no `units_parsed`. Stored units keep
+///   their columns. A series with no units anywhere is `unknown`, keeping the fetch's
+///   `units_raw` if it gave one (text the units could not be parsed out of). The check runs
+///   before the transaction commits, so a persist that rolls back and is retried counts and
+///   logs it again: the counts are at least once per stored fetch.
 /// - Validators: `fetched.validators` replaces the series' `series_fetch_validators` row (`None`
 ///   deletes it), in the same transaction as the points ([`stored_fetch_state`] reads it back).
 /// - Points: upserted on the `data_points` unique key `(series_id, date, revision_date,
@@ -1070,6 +1084,26 @@ pub(crate) async fn persist_series_conn(
     let title = meta.and_then(|m| clip_opt(Some(&m.title), 500));
     let description = meta.and_then(|m| clip_opt(m.description.as_deref(), 2000));
     let units = meta.and_then(|m| clip_opt(m.units.as_deref(), 100));
+    // The fetch states units when it gives either the units or the text they came from. Its
+    // units win; its text alone is kept only for a series with no units anywhere.
+    let units_raw = meta.and_then(|m| clip_opt(m.units_raw.as_deref(), MAX_UNITS_RAW));
+    let units_claim = meta.filter(|_| units.is_some() || units_raw.is_some());
+    let units_source = units_claim.map(|m| match &units {
+        Some(_) => m.units_source.as_str(),
+        None => UnitsSource::Unknown.as_str(),
+    });
+    let units_raw = units_raw.or_else(|| units.clone());
+    let units_parsed = match units_claim {
+        Some(m) => units::check_and_record(
+            source,
+            external_id,
+            units.as_deref(),
+            m.structured_unit.as_deref(),
+            &m.units_context,
+        )
+        .map(|u| serde_json::to_value(u).expect("a Unit serialises")),
+        None => None,
+    };
     let frequency = meta.and_then(|m| clip_opt(m.frequency.as_deref(), 50));
     let seasonal = meta.and_then(|m| clip_opt(m.seasonal_adjustment.as_deref(), 100));
     let external_id = clip(external_id, 255);
@@ -1097,7 +1131,8 @@ pub(crate) async fn persist_series_conn(
                      FROM series_metadata WHERE source_id = $1 AND external_id = $2) \
                  INSERT INTO economic_series (id, source_id, external_id, title, description, units, \
                      frequency, seasonal_adjustment, is_active, first_discovered_at, last_crawled_at, \
-                     last_updated, crawl_status, crawl_error_message, dataset_id, dimensions) \
+                     last_updated, crawl_status, crawl_error_message, dataset_id, dimensions, \
+                     units_source, units_raw, units_parsed) \
                  SELECT $9, $1, $2, COALESCE($3, (SELECT title FROM discovered), $2), \
                      COALESCE($4, (SELECT description FROM discovered)), \
                      COALESCE($5, (SELECT units FROM discovered)), \
@@ -1105,12 +1140,36 @@ pub(crate) async fn persist_series_conn(
                      COALESCE((SELECT l.status <> 'restricted' FROM series_lifecycle l \
                          WHERE l.source_id=$1 AND l.external_id=$2), TRUE), NOW(), \
                      NOW(), NOW(), COALESCE((SELECT NULLIF(l.status, 'active') FROM series_lifecycle l \
-                         WHERE l.source_id=$1 AND l.external_id=$2), 'success'), NULL, $10, $11 \
+                         WHERE l.source_id=$1 AND l.external_id=$2), 'success'), NULL, $10, $11, \
+                     CASE WHEN $5::text IS NOT NULL THEN $12 \
+                         WHEN (SELECT units FROM discovered) IS NOT NULL THEN 'structured' \
+                         ELSE 'unknown' END, \
+                     CASE WHEN $5::text IS NOT NULL THEN $13 \
+                         WHEN (SELECT units FROM discovered) IS NOT NULL \
+                             THEN (SELECT units FROM discovered) \
+                         ELSE $13 END, \
+                     CASE WHEN $5::text IS NOT NULL THEN $14 END \
                  ON CONFLICT (source_id, external_id) DO UPDATE SET \
                      title = COALESCE($3, (SELECT title FROM discovered), economic_series.title), \
                      description = COALESCE($4, (SELECT description FROM discovered), \
                          economic_series.description), \
                      units = COALESCE($5, (SELECT units FROM discovered), economic_series.units), \
+                     units_source = CASE WHEN $5::text IS NOT NULL THEN $12 \
+                         WHEN (SELECT units FROM discovered) IS NOT NULL THEN 'structured' \
+                         WHEN economic_series.units IS NOT NULL THEN economic_series.units_source \
+                         WHEN $12::text IS NOT NULL THEN 'unknown' \
+                         ELSE economic_series.units_source END, \
+                     units_raw = CASE WHEN $5::text IS NOT NULL THEN $13 \
+                         WHEN (SELECT units FROM discovered) IS NOT NULL \
+                             THEN (SELECT units FROM discovered) \
+                         WHEN economic_series.units IS NOT NULL THEN economic_series.units_raw \
+                         WHEN $12::text IS NOT NULL THEN $13 \
+                         ELSE economic_series.units_raw END, \
+                     units_parsed = CASE WHEN $5::text IS NOT NULL THEN $14 \
+                         WHEN (SELECT units FROM discovered) IS NOT NULL THEN NULL \
+                         WHEN economic_series.units IS NOT NULL \
+                             THEN economic_series.units_parsed \
+                         END, \
                      frequency = COALESCE($6, (SELECT frequency FROM discovered), \
                          economic_series.frequency), \
                      seasonal_adjustment = COALESCE($8, economic_series.seasonal_adjustment), \
@@ -1132,6 +1191,9 @@ pub(crate) async fn persist_series_conn(
     .bind::<SqlUuid, _>(id)
     .bind::<SqlUuid, _>(dataset_id)
     .bind::<Jsonb, _>(&fetched.dataset.dimensions)
+    .bind::<Nullable<Text>, _>(units_source)
+    .bind::<Nullable<Text>, _>(units_raw.as_deref())
+    .bind::<Nullable<Jsonb>, _>(units_parsed.as_ref())
     .get_result(&mut *conn)
     .await?;
     let series_id = row.id;
@@ -1533,5 +1595,7 @@ mod reference_data_tests;
 mod release_sources_tests;
 #[cfg(test)]
 pub(crate) mod stable_id_tests;
+#[cfg(test)]
+mod units_tests;
 #[cfg(test)]
 mod validator_tests;

@@ -408,6 +408,13 @@ again after creating or recreating it.** A node or etcd snapshot of production r
 elsewhere keeps the UID, the marker and the token, so run `--unmark` on such a clone before
 starting its workloads, or don't restore it while production runs.
 
+Scripts that delete a cluster (`recreate-kind-cluster.sh`, `migrate-to-host-storage.sh`)
+read the marker more broadly, so a damaged one still protects: any ConfigMap
+`kube-system/econgraph-cluster-role` counts as a production marker there, whatever its role
+or UID, an empty one included, except one whose role is exactly `none`, with no
+`kube-system-uid` or one without whitespace. A role or UID with surrounding whitespace or a
+newline in it counts as production. `--unmark` removes any such ConfigMap, empty ones too.
+
 Before it changes anything, the script shows the cluster's identity (this host's name, the
 nodes, the API server and the kube-system UID) and asks, at a terminal, for the first 8
 characters of the kube-system UID: context names such as `kind-econ-graph` are the same on
@@ -661,8 +668,9 @@ recreates them from the backup the teardown took.
 Asks for the cluster name, typed on a terminal, before deleting the cluster. Deleting the
 cluster loses what is stored only in its nodes: the in-cluster nightly backups and Grafana's
 data. `scripts/deploy/recreate-kind-cluster.sh` replaces a cluster with a confirmation, then a
-dump. On a cluster with a production marker (any role other than `none`), or one whose marker
-can't be read, the confirmation is the first 8 characters of its kube-system UID, typed or given
+dump. On a cluster with a production marker (any ConfigMap `kube-system/econgraph-cluster-role`
+except `none` or `none <uid>`, exactly; see [Production marker](#production-marker)), or one
+whose marker can't be read, the confirmation is the first 8 characters of its kube-system UID, typed or given
 as `--confirm-production`; `--yes` does not answer it. `terraform destroy` in `terraform/k8s/`
 does not delete the cluster.
 
