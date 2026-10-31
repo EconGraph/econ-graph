@@ -94,6 +94,13 @@ impl Worker {
     /// its adapter could chunk: supersedes any run of it still in progress (one started before
     /// the switch), so that run never commits on top of this discovery. Nothing for any other
     /// source.
+    ///
+    /// It runs before the walk, without re-checking that this worker still holds the
+    /// `discover_catalog` claim. A worker whose lease expired can therefore still supersede a
+    /// run, but only one of a source it is configured to discover by single job: that costs the
+    /// run (availability), never correctness, since a superseded run commits nothing and the
+    /// stale worker's own commit is rejected as a lost lease. Runs started by a worker without
+    /// the switch exist alongside it only while a deployment rolls over.
     pub(super) async fn supersede_runs_for_single_job(&self, source: SourceId) -> Fetched {
         if self.single_job_discovery.contains(&source) {
             let superseded = discovery_run::supersede_active_runs(&self.ctx.pool, source)

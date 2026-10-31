@@ -1200,9 +1200,13 @@ impl SourceAdapter for FredAdapter {
         }
         crate::lifecycle::refuse_empty_selection(SourceId::Fred, units.len())?;
         let lifecycle = CatalogLifecycle {
+            // As single-job discovery: walked ids the rules didn't select. An include override
+            // the walk lists outside the rules stays here, because whether `/series` finds it is
+            // only known in its chunk (found, it is listed, which wins over unselected; missing,
+            // it stays published outside the rules, never absent).
             unselected_ids: walked
                 .into_iter()
-                .filter(|id| !units.contains_key(id))
+                .filter(|id| !matches!(units.get(id), Some(FredUnit::Listed { .. })))
                 .collect(),
             ..CatalogLifecycle::default()
         };

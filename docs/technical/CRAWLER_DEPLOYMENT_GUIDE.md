@@ -87,11 +87,15 @@ To switch a source between chunked and single-job catalog discovery, set or clea
 for example `kubectl -n econ-graph set env deployment/crawler-worker
 CRAWLER_SINGLE_JOB_DISCOVERY_SOURCES=FRED` to discover FRED by single job, and
 `kubectl -n econ-graph set env deployment/crawler-worker CRAWLER_SINGLE_JOB_DISCOVERY_SOURCES-`
-to return it to chunks. Switching is safe at any time. With the source listed, a chunk or
-finalize job of a run already in progress fails that run, and the source's next discovery
-supersedes any run still in progress before it walks, so a run never commits after a single-job
-discovery. With the source no longer listed, its next discovery starts a run. Either way each
-discovery commits once, from one catalog; `crawler status` shows the source's newest run.
+to return it to chunks. Switching never commits a mixed or partial catalog: with the source
+listed, a chunk or finalize job of a run already in progress fails that run, and the source's
+next discovery supersedes any run still in progress before it walks, so a run never commits
+after a single-job discovery. With the source no longer listed, its next discovery starts a run.
+Either way each discovery commits once, from one catalog. What a switch does cost: a run in
+progress is lost, with the upstream requests it already made, and the switched source's
+discovery run gauges stop (listed) or start (no longer listed), so `CrawlerDiscoveryRunOverdue`
+covers it only while it discovers in chunks. `crawler status` keeps showing the source's newest
+run.
 
 The crawler reads its selection files and dataset definitions from `CRAWLER_DATA_DIR`,
 which defaults to `backend/crates/econ-graph-crawler/data/` in a source checkout.
@@ -291,7 +295,7 @@ discarded), and records `crawler_discovery_chunk_duration_seconds` and
 `crawler_discovery_run_duration_seconds`. It polls `crawler_discovery_run_chunks{source,state}`,
 `crawler_discovery_run_active{source}` and
 `crawler_discovery_last_complete_run_timestamp_seconds{source}` from `discovery_runs` for the
-enabled sources that discover in chunks today, so a source that stops opting in or is disabled
-drops out. The `CrawlerDiscoveryRunOverdue` alert fires when a source has had no complete run for more than
+enabled sources the worker discovers in chunks, so a source that stops opting in, is disabled,
+or is listed in `CRAWLER_SINGLE_JOB_DISCOVERY_SOURCES` drops out, and its alert clears. The `CrawlerDiscoveryRunOverdue` alert fires when a source has had no complete run for more than
 twice its 7-day discovery interval; `discovery_runs.error_message` and the source's failed
 `discover_chunk` or `finalize_discovery` rows in `crawl_queue` say why.

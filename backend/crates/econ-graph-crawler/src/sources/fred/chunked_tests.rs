@@ -914,3 +914,261 @@ async fn switching_back_to_chunks_runs_the_next_discovery_in_chunks() {
     assert_eq!(all[1].0, "complete");
     assert_eq!(accepted_scope(p).await, Some((rules_scope(), false)));
 }
+
+// ---------------------------------------------------------------------------
+// Include overrides, single-job supersede races, expected-missing probes
+// ---------------------------------------------------------------------------
+
+const RULES_OTHER_INCLUDED: &str = r#"
+max_series = 100
+max_catalog_series = 1000
+include = ["T756INC", "T756OTHER"]
+expected_missing = []
+exclude = []
+
+[[rules]]
+release_id = 53
+title_contains = "gross domestic product"
+frequencies = ["Quarterly"]
+"#;
+
+/// An include override that a walked release still lists (outside the rules) but `/series`
+/// reports missing. Three discoveries on each path.
+async fn three_discoveries_other_included(pool: &DatabasePool, mode: Mode) -> Vec<LifecycleRow> {
+    reset(pool).await;
+    let mock = MockSource::start().await;
+    mount_fred(&mock, &gdp_ids()).await;
+    mock.mount(
+        &Route::get("/series").query("series_id", "T756OTHER"),
+        Reply::json_str(ERR_NO_SERIES).with_status(400),
+    )
+    .await;
+    let fred = FredAdapter::new(mock.base_url())
+        .with_catalog_rules_text(RULES_OTHER_INCLUDED)
+        .with_units_per_chunk(4);
+    let adapter: Arc<dyn SourceAdapter> = if mode == Mode::SingleJobAdapter {
+        Arc::new(SingleJob(fred))
+    } else {
+        Arc::new(fred)
+    };
+    let w = worker(pool, adapter);
+    sync(pool, &w).await;
+    for _ in 0..3 {
+        enqueue_discovery(pool).await;
+        drain(&w).await;
+    }
+    lifecycle(pool).await
+}
+
+/// An include override that a walked release still lists outside the rules, but `/series`
+/// reports missing, stays published (unselected) on both paths: over three discoveries the
+/// chunked path never counts it absent, exactly as single-job discovery doesn't.
+#[tokio::test]
+async fn a_listed_include_override_fred_reports_missing_agrees_with_single_job() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    let single = three_discoveries_other_included(p, Mode::SingleJobAdapter).await;
+    let chunked = three_discoveries_other_included(p, Mode::Chunked).await;
+    let pick = |rows: &[LifecycleRow]| {
+        rows.iter()
+            .find(|r| r.external_id == "T756OTHER")
+            .map(|r| (r.status.clone(), r.missing_refreshes))
+    };
+    assert_eq!(pick(&single), Some(("active".to_string(), 0)));
+    assert_eq!(pick(&chunked), pick(&single));
+    assert_eq!(chunked, single);
+}
+
+/// Inserts a FRED run that is `finalizing` with every chunk done.
+async fn finalizing_run(pool: &DatabasePool) -> uuid::Uuid {
+    #[derive(QueryableByName)]
+    struct Id {
+        #[diesel(sql_type = diesel::sql_types::Uuid)]
+        id: uuid::Uuid,
+    }
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query(
+        "INSERT INTO discovery_runs (source, state, catalog_scope, chunks_total, chunks_done) \
+         VALUES ('FRED', 'finalizing', 'x', 1, 1) RETURNING id",
+    )
+    .get_result::<Id>(&mut conn)
+    .await
+    .unwrap()
+    .id
+}
+
+async fn run_state(pool: &DatabasePool, id: uuid::Uuid) -> String {
+    #[derive(QueryableByName)]
+    struct S {
+        #[diesel(sql_type = Text)]
+        state: String,
+    }
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query(format!(
+        "SELECT state::text AS state FROM discovery_runs WHERE id = '{id}'"
+    ))
+    .get_result::<S>(&mut conn)
+    .await
+    .unwrap()
+    .state
+}
+
+/// Finalize's conditional commit and a single-job supersede, interleaved on real Postgres in
+/// both orders, with finalize also holding the source's exclusive lifecycle lock as its
+/// reconciliation does. Exactly one wins; no deadlock.
+#[tokio::test]
+async fn a_single_job_supersede_races_a_finalize_commit_safely() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    let source_id = persist::data_source_id(p, SourceId::Fred).await.unwrap();
+
+    // Order 1: finalize's transaction has moved the run to complete (uncommitted) and holds the
+    // source lock; supersede must wait, then find nothing to supersede.
+    reset(p).await;
+    let run = finalizing_run(p).await;
+    let mut a = p.get().await.unwrap();
+    diesel::sql_query("BEGIN").execute(&mut a).await.unwrap();
+    let done = crate::discovery_run::complete_run_conn(&mut a, run)
+        .await
+        .unwrap();
+    assert!(done.is_some());
+    crate::lifecycle::lock_source_exclusive(&mut a, source_id)
+        .await
+        .unwrap();
+    let pool = p.clone();
+    let sup = tokio::spawn(async move {
+        crate::discovery_run::supersede_active_runs(&pool, SourceId::Fred).await
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !sup.is_finished(),
+        "supersede must wait for finalize's row lock"
+    );
+    diesel::sql_query("COMMIT").execute(&mut a).await.unwrap();
+    let n = tokio::time::timeout(Duration::from_secs(10), sup)
+        .await
+        .expect("no deadlock")
+        .unwrap()
+        .unwrap();
+    assert_eq!(n, 0);
+    assert_eq!(run_state(p, run).await, "complete");
+
+    // Order 2: supersede first (its transaction holds the run row); finalize waits and then
+    // commits nothing.
+    reset(p).await;
+    let run = finalizing_run(p).await;
+    let mut b = p.get().await.unwrap();
+    diesel::sql_query("BEGIN").execute(&mut b).await.unwrap();
+    diesel::sql_query(format!(
+        "UPDATE discovery_runs SET state = 'superseded', finished_at = NOW() WHERE id = '{run}' AND state = 'finalizing'"
+    ))
+    .execute(&mut b)
+    .await
+    .unwrap();
+    let pool = p.clone();
+    let fin = tokio::spawn(async move {
+        let mut c = pool.get().await.unwrap();
+        diesel::sql_query("BEGIN").execute(&mut c).await.unwrap();
+        let r = crate::discovery_run::complete_run_conn(&mut c, run)
+            .await
+            .unwrap();
+        diesel::sql_query("COMMIT").execute(&mut c).await.unwrap();
+        r
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!fin.is_finished());
+    diesel::sql_query("COMMIT").execute(&mut b).await.unwrap();
+    let r = tokio::time::timeout(Duration::from_secs(10), fin)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(r.is_none(), "finalize must not complete a superseded run");
+    assert_eq!(run_state(p, run).await, "superseded");
+
+    // Order 3: the real supersede_active_runs, then finalize: nothing completes.
+    reset(p).await;
+    let run = finalizing_run(p).await;
+    assert_eq!(
+        crate::discovery_run::supersede_active_runs(p, SourceId::Fred)
+            .await
+            .unwrap(),
+        1
+    );
+    let mut c = p.get().await.unwrap();
+    assert!(crate::discovery_run::complete_run_conn(&mut c, run)
+        .await
+        .unwrap()
+        .is_none());
+    reset(p).await;
+}
+
+/// An include override FRED reports missing in a chunk: a known-retired probe
+/// (`expected_missing`) is confirmed missing without being a curated entry missing; any other is
+/// both. The flag is set at enumeration and honoured in the chunk.
+#[tokio::test]
+async fn expected_missing_probes_are_not_curated_missing_in_chunks() {
+    let mock = MockSource::start().await;
+    mount_fred(&mock, &gdp_ids()).await;
+    let fred = FredAdapter::new(mock.base_url()).with_catalog_rules_text(RULES);
+    let Enumeration::Units { units, .. } = fred.enumerate_discovery(&test_ctx()).await.unwrap()
+    else {
+        panic!("units expected");
+    };
+    let flag = |id: &str| {
+        let unit = units.iter().find(|u| u.key == id).unwrap();
+        match serde_json::from_value(unit.listing.clone().unwrap()).unwrap() {
+            FredUnit::Include { expected_missing } => expected_missing,
+            FredUnit::Listed { .. } => panic!("{id} is an include override"),
+        }
+    };
+    assert!(flag("T756PROBE"));
+    assert!(!flag("T756LOST"));
+    assert!(!flag("T756INC"));
+
+    let includes: Vec<DiscoveryUnit> = units
+        .into_iter()
+        .filter(|u| u.key == "T756PROBE" || u.key == "T756LOST")
+        .collect();
+    let chunk = fred.discover_units(&test_ctx(), &includes).await.unwrap();
+    assert!(chunk.found.is_empty());
+    assert_eq!(chunk.curated_missing, ["T756LOST"]);
+    let mut confirmed = chunk.lifecycle.confirmed_missing_ids.clone();
+    confirmed.sort();
+    assert_eq!(confirmed, ["T756LOST", "T756PROBE"]);
+}
+
+/// Through the worker, a chunked run publishes the same curated-missing gauge as single-job
+/// discovery: one entry (the unexpectedly missing override), not the expected-missing probe.
+#[tokio::test]
+async fn the_curated_missing_gauge_matches_single_job_discovery() {
+    let Some(db) = db().await else { return };
+    let p = &db.pool;
+    let gauge = || {
+        econ_graph_metrics::crawler::CRAWLER_DISCOVERY_METRICS
+            .curated_missing
+            .with_label_values(&["FRED"])
+            .get()
+    };
+    for mode in [Mode::SingleJobAdapter, Mode::Chunked] {
+        reset(p).await;
+        let mock = MockSource::start().await;
+        mount_fred(&mock, &gdp_ids()).await;
+        let fred = FredAdapter::new(mock.base_url())
+            .with_catalog_rules_text(RULES)
+            .with_units_per_chunk(4);
+        let adapter: Arc<dyn SourceAdapter> = if mode == Mode::SingleJobAdapter {
+            Arc::new(SingleJob(fred))
+        } else {
+            Arc::new(fred)
+        };
+        let w = worker(p, adapter);
+        sync(p, &w).await;
+        econ_graph_metrics::crawler::CRAWLER_DISCOVERY_METRICS
+            .curated_missing
+            .with_label_values(&["FRED"])
+            .set(-1);
+        enqueue_discovery(p).await;
+        drain(&w).await;
+        assert_eq!(gauge(), 1, "only T756LOST, not the expected-missing probe");
+    }
+}
