@@ -1,0 +1,24 @@
+{
+  "name": "minimatch",
+  "version": "11.0.3",
+  "private": true,
+  "description": "Callable legacy-tool adapter over the patched minimatch registry implementation",
+  "license": "MIT",
+  "main": "index.cjs",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.mjs",
+      "require": "./index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "minimatch-patched": "npm:minimatch@11.0.3"
+  },
+  "engines": {
+    "node": ">=26.0.0 <27"
+  },
+  "types": "index.d.ts",
+  "type": "module"
+}

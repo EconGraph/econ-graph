@@ -1,0 +1,66 @@
+name: Patched npm compatibility
+
+on:
+  merge_group:
+    types: [checks_requested]
+  pull_request:
+    paths:
+      - ".github/workflows/train4-npm-compat.yml"
+      - ".nvmrc"
+      - "frontend/compat/**"
+      - "frontend/scripts/*minimatch*"
+      - "frontend/scripts/*npm-audit*"
+      - "frontend/package*.json"
+      - "admin-frontend/package*.json"
+      - "admin-frontend/scripts/npm-audit-allowlist.json"
+      - "ci/docker/**"
+      - "frontend/Dockerfile"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/train4-npm-compat.yml"
+      - ".nvmrc"
+      - "frontend/compat/**"
+      - "frontend/scripts/*minimatch*"
+      - "frontend/scripts/*npm-audit*"
+      - "frontend/package*.json"
+      - "admin-frontend/package*.json"
+      - "admin-frontend/scripts/npm-audit-allowlist.json"
+      - "ci/docker/**"
+      - "frontend/Dockerfile"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    name: Registry matcher compatibility and audits
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: ".nvmrc"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            admin-frontend/package-lock.json
+      - name: Install the public frontend's locked dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Test actual legacy and modern consumers and guard failures
+        working-directory: frontend
+        run: npm run test:dependency-compat
+      - name: Audit the public frontend and check adapter integrity
+        working-directory: frontend
+        run: node scripts/check-npm-audit.mjs .
+      - name: Install the admin frontend's locked dependencies
+        working-directory: admin-frontend
+        run: npm ci
+      - name: Audit the admin frontend and check adapter integrity
+        working-directory: admin-frontend
+        run: node ../frontend/scripts/check-npm-audit.mjs . --allowlist scripts/npm-audit-allowlist.json
