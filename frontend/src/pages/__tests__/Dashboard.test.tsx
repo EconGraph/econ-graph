@@ -221,6 +221,9 @@ describe('Dashboard', () => {
     const unrateCard = card('Unemployment Rate');
     expect(await within(unrateCard).findByText('No value reported')).toBeInTheDocument();
     expect(within(unrateCard).getByText('Feb 1, 2025')).toBeInTheDocument();
+    // The card's own units still label it, not the stored "Percent".
+    expect(within(unrateCard).getByText('Percent, seasonally adjusted')).toBeInTheDocument();
+    expect(within(unrateCard).queryByText('Percent')).not.toBeInTheDocument();
   });
 
   test('shows an error on the card when the lookup fails', async () => {

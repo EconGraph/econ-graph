@@ -80,7 +80,8 @@ export const LatestValueCard: React.FC<LatestValueCardProps> = ({ entry }) => {
     const value = formatted ?? observation.value;
     // The entry's units describe the value as formatted (scaled); a value the formatter could
     // not read is shown as stored, so it keeps the series' own units.
-    const units = formatted === null ? series.units : (entry.units ?? series.units);
+    const unreadable = observation.value !== null && formatted === null;
+    const units = unreadable ? series.units : (entry.units ?? series.units);
     body = (
       <>
         <Typography variant='h4' component='div' sx={{ mb: 0.5, fontWeight: 600 }}>
@@ -136,7 +137,14 @@ export const LatestValueCard: React.FC<LatestValueCardProps> = ({ entry }) => {
   );
 
   return (
-    <Card component='article' aria-labelledby={headingId} sx={{ height: '100%' }}>
+    // A column: the link fills the space the notice leaves, so the notice stays inside the card
+    // (MUI's Card clips its overflow) when the grid row stretches the card to its tallest
+    // neighbour.
+    <Card
+      component='article'
+      aria-labelledby={headingId}
+      sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+    >
       {/* The series(id) query treats a series with no observations as not found, so a series
           page link is only useful once there is an observation to show. */}
       {series && observation ? (
@@ -144,7 +152,13 @@ export const LatestValueCard: React.FC<LatestValueCardProps> = ({ entry }) => {
           component={RouterLink}
           aria-labelledby={headingId}
           to={`/series/${encodeURIComponent(series.id)}`}
-          sx={{ height: '100%' }}
+          sx={{
+            flexGrow: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            justifyContent: 'flex-start',
+          }}
         >
           {content}
         </CardActionArea>

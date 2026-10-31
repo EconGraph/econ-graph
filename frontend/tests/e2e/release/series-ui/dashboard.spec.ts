@@ -68,4 +68,45 @@ test.describe('dashboard cards', () => {
       await expect(card.getByTestId('source-notice')).toBeVisible();
     });
   }
+
+  // toBeVisible() ignores clipping by an ancestor's overflow, and MUI's Card hides its overflow,
+  // so this compares boxes: a notice pushed past the card's bottom edge is cut off on screen.
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 375, height: 812 },
+  ]) {
+    test(`at ${viewport.width} px every card's source notice and terms link lie inside it`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await page.goto('/');
+      for (const expected of DASHBOARD_CARDS) {
+        const card = page.getByRole('article', { name: expected.label });
+        const notice = card.getByTestId('source-notice');
+        await expect(notice).toBeVisible();
+        const terms = notice.getByRole('link', { name: 'Terms of use' });
+        await expect(terms).toBeVisible();
+        await card.scrollIntoViewIfNeeded();
+        const cardBox = await card.boundingBox();
+        expect(cardBox, `${expected.label} card box`).not.toBeNull();
+        for (const [what, inner] of [
+          ['notice', notice],
+          ['terms link', terms],
+        ] as const) {
+          const box = await inner.boundingBox();
+          expect(box, `${expected.label} ${what} box`).not.toBeNull();
+          if (!cardBox || !box) continue;
+          // Half a pixel of slack for subpixel layout.
+          expect(box.x, `${expected.label} ${what} left`).toBeGreaterThanOrEqual(cardBox.x - 0.5);
+          expect(box.y, `${expected.label} ${what} top`).toBeGreaterThanOrEqual(cardBox.y - 0.5);
+          expect(box.x + box.width, `${expected.label} ${what} right`).toBeLessThanOrEqual(
+            cardBox.x + cardBox.width + 0.5
+          );
+          expect(box.y + box.height, `${expected.label} ${what} bottom`).toBeLessThanOrEqual(
+            cardBox.y + cardBox.height + 0.5
+          );
+        }
+      }
+    });
+  }
 });
