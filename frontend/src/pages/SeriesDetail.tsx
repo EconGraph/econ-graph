@@ -98,6 +98,14 @@ const formatValue = (
   levelDigits: number
 ): string => (value === null ? 'N/A' : formatTransformedValue(value, transformation, levelDigits));
 
+/**
+ * Whether a point's value differs from its date's original release: from the backend's
+ * `revisedFromOriginal`, so a later release that repeated the value reads as original. Where
+ * the original isn't known, a point that isn't the original release counts as revised.
+ */
+const isRevised = (point: SeriesDataPoint): boolean =>
+  point.revisedFromOriginal ?? !point.isOriginalRelease;
+
 const hasValues = (points: SeriesDataPoint[] | undefined): points is SeriesDataPoint[] =>
   !!points && points.some(p => p.value !== null);
 
@@ -486,11 +494,11 @@ const SeriesDetailContent: React.FC<{ seriesId: string }> = ({ seriesId }) => {
                           </TableCell>
                           <TableCell align='center'>
                             <Chip
-                              label={point.isOriginalRelease ? 'Original' : 'Revised'}
+                              label={isRevised(point) ? 'Revised' : 'Original'}
                               size='small'
                               // Original is the usual case, so it stays neutral; the theme's
                               // secondary colour is red and read as an error.
-                              color={point.isOriginalRelease ? 'default' : 'primary'}
+                              color={isRevised(point) ? 'primary' : 'default'}
                               variant='outlined'
                             />
                           </TableCell>

@@ -47,6 +47,7 @@ const schema = buildSchema(`
     value: Float!
     revisionDate: String
     isOriginalRelease: Boolean
+    revisedFromOriginal: Boolean
   }
 
   type PageInfo {
