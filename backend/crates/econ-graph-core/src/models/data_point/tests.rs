@@ -29,6 +29,7 @@ mod simple_tests {
         let previous_value = Some(BigDecimal::from(100));
 
         let data_point = DataPoint {
+            attributes: None,
             id: Uuid::new_v4(),
             series_id: Uuid::new_v4(),
             date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
@@ -57,6 +58,7 @@ mod simple_tests {
         let previous_value = Some(BigDecimal::from(100));
 
         let data_point = DataPoint {
+            attributes: None,
             id: Uuid::new_v4(),
             series_id: Uuid::new_v4(),
             date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
@@ -85,6 +87,7 @@ mod simple_tests {
         let previous_value = Some(BigDecimal::from(100));
 
         let data_point = DataPoint {
+            attributes: None,
             id: Uuid::new_v4(),
             series_id: Uuid::new_v4(),
             date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
@@ -113,6 +116,7 @@ mod simple_tests {
         let zero_previous = Some(BigDecimal::from(0));
 
         let data_point = DataPoint {
+            attributes: None,
             id: Uuid::new_v4(),
             series_id: Uuid::new_v4(),
             date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
@@ -142,6 +146,7 @@ mod simple_tests {
         // This tests the basic struct functionality without database interaction
 
         let data_point = NewDataPoint {
+            attributes: None,
             series_id: Uuid::new_v4(),
             date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
             value: Some(BigDecimal::from(12345)),

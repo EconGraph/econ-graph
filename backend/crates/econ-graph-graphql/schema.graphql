@@ -482,6 +482,10 @@ type DataPoint {
 	isOriginalRelease: Boolean!
 	createdAt: DateTime!
 	updatedAt: DateTime!
+	"""
+	Null means provider attributes were not captured for this stored observation.
+	"""
+	attributes: JSON
 }
 
 """
@@ -702,6 +706,11 @@ type EconomicSeriesType {
 }
 
 """
+A scalar that can represent any JSON value.
+"""
+scalar JSON
+
+"""
 The newest observation of a series: its latest date, at the newest revision of that date
 """
 type LatestObservation {
@@ -717,6 +726,10 @@ type LatestObservation {
 	Publication date of the revision the value comes from
 	"""
 	revisionDate: NaiveDate!
+	"""
+	Captured provider metadata for this exact observation revision, or null when unknown.
+	"""
+	attributes: JSON
 }
 
 type Mutation {

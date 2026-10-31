@@ -338,6 +338,7 @@ diesel::table! {
         is_original_release -> Bool,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
+        attributes -> Nullable<Jsonb>,
     }
 }
 

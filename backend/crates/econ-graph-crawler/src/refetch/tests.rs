@@ -335,6 +335,7 @@ fn wdi_series(area: &str) -> FetchedSeries {
     FetchedSeries {
         metadata: None,
         points: vec![FetchedPoint {
+            attributes: None,
             date: d("2023-01-01"),
             value: Some(bd("1.5")),
             revision_date: d("2026-07-01"),

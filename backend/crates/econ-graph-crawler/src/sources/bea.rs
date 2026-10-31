@@ -1412,6 +1412,7 @@ fn points<'a>(
     Ok(by_date
         .into_iter()
         .map(|(date, value)| FetchedPoint {
+            attributes: None,
             date,
             value,
             revision_date: date,

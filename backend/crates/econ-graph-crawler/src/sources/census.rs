@@ -643,6 +643,7 @@ fn parse_bds_rows(
             None
         };
         points.push(FetchedPoint {
+            attributes: None,
             date,
             value,
             revision_date: date,

@@ -81,6 +81,7 @@ mod tests {
         // Create test data points
         let test_data_points: Vec<NewDataPoint> = (1..=12)
             .map(|month| NewDataPoint {
+                attributes: None,
                 series_id: created_series.id,
                 date: NaiveDate::from_ymd_opt(2024, month, 1).unwrap(),
                 value: Some(BigDecimal::from(100 + month)),
