@@ -285,6 +285,9 @@ enum JobWrite {
         found: Vec<DiscoveredSeries>,
         complete: bool,
         scope_prefix: Option<String>,
+        lifecycle: crate::lifecycle::CatalogLifecycle,
+        catalog_scope: Option<String>,
+        observed_at: chrono::DateTime<Utc>,
         /// `(url, validators)` to store with the discovered series.
         validator: Option<(String, Validators)>,
     },
@@ -619,6 +622,7 @@ impl Worker {
 
         // A re-fetch is a full fetch of every series, ignoring stored validators.
         let refetch = items
+            .as_slice()
             .first()
             .is_some_and(|i| i.job_kind() == JobKind::RefetchSeries);
         // `since` for the batch is the earliest of its series (a full fetch if any has no points).
@@ -687,7 +691,7 @@ impl Worker {
                             .and_then(|_| check_fetched_values(&item.series_id, &series))
                             .map(|_| JobWrite::Series(series)),
                         Some(Err(e)) => Err(e),
-                        None => Err(CrawlError::NotFound(format!(
+                        None => Err(CrawlError::Transient(format!(
                             "{} missing from the batch response",
                             item.series_id
                         ))),
@@ -771,22 +775,24 @@ impl Worker {
             .registry
             .get(source)
             .ok_or_else(|| CrawlError::Permanent(format!("no adapter registered for {source}")))?;
-        let complete = adapter.discovery_is_complete();
+        let observed_at = Utc::now();
         let scope_prefix = adapter.retirement_scope_prefix().map(str::to_string);
         let ctx = self.ctx.clone();
-        {
+        let reference_ok = {
             let adapter = adapter.clone();
             let ctx = ctx.clone();
-            if let Err(error) =
-                guarded(async move { adapter.refresh_reference_data(&ctx).await }).await
-            {
-                tracing::warn!(
-                    %source,
-                    %error,
-                    "refresh_reference_data failed; discovering with existing reference data"
-                );
+            match guarded(async move { adapter.refresh_reference_data(&ctx).await }).await {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(
+                        %source,
+                        %error,
+                        "refresh_reference_data failed; discovering with existing reference data"
+                    );
+                    false
+                }
             }
-        }
+        };
         let discovering = adapter.clone();
         let (found, validator) =
             match guarded(async move { discovering.discover_if_changed(&ctx).await }).await? {
@@ -803,7 +809,19 @@ impl Worker {
             .curated_missing
             .with_label_values(&[source.as_str()])
             .set(i64::try_from(missing.len()).unwrap_or(i64::MAX));
-        let complete = complete && missing.is_empty();
+        let catalog_scope = adapter.catalog_scope();
+        let mut lifecycle = adapter.catalog_lifecycle();
+        let complete = reference_ok
+            && adapter.discovery_is_complete()
+            && (missing.is_empty() || catalog_scope.is_some());
+        if complete && catalog_scope.is_some() {
+            let scope_adapter = adapter.clone();
+            let scope_ctx = self.ctx.clone();
+            lifecycle.scope_ids.extend(
+                guarded(async move { scope_adapter.catalog_scope_members(&scope_ctx).await })
+                    .await?,
+            );
+        }
         self.datasets.check_all(
             source,
             found.iter().map(|d| (d.external_id.as_str(), &d.dataset)),
@@ -812,6 +830,9 @@ impl Worker {
             found,
             complete,
             scope_prefix,
+            lifecycle,
+            catalog_scope,
+            observed_at,
             validator,
         })
     }
@@ -878,9 +899,18 @@ impl Worker {
         let mut conn = self.ctx.pool.get().await.map_err(|e| {
             AppError::DatabaseError(format!("Failed to get database connection: {e}"))
         })?;
+        let pending_metrics = std::sync::Arc::new(std::sync::Mutex::new(Vec::<
+            crate::lifecycle::Reconciled,
+        >::new()));
+        let transaction_metrics = pending_metrics.clone();
+        let tracks_lifecycle = self
+            .registry
+            .get(source)
+            .is_some_and(|a| a.tracks_catalog_lifecycle());
         // This pooled connection starts a fresh transaction. READ COMMITTED rechecks
         // the token after a lock wait; the queue row stays locked through commit.
-        conn.build_transaction()
+        let outcome = conn
+            .build_transaction()
             .read_committed()
             .run::<JobOutcome, AppError, _>(async move |conn| {
                 if item.locked_by.as_deref() != Some(self.config.worker_id.as_str())
@@ -895,11 +925,26 @@ impl Worker {
                         error: result.err().map(|e| e.to_string()),
                     });
                 }
+                // Every fetch job of every source takes the shared source lock before any row
+                // write. A discovery takes it exclusively and then updates series rows, so a
+                // fetch that wrote rows first and locked later could deadlock with it.
+                if matches!(
+                    item.job_kind(),
+                    JobKind::FetchSeries | JobKind::RefetchSeries
+                ) {
+                    let source_id = persist::data_source_id_conn(conn, source).await?;
+                    crate::lifecycle::lock_source_shared(conn, source_id).await?;
+                }
                 let result: Dispatched = match result {
                     Ok(JobWrite::Series(fetched)) => {
-                        let write =
-                            persist::persist_series_conn(conn, source, &item.series_id, &fetched)
-                                .await?;
+                        let write = persist::persist_series_conn(
+                            conn,
+                            source,
+                            &item.series_id,
+                            &fetched,
+                            tracks_lifecycle,
+                        )
+                        .await?;
                         Ok(JobStats {
                             series_id: Some(write.series_id),
                             points_written: write.points_upserted,
@@ -912,21 +957,48 @@ impl Worker {
                         found,
                         complete,
                         scope_prefix,
+                        lifecycle,
+                        catalog_scope,
+                        observed_at,
                         validator,
                     }) => {
+                        // Lifecycle fetch writers take this source's advisory lock (shared)
+                        // before touching series/metadata. Take it exclusively before
+                        // validators and discovered metadata so catalog and per-series
+                        // lifecycle commits cannot hold each other's locks in opposite order.
+                        // Every discovery takes it, complete or not: metadata activation must
+                        // not interleave with a restriction recorded by a concurrent fetch.
+                        let source_id = persist::data_source_id_conn(conn, source).await?;
+                        crate::lifecycle::lock_source_exclusive(conn, source_id).await?;
                         if let Some((url, validators)) = &validator {
                             persist::set_url_validators_conn(conn, source, url, validators).await?;
                         }
                         let metadata_written =
                             persist::persist_discovered_conn(conn, source, &found).await?;
                         if complete {
-                            persist::retire_unlisted_conn(
-                                conn,
-                                source,
-                                &found,
-                                scope_prefix.as_deref(),
-                            )
-                            .await?;
+                            if let Some(scope) = catalog_scope {
+                                let metrics = crate::lifecycle::reconcile_conn(
+                                    conn,
+                                    source,
+                                    &found,
+                                    &lifecycle,
+                                    &scope,
+                                    observed_at,
+                                )
+                                .await?;
+                                transaction_metrics
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .push(metrics);
+                            } else {
+                                persist::retire_unlisted_conn(
+                                    conn,
+                                    source,
+                                    &found,
+                                    scope_prefix.as_deref(),
+                                )
+                                .await?;
+                            }
                         }
                         Ok(JobStats {
                             metadata_written,
@@ -947,12 +1019,30 @@ impl Worker {
                         item,
                         &result,
                         duration + commit_started.elapsed(),
+                        &transaction_metrics,
                     )
                     .await?;
                 }
                 self.transition_conn(conn, source, item, result).await
             })
-            .await
+            .await?;
+        drop(conn);
+        let pending =
+            std::mem::take(&mut *pending_metrics.lock().unwrap_or_else(|e| e.into_inner()));
+        for metrics in &pending {
+            metrics.publish(source);
+        }
+        // Most jobs only update fetch health. Periodic coverage polling already restores
+        // lifecycle gauges after restart, so aggregate again only after a transition or a catalog
+        // snapshot (which may have stored or cleared a guarded snapshot).
+        if pending
+            .iter()
+            .any(|m| m.transitions > 0 || m.unselected_tracked.is_some())
+            && let Err(error) = crate::lifecycle::refresh_metrics(&self.ctx.pool, &[source]).await
+        {
+            tracing::warn!(%source, %error, "publication metrics refresh failed after commit");
+        }
+        Ok(outcome)
     }
 
     fn record_breaker(&self, source: SourceId, error: Option<&CrawlError>) {
@@ -979,7 +1069,45 @@ impl Worker {
         item: &CrawlQueueItem,
         result: &Dispatched,
         duration: Duration,
+        pending_metrics: &std::sync::Mutex<Vec<crate::lifecycle::Reconciled>>,
     ) -> AppResult<()> {
+        let tracks_lifecycle = self
+            .registry
+            .get(source)
+            .is_some_and(|a| a.tracks_catalog_lifecycle());
+        let fetch_miss = match result {
+            Err(CrawlError::NotFound(_)) if tracks_lifecycle => {
+                crate::lifecycle::record_not_found_conn(conn, source, &item.series_id).await?
+            }
+            Err(CrawlError::Absent(_)) if tracks_lifecycle => {
+                crate::lifecycle::record_absent_conn(conn, source, &item.series_id).await?
+            }
+            _ => None,
+        };
+        if let Some(status) = fetch_miss {
+            pending_metrics
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(crate::lifecycle::Reconciled {
+                    transitions: 1,
+                    transition_statuses: vec![status],
+                    ..Default::default()
+                });
+        }
+        if matches!(result, Err(CrawlError::Restricted(_)))
+            && let Some(status) =
+                crate::lifecycle::record_restricted_conn(conn, source, &item.series_id).await?
+        {
+            pending_metrics
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(crate::lifecycle::Reconciled {
+                    guarded: false,
+                    transitions: 1,
+                    transition_statuses: vec![status],
+                    ..Default::default()
+                });
+        }
         let series_id = match result {
             Ok(stats) => stats.series_id,
             Err(_) => persist::find_series_id_conn(conn, source, &item.series_id).await?,
@@ -991,7 +1119,10 @@ impl Worker {
         let Some(series_id) = series_id else {
             if let Err(e) = result
                 && e.kind() == "not_found"
+                && !tracks_lifecycle
             {
+                // Sources without catalog lifecycle tracking retain the legacy inactive
+                // metadata behavior; tracked histories stay browsable with a badge.
                 persist::deactivate_metadata_conn(conn, source, &item.series_id).await?;
             }
             return Ok(());
@@ -1051,6 +1182,8 @@ impl Worker {
             CrawlError::Transient(_) => Some((policy.backoff(attempt), true)),
             CrawlError::Busy { retry_after, .. } => Some((*retry_after, false)),
             CrawlError::NotFound(_)
+            | CrawlError::Absent(_)
+            | CrawlError::Restricted(_)
             | CrawlError::Auth(_)
             | CrawlError::Parse(_)
             | CrawlError::Permanent(_) => None,

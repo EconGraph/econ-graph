@@ -36,8 +36,9 @@ const getDataSourceIcon = (name: string): React.ReactElement => {
 
 /**
  * REQUIREMENT: Show the data sources and how many series each one has.
- * PURPOSE: Let users see where the data comes from and browse available series.
- * Crawler configuration and operational details belong in administrative surfaces.
+ * PURPOSE: Let users see where the data comes from and browse available series. Only figures
+ * the API reports are shown (series counts and publication lifecycle); crawler configuration
+ * and operational details belong in administrative surfaces.
  * @returns The DataSourcesContent component.
  */
 const DataSourcesContent: React.FC = () => {
@@ -173,6 +174,27 @@ const DataSourcesContent: React.FC = () => {
                     {source.seriesCount.toLocaleString()}
                   </Typography>
                 </Box>
+                {source.lifecycleCounts && (
+                  <Box component='dl' sx={{ my: 2 }}>
+                    {(
+                      [
+                        ['Discontinued', source.lifecycleCounts.discontinued],
+                        ['Missing from catalog', source.lifecycleCounts.missingFromCatalog],
+                        ['Retired', source.lifecycleCounts.retired],
+                        ['Superseded', source.lifecycleCounts.superseded],
+                      ] as const
+                    ).map(([label, count]) => (
+                      <Box key={label} sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography component='dt' variant='body2'>
+                          {label}
+                        </Typography>
+                        <Typography component='dd' variant='body2' sx={{ m: 0 }}>
+                          {count.toLocaleString()}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
               </CardContent>
 
               <CardActions>
