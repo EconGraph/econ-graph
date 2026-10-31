@@ -241,8 +241,46 @@ const RAW_DATA_POINTS_SQL: &[(&str, bool)] = &[
     ("econ-graph-crawler/src/persist.rs", false),
 ];
 
+/// Lines of SOURCE outside `#[cfg(test)]` items, numbered from 1. The item an attribute marks
+/// ends at its first `;` outside braces, or where its braces close.
+fn without_test_items(source: &str) -> Vec<(usize, String)> {
+    let mut kept = Vec::new();
+    let mut lines = source.lines().enumerate().peekable();
+    while let Some((n, line)) = lines.next() {
+        if line.trim() != "#[cfg(test)]" {
+            kept.push((n + 1, line.to_string()));
+            continue;
+        }
+        while lines
+            .peek()
+            .is_some_and(|(_, l)| l.trim_start().starts_with("#["))
+        {
+            lines.next();
+        }
+        let mut depth = 0i32;
+        for (_, item) in lines.by_ref() {
+            let mut ended = false;
+            for c in item.chars() {
+                match c {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        ended |= depth == 0;
+                    }
+                    ';' if depth == 0 => ended = true,
+                    _ => {}
+                }
+            }
+            if ended {
+                break;
+            }
+        }
+    }
+    kept
+}
+
 /// Each non-test source file of the workspace's crates, relative to `crates/`, with its code
-/// lines: whole-line comments dropped, and the file cut at its inline `#[cfg(test)]` module.
+/// lines: whole-line comments and `#[cfg(test)]` items dropped.
 fn sources() -> Vec<(String, Vec<(usize, String)>)> {
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut files = Vec::new();
@@ -262,13 +300,9 @@ fn sources() -> Vec<(String, Vec<(usize, String)>)> {
             if !name.ends_with(".rs") || is_test {
                 continue;
             }
-            let lines = std::fs::read_to_string(&path)
-                .unwrap()
-                .lines()
-                .enumerate()
-                .take_while(|(_, line)| line.trim() != "#[cfg(test)]")
+            let lines = without_test_items(&std::fs::read_to_string(&path).unwrap())
+                .into_iter()
                 .filter(|(_, line)| !line.trim_start().starts_with("//"))
-                .map(|(n, line)| (n + 1, line.to_string()))
                 .collect();
             let relative = path.strip_prefix(&crates).unwrap().display().to_string();
             files.push((relative, lines));
@@ -283,16 +317,28 @@ fn sources() -> Vec<(String, Vec<(usize, String)>)> {
 /// - `revision_filter_excluding_synthetic` comes with `exclude_synthetic_legacy_rows`: alone,
 ///   it keeps a synthetic row beside the projection, two rows for one date.
 /// - Raw SQL on `data_points` is only in the files listed in [`RAW_DATA_POINTS_SQL`], and those
-///   that resolve revisions use `synthetic_legacy_row`.
+///   that resolve revisions use `synthetic_legacy_row`; each listed file still has some.
+///
+/// It reads source text, so it checks per file (a second reader in a file that already pairs
+/// the filters isn't told apart) and can't follow aliases; review covers what it can't.
 #[test]
 fn no_reader_lets_synthetic_legacy_rows_count() {
     let mut problems = Vec::new();
+    let mut listed_seen = Vec::new();
     for (file, lines) in sources() {
         let code = lines
             .iter()
             .map(|(_, l)| l.as_str())
             .collect::<Vec<_>>()
             .join("\n");
+        // Whitespace-insensitive, for SQL split across lines or continuation backslashes.
+        let words = code
+            .split(|c: char| c.is_whitespace() || c == '\\')
+            .filter(|w| !w.is_empty())
+            .collect::<Vec<_>>();
+        let raw_sql = words
+            .windows(2)
+            .any(|w| (w[0] == "FROM" || w[0] == "JOIN") && w[1] == "data_points");
         let definition = file.ends_with("econ-graph-core/src/models/data_point.rs");
         for (n, line) in &lines {
             if line.contains("revision_filter(") && !definition {
@@ -307,8 +353,12 @@ fn no_reader_lets_synthetic_legacy_rows_count() {
                 "{file}: revision_filter_excluding_synthetic without exclude_synthetic_legacy_rows"
             ));
         }
-        if code.contains("FROM data_points") || code.contains("JOIN data_points") {
-            match RAW_DATA_POINTS_SQL.iter().find(|(f, _)| file.ends_with(f)) {
+        if raw_sql {
+            let listed = RAW_DATA_POINTS_SQL.iter().find(|(f, _)| file.ends_with(f));
+            if let Some((f, _)) = listed {
+                listed_seen.push(*f);
+            }
+            match listed {
                 None => problems.push(format!(
                     "{file}: raw SQL on data_points; add it to RAW_DATA_POINTS_SQL, using \
                      synthetic_legacy_row if it resolves revisions"
@@ -320,5 +370,23 @@ fn no_reader_lets_synthetic_legacy_rows_count() {
             }
         }
     }
+    for (f, _) in RAW_DATA_POINTS_SQL {
+        if !listed_seen.contains(f) {
+            problems.push(format!(
+                "RAW_DATA_POINTS_SQL lists {f}, which has no raw SQL on data_points"
+            ));
+        }
+    }
     assert!(problems.is_empty(), "{problems:#?}");
+}
+
+#[test]
+fn test_items_are_skipped_up_to_their_end() {
+    let source = "a\n#[cfg(test)]\nfn plan() {\n  x;\n}\nb\n#[cfg(test)]\n#[allow(x)]\nmod t;\nc\n\
+                  #[cfg(test)]\n    let y = 1;\nd\n#[cfg(test)]\nmod tests {\n  fn f() {}\n}\ne";
+    let kept: Vec<_> = without_test_items(source)
+        .into_iter()
+        .map(|(_, l)| l.trim().to_string())
+        .collect();
+    assert_eq!(kept, ["a", "b", "c", "d", "e"]);
 }
