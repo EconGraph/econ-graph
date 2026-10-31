@@ -269,6 +269,43 @@ mod tests {
         .into_iter()
         .collect()
     }
+    /// The shipped Regional rule follows SAGDP2 through its N-suffix rename but not to the
+    /// discontinued SIC-basis SAGDP2S or to other families.
+    #[test]
+    fn shipped_regional_rule_selects_sagdp2_and_sagdp2n_only() {
+        let shipped = BeaSelection::parse(
+            &std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("data")
+                    .join(BEA_RULES_FILE),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let nipa: HashMap<String, String> = shipped
+            .rule
+            .iter()
+            .filter(|r| r.dataset == "NIPA")
+            .map(|r| (r.prefix.clone(), "NIPA table".to_string()))
+            .collect();
+        let regional = ["SAGDP2", "SAGDP2N", "SAGDP2S", "SAINC1", "CAGDP2"]
+            .into_iter()
+            .map(|n| (n.to_string(), "GDP".to_string()))
+            .collect();
+        let catalogs = [(BeaDataset::Nipa, nipa), (BeaDataset::Regional, regional)]
+            .into_iter()
+            .collect();
+        let mut selected: Vec<_> = shipped
+            .select(&catalogs)
+            .unwrap()
+            .into_iter()
+            .filter(|t| t.dataset == BeaDataset::Regional)
+            .map(|t| t.table_name)
+            .collect();
+        selected.sort();
+        assert_eq!(selected, ["SAGDP2", "SAGDP2N"]);
+    }
+
     #[test]
     fn rename_and_new_table_are_selected_without_config_changes() {
         let r = rules();

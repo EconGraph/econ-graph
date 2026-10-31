@@ -552,13 +552,16 @@ pub struct CrawlerCatalogMetrics {
     /// Tracked series the last complete catalog still lists upstream but the selection rules
     /// no longer select. They stay published and scheduled.
     pub unselected_series: IntGaugeVec,
+    /// 1 while a catalog snapshot rejected by the mass-disappearance guard waits for operator
+    /// review (`crawler accept-guarded-catalog`), from the database.
+    pub guarded_snapshot_pending: IntGaugeVec,
 }
 
 impl CrawlerCatalogMetrics {
     /// Materialize bounded counter labels at zero before events, so Prometheus can
     /// observe an increase from a baseline rather than seeing only a first value of one.
     pub fn initialize_source(&self, source: &str) {
-        for reason in ["volume", "mass_disappearance"] {
+        for reason in ["volume", "mass_disappearance", "fetch_mass_missing"] {
             self.guard_rejections_total
                 .with_label_values(&[source, reason]);
         }
@@ -573,6 +576,7 @@ impl CrawlerCatalogMetrics {
             self.transitions_total.with_label_values(&[source, status]);
         }
         self.unselected_series.with_label_values(&[source]);
+        self.guarded_snapshot_pending.with_label_values(&[source]);
     }
 
     /// Register catalog metrics with the supplied registry.
@@ -614,6 +618,13 @@ impl CrawlerCatalogMetrics {
             ),
             &["source", "rule"],
         )?;
+        let guarded_snapshot_pending = IntGaugeVec::new(
+            Opts::new(
+                "crawler_catalog_guarded_snapshot_pending",
+                "1 while a guarded catalog snapshot waits for operator review",
+            ),
+            &["source"],
+        )?;
         let unselected_series = IntGaugeVec::new(
             Opts::new(
                 "crawler_catalog_unselected_series",
@@ -624,6 +635,7 @@ impl CrawlerCatalogMetrics {
         registry.register(Box::new(series.clone()))?;
         registry.register(Box::new(rule_matches.clone()))?;
         registry.register(Box::new(rule_configured.clone()))?;
+        registry.register(Box::new(guarded_snapshot_pending.clone()))?;
         registry.register(Box::new(unselected_series.clone()))?;
         Ok(Self {
             guard_rejections_total,
@@ -632,6 +644,7 @@ impl CrawlerCatalogMetrics {
             rule_matches,
             rule_configured,
             unselected_series,
+            guarded_snapshot_pending,
         })
     }
 }
@@ -824,6 +837,7 @@ mod queue_metrics_tests {
             "crawler_series_lifecycle",
             "crawler_catalog_rule_matches",
             "crawler_catalog_rule_configured",
+            "crawler_catalog_guarded_snapshot_pending",
             "crawler_catalog_unselected_series",
         ] {
             assert!(families.iter().any(|f| f.name() == name));

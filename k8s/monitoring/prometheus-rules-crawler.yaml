@@ -269,6 +269,17 @@ data:
             summary: '{{ $labels.source }} catalog rejected by {{ $labels.reason }} guard'
             description: A catalog exceeded its configured selection limit or disappearance threshold. The worker retained stored histories; inspect its catalog warning and upstream completeness before changing selection rules or retrying. For mass_disappearance, review and accept a correct snapshot with `crawler accept-guarded-catalog` (crawler coverage runbook).
 
+        # A guarded snapshot waits for operator review until accepted or replaced. The one-off
+        # guard rejection alert clears after an hour; this one stays while the review is pending.
+        - alert: CrawlerCatalogGuardedSnapshotPending
+          expr: max by (source) (crawler_catalog_guarded_snapshot_pending{kubernetes_namespace="econ-graph"}) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: '{{ $labels.source }} has a guarded catalog snapshot waiting for review'
+            description: A {{ $labels.source }} catalog lost more than 20% of the last accepted catalog and was not applied. Review it with `crawler accept-guarded-catalog --source {{ $labels.source }}` and accept it only if the upstream change is real (crawler coverage runbook).
+
         - alert: CrawlerSeriesPublicationChanged
           expr: sum by (source, status) (increase(crawler_series_lifecycle_transitions_total{status=~"discontinued|missing_from_catalog|retired|superseded|restricted"}[1h])) > 0
           for: 1m

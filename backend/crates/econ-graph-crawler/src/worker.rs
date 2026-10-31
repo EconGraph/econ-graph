@@ -956,10 +956,10 @@ impl Worker {
                         // before touching series/metadata. Take it exclusively before
                         // validators and discovered metadata so catalog and per-series
                         // lifecycle commits cannot hold each other's locks in opposite order.
-                        if complete && catalog_scope.is_some() {
-                            let source_id = persist::data_source_id_conn(conn, source).await?;
-                            crate::lifecycle::lock_source_exclusive(conn, source_id).await?;
-                        }
+                        // Every discovery takes it, complete or not: metadata activation must
+                        // not interleave with a restriction recorded by a concurrent fetch.
+                        let source_id = persist::data_source_id_conn(conn, source).await?;
+                        crate::lifecycle::lock_source_exclusive(conn, source_id).await?;
                         if let Some((url, validators)) = &validator {
                             persist::set_url_validators_conn(conn, source, url, validators).await?;
                         }
@@ -1023,8 +1023,11 @@ impl Worker {
             metrics.publish(source);
         }
         // Most jobs only update fetch health. Periodic coverage polling already restores
-        // lifecycle gauges after restart, so aggregate again only for an actual transition.
-        if pending.iter().any(|m| m.transitions > 0)
+        // lifecycle gauges after restart, so aggregate again only after a transition or a catalog
+        // snapshot (which may have stored or cleared a guarded snapshot).
+        if pending
+            .iter()
+            .any(|m| m.transitions > 0 || m.unselected_tracked.is_some())
             && let Err(error) = crate::lifecycle::refresh_metrics(&self.ctx.pool, &[source]).await
         {
             tracing::warn!(%source, %error, "publication metrics refresh failed after commit");
@@ -1062,6 +1065,11 @@ impl Worker {
             .registry
             .get(source)
             .is_some_and(|a| a.tracks_catalog_lifecycle());
+        // Every crawl_status write below happens under the shared source lock, so it cannot
+        // interleave with a catalog reconciliation's publication-state writes. Nothing else is
+        // locked yet in this transaction except the queue row, so taking it first is safe.
+        let source_id = persist::data_source_id_conn(conn, source).await?;
+        crate::lifecycle::lock_source_shared(conn, source_id).await?;
         let fetch_miss = match result {
             Err(CrawlError::NotFound(_)) if tracks_lifecycle => {
                 crate::lifecycle::record_not_found_conn(conn, source, &item.series_id).await?
@@ -1069,16 +1077,16 @@ impl Worker {
             Err(CrawlError::Absent(_)) if tracks_lifecycle => {
                 crate::lifecycle::record_absent_conn(conn, source, &item.series_id).await?
             }
-            _ => None,
+            _ => crate::lifecycle::FetchMissOutcome::default(),
         };
-        if let Some(status) = fetch_miss {
+        if fetch_miss.status.is_some() || fetch_miss.guarded {
             pending_metrics
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .push(crate::lifecycle::Reconciled {
-                    guarded: false,
-                    transitions: 1,
-                    transition_statuses: vec![status],
+                    transitions: usize::from(fetch_miss.status.is_some()),
+                    transition_statuses: fetch_miss.status.into_iter().collect(),
+                    fetch_guarded: fetch_miss.guarded,
                     ..Default::default()
                 });
         }

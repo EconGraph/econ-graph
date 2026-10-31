@@ -164,3 +164,27 @@ tests:
           so they keep their publication state and are still fetched. The worker log's
           catalog warning counts them; review whether the rules in data/catalog_selection/
           should follow the upstream change.
+- interval: 1m
+  input_series:
+  - series: crawler_catalog_guarded_snapshot_pending{kubernetes_namespace="econ-graph",pod="w1",source="BEA"}
+    values: 0x10 1x30 0x30
+  - series: crawler_catalog_guarded_snapshot_pending{kubernetes_namespace="econ-graph-branch",pod="b1",source="FRED"}
+    values: 1x70
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CrawlerCatalogGuardedSnapshotPending
+    exp_alerts: []
+  - eval_time: 35m
+    alertname: CrawlerCatalogGuardedSnapshotPending
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        source: BEA
+      exp_annotations:
+        summary: BEA has a guarded catalog snapshot waiting for review
+        description: A BEA catalog lost more than 20% of the last accepted catalog and was
+          not applied. Review it with `crawler accept-guarded-catalog --source BEA` and
+          accept it only if the upstream change is real (crawler coverage runbook).
+  - eval_time: 65m
+    alertname: CrawlerCatalogGuardedSnapshotPending
+    exp_alerts: []

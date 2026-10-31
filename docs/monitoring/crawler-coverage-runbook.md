@@ -119,23 +119,37 @@ of a `title_contains` rule, or a BEA table retitled out of a title rule) keeps i
 publication state and stays scheduled. The worker logs a warning, publishes
 `crawler_catalog_unselected_series{source}`, and `CrawlerCatalogSeriesUnselected` (info)
 suggests reviewing the rules. That gauge changes only when a complete catalog snapshot is
-reconciled; between discoveries it keeps the last snapshot's count.
+reconciled; between discoveries it keeps the last snapshot's count. A FRED series that
+moves out of the walked releases and categories altogether is no longer listed anywhere the
+walk looks, so it becomes `missing_from_catalog` after three catalogs and stops updating,
+even though FRED still publishes it; add it as an `include` override to keep it current.
+
+The BEA rule `prefix = "SAGDP2"` selects every Regional table whose name starts with
+`SAGDP2` except those in `exclude`: today `SAGDP2`, and `SAGDP2N` while BEA lists the table
+under that name. `SAGDP2S`, the discontinued SIC-basis series, is excluded.
 Confirmed fetch-level NotFound responses use a separate consecutive-failure counter, reset
 by a successful fetch. Only definite answers count: a FRED 400 "series does not exist" or an
-HTTP 404. Three in a row retire a series from fetching. A BEA GetData response that omits a
+HTTP 404. Three in a row retire a series from fetching, unless more than 20% of the
+source's active series (and at least ten) currently have fetch misses: an upstream incident
+answering every request with 404 is then more likely than real removals, so nothing is
+fetch-retired, and `crawler_catalog_guard_rejections_total{reason="fetch_mass_missing"}`
+counts each skipped retirement. A BEA GetData response that omits a
 requested line or area is weaker evidence (`crawl_status` `absent`) with its own counter:
 six in a row retire the series from fetching. That includes an empty response, which is what
 BEA returns when every requested Regional area is gone or a NIPA table is no longer published
 at that frequency. Both kinds back off ten refresh intervals between attempts, so an omitted
 line takes at least as long to retire as a NotFound, and a table that is briefly empty during
-a BEA update cannot retire anything. Omissions count only for series the current accepted
-catalog does not list outright: lines under tables the rules no longer select and legacy BEA
-rows outside the rules. For a listed series the catalog alone decides. A FRED `/series`
+a BEA update cannot retire anything. Neither NotFound nor omissions are counted for a series
+the current accepted catalog lists outright: the catalog alone decides its publication
+state, and its failed fetches still raise the ordinary crawl-failure alerts. Omissions do
+count for lines under tables the rules no longer select and for legacy BEA rows outside the
+rules. Only an outright listing or a successful fetch clears a fetch retirement; a series
+that is merely still published outside the rules stays retired. Any return to active clears
+both fetch counters. A FRED `/series`
 response with no series is a transient failure and counts as neither. The
 scheduler still probes a fetch-retired series once every 12 refresh intervals (a series with
 no stored history: at most once per queue retention), and a successful probe makes it active
-again. A complete catalog that lists the series again also makes it active and restarts both
-counters. Per-series writers (fetch success,
+again. A complete catalog that lists the series again also makes it active. Per-series writers (fetch success,
 NotFound, restriction) serialize only on the same series, so normal fetches and forced
 refetches of one series cannot race while different series persist concurrently; a complete
 catalog reconciliation briefly excludes them for its source. Fetch success never erases
@@ -153,7 +167,34 @@ catalog absence evidence: a delisted series can still serve historical observati
 `restricted` is sticky. Once a catalog or a fetch reports a legal restriction, no later
 catalog, rule change, successful fetch or accepted guarded catalog clears it; the series stays
 hidden even if upstream lifts the restriction. Lifting it is a reviewed manual change in the
-data database: the series' `series_lifecycle` status and its `is_active` flags.
+data database. First confirm upstream that the restriction is gone (otherwise the next
+catalog or fetch restricts it again), then run this in one transaction with `psql` against
+the data database, setting the source's `data_sources.name` and the series id:
+
+```sql
+\set source 'Federal Reserve Economic Data (FRED)'
+\set series 'SERIES_ID'
+BEGIN;
+-- Expect exactly one row, with status restricted.
+SELECT l.status, l.since FROM series_lifecycle l JOIN data_sources ds ON ds.id = l.source_id
+ WHERE ds.name = :'source' AND l.external_id = :'series';
+UPDATE series_lifecycle l SET status = 'active', since = NULL
+  FROM data_sources ds
+ WHERE ds.id = l.source_id AND ds.name = :'source' AND l.external_id = :'series'
+   AND l.status = 'restricted';                     -- expect UPDATE 1
+UPDATE economic_series es SET is_active = true, crawl_status = 'success'
+  FROM data_sources ds
+ WHERE ds.id = es.source_id AND ds.name = :'source' AND es.external_id = :'series';
+                                                    -- expect UPDATE 0 or 1
+UPDATE series_metadata sm SET is_active = true
+  FROM data_sources ds
+ WHERE ds.id = sm.source_id AND ds.name = :'source' AND sm.external_id = :'series';
+                                                    -- expect UPDATE 0 or 1
+COMMIT;                                             -- ROLLBACK if any count differs
+```
+
+The series' observations were retained while it was restricted; the next scheduled fetch
+brings it current.
 
 Data Sources shows lifecycle counts. Series pages distinguish proposed successors from
 confirmed successors. A proposed match is a review hint: compare source definitions, units
@@ -165,6 +206,38 @@ crawler confirm-successor --source FRED --series OLD_ID --successor NEW_ID
 
 This command records the reviewed link. It never merges histories, moves annotations or
 deletes either series. Keeping values separate avoids joining numbers with different bases.
+It cannot be undone with a command, and `superseded` takes precedence over everything but a
+restriction: a later catalog that lists the old id again does not reactivate it. Confirm only
+after the review above.
+
+### Before deploying catalog selection
+
+The first deployment of catalog-driven discovery, and any later change to the selection
+files, needs two checks against the data database and the live APIs:
+
+1. **FRED volume.** The GDP release walk is capped at `max_series` in
+   `catalog_selection/fred.toml` (500). Count what the rule selects today, and record the
+   count in the release ticket:
+
+   ```sh
+   for offset in 0 1000 2000 3000; do
+     curl -s "https://api.stlouisfed.org/fred/release/series?release_id=53&api_key=$FRED_API_KEY&file_type=json&limit=1000&offset=$offset"
+   done | jq -s '[.[].seriess[] | select((.title | ascii_downcase | contains("gross domestic product"))
+     and (.frequency == "Quarterly" or .frequency == "Annual"))] | length'
+   ```
+
+   Add the `include` overrides. If the total exceeds `max_series`, every FRED discovery
+   fails the volume guard; raise `max_series` in the deployed `catalog_selection/fred.toml`
+   (it does not change the selection scope) and restart the workers. Each newly selected
+   series then fetches its full vintage history, in windows of up to 1,000 vintage dates.
+2. **BEA rows that will stay inactive.** Rows an earlier unlisted-series sweep deactivated
+   stay inactive, and unscheduled, until a catalog lists them outright. Count them before
+   deploying and record the number:
+
+   ```sql
+   SELECT count(*) FROM economic_series es JOIN data_sources ds ON ds.id = es.source_id
+    WHERE ds.name = 'Bureau of Economic Analysis (BEA)' AND NOT es.is_active;
+   ```
 
 ### Reviewing a guarded catalog
 
@@ -188,16 +261,22 @@ crawler accept-guarded-catalog --source BEA --accept --guarded-at 2026-10-30T18:
 If a newer snapshot was guarded after your review, the command refuses and nothing changes;
 review the new one instead.
 
-Accepting records one absence for each listed series, exactly as an unguarded catalog would,
+Accepting records one absence for each newly missing series it listed, exactly as an
+unguarded catalog would,
 and makes the snapshot the new comparison baseline. Two further complete catalogs are still
 needed before those series show as missing. Nothing is deleted. If the snapshot was
 incomplete, do not accept it; the next complete catalog that passes the guard replaces it.
+
+While a guarded snapshot waits, `crawler_catalog_guarded_snapshot_pending{source}` is 1 (from
+the database, refreshed after each catalog and on the coverage polling interval) and
+`CrawlerCatalogGuardedSnapshotPending` stays firing, so a pending review is not forgotten
+after the one-off `CrawlerCatalogGuardRejected` alert clears.
 
 The worker publishes `crawler_series_lifecycle{source,status}` counts and
 `crawler_series_lifecycle_transitions_total{source,status}` transition counters.
 `CrawlerSeriesPublicationChanged` is informational and points operators to source counts
 and successor candidates. `crawler_catalog_guard_rejections_total{source,reason}` distinguishes
-`volume` and `mass_disappearance`. Counts refresh from the database on the coverage polling
+`volume`, `mass_disappearance` and `fetch_mass_missing`. Counts refresh from the database on the coverage polling
 interval. Event counters are process-local: an increase requires scraping around the event.
 Alert rules do not send notifications without Alertmanager.
 

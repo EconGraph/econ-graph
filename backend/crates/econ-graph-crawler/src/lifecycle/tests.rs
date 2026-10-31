@@ -1648,8 +1648,8 @@ async fn omitted_lines_fetch_retire_only_after_six_responses() {
     db.drop().await;
 }
 
-/// When a catalog lists a fetch-retired series again, its fetch evidence restarts, so one
-/// later NotFound does not retire it straight away.
+/// When a catalog lists a fetch-retired series again, its fetch evidence restarts, and while
+/// it stays listed, NotFound is not counted at all.
 #[tokio::test]
 async fn catalog_reactivation_resets_fetch_miss_counters() {
     let Some(db) = fetch_counter_db("eco464_catalog_reactivates").await else {
@@ -1685,9 +1685,12 @@ async fn catalog_reactivation_resets_fetch_miss_counters() {
         ("active", false, 0)
     );
     assert_eq!(absent_count(pool, id).await, 0);
-    fetch_miss(pool, id).await;
+    // Listed outright now, so the catalog alone decides: a later NotFound is not counted.
+    for _ in 0..NOT_FOUND_RETIRE_AFTER {
+        fetch_miss(pool, id).await;
+    }
     let state = fetch_evidence(pool, id).await;
-    assert_eq!((state.status.as_str(), state.fetch_misses), ("active", 1));
+    assert_eq!((state.status.as_str(), state.fetch_misses), ("active", 0));
     db.drop().await;
 }
 
@@ -1855,5 +1858,228 @@ async fn listing_under_older_rules_does_not_exempt_absent_evidence() {
     absent_miss(pool, "new_rules").await;
     assert_eq!(absent_count(pool, "old_rules").await, 1);
     assert_eq!(absent_count(pool, "new_rules").await, 0);
+    db.drop().await;
+}
+
+/// A series still published outside the rules (drifted) that fetch evidence retired stays
+/// retired across catalogs; only an outright listing (or a successful fetch) reactivates it.
+#[tokio::test]
+async fn drifted_fetch_retired_series_stays_retired_until_listed() {
+    let Some(db) = fetch_counter_db("eco464_drifted_retired").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let (kept, drifted) = (counter_series("kept"), counter_series("drifted"));
+    persist::persist_discovered(pool, SourceId::Fred, &[kept.clone(), drifted.clone()])
+        .await
+        .unwrap();
+    let start = Utc::now();
+    let at = |n: i64| start + chrono::Duration::seconds(n);
+    let both = vec![kept.clone(), drifted.clone()];
+    let only_kept = vec![kept.clone()];
+    let unselected = CatalogLifecycle {
+        unselected_ids: vec!["drifted".into()],
+        ..Default::default()
+    };
+    reconcile_scope(pool, &both, &CatalogLifecycle::default(), "rules", at(0)).await;
+    reconcile_scope(pool, &only_kept, &unselected, "rules", at(1)).await;
+    for _ in 0..NOT_FOUND_RETIRE_AFTER {
+        fetch_miss(pool, "drifted").await;
+    }
+    assert_eq!(fetch_evidence(pool, "drifted").await.status, "retired");
+    for n in 2..5 {
+        reconcile_scope(pool, &only_kept, &unselected, "rules", at(n)).await;
+        let state = fetch_evidence(pool, "drifted").await;
+        assert_eq!(
+            (
+                state.status.as_str(),
+                state.fetch_retired,
+                state.fetch_misses
+            ),
+            ("retired", true, NOT_FOUND_RETIRE_AFTER),
+            "catalog {n}"
+        );
+    }
+    reconcile_scope(pool, &both, &CatalogLifecycle::default(), "rules", at(5)).await;
+    let state = fetch_evidence(pool, "drifted").await;
+    assert_eq!(
+        (
+            state.status.as_str(),
+            state.fetch_retired,
+            state.fetch_misses
+        ),
+        ("active", false, 0)
+    );
+    db.drop().await;
+}
+
+/// Any return to active clears stale fetch counters, even without an outright listing.
+#[tokio::test]
+async fn return_to_active_clears_fetch_counters() {
+    let Some(db) = fetch_counter_db("eco464_return_active").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let (kept, back) = (counter_series("kept"), counter_series("back"));
+    persist::persist_discovered(pool, SourceId::Fred, &[kept.clone(), back.clone()])
+        .await
+        .unwrap();
+    let start = Utc::now();
+    let at = |n: i64| start + chrono::Duration::seconds(n);
+    // Two series so losing one is 50%: accept each snapshot after review.
+    reconcile_scope(
+        pool,
+        &[kept.clone(), back.clone()],
+        &CatalogLifecycle::default(),
+        "rules",
+        at(0),
+    )
+    .await;
+    for n in 1..=3 {
+        reconcile_scope(
+            pool,
+            std::slice::from_ref(&kept),
+            &CatalogLifecycle::default(),
+            "rules",
+            at(n),
+        )
+        .await;
+        if let Ok(review) = review_guarded_catalog(pool, SourceId::Fred, None).await {
+            review_guarded_catalog(pool, SourceId::Fred, Some(review.guarded_at))
+                .await
+                .unwrap();
+        }
+    }
+    assert_eq!(
+        fetch_evidence(pool, "back").await.status,
+        "missing_from_catalog"
+    );
+    fetch_miss(pool, "back").await;
+    fetch_miss(pool, "back").await;
+    assert_eq!(fetch_evidence(pool, "back").await.fetch_misses, 2);
+    let drifted = CatalogLifecycle {
+        unselected_ids: vec!["back".into()],
+        ..Default::default()
+    };
+    reconcile_scope(pool, std::slice::from_ref(&kept), &drifted, "rules", at(4)).await;
+    let state = fetch_evidence(pool, "back").await;
+    assert_eq!((state.status.as_str(), state.fetch_misses), ("active", 0));
+    db.drop().await;
+}
+
+/// An upstream incident that answers every request with 404 must not fetch-retire the
+/// whole source: while more than 20% of its active series have misses, nothing retires.
+#[tokio::test]
+async fn fetch_only_mass_retirement_is_guarded() {
+    let Some(db) = fetch_counter_db("eco464_fetch_guard").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let ids: Vec<String> = (0..12).map(|i| format!("s{i}")).collect();
+    for id in &ids {
+        persist::persist_series(pool, SourceId::Fred, id, &successful_history())
+            .await
+            .unwrap();
+    }
+    for _ in 1..NOT_FOUND_RETIRE_AFTER {
+        for id in &ids {
+            fetch_miss(pool, id).await;
+        }
+    }
+    let mut conn = pool.get().await.unwrap();
+    let outcome = conn
+        .transaction::<_, AppError, _>(async |conn| {
+            record_not_found_conn(conn, SourceId::Fred, "s0").await
+        })
+        .await
+        .unwrap();
+    assert!(outcome.guarded);
+    assert_eq!(outcome.status, None);
+    let s0 = fetch_evidence(pool, "s0").await;
+    assert_eq!(
+        (s0.status.as_str(), s0.fetch_misses),
+        ("active", NOT_FOUND_RETIRE_AFTER)
+    );
+    // Once the others recover, the same series retires normally.
+    for id in &ids[1..] {
+        persist::persist_series(pool, SourceId::Fred, id, &successful_history())
+            .await
+            .unwrap();
+    }
+    let outcome = conn
+        .transaction::<_, AppError, _>(async |conn| {
+            record_not_found_conn(conn, SourceId::Fred, "s0").await
+        })
+        .await
+        .unwrap();
+    assert!(!outcome.guarded);
+    assert_eq!(fetch_evidence(pool, "s0").await.status, "retired");
+    drop(conn);
+    db.drop().await;
+}
+
+/// A stored row that was already inactive (for example deactivated by the earlier
+/// unlisted-series sweep) and that the rules enroll as a scope member stays inactive until a
+/// catalog lists it outright.
+#[tokio::test]
+async fn enrolled_inactive_rows_stay_inactive_until_listed() {
+    let Some(db) = fetch_counter_db("eco464_inactive_enrolled").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let (kept, old) = (counter_series("kept"), counter_series("old"));
+    persist::persist_discovered(pool, SourceId::Fred, &[kept.clone(), old.clone()])
+        .await
+        .unwrap();
+    for id in ["kept", "old"] {
+        persist::persist_series(pool, SourceId::Fred, id, &successful_history())
+            .await
+            .unwrap();
+    }
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query("UPDATE economic_series SET is_active=false WHERE external_id='old'")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    diesel::sql_query("UPDATE series_metadata SET is_active=false WHERE external_id='old'")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    #[derive(QueryableByName)]
+    struct Active {
+        #[diesel(sql_type = diesel::sql_types::Bool)]
+        es: bool,
+        #[diesel(sql_type = diesel::sql_types::Bool)]
+        sm: bool,
+    }
+    const ACTIVE_OLD: &str =
+        "SELECT es.is_active AS es, sm.is_active AS sm FROM economic_series es \
+         JOIN series_metadata sm ON sm.source_id=es.source_id AND sm.external_id=es.external_id \
+         WHERE es.external_id='old'";
+    let start = Utc::now();
+    let scope = CatalogLifecycle {
+        scope_ids: vec!["old".into()],
+        ..Default::default()
+    };
+    reconcile_scope(pool, std::slice::from_ref(&kept), &scope, "rules", start).await;
+    let a: Active = diesel::sql_query(ACTIVE_OLD)
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!((a.es, a.sm), (false, false));
+    reconcile_scope(
+        pool,
+        &[kept.clone(), old.clone()],
+        &scope,
+        "rules",
+        start + chrono::Duration::seconds(1),
+    )
+    .await;
+    let a: Active = diesel::sql_query(ACTIVE_OLD)
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!((a.es, a.sm), (true, true));
+    drop(conn);
     db.drop().await;
 }
