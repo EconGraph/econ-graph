@@ -9,7 +9,7 @@ import { expect, test } from '@playwright/test';
 import { DEPLOYED } from '../env';
 import { SEEDED } from '../fixtures';
 import { seededSeriesId } from '../auth/helpers';
-import { asShown, parseShown, splitSeriesCsv } from '../seriesPage';
+import { asShown, csvTextField, parseShown, splitSeriesCsv } from '../seriesPage';
 
 // Live QA: downloading CSV from a series page saves every point the chart shows, in its own
 // metadata-then-data format (src/utils/seriesCsv.ts): five `label,value` rows (Title, Source,
@@ -22,17 +22,18 @@ test.describe('download CSV', () => {
     page,
     request,
   }) => {
-    const series = SEEDED.fredGdp;
+    const series = SEEDED.blsCpi;
     const seriesId = await seededSeriesId(request, series);
     await page.goto(`/series/${seriesId}`);
-    // fred/observations_gdp.json, oldest first: the chart's default range shows every point,
-    // including the missing one ("." in the fixture), which the CSV keeps as an empty value.
+    // bls/cpi_monthly.json, oldest first: the chart's default range shows every monthly point,
+    // including the missing one ("-" in the fixture), which the CSV keeps as an empty value, and
+    // not the annual average (period M13).
     const shownObservations: Array<{ date: string; value: number | null }> = [
-      { date: '2025-04-01', value: 30485.729 },
-      { date: '2025-07-01', value: 31095.089 },
-      { date: '2025-10-01', value: null },
-      { date: '2026-01-01', value: 31722.514 },
-      { date: '2026-04-01', value: 32101.6 },
+      { date: '2023-11-01', value: null },
+      { date: '2023-12-01', value: 306.746 },
+      { date: '2024-01-01', value: 308.417 },
+      { date: '2024-02-01', value: 310.326 },
+      { date: '2024-03-01', value: 312.332 },
     ];
     await expect(page.getByRole('columnheader', { name: 'Date' })).toBeVisible();
 
@@ -47,17 +48,21 @@ test.describe('download CSV', () => {
     const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
     const lines = text.trim().split('\r\n');
 
-    expect(lines[0]).toBe(`Title,${series.title}`);
-    expect(lines[1]).toBe(`Source,${series.sourceName}`);
-    expect(lines[2]).toBe(`Units,${series.units}`);
+    // CPI's title holds commas, so it is quoted.
+    expect(lines[0]).toBe(`Title,${csvTextField(series.title)}`);
+    expect(lines[1]).toBe(`Source,${csvTextField(series.sourceName)}`);
+    expect(lines[2]).toBe(`Units,${csvTextField(series.units)}`);
     expect(lines[3]).toBe('Transformation,None');
     expect(lines[4]).toMatch(/^Retrieved at,/);
-    // Then FRED's notice and terms link (ECO-767), and the data header.
+    // Then BLS's citation, notice, retrieval date and terms link (ECO-767), and the data header.
     const { notice, data } = splitSeriesCsv(lines);
-    expect(notice).toEqual([
-      'Notice,This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.',
-      'Terms of use,https://fred.stlouisfed.org/docs/api/terms_of_use.html',
-    ]);
+    expect(notice).toHaveLength(4);
+    expect(notice[0]).toBe('Citation,Source: U.S. Bureau of Labor Statistics');
+    expect(notice[1]).toBe(
+      'Notice,BLS.gov cannot vouch for the data or analyses derived from these data after the data have been retrieved from BLS.gov.'
+    );
+    expect(notice[2]).toMatch(/^Retrieved from source,\d{4}-\d{2}-\d{2}$/);
+    expect(notice[3]).toBe('Terms of use,https://www.bls.gov/developers/termsOfService.htm');
 
     const rows = data.map(line => {
       const [date, value] = line.split(',');
@@ -68,7 +73,7 @@ test.describe('download CSV', () => {
       // Fixture mode: one data row per observation, in the fixture's own (oldest-first) order.
       expect(rows).toEqual(shownObservations);
     } else {
-      // Deployed mode: live GDP has decades of observations, so check structure instead of
+      // Deployed mode: live CPI has decades of observations, so check structure instead of
       // exact values — strictly ascending dates, every value numeric or missing, and the export
       // has the same latest non-missing point as the page's Recent Data table.
       expect(rows.length).toBeGreaterThan(0);
@@ -87,11 +92,11 @@ test.describe('download CSV', () => {
         .getByRole('table', { name: 'Recent observations' })
         .getByRole('row')
         .nth(1);
-      // Quarterly GDP's date reads as its quarter ("2026 Q2"), and its value with the decimals
-      // the series carries, up to 2.
+      // Monthly CPI's date reads as a calendar date ("Mar 1, 2024"), and its value with the
+      // decimals the series carries, up to 2.
       const dateCell = latestRow.getByRole('cell').nth(0);
       const valueCell = latestRow.getByRole('cell').nth(1);
-      await expect(dateCell).toHaveText(/^\d{4} Q[1-4]$/);
+      await expect(dateCell).toHaveText(/^[A-Z][a-z]{2} \d{1,2}, \d{4}$/);
       const shownDate = await dateCell.innerText();
       expect(asShown(latest.date, shownDate)).toBe(shownDate);
       expect(Math.abs(parseShown(await valueCell.innerText()) - latest.value)).toBeLessThan(0.01);
