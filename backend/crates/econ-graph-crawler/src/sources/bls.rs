@@ -451,55 +451,60 @@ struct DataPoint {
     period: String,
     value: String,
     #[serde(default)]
-    footnotes: Option<Vec<Footnote>>,
+    footnotes: Option<Vec<serde_json::Map<String, serde_json::Value>>>,
 }
 
-/// Verbatim footnotes retain optional fields and provider extensions.
-type Footnote = econ_graph_core::models::ObservationFootnote;
-
 impl DataPoint {
-    /// Footnotes that carry a code or text (the `{}` placeholder dropped).
-    fn footnotes(&self) -> impl Iterator<Item = &Footnote> {
-        self.footnotes
-            .iter()
-            .flatten()
-            .filter(|f| f.code.is_some() || f.text.is_some() || !f.extra.is_empty())
+    /// Raw footnote objects, excluding only BLS's literal `{}` placeholder.
+    fn footnotes(&self) -> impl Iterator<Item = &serde_json::Map<String, serde_json::Value>> {
+        self.footnotes.iter().flatten().filter(|f| !f.is_empty())
     }
 
     /// Capture what this response actually supplied, without backfilling unknown history.
     fn attributes(&self) -> serde_json::Value {
-        use econ_graph_core::models::ObservationAttributes;
         let notes = self
             .footnotes
             .as_ref()
             .map(|_| self.footnotes().cloned().collect::<Vec<_>>());
-        let status_flags = notes
-            .as_ref()
-            .map(|notes| notes.iter().filter_map(|f| f.code.clone()).collect());
+        let status_flags = notes.as_ref().map(|notes| {
+            notes
+                .iter()
+                .filter_map(|f| f.get("code").and_then(serde_json::Value::as_str))
+                .collect::<Vec<_>>()
+        });
         let estimated = notes.as_ref().map(|notes| {
             notes.iter().any(|f| {
-                f.text.as_deref().is_some_and(|text| {
-                    // Do not guess survey-specific code meanings: retain those in status_flags.
-                    let text = text.trim().trim_end_matches('.');
-                    text.eq_ignore_ascii_case("estimated") || text.eq_ignore_ascii_case("estimate")
-                })
+                f.get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|text| {
+                        // Do not guess survey-specific code meanings: retain those in status_flags.
+                        let text = text.trim().trim_end_matches('.');
+                        text.eq_ignore_ascii_case("estimated")
+                            || text.eq_ignore_ascii_case("estimate")
+                    })
             })
         });
-        serde_json::to_value(ObservationAttributes {
-            source: "BLS".into(),
-            status_flags,
-            footnotes: notes,
-            preliminary: self.footnotes.as_ref().map(|_| self.is_preliminary()),
-            estimated,
-            raw_value: Some(self.value.clone()),
+        // Serializing through the typed public helper would turn omitted code/text
+        // fields into explicit nulls. Keep provider objects intact and derive only
+        // the interpretation fields separately.
+        serde_json::json!({
+            "source": "BLS",
+            "status_flags": status_flags,
+            "footnotes": notes,
+            "preliminary": self.footnotes.as_ref().map(|_| self.is_preliminary()),
+            "estimated": estimated,
+            "raw_value": self.value,
         })
-        .expect("observation attributes serialize")
     }
 
     /// Whether BLS marked the value preliminary (footnote code `P`).
     fn is_preliminary(&self) -> bool {
-        self.footnotes()
-            .any(|f| f.code.as_deref().map(str::trim) == Some("P"))
+        self.footnotes().any(|f| {
+            f.get("code")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                == Some("P")
+        })
     }
 
     /// The footnotes as `code: text` pairs, for logs.
@@ -508,8 +513,14 @@ impl DataPoint {
             .map(|f| {
                 format!(
                     "{}: {}",
-                    f.code.as_deref().unwrap_or("").trim(),
-                    f.text.as_deref().unwrap_or("").trim()
+                    f.get("code")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .trim(),
+                    f.get("text")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .trim()
                 )
             })
             .collect::<Vec<_>>()
@@ -3475,6 +3486,69 @@ mod tests {
             .attributes
             .unwrap();
         assert_eq!(unknown["estimated"], false);
+    }
+
+    #[test]
+    fn captured_footnotes_preserve_missing_and_null_fields() {
+        let cases = [
+            (json!({"text":"Estimated."}), json!([]), false, true),
+            (json!({"code":"P"}), json!(["P"]), true, false),
+            (json!({"code":null}), json!([]), false, false),
+            (json!({"text":null}), json!([]), false, false),
+            (json!({"code":null,"text":null}), json!([]), false, false),
+            (json!({"code":"X","text":null}), json!(["X"]), false, false),
+            (
+                json!({"code":null,"text":"estimate"}),
+                json!([]),
+                false,
+                true,
+            ),
+        ];
+        for (note, flags, preliminary, estimated) in cases {
+            let raw = json!({"year":"2024","period":"M01","value":"1.0",
+                "footnotes":[{},note.clone(),{}]});
+            let raw: DataPoint = serde_json::from_value(raw).unwrap();
+            let attrs = build_series("CES0000000001", None, &[raw], None)
+                .unwrap()
+                .points
+                .remove(0)
+                .attributes
+                .unwrap();
+            assert_eq!(attrs["footnotes"], json!([note]), "provider keys changed");
+            assert_eq!(attrs["status_flags"], flags);
+            assert_eq!(attrs["preliminary"], preliminary);
+            assert_eq!(attrs["estimated"], estimated);
+        }
+    }
+
+    #[test]
+    fn captured_footnotes_preserve_unknown_fields_and_exact_numbers() {
+        let source = r#"{"year":"2024","period":"M01","value":"1.0","footnotes":[
+            {},
+            {"extension":{"amount":123456789012345678901234567890.12345678901234567890123456789,
+                "items":[null,{"other":92233720368547758081234567890}]}},
+            {"code":null,"text":null,"provider_flag":false},
+            {"code":17,"text":["unknown provider shape"]}
+        ]}"#;
+        let source_json: serde_json::Value = serde_json::from_str(source).unwrap();
+        let raw: DataPoint = serde_json::from_str(source).unwrap();
+        let attrs = build_series("CES0000000001", None, &[raw], None)
+            .unwrap()
+            .points
+            .remove(0)
+            .attributes
+            .unwrap();
+        assert_eq!(
+            attrs["footnotes"],
+            json!(source_json["footnotes"].as_array().unwrap()[1..])
+        );
+        assert_eq!(
+            attrs["footnotes"][0]["extension"]["amount"].to_string(),
+            "123456789012345678901234567890.12345678901234567890123456789"
+        );
+        assert_eq!(attrs["status_flags"], json!([]));
+        assert_eq!(attrs["preliminary"], false);
+        assert_eq!(attrs["estimated"], false);
     }
 
     #[test]

@@ -73,6 +73,7 @@ async fn series_with(pool: &DatabasePool, points: &[(&str, &str, &str, bool)]) -
                 value: Some(BigDecimal::from_str(value).unwrap()),
                 revision_date: day(revision_date),
                 is_original_release: *is_original_release,
+                attributes: None,
             },
         )
         .await
