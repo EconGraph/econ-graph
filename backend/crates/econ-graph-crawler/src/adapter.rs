@@ -303,7 +303,7 @@ pub trait SourceAdapter: Send + Sync {
     }
 
     /// Whether every history fetch checks the upstream restriction marker and refuses a
-    /// marked series with [`CrawlError::Restricted`](crate::CrawlError::Restricted), so that a
+    /// marked series with [`CrawlError::Restricted`], so that a
     /// successful fetch is evidence no marker is present. Only then can an operator's review
     /// of a restriction (`crawler clear-restriction`) publish the series again.
     fn checks_restriction_markers(&self) -> bool {
