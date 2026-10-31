@@ -432,11 +432,18 @@ impl std::fmt::Display for ExitStatus {
 impl std::error::Error for ExitStatus {}
 
 /// The sources `check-selection --source` names, de-duplicated in report order, or every
-/// checked source when it names none. A named source it doesn't check, or one the licence gate
-/// blocks, is refused with [`EXIT_USAGE`], whatever the build's licence flags; the default list
-/// leaves gated sources out.
+/// checked source when it names none. A named source the licence gate blocks, or one it doesn't
+/// check, is refused with [`EXIT_USAGE`]; the default list leaves gated sources out.
 pub fn check_selection_sources(named: &[SourceId]) -> anyhow::Result<Vec<SourceId>> {
     use crate::check_selection::CHECKED_SOURCES;
+    // The licence refusal first, so a gated source is refused for its licence (with the
+    // ticket), not only for having nothing to check.
+    for &source in named {
+        licence::check(source).map_err(|refusal| ExitStatus {
+            code: EXIT_USAGE,
+            message: refusal.to_string(),
+        })?;
+    }
     if let Some(bad) = named.iter().find(|s| !CHECKED_SOURCES.contains(s)) {
         return Err(ExitStatus {
             code: EXIT_USAGE,
@@ -445,12 +452,6 @@ pub fn check_selection_sources(named: &[SourceId]) -> anyhow::Result<Vec<SourceI
             ),
         }
         .into());
-    }
-    for &source in named {
-        licence::check(source).map_err(|refusal| ExitStatus {
-            code: EXIT_USAGE,
-            message: refusal.to_string(),
-        })?;
     }
     Ok(CHECKED_SOURCES
         .into_iter()
@@ -1242,7 +1243,9 @@ mod tests {
     }
 
     /// `check-selection --source` naming a licence-gated source exits `EXIT_USAGE`, before any
-    /// request, in every build: not 1, which means the check found selection problems.
+    /// request: not 1, which means the check found selection problems. While its flag is off the
+    /// refusal gives the licence reason; with the flag on (no gated source has a selection to
+    /// check) it is refused as unchecked, still with `EXIT_USAGE`.
     #[tokio::test]
     async fn check_selection_refuses_a_gated_source_with_the_usage_status() {
         for gate in licence::LICENCE_GATES {
@@ -1256,6 +1259,12 @@ mod tests {
                 .downcast_ref::<ExitStatus>()
                 .unwrap_or_else(|| panic!("{name}: {err:#}"));
             assert_eq!(status.code, EXIT_USAGE, "{name}: {status}");
+            let reason = if gate.is_enabled() {
+                "no curated list"
+            } else {
+                gate.ticket
+            };
+            assert!(status.message.contains(reason), "{name}: {status}");
         }
     }
 
