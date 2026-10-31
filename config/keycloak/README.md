@@ -370,7 +370,10 @@ expanded. The supported switch for anonymous access to a catalog is its read map
 the client's own scope. A catalog read admitted any other way would reach visitors whatever that
 mapping says, including after `set-catalog-access.sh` withdraws it. That covers a catalog read
 mapped on a client scope, a realm role such as `catalog-public` or `user` mapped on one or on the
-client's own scope, and a composite API role holding a catalog read. So a deploy stops, before
+client's own scope, a composite role holding a catalog read, and full scope (`fullScopeAllowed`)
+on the anonymous client. Full scope stops even the deploy that would turn it off, so turn it off
+in Keycloak first. Protocol mappers that write roles into tokens are not checked: don't add one to
+the anonymous client or its client scopes. So a deploy stops, before
 importing anything, while one does, and the error names each scope and the catalog reads it
 admits. Keycloak is checked live, and the realm file's `clientScopeMappings` and `scopeMappings`
 through its realm composites. Remove those scope mappings, and make a catalog public with

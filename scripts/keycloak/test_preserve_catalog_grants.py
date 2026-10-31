@@ -553,7 +553,8 @@ class CatalogPolicyTests(unittest.TestCase):
         self.state[own + "/composite"] = [{"name": "catalog.bea:read"}, {"name": "catalog.bls:read"}]
         with self.assertRaises(RuntimeError) as raised:
             self.merge()
-        self.assertIn("its own scope, through realm roles (catalog.bls:read)", str(raised.exception))
+        self.assertIn("its own scope, through realm roles, its own client roles or full scope (catalog.bls:read)",
+                      str(raised.exception))
         self.assertNotIn("catalog.bea:read", str(raised.exception))
         del self.state[own + "/composite"]
         self.merge()

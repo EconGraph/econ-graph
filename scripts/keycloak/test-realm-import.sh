@@ -223,9 +223,11 @@ print(",".join(sorted(set(re.findall(r"catalog\.[a-z0-9_]+:read", claims)))))'
 # BEA signed-in only: off the reader's own scope, still in catalog-public. Then catalog-public
 # mapped on basic gives anonymous tokens BEA back.
 api DELETE "/clients/$ANON_ID/scope-mappings/clients/$API_ID" "[$(role catalog.bea:read)]" >/dev/null
-anonymous_catalogs | grep -q 'catalog\.bea:read' && fail "BEA reached an anonymous token before the leak"
+TOKEN_CATALOGS="$(anonymous_catalogs)"
+[[ ",$TOKEN_CATALOGS," != *,catalog.bea:read,* ]] || fail "BEA reached an anonymous token before the leak"
 api POST "/client-scopes/$BASIC_ID/scope-mappings/realm" "[$PUBLIC]" >/dev/null
-anonymous_catalogs | grep -q 'catalog\.bea:read' || fail "catalog-public on basic didn't reach the token; the refusal test is vacuous"
+TOKEN_CATALOGS="$(anonymous_catalogs)"
+[[ ",$TOKEN_CATALOGS," == *,catalog.bea:read,* ]] || fail "catalog-public on basic didn't reach the token; the refusal test is vacuous"
 
 snapshot() {
     local path
@@ -264,8 +266,9 @@ expect "client-scopes/$SCOPE_ID realm: catalog-public"
 expect "client-scopes/$BASIC_ID api: "
 expect "clients/$ANON_ID api: catalog.fhfa:read,catalog.imf:read,catalog.world_bank:read"
 expect "client-scopes/$BASIC_ID realm: "
-[ "$(anonymous_catalogs)" = "catalog.fhfa:read,catalog.imf:read,catalog.world_bank:read" ] ||
-    fail "an anonymous token carries $(anonymous_catalogs)"
+TOKEN_CATALOGS="$(anonymous_catalogs)"
+[ "$TOKEN_CATALOGS" = "catalog.fhfa:read,catalog.imf:read,catalog.world_bank:read" ] ||
+    fail "an anonymous token carries $TOKEN_CATALOGS"
 expect "catalog-public: catalog.bea:read,catalog.fhfa:read,catalog.imf:read,catalog.world_bank:read"
 grep -q '^admin: .*catalog\.bls:read' "$WORK/after" || fail "admin lost catalog.bls:read: $(grep '^admin:' "$WORK/after")"
 grep -q '^admin: .*catalog\.partner:read' "$WORK/after" || fail "admin lost catalog.partner:read: $(grep '^admin:' "$WORK/after")"

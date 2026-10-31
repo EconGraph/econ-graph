@@ -151,8 +151,8 @@ def config_cli_state(attributes, kind):
         raise RuntimeError("Unreadable keycloak-config-cli state (realm attributes %s*)" % key)
     if joined[end:].strip():
         warn("ignoring %d characters after the keycloak-config-cli state list in realm attributes %s*, "
-             "as config-cli does; they are left over from a longer list"
-             % (len(joined) - end, key))
+             "as config-cli does: a chunk left over from a longer list, harmless; deleting the realm "
+             "attribute with the highest number silences this" % (len(joined) - end, key))
     return set(names)
 
 
@@ -311,7 +311,7 @@ def check_anonymous_client_scopes(realm, get, prefix, anon_id, api_id, live=True
     refused = sorted("client scope %s (%s)" % (name, ", ".join(sorted(admitted[("clientScope", name)])))
                      for name in assigned if ("clientScope", name) in admitted)
     if ("client", ANONYMOUS_CLIENT) in admitted:
-        refused.append("its own scope, through realm roles (%s)"
+        refused.append("its own scope, through realm roles, its own client roles or full scope (%s)"
                        % ", ".join(sorted(admitted[("client", ANONYMOUS_CLIENT)])))
     if refused:
         raise RuntimeError(
@@ -476,8 +476,8 @@ def merge_catalog_policy(realm, get):
             user["realmRoles"] = without_deleted(
                 user["realmRoles"], roles_config_cli_deletes(realm, observed_attrs), account_label)
             for name in user["clientRoles"]:
-                user["clientRoles"][name] = without_deleted(
-                    user["clientRoles"][name], roles_config_cli_deletes(realm, observed_attrs, name), account_label)
+                deleted = deleted_roles if name == API_CLIENT else roles_config_cli_deletes(realm, observed_attrs, name)
+                user["clientRoles"][name] = without_deleted(user["clientRoles"][name], deleted, account_label)
     return realm
 
 

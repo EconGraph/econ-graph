@@ -240,8 +240,13 @@ grep -qF "through client scope basic" "$out" || fail "--make-public hides the cl
 reset
 set_state '{"scope_realm": ["catalog.fred:read"], "reader_direct": ["catalog.fred:read"]}'
 run -- --context kind-econ-graph --withdraw catalog.fred:read
-grep -qF "admit catalog.fred:read through a realm role mapped on its own scope" "$out" ||
+grep -qF "admit catalog.fred:read through its own scope" "$out" ||
   fail "a realm role on the reader's own scope is not named: $(cat "$out")"
+reset
+set_state '{"scope_realm": ["catalog.fred:read"], "reader_direct": ["catalog.fred:read"]}'
+run -- --context kind-econ-graph --dry-run --withdraw catalog.fred:read
+grep -qF "only after the change; the real run checks it" "$out" ||
+  fail "a dry run doesn't say the reader's own scope is checked after the change: $(cat "$out")"
 reset
 set_state '{"reader_scopes": {"basic": []}, "reader_direct": ["catalog.fred:read"]}'
 run -- --context kind-econ-graph --admin-only catalog.fred:read
