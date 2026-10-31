@@ -181,23 +181,46 @@ impl XbrlStorage {
             updated_at: Utc::now(),
         };
 
+        // Preserve the original row identity on concurrent/repeated ingest. A changed
+        // payload under one accession must never silently retarget existing notes.
         diesel::insert_into(financial_statements)
             .values(&new_statement)
+            .on_conflict((company_id, accession_number))
+            .do_nothing()
             .execute(conn)
             .await
             .context("Failed to insert financial statement")?;
+        let stored = financial_statements
+            .select(FinancialStatement::as_select())
+            .filter(company_id.eq(comp_id))
+            .filter(accession_number.eq(acc_num))
+            .first::<FinancialStatement>(conn)
+            .await
+            .context("Failed to read stored filing identity")?;
+        anyhow::ensure!(
+            stored.filing_date == filing_dt.date_naive()
+                && stored.period_end_date == period_end_dt.date_naive()
+                && stored.fiscal_year == fiscal_yr
+                && stored.fiscal_quarter == fiscal_qtr
+                && stored.form_type == form_typ.unwrap_or("10-K"),
+            "filing metadata changed for accession {acc_num}; preserve the original filing identity"
+        );
+        anyhow::ensure!(
+            stored.xbrl_file_hash.as_deref() == Some(file_hash),
+            "filing content changed for accession {acc_num}; preserve the original target and ingest a distinct amendment instead"
+        );
 
         Ok(StoredXbrlDocument {
-            id: new_statement.id,
+            id: stored.id,
             accession_number: acc_num.to_string(),
-            company_id: comp_id,
+            company_id: stored.company_id,
             filing_date: filing_dt,
             period_end_date: period_end_dt,
-            fiscal_year: fiscal_yr,
-            fiscal_quarter: fiscal_qtr,
-            file_size: original_size,
-            compressed_size: content.len(),
-            compression_type: match compression_type {
+            fiscal_year: stored.fiscal_year,
+            fiscal_quarter: stored.fiscal_quarter,
+            file_size: stored.xbrl_file_size_bytes.unwrap_or(0) as usize,
+            compressed_size: stored.xbrl_file_content.as_ref().map_or(0, Vec::len),
+            compression_type: match stored.xbrl_file_compression_type {
                 CompressionType::Zstd => "zstd".to_string(),
                 CompressionType::Lz4 => "lz4".to_string(),
                 CompressionType::Gzip => "gzip".to_string(),
@@ -205,7 +228,7 @@ impl XbrlStorage {
             },
             file_hash: file_hash.to_string(),
             storage_method: "bytea".to_string(),
-            created_at: new_statement.created_at,
+            created_at: stored.created_at,
         })
     }
 
