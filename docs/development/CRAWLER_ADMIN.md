@@ -2,8 +2,14 @@
 
 The admin frontend polls the persistent crawler queue. It uses the configured
 `VITE_GRAPHQL_ENDPOINT` (default `/graphql`), includes credentials and forwards
-the existing `auth_token` bearer token. Authentication and permissions are
-enforced by the server for every operation. An authorization failure replaces
+the existing `auth_token` bearer token through the shared Apollo client.
+Polling explicitly disables read retries, and neither the shared link nor the
+polling hooks replay a mutation after a lost response. HTTP 401 clears the
+expired token and uses the shared login redirect. Authentication and permissions are
+enforced by the server for every operation. Shared token setters/logout and
+cross-tab storage changes clear both client caches and rotate an opaque session
+identity. Crawler query keys use that identity, never the bearer token, so another
+operator cannot inherit a prior caller's cached queue records. An authorization failure replaces
 displayed operator data with its error; there is no unauthenticated fallback.
 
 | Operation | Permission | Behavior |
@@ -37,7 +43,10 @@ also excluded: company search and SEC trigger/import GraphQL resolvers are not
 present in this baseline.
 
 The authenticated control backend needs its app database for audit records and
-its data database for crawler state. An app-only schema returns
+its data database for crawler state. Audit persistence follows the existing
+best-effort cross-database policy: a failed app-database audit insert is logged
+and counted, and does not roll back a successful data-database setting change.
+The mutation and its audit record are not one atomic transaction across planes. An app-only schema returns
 `DATA_SERVED_REMOTELY`; no resolver silently bypasses that boundary or delegates
 an operator mutation to the public data endpoint. A strict query-only data
 service must continue rejecting these admin roots and all mutations. Configure
