@@ -1254,7 +1254,11 @@ async fn mirror_series_inner_conn(
     let config = econ_graph_timeseries::StorageConfig::from_env()
         .map_err(|_| AppError::ConfigError("invalid Iceberg storage configuration".into()))?;
     let catalog = econ_graph_timeseries::SqlCatalog::new(pool.clone(), config);
-    let mirror_error = |_| {
+    let mirror_error = |stage: &'static str, error: anyhow::Error| {
+        // Raw error chains may contain signed URLs or credentials. Retain typed cause
+        // diagnostics and operation context without rendering untrusted error messages.
+        tracing::warn!(%series_id, %dataset_id, stage,
+            cause = %mirror_cause(&error), "Iceberg mirror transaction failed");
         AppError::ServiceUnavailable(
             "Iceberg mirror failed; PostgreSQL transaction rolled back".into(),
         )
@@ -1263,18 +1267,45 @@ async fn mirror_series_inner_conn(
         catalog
             .ensure_dataset_conn(conn, dataset_id)
             .await
-            .map_err(mirror_error)?;
+            .map_err(|error| mirror_error("ensure_dataset", error))?;
     } else {
         let rows: Vec<Observation> = points.into_iter().map(Observation::from).collect();
         let prepared = catalog
             .prepare_append_conn(conn, Uuid::new_v4(), dataset_id, &rows)
             .await
-            .map_err(mirror_error)?;
+            .map_err(|error| mirror_error("prepare_append", error))?;
         econ_graph_timeseries::SqlCatalog::commit_prepared_conn(conn, &prepared)
             .await
-            .map_err(mirror_error)?;
+            .map_err(|error| mirror_error("commit_prepared", error))?;
     }
     Ok(())
+}
+
+/// Bounded diagnostics containing no error Display/Debug or request URL.
+fn mirror_cause(error: &anyhow::Error) -> String {
+    for cause in error.chain() {
+        if let Some(error) = cause.downcast_ref::<diesel::result::Error>() {
+            return match error {
+                diesel::result::Error::DatabaseError(kind, _) => format!("database:{kind:?}"),
+                _ => "database:other".into(),
+            };
+        }
+        if let Some(error) = cause.downcast_ref::<std::io::Error>() {
+            return format!("io:{:?}", error.kind());
+        }
+        if let Some(error) = cause.downcast_ref::<reqwest::Error>() {
+            return format!(
+                "http:status={:?},timeout={},connect={}",
+                error.status().map(|status| status.as_u16()),
+                error.is_timeout(),
+                error.is_connect()
+            );
+        }
+        if let Some(error) = cause.downcast_ref::<serde_json::Error>() {
+            return format!("json:{:?}", error.classify());
+        }
+    }
+    "unclassified".into()
 }
 
 /// Upserts one `series_metadata` row per discovered series (key `(source_id, external_id)`), in
@@ -1597,6 +1628,25 @@ pub async fn latest_point_date_by_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mirror_diagnostics_preserve_cause_without_secret_messages() {
+        let error = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "secret-token=https://user:password@host",
+        ))
+        .context("signed-url?credential=secret");
+        assert_eq!(mirror_cause(&error), "io:PermissionDenied");
+        assert_eq!(
+            mirror_cause(&anyhow::anyhow!("secret-token")),
+            "unclassified"
+        );
+        let error = anyhow::Error::new(diesel::result::Error::DatabaseError(
+            diesel::result::DatabaseErrorKind::SerializationFailure,
+            Box::new("secret database detail".to_string()),
+        ));
+        assert_eq!(mirror_cause(&error), "database:SerializationFailure");
+    }
 
     #[test]
     fn clip_counts_characters() {

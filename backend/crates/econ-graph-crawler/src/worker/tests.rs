@@ -2304,6 +2304,205 @@ async fn release_stuck_runs_on_start() {
 }
 
 #[test]
+fn only_exact_recovery_guard_error_is_busy() {
+    use diesel::result::{DatabaseErrorKind, Error};
+    let classify = |kind, message: &str| {
+        db_error(AppError::Database(Error::DatabaseError(
+            kind,
+            Box::new(message.to_owned()),
+        )))
+    };
+    assert!(
+        matches!(classify(DatabaseErrorKind::Unknown, RECOVERY_PAUSE_MESSAGE),
+        CrawlError::Busy { retry_after, .. } if retry_after == RECOVERY_PAUSE_RETRY)
+    );
+    assert_eq!(
+        classify(DatabaseErrorKind::Unknown, "lock timeout").kind(),
+        "transient"
+    );
+    assert_eq!(
+        classify(
+            DatabaseErrorKind::Unknown,
+            &format!("query failed: {RECOVERY_PAUSE_MESSAGE}")
+        )
+        .kind(),
+        "transient"
+    );
+    assert_eq!(
+        classify(
+            DatabaseErrorKind::SerializationFailure,
+            RECOVERY_PAUSE_MESSAGE
+        )
+        .kind(),
+        "transient"
+    );
+}
+
+/// A pause beginning while upstream work is in flight must not exhaust the retry budget.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn recovery_pause_retries_without_budget_and_resume_is_lease_fenced() {
+    if std::env::var_os("TRAIN4_WORKER_PAUSE_PROOF").is_none() {
+        use diesel::connection::SimpleConnection;
+        let db = econ_graph_core::test_utils::ScratchDatabase::create("train4_pause");
+        econ_graph_core::run_migrations(&db.url).await.unwrap();
+        let target = Uuid::new_v4();
+        db.connect().batch_execute(&format!("INSERT INTO timeseries_recovery_state(target_id,target_label) VALUES ('{target}','disposable pause proof')")).unwrap();
+        let status = tokio::time::timeout(Duration::from_secs(120),
+            tokio::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "worker::tests::recovery_pause_retries_without_budget_and_resume_is_lease_fenced", "--nocapture", "--test-threads=1"])
+                .env("TRAIN4_WORKER_PAUSE_PROOF", "1")
+                .env("DATABASE_URL", &db.url).env("DATA_DATABASE_URL", &db.url)
+                .env("TIMESERIES_BACKEND", "postgres").env("TIMESERIES_ICEBERG_MIRROR", "false")
+                .env("TIMESERIES_TARGET_ID", target.to_string())
+                .kill_on_drop(true).status()).await.unwrap().unwrap();
+        assert!(status.success());
+        return;
+    }
+    let pool = econ_graph_core::create_pool(&std::env::var("DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+    persist::sync_datasets(&pool, &test_catalog())
+        .await
+        .unwrap();
+    let external = "t5_pause";
+    let seed = persist::persist_series(&pool, SRC, external, &lease_response("Before pause", 1))
+        .await
+        .unwrap();
+    let job = enqueue(&pool, SRC.as_str(), external, JobKind::FetchSeries, 5).await;
+    let adapter = LeaseGateAdapter::new(Ok(lease_response("After resume", 2)));
+    let worker = Arc::new(lease_worker(&pool, &adapter, "pause-worker"));
+    let running = {
+        let worker = worker.clone();
+        tokio::spawn(async move { worker.run_once().await.unwrap() })
+    };
+    adapter.entered.wait().await;
+    let initial = item(&pool, job).await;
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query("UPDATE timeseries_recovery_state SET writes_paused=true, pause_token=gen_random_uuid(), epoch=epoch+1")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    drop(conn);
+    adapter.resume.wait().await;
+    let result = running.await.unwrap();
+    assert!(matches!(
+        result,
+        JobOutcome::Retrying {
+            error: CrawlError::Busy { .. },
+            ..
+        }
+    ));
+    // Explicit claims bypass the schedule so this proof does not sleep between retries.
+    for _ in 0..=initial.max_retries {
+        let claim = CrawlQueueItem::claim_by_id(&pool, job, "pause-worker")
+            .await
+            .unwrap()
+            .unwrap();
+        let outcome = worker
+            .finish_result(
+                SRC,
+                &claim,
+                Ok(JobWrite::Series(lease_response("Must roll back", 99))),
+                Duration::ZERO,
+            )
+            .await;
+        assert!(matches!(
+            outcome,
+            JobOutcome::Retrying {
+                error: CrawlError::Busy { .. },
+                ..
+            }
+        ));
+        let queued = item(&pool, job).await;
+        assert_eq!(queued.retry_count, 0);
+        assert_eq!(queued.max_retries, initial.max_retries);
+        assert_eq!(queued.status, "retrying");
+        assert!(queued.claim_token.is_none());
+        assert!(queued.scheduled_for.unwrap() > Utc::now() + chrono::Duration::seconds(25));
+    }
+    let baseline = series_row(&pool, external).await.unwrap();
+    assert_eq!(baseline.2, "Before pause");
+    let mut conn = pool.get().await.unwrap();
+    let values = data_points::table
+        .filter(data_points::series_id.eq(seed.series_id))
+        .select(data_points::value)
+        .load::<Option<BigDecimal>>(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(values, vec![Some(BigDecimal::from(1))]);
+    let attempts = crawl_attempts::table
+        .filter(crawl_attempts::series_id.eq(seed.series_id))
+        .count()
+        .get_result::<i64>(&mut conn)
+        .await
+        .unwrap();
+    assert!(attempts > i64::from(initial.max_retries)); // Busy remains auditable, without budget consumption.
+    drop(conn);
+    let stale = CrawlQueueItem::claim_by_id(&pool, job, "pause-worker")
+        .await
+        .unwrap()
+        .unwrap();
+    expire_lease_jobs(&pool, &[job]).await;
+    let replacement = CrawlQueueItem::claim_by_id(&pool, job, "pause-worker")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(stale.claim_token, replacement.claim_token); // Even the same worker ID cannot reuse an expired lease.
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query(
+        "UPDATE timeseries_recovery_state SET writes_paused=false, pause_token=NULL, epoch=epoch+1",
+    )
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    drop(conn);
+    let outcome = worker
+        .finish_result(
+            SRC,
+            &stale,
+            Ok(JobWrite::Series(lease_response("Stale", 99))),
+            Duration::ZERO,
+        )
+        .await;
+    assert!(matches!(outcome, JobOutcome::LeaseLost { .. }));
+    assert_eq!(item(&pool, job).await.claim_token, replacement.claim_token);
+    let mut conn = pool.get().await.unwrap();
+    assert_eq!(
+        crawl_attempts::table
+            .filter(crawl_attempts::series_id.eq(seed.series_id))
+            .count()
+            .get_result::<i64>(&mut conn)
+            .await
+            .unwrap(),
+        attempts
+    );
+    drop(conn);
+    let outcome = worker
+        .finish_result(
+            SRC,
+            &replacement,
+            Ok(JobWrite::Series(lease_response("After resume", 2))),
+            Duration::ZERO,
+        )
+        .await;
+    assert!(matches!(outcome, JobOutcome::Completed(_)));
+    let completed = item(&pool, job).await;
+    assert_eq!(completed.status, "completed");
+    assert_eq!(completed.retry_count, 1); // Only actual lease expiry consumed an attempt.
+    assert_eq!(series_row(&pool, external).await.unwrap().2, "After resume");
+    let mut conn = pool.get().await.unwrap();
+    assert_eq!(
+        data_points::table
+            .filter(data_points::series_id.eq(seed.series_id))
+            .select(data_points::value)
+            .load::<Option<BigDecimal>>(&mut conn)
+            .await
+            .unwrap(),
+        vec![Some(BigDecimal::from(2))]
+    );
+}
+
+#[test]
 fn db_error_fails_unsynced_datasets_permanently_and_retries_the_rest() {
     let e = db_error(econ_graph_core::AppError::ValidationError(
         "BEA dataset x is not in the datasets table".into(),

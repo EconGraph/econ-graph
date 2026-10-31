@@ -13,7 +13,7 @@
 //! | `Ok`                                | `complete`                                                              |
 //! | `RateLimited { retry_after }`       | `retry_later(retry_after or policy.backoff(retry_count), count = false)` |
 //! | `Transient` (incl. panics, DB errors while persisting) | `retry_later(policy.backoff(retry_count), count = true)` (fails once `max_retries` is reached) |
-//! | `Busy { retry_after }`              | `retry_later(retry_after, count = false)` (local contention, not the source's fault) |
+//! | `Busy { retry_after }`              | `retry_later(retry_after, count = false)` (local contention or recovery pause; no attempt limit) |
 //! | `NotFound` / `Auth` / `Parse` / `Permanent` | `fail`                                                          |
 //! | unknown `source` / `kind`, no adapter or handler | `fail`                                                 |
 //!
@@ -1126,14 +1126,29 @@ pub(crate) fn incremental_since(
     latest.checked_sub_signed(lookback)
 }
 
+// Diesel maps SQLSTATE 55P03 to Unknown and does not retain the SQLSTATE. Match only
+// the fixed guard message, never other lock failures or messages containing this phrase.
+const RECOVERY_PAUSE_MESSAGE: &str = "observation writes are paused for recovery";
+const RECOVERY_PAUSE_RETRY: Duration = Duration::from_secs(30);
+
 /// Database failures while reading/persisting are infrastructure problems: retry later. The
 /// exceptions fail at once, because a retry would fail the same way: a dataset missing from
 /// `datasets` (not synced), and two series claiming the same dataset and dimension values.
+// Busy retries deliberately have no attempt limit: recovery may outlast the source retry
+// budget. Operators must resume/repair recovery; each retry remains lease fenced.
 fn db_error(e: econ_graph_core::AppError) -> CrawlError {
     use diesel::result::{DatabaseErrorKind, Error as DieselError};
     use econ_graph_core::AppError;
     match &e {
         AppError::ValidationError(msg) => CrawlError::Permanent(msg.clone()),
+        AppError::Database(DieselError::DatabaseError(DatabaseErrorKind::Unknown, info))
+            if info.message() == RECOVERY_PAUSE_MESSAGE =>
+        {
+            CrawlError::Busy {
+                message: RECOVERY_PAUSE_MESSAGE.into(),
+                retry_after: RECOVERY_PAUSE_RETRY,
+            }
+        }
         AppError::Database(DieselError::DatabaseError(
             DatabaseErrorKind::UniqueViolation,
             info,
