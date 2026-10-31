@@ -690,10 +690,12 @@ async fn exclude_synthetic_legacy_rows_keeps_asof_and_original_only_correct() {
                 query = query.filter(data_points::is_original_release.eq(true));
             }
             if as_of.is_some() || original_only {
-                query = query.filter(econ_graph_core::models::revision_filter(
-                    as_of,
-                    original_only,
-                ));
+                query = query.filter(
+                    econ_graph_core::models::revision_filter_excluding_synthetic(
+                        as_of,
+                        original_only,
+                    ),
+                );
             }
             query
                 .select((data_points::date, data_points::value))
