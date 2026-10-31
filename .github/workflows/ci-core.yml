@@ -1209,6 +1209,17 @@ jobs:
         CHECKPOINT: before the doctests
       run: *disk_checkpoint
 
+    - name: Exercise real Iceberg catalog and disposable smoke guards
+      if: ${{ !cancelled() }}
+      env:
+        DATA_DATABASE_URL: postgresql://postgres:password@127.0.0.1:5446/econ_graph_test
+      run: |
+        set -euo pipefail
+        cargo test --locked -p econ-graph-timeseries --test iceberg_contract --test smoke_safety -- --include-ignored --test-threads=1
+        cargo test --locked -p econ-graph-core --test observation_storage -- --include-ignored --test-threads=1
+        shellcheck ../scripts/train4/maintain-timeseries.sh
+      working-directory: backend
+
     # Report documentation failures even when the broader test step failed.
     - name: Run workspace doctests
       if: ${{ !cancelled() }}
@@ -1593,6 +1604,9 @@ jobs:
     - name: Run Rust security audit
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
+        python3 scripts/check_security_adapters.py
+        python3 -m unittest discover -s scripts -p test_security_adapters.py -v
+        cargo test --locked -p zstd@0.13.3 -p quick-xml@0.39.4 --doc
         cargo audit
       working-directory: backend
 
