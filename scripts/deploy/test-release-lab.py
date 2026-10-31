@@ -317,7 +317,8 @@ class CreateTests(Stubbed):
         self.assertNotIn('cloudflare-tunnel', self.state()['secrets'])
         self.assertNotIn('crawler-api-keys', self.state()['secrets'])
         record = {'name': 'one', 'lab_id': '0' * 32, 'ports': dict.fromkeys(lab.PORT_NAMES, 40000), 'images': {
-            n: {'lab_tag': lab.lab_tag('one', n, IMAGE_ID)} for n in lab.IMAGE_NAMES}}
+            n: {'lab_tag': lab.lab_tag('one', n, IMAGE_ID),
+                'reference': f'ghcr.io/econgraph/econ-graph-{n}:sha-{COMMIT}'} for n in lab.IMAGE_NAMES}}
         docs = lab.render_manifests(record)
         cloudflared = {'apiVersion': 'apps/v1', 'kind': 'Deployment',
                        'metadata': {'name': 'cloudflared', 'namespace': 'econ-graph'},
@@ -395,9 +396,29 @@ class CreateTests(Stubbed):
         crawler = [d for d in self.state()['applied'] if d['kind'] == 'Deployment'
                    and d['metadata']['name'] == 'crawler-worker']
         self.assertEqual([d['spec']['replicas'] for d in crawler], [0])
+        container = crawler[0]['spec']['template']['spec']['containers'][0]
+        self.assertEqual(container['image'], lab.lab_tag('one', 'crawler-worker', IMAGE_ID))
+        self.assertEqual(container['imagePullPolicy'], 'Never')
         crawler[0]['spec']['replicas'] = 1
         with self.assertRaisesRegex(lab.LabError, '0 replicas'):
             lab.check_manifests([crawler[0]])
+
+    def test_source_repository_namespace_text_cannot_escape_the_loaded_lab_tag(self):
+        _, namespace = lab.renderer.identity('lab-one')
+        reference = f'ghcr.io/{namespace}/econ-graph-crawler-worker:sha-{COMMIT}'
+        images = self.state()['images']
+        images[reference] = images[f'ghcr.io/econgraph/econ-graph-crawler-worker:sha-{COMMIT}']
+        self.state(images=images)
+        self.create(**{'--crawler-image': reference})
+        containers = [c for d in self.state()['applied']
+                      if d['kind'] in ('Deployment', 'StatefulSet', 'Job')
+                      for c in d['spec']['template']['spec'].get('initContainers', []) +
+                      d['spec']['template']['spec']['containers']
+                      if c['name'] in ('crawler-worker', 'crawler-migrate')]
+        self.assertEqual({c['name'] for c in containers}, {'crawler-worker', 'crawler-migrate'})
+        for container in containers:
+            self.assertEqual(container['image'], lab.lab_tag('one', 'crawler-worker', IMAGE_ID))
+            self.assertEqual(container['imagePullPolicy'], 'Never')
 
     def test_inputs_never_modified(self):
         self.create()
