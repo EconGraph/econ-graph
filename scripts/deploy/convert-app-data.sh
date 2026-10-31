@@ -108,15 +108,25 @@ log "Cluster ${KIND_CLUSTER} (context ${CONTEXT}, namespace ${NAMESPACE})"
 check_docker_daemon
 ensure_kind_kubectl
 echo "  kubectl: $(command -v kubectl) --context ${CONTEXT}"
-if kind_cluster_is_production; then
-    [ "$PRODUCTION" = true ] ||
-        die "${KIND_CLUSTER} carries the production marker; pass --production to convert production"
-    echo "  PRODUCTION cluster"
-else
-    [ "$PRODUCTION" = false ] ||
-        die "--production given, but ${KIND_CLUSTER} is not marked production (${CLUSTER_ROLE_REASON:-no marker})"
-    echo "  not a production cluster"
-fi
+# 0 production, 1 not production, 2 unknown (could not be asked, or conflicting
+# markers): unknown stops here, whatever --production says.
+role_status=0
+kind_cluster_is_production || role_status=$?
+case "$role_status" in
+    0)
+        [ "$PRODUCTION" = true ] ||
+            die "${KIND_CLUSTER} carries the production marker; pass --production to convert production"
+        echo "  PRODUCTION cluster"
+        ;;
+    1)
+        [ "$PRODUCTION" = false ] ||
+            die "--production given, but ${KIND_CLUSTER} is not marked production (${CLUSTER_ROLE_REASON:-no marker})"
+        echo "  not a production cluster"
+        ;;
+    *)
+        die "production status unknown for ${KIND_CLUSTER}: ${CLUSTER_ROLE_REASON:-the check failed}; nothing was changed"
+        ;;
+esac
 
 server_major() {
     local version

@@ -18,6 +18,9 @@
 #              is no marker), then remove the marker (kept if scaling fails),
 #              then offer to delete the tunnel token (Secret cloudflare-tunnel)
 #
+# It refuses a release lab (a cluster with ConfigMap kube-system/econgraph-lab-owner,
+# scripts/deploy/release-lab.py): a lab is never production.
+#
 # Before a change it shows the cluster's identity (this host's name, the
 # nodes, the API server and the kube-system UID) and asks, at a terminal, for
 # the first 8 characters of that UID: context names such as kind-econ-graph are
@@ -146,11 +149,17 @@ if [[ "$UNMARK" == true ]]; then
         log "context $context: not marked production, cloudflared not running, no tunnel token; nothing to do"
         exit 0
     fi
-    if cluster_is_marked_production; then
+    role_status=0
+    cluster_is_marked_production || role_status=$?
+    if [[ "$role_status" == 0 ]]; then
         echo
         echo "!!! WARNING: context $context is the cluster marked production, the one serving"
         echo "!!! econgraph.com now. Unmarking it stops cloudflared and takes the public site down."
         echo "!!! Go on only if another cluster is taking over, or the site is meant to go down."
+    elif [[ "$role_status" != 1 ]]; then
+        echo
+        echo "!!! WARNING: whether context $context is production is unknown: $CLUSTER_ROLE_REASON"
+        echo "!!! It may be the cluster serving econgraph.com. Unmarking it stops cloudflared there."
     fi
     if [[ "$DRY_RUN" == true ]]; then
         [[ "$running" == false ]] ||
@@ -188,6 +197,13 @@ if [[ "$UNMARK" == true ]]; then
     exit 0
 fi
 
+# A release lab (scripts/deploy/release-lab.py) is never production.
+lab=0
+cluster_role_is_lab || lab=$?
+case "$lab" in
+    0) die "context $context is a release lab (ConfigMap $CLUSTER_ROLE_NAMESPACE/$CLUSTER_ROLE_LAB_CONFIGMAP); a lab is never production. Nothing was changed" ;;
+    2) die "could not check context $context for ConfigMap $CLUSTER_ROLE_NAMESPACE/$CLUSTER_ROLE_LAB_CONFIGMAP; nothing was changed" ;;
+esac
 if cluster_is_marked_production; then
     log "context $context (kube-system UID $uid) is already marked production; nothing to do"
     exit 0
