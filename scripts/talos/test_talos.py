@@ -196,6 +196,44 @@ class TalosTests(unittest.TestCase):
             with self.assertRaisesRegex(common.Refused, "domain ownership"):
                 cluster.verify_domain(self.config, "worker-1")
 
+    def test_build_refuses_saved_plan_deletion_and_replacement_for_fit_and_production(self):
+        for purpose in ['fit', 'production']:
+            for actions in [['delete'], ['delete', 'create'], ['create', 'delete'], ['forget']]:
+                with self.subTest(purpose=purpose, actions=actions):
+                    config = dict(self.config, purpose=purpose)
+                    common.claim(self.state, config)
+                    calls = []
+                    def command(module, action, *args, env):
+                        calls.append((action, args))
+                        if action == 'show':
+                            return json.dumps({'resource_changes': [{'address': 'libvirt_volume.data["worker-3"]',
+                                               'change': {'actions': actions}}]}).encode()
+                        if action == 'apply':
+                            self.fail('build applied a destructive plan')
+                        return b''
+                    with patch.object(cluster, 'verify_host'), patch.object(cluster, 'tofu_environment', return_value={}), patch.object(cluster, 'import_secrets'), patch.object(cluster, 'export_credentials'), patch.object(cluster, 'tofu', side_effect=command):
+                        with self.assertRaisesRegex(common.Refused, 'deletion, replacement or unsupported'):
+                            cluster.operate(self.args('build', execute=True, age=['public-recipient'], host_state_dir=self.directory), config, self.state)
+                    self.assertEqual([action for action, _ in calls], ['init', 'plan', 'show'])
+                    self.assertFalse(list((self.state / 'tofu').glob('reviewed-plan-*')))
+
+    def test_build_applies_the_exact_inspected_plan_without_replanning(self):
+        common.claim(self.state, self.config)
+        calls = []
+        def command(module, action, *args, env):
+            calls.append((action, args))
+            if action == 'show':
+                return json.dumps({'resource_changes': [{'change': {'actions': ['create']}},
+                                                        {'change': {'actions': ['update']}}]}).encode()
+            return b''
+        with patch.object(cluster, 'verify_host'), patch.object(cluster, 'tofu_environment', return_value={}), patch.object(cluster, 'import_secrets'), patch.object(cluster, 'export_credentials'), patch.object(cluster, 'tofu', side_effect=command), redirect_stdout(io.StringIO()):
+            cluster.operate(self.args('build', execute=True, age=['public-recipient'], host_state_dir=self.directory), self.config, self.state)
+        self.assertEqual([action for action, _ in calls], ['init', 'plan', 'show', 'apply'])
+        saved = calls[1][1][1].removeprefix('-out=')
+        self.assertEqual(calls[2][1], ('-json', saved))
+        self.assertEqual(calls[3][1], ('-input=false', saved))
+        self.assertFalse(Path(saved).parent.exists())
+
     def test_owned_vm_with_foreign_attached_disk_is_refused(self):
         name = self.config["name"] + "-worker-1"
         owner = f"econgraph-talos owner={self.config['owner_id']} cluster={self.config['name']} role=worker"
@@ -312,24 +350,57 @@ class TalosTests(unittest.TestCase):
         with self.assertRaisesRegex(common.Refused, "explicit worker"):
             cluster.kill_worker(self.args("kill-worker", node="cp-1"), self.config, [], ["kubectl"])
 
-    def test_worker_loss_requires_target_workload_on_victim(self):
-        deployment = {"spec": {"replicas": 2, "selector": {"matchLabels": {"app": "probe"}}}, "status": {"readyReplicas": 2}}
-        responses = [json.dumps(deployment).encode(), b'{"items": []}']
-        with patch.object(cluster, "verify_domain", return_value=self.config["name"] + "-worker-1"), patch.object(cluster, "call", side_effect=responses) as command:
-            with self.assertRaisesRegex(common.Refused, "no pod on the selected worker"):
-                cluster.kill_worker(self.args("kill-worker", node="worker-1", namespace="fit", deployment="probe"), self.config, [], ["kubectl"])
-        self.assertFalse(any("destroy" in item.args[0] for item in command.call_args_list))
+    def worker_loss_fixture(self):
+        deployment = {"metadata": {"uid": "deployment-uid", "generation": 2,
+                       "annotations": {"deployment.kubernetes.io/revision": "2"}},
+                      "spec": {"replicas": 2, "selector": {"matchLabels": {"app": "probe"}}},
+                      "status": {"readyReplicas": 2, "updatedReplicas": 2, "observedGeneration": 2}}
+        replicas = {"items": [{"metadata": {"uid": "current-rs", "annotations": {"deployment.kubernetes.io/revision": "2"},
+                               "ownerReferences": [{"controller": True, "kind": "Deployment", "uid": "deployment-uid"}]}}]}
+        def pod(uid, node):
+            return {"metadata": {"uid": uid, "ownerReferences": [{"controller": True, "kind": "ReplicaSet", "uid": "current-rs"}]},
+                    "spec": {"nodeName": self.config["name"] + "-" + node},
+                    "status": {"phase": "Running", "conditions": [{"type": "Ready", "status": "True"}]}}
+        return deployment, replicas, pod
 
-    def test_worker_loss_observes_replacement_without_deleting_disks(self):
+    def test_worker_loss_requires_healthy_current_workload_on_victim(self):
+        deployment, replicas, pod = self.worker_loss_fixture()
+        stale = pod("stale-victim", "worker-1")
+        stale["metadata"]["deletionTimestamp"] = "2026-10-31T00:00:00Z"
+        stale["status"]["conditions"][0]["status"] = "False"
+        for pods in [[], [stale, pod("survivor-1", "worker-2"), pod("survivor-2", "worker-2")]]:
+            responses = [json.dumps(value).encode() for value in [deployment, replicas, {"items": pods}]]
+            with patch.object(cluster, "verify_domain", return_value=self.config["name"] + "-worker-1"), patch.object(cluster, "call", side_effect=responses) as command:
+                with self.assertRaisesRegex(common.Refused, "no healthy current replica"):
+                    cluster.kill_worker(self.args("kill-worker", node="worker-1", namespace="fit", deployment="probe"), self.config, [], ["kubectl"])
+            self.assertFalse(any("destroy" in item.args[0] for item in command.call_args_list))
+
+    def test_worker_loss_observes_new_owned_replacement_without_deleting_disks(self):
         name = self.config["name"] + "-worker-1"
-        deployment = {"spec": {"replicas": 2, "selector": {"matchLabels": {"app": "probe"}}}, "status": {"readyReplicas": 2}}
-        before = {"items": [{"spec": {"nodeName": name}}]}
-        pod = {"metadata": {}, "spec": {"nodeName": self.config["name"] + "-worker-2"}, "status": {"conditions": [{"type": "Ready", "status": "True"}]}}
-        responses = [json.dumps(deployment).encode(), json.dumps(before).encode(), b"", json.dumps({"items": [pod, copy.deepcopy(pod)]}).encode()]
+        deployment, replicas, pod = self.worker_loss_fixture()
+        before = {"items": [pod("victim", "worker-1"), pod("survivor", "worker-2")]}
+        after = {"items": [pod("new-replacement", "worker-2"), pod("survivor", "worker-2")]}
+        responses = [json.dumps(v).encode() if isinstance(v, dict) else v for v in [deployment, replicas, before, b"", deployment, after]]
         with patch.object(cluster, "verify_domain", return_value=name), patch.object(cluster, "call", side_effect=responses) as command, redirect_stdout(io.StringIO()):
             cluster.kill_worker(self.args("kill-worker", node="worker-1", namespace="fit", deployment="probe"), self.config, [], ["kubectl"])
-        self.assertEqual(command.call_args_list[2].args[0], ["virsh", "--connect", "qemu:///system", "destroy", name])
+        self.assertEqual(command.call_args_list[3].args[0], ["virsh", "--connect", "qemu:///system", "destroy", name])
         self.assertFalse(any("vol-delete" in item.args[0] or "undefine" in item.args[0] for item in command.call_args_list))
+
+    def test_worker_loss_rejects_unchanged_or_foreign_pods_and_changed_rollout(self):
+        deployment, replicas, pod = self.worker_loss_fixture()
+        before = {"items": [pod("victim", "worker-1"), pod("survivor", "worker-2"), pod("pending-before-stop", "worker-2")]}
+        before["items"][-1]["status"]["conditions"][0]["status"] = "False"
+        unchanged = {"items": [pod("pending-before-stop", "worker-2"), pod("survivor", "worker-2")]}
+        foreign = copy.deepcopy(unchanged)
+        foreign["items"][0]["metadata"]["uid"] = "new-but-unrelated"
+        foreign["items"][0]["metadata"]["ownerReferences"][0]["uid"] = "another-rs"
+        changed = copy.deepcopy(deployment)
+        changed["metadata"]["generation"] = 3
+        for post_deployment, after in [(deployment, unchanged), (deployment, foreign), (changed, unchanged)]:
+            responses = [json.dumps(v).encode() if isinstance(v, dict) else v for v in [deployment, replicas, before, b"", post_deployment, after]]
+            with patch.object(cluster, "verify_domain", return_value=self.config["name"] + "-worker-1"), patch.object(cluster, "call", side_effect=responses), patch.object(cluster.time, "monotonic", side_effect=[0, 0, 601]), patch.object(cluster.time, "sleep"):
+                with self.assertRaisesRegex(common.Refused, "did not regain|rollout changed"):
+                    cluster.kill_worker(self.args("kill-worker", node="worker-1", namespace="fit", deployment="probe"), self.config, [], ["kubectl"])
 
     def test_readiness_checks_every_inventory_node_explicitly(self):
         with patch.object(cluster, "call", return_value=b"") as command:

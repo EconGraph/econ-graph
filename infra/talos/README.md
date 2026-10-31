@@ -156,6 +156,12 @@ preserved CA/secrets, provisions the VMs, applies their Talos configurations,
 bootstraps etcd once and exports encrypted clients. The module has no Helm,
 Kubernetes, Flux, CloudNativePG or host-object-store resources.
 
+Every build saves an encrypted OpenTofu plan, refuses deletion and replacement
+actions, and applies that exact inspected plan. Re-running `build` with a smaller
+inventory or changed disk configuration cannot silently remove a VM or its data.
+Destructive recreation remains restricted to the explicit fit-only `rebuild`
+flow below; ordinary builds are not a production topology-removal mechanism.
+
 Each lifecycle step is a separate subcommand of the checked-in script. All
 support the same config/runtime arguments and dry-run default:
 
@@ -181,6 +187,11 @@ the replacement; the script will not overwrite it automatically.
 The worker-loss step retains the stopped VM and disks for diagnosis. A missing
 target workload, a workload with fewer than two healthy replicas, a foreign VM,
 a control-plane target or a production inventory is refused before stopping it.
+The victim must host a healthy nonterminating pod from the current ReplicaSet.
+The probe binds the Deployment UID, generation and revision, and requires new
+ready pod UIDs from that same ReplicaSet on surviving inventory workers after
+the stop. Existing pending or unrelated pods cannot count as replacements, and
+a concurrent Deployment rollout invalidates the probe.
 Use `restart-worker` with the same explicit inventory node after collecting the result;
 do not infer disk deletion or physical-host resilience from a successful pod
 reschedule.

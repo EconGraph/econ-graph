@@ -12,6 +12,7 @@ import re
 import secrets
 import shutil
 import sys
+import tempfile
 import time
 import xml.etree.ElementTree as ET
 
@@ -103,6 +104,23 @@ def tofu_environment(state):
 
 def tofu(module, action, *args, env):
     return call(["tofu", f"-chdir={module}", action, *args], env=env, timeout=3600)
+
+
+def apply_without_destruction(module, env):
+    # The pinned module enforces plan encryption. Inspect decrypted JSON only
+    # in memory, then apply that exact saved plan, never a newly computed plan.
+    with tempfile.TemporaryDirectory(prefix="reviewed-plan-", dir=module) as temporary:
+        saved = str(Path(temporary) / "apply.tfplan")
+        tofu(module, "plan", "-input=false", "-out=" + saved, env=env)
+        plan = json.loads(tofu(module, "show", "-json", saved, env=env))
+        changes = plan.get("resource_changes", [])
+        if not isinstance(changes, list):
+            raise Refused("unexpected saved plan resource changes; refusing apply")
+        for resource in changes:
+            actions = resource.get("change", {}).get("actions")
+            if actions not in (["no-op"], ["create"], ["update"], ["read"]):
+                raise Refused("saved plan contains deletion, replacement or unsupported actions; use the separately guarded fit rebuild")
+        tofu(module, "apply", "-input=false", saved, env=env)
 
 
 def import_secrets(module, state, env):
@@ -260,7 +278,9 @@ def plan(args, config, state):
             show(["tofu", f"-chdir={module}", "destroy", "-input=false", "-auto-approve"])
         show(["tofu", f"-chdir={module}", "init", "-input=false", "-lockfile=readonly"])
         show(["tofu", f"-chdir={module}", "import", "talos_machine_secrets.cluster", "<SOPS-decrypted-memory-file>"])
-        show(["tofu", f"-chdir={module}", "apply", "-input=false", "-auto-approve"])
+        show(["tofu", f"-chdir={module}", "plan", "-input=false", "-out=<encrypted-reviewed-plan>"])
+        show(["verify", "saved-plan-has-no-deletes-or-replacements"])
+        show(["tofu", f"-chdir={module}", "apply", "-input=false", "<encrypted-reviewed-plan>"])
         print("Then export encrypted client configs and install the pinned platform Cilium before waiting for Ready.")
     elif args.action == "credentials":
         show(["tofu", f"-chdir={module}", "output", "-raw", "<client-config>", "to-SOPS-only"])
@@ -320,7 +340,7 @@ def operate(args, config, state):
             tofu(module, "destroy", "-input=false", "-auto-approve", env=env)
         if args.action in ("build", "rebuild"):
             import_secrets(module, state, env)
-            tofu(module, "apply", "-input=false", "-auto-approve", env=env)
+            apply_without_destruction(module, env)
             print("Talos API bootstrapped. Cilium must be installed before Kubernetes nodes can become Ready.")
         export_credentials(module, state, env, args.age)
         return
@@ -376,19 +396,53 @@ def kill_worker(args, config, talosctl, kubectl):
     deployment = json.loads(call(deployment_command))
     count = deployment["spec"].get("replicas", 1)
     selector = deployment["spec"]["selector"]
-    if count < 2 or deployment.get("status", {}).get("readyReplicas", 0) != count or selector.get("matchExpressions"):
+    metadata, status = deployment.get("metadata", {}), deployment.get("status", {})
+    uid, generation = metadata.get("uid"), metadata.get("generation")
+    revision = metadata.get("annotations", {}).get("deployment.kubernetes.io/revision")
+    if (count < 2 or not uid or not isinstance(generation, int) or not revision
+            or status.get("observedGeneration", 0) < generation
+            or status.get("readyReplicas", 0) != count or status.get("updatedReplicas", 0) != count
+            or not selector.get("matchLabels") or selector.get("matchExpressions")):
         raise Refused("target must be a healthy replicated deployment with a simple matchLabels selector")
     labels = ",".join(f"{key}={value}" for key, value in sorted(selector["matchLabels"].items()))
+    replicasets = json.loads(call([*kubectl, "--namespace", args.namespace, "get", "replicasets", "-l", labels, "-o", "json"]))["items"]
+    replica_uids = {r["metadata"]["uid"] for r in replicasets
+                    if r.get("metadata", {}).get("uid")
+                    and r["metadata"].get("annotations", {}).get("deployment.kubernetes.io/revision") == revision
+                    and any(o.get("controller") is True and o.get("kind") == "Deployment" and o.get("uid") == uid
+                            for o in r["metadata"].get("ownerReferences", []))}
+    if len(replica_uids) != 1:
+        raise Refused("target needs one unambiguous current ReplicaSet owned by the deployment UID")
     pods_command = [*kubectl, "--namespace", args.namespace, "get", "pods", "-l", labels, "-o", "json"]
     pods = json.loads(call(pods_command))["items"]
-    if not any(pod["spec"].get("nodeName") == name for pod in pods):
-        raise Refused("target deployment has no pod on the selected worker; no failover would be tested")
+    workers = {config['name'] + '-' + node for node, detail in config['nodes'].items() if detail['role'] == 'worker'}
+    def healthy(pod):
+        meta = pod.get("metadata", {})
+        return (bool(meta.get("uid")) and not meta.get("deletionTimestamp")
+                and pod.get("spec", {}).get("nodeName") in workers
+                and pod.get("status", {}).get("phase") == "Running"
+                and any(o.get("controller") is True and o.get("kind") == "ReplicaSet" and o.get("uid") in replica_uids
+                        for o in meta.get("ownerReferences", []))
+                and any(c.get("type") == "Ready" and c.get("status") == "True"
+                        for c in pod.get("status", {}).get("conditions", [])))
+    initial = {p["metadata"]["uid"] for p in pods if p.get("metadata", {}).get("uid")}
+    ready = {p["metadata"]["uid"]: p for p in pods if healthy(p)}
+    victims = {key for key, pod in ready.items() if pod["spec"]["nodeName"] == name}
+    if not victims:
+        raise Refused("target deployment has no healthy current replica on the selected worker; no failover would be tested")
+    if len(ready) != count:
+        raise Refused("target's current owned pods do not match its healthy replica count")
     call(["virsh", "--connect", "qemu:///system", "destroy", name])
     deadline = time.monotonic() + 600
     while time.monotonic() < deadline:
+        current = json.loads(call(deployment_command))
+        if (current.get("metadata", {}).get("uid") != uid
+                or current["metadata"].get("generation") != generation
+                or current["metadata"].get("annotations", {}).get("deployment.kubernetes.io/revision") != revision):
+            raise Refused("deployment identity or rollout changed during the worker-loss probe")
         pods = json.loads(call(pods_command))["items"]
-        ready = [pod for pod in pods if not pod["metadata"].get("deletionTimestamp") and pod["spec"].get("nodeName") != name and any(condition.get("type") == "Ready" and condition.get("status") == "True" for condition in pod.get("status", {}).get("conditions", []))]
-        if len(ready) >= count:
+        ready = {p["metadata"]["uid"] for p in pods if healthy(p) and p["spec"]["nodeName"] != name}
+        if len(ready) >= count and len(ready - initial) >= len(victims):
             print("Observed target deployment readiness on other workers. Stopped VM and disks retained; this is not a physical-host resilience proof.")
             return
         time.sleep(5)
