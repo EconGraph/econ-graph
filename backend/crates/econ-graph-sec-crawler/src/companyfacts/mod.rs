@@ -5,7 +5,7 @@ pub mod archive;
 pub mod parse;
 pub mod store;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -154,26 +154,43 @@ async fn ingest_inner(
         let subs_hash = file_hash(&subs_path)?;
         let mut facts = BulkArchive::open_verified(&facts_path, limits)?;
         let mut subs = BulkArchive::open_verified(&subs_path, limits)?;
-        let names = facts.company_names();
-        if names.len() != facts.entries.len() {
+        let fact_names = facts.company_names();
+        if fact_names.len() != facts.entries.len() {
             bail!("companyfacts archive contains non-company entries");
         }
+        // Some XBRL issuers use only custom concepts and have no companyfacts document.
+        // Submissions, including its historical chunks, is the issuer-discovery authority.
+        let names: BTreeSet<_> = fact_names.into_iter().chain(subs.company_names()).collect();
         for name in names {
-            let parsed_facts = parse_companyfacts(&facts.read(&name)?)?;
-            if name != format!("CIK{}.json", parsed_facts.cik) {
-                bail!("companyfacts entry CIK mismatch");
-            }
-            let mut parsed_subs = parse_submissions(&subs.read(&name)?, &parsed_facts.cik)?;
-            ensure_unique_historical_files(&parsed_subs.historical_files, &parsed_facts.cik)?;
+            let cik = &name[3..13]; // BulkArchive validated the CIK10 main-document name.
+            let mut parsed_subs = parse_submissions(&subs.read(&name)?, cik)?;
+            ensure_unique_historical_files(&parsed_subs.historical_files, cik)?;
             for historical in &parsed_subs.historical_files {
                 let root = serde_json::from_slice(&subs.read(historical)?)?;
                 parsed_subs
                     .filings
-                    .extend(parse_submission_rows(&root, &parsed_facts.cik)?);
+                    .extend(parse_submission_rows(&root, cik)?);
                 if parsed_subs.filings.len() > 100_000 {
                     bail!("company exceeds bounded filing count");
                 }
             }
+            let parsed_facts = if facts.entries.contains_key(&name) {
+                let parsed = parse_companyfacts(&facts.read(&name)?)?;
+                if parsed.cik != cik {
+                    bail!("companyfacts entry CIK mismatch");
+                }
+                parsed
+            } else {
+                if !parsed_subs.filings.iter().any(|filing| filing.is_xbrl) {
+                    continue;
+                }
+                // Preserve discovery and filing provenance without inventing standard facts.
+                parse::ParsedCompanyFacts {
+                    cik: cik.to_owned(),
+                    name: parsed_subs.name.clone(),
+                    facts: Vec::new(),
+                }
+            };
             let mut unique = BTreeMap::new();
             for filing in parsed_subs.filings.drain(..) {
                 if let Some(old) = unique.insert(filing.accession.clone(), filing.clone()) {
@@ -210,6 +227,9 @@ async fn ingest_inner(
     }
     let (facts_hash, subs_hash) = produced?;
     *hashes = (Some(facts_hash), Some(subs_hash));
+    if counts.0 <= 0 || counts.1 <= 0 || counts.2 <= 0 {
+        bail!("bulk load has no usable companies, facts or filings; refusing successful evidence");
+    }
     for date in [modified.0, modified.1].into_iter().flatten() {
         validate_source_timestamp(Some(&date.to_rfc2822()), Utc::now())?;
     }

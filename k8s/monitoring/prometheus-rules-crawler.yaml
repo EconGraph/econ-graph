@@ -459,7 +459,7 @@ data:
       - name: crawler.companyfacts
         rules:
         - alert: SecCompanyfactsLoadFailed
-          expr: (kube_job_status_failed{namespace="econ-graph", job_name=~"sec-companyfacts-ingest-.*"} > 0) and on(namespace,job_name) (kube_job_created{namespace="econ-graph"} > time() - 3600)
+          expr: (kube_job_status_failed{namespace="econ-graph", job_name=~"sec-companyfacts-ingest-.*"} > 0) unless on(namespace,job_name) (kube_job_created{namespace="econ-graph", job_name=~"sec-companyfacts-ingest-.*"} < on(namespace) group_left kube_cronjob_status_last_successful_time{namespace="econ-graph", cronjob="sec-companyfacts-ingest"})
           labels:
             severity: warning
           annotations:

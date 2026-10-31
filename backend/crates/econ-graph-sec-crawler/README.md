@@ -118,6 +118,11 @@ SEC payload sizes. Allow 32 GiB staging space plus database growth; the compress
 are never buffered in RAM. The monitor rejects upstream Last-Modified timestamps older than
 24 hours. SEC publishes at approximately 03:00 ET; the optional schedule runs at 09:00 UTC.
 
+Issuer discovery also reads submissions-only companies with XBRL filings, including custom-concept
+issuers absent from companyfacts. Their company and filing metadata are retained without invented
+standard facts. Submissions-only non-XBRL issuers are excluded. A whole run with no companies,
+facts or filings fails and cannot establish source freshness.
+
 Each company's metadata, all available submissions-history chunks and facts commit in one
 transaction. Repeated loads preserve IDs and accession-specific revisions. A changed value
 under an already stored accession fails instead of silently replacing evidence. An interrupted
@@ -138,6 +143,9 @@ satisfy release acceptance.
 
 `SecCompanyfactsLoadFailed` and `SecCompanyfactsStale` use existing kube-state-metrics and
 Prometheus rules. They remain inactive while the optional CronJobs are absent/suspended.
+The failed-load alert remains active for retained failed Jobs until a later scheduled ingestion
+succeeds or the operator deletes the failed Job after investigation; it does not expire based
+on job creation time, so late failures in an eight-hour job remain visible.
 As with the existing crawler rules, Prometheus visibility does not itself configure an external
 notification receiver. Validate notification routing before relying on paging.
 

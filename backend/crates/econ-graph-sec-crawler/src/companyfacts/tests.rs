@@ -203,6 +203,74 @@ async fn database_repeat_load_failed_run_and_recovery() {
     downloaded.companyfacts_last_modified = Some(Utc::now() - TimeDelta::hours(25));
     assert!(store::check_freshness(&[downloaded], Utc::now()).is_err());
     assert!(store::check_freshness(&recovered, Utc::now() + TimeDelta::hours(25)).is_err());
+    // A custom-concept-only XBRL issuer has submissions but no companyfacts entry.
+    let make_issuer = |cik: &str, xbrl: bool| {
+        let mut root: serde_json::Value = serde_json::from_slice(SUBS).unwrap();
+        root["cik"] = serde_json::json!(cik);
+        root["name"] = serde_json::json!(format!("Issuer {cik}"));
+        root["filings"]["files"] = serde_json::json!([]);
+        root["filings"]["recent"] = serde_json::json!({
+            "accessionNumber":[format!("{cik}-24-000001")],"filingDate":["2024-02-02"],
+            "reportDate":["2023-12-31"],"form":["10-K"],"primaryDocument":["report.htm"],
+            "isXBRL":[if xbrl {1}else{0}]});
+        serde_json::to_vec(&root).unwrap()
+    };
+    let custom = make_issuer("0009999902", true);
+    let non_xbrl = make_issuer("0009999903", false);
+    let extended_subs = stage(&zip(&[
+        ("CIK0000320193.json", SUBS),
+        ("CIK0000320193-submissions-001.json", HISTORY),
+        ("CIK0009999902.json", &custom),
+        ("CIK0009999903.json", &non_xbrl),
+    ]));
+    let extended = IngestConfig {
+        submissions_zip: Some(extended_subs.path().to_owned()),
+        companyfacts_zip: Some(facts.path().to_owned()),
+        staging_dir: std::env::temp_dir(),
+        user_agent: "test@econgraph.com".into(),
+        limits: ArchiveLimits::default(),
+    };
+    let loaded = ingest(&url, extended.clone()).await.unwrap();
+    assert_eq!(
+        (
+            loaded.companies_count,
+            loaded.facts_count,
+            loaded.filings_count
+        ),
+        (2, 4, 4)
+    );
+    let count: Count = diesel::sql_query(
+        "SELECT count(*) AS count FROM company_fact_filings WHERE cik='0009999902' AND is_xbrl",
+    )
+    .get_result(&mut conn)
+    .await
+    .unwrap();
+    assert_eq!(count.count, 1);
+    let count: Count =
+        diesel::sql_query("SELECT count(*) AS count FROM company_facts WHERE cik='0009999902'")
+            .get_result(&mut conn)
+            .await
+            .unwrap();
+    assert_eq!(count.count, 0);
+    let count: Count =
+        diesel::sql_query("SELECT count(*) AS count FROM companies WHERE cik='0009999903'")
+            .get_result(&mut conn)
+            .await
+            .unwrap();
+    assert_eq!(count.count, 0);
+    // An archive with no usable facts cannot claim a successful nightly snapshot.
+    let empty_facts = stage(&zip(&[(
+        "CIK0000320193.json",
+        br#"{"cik":320193,"entityName":"Apple Inc.","facts":{}}"#,
+    )]));
+    let no_facts = IngestConfig {
+        companyfacts_zip: Some(empty_facts.path().to_owned()),
+        ..extended
+    };
+    assert!(ingest(&url, no_facts).await.is_err());
+    let failed = store::load_evidence(&pool).await.unwrap();
+    assert_eq!(failed[0].status, "failed");
+    assert_eq!(failed[0].facts_count, 0);
 }
 
 #[test]
@@ -224,6 +292,13 @@ fn active_load_grace_requires_a_fresh_verified_success() {
         companyfacts_last_modified: Some(completed - TimeDelta::hours(6)),
         submissions_last_modified: Some(completed - TimeDelta::hours(6)),
     };
+    for counts in [(0, 4, 3), (1, 0, 3), (1, 4, 0)] {
+        let mut empty = successful.clone();
+        empty.companies_count = counts.0;
+        empty.facts_count = counts.1;
+        empty.filings_count = counts.2;
+        assert!(store::check_freshness(&[empty], now).is_err());
+    }
     // Publication is now 26h old but was fresh when this verified snapshot completed.
     store::check_freshness(&[successful.clone()], now).unwrap();
     let mut running = successful.clone();

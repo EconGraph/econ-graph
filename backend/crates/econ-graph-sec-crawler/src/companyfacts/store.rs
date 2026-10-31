@@ -98,6 +98,12 @@ pub fn check_freshness(runs: &[LoadRun], now: DateTime<Utc>) -> Result<()> {
         .iter()
         .find(|run| run.status == "succeeded" && run.source_mode == "downloaded")
         .context("no verified downloaded companyfacts load has succeeded")?;
+    if successful.companies_count <= 0
+        || successful.facts_count <= 0
+        || successful.filings_count <= 0
+    {
+        bail!("successful load has no usable companies, facts or filings");
+    }
     let completed = successful
         .completed_at
         .context("load has no completion timestamp")?;
