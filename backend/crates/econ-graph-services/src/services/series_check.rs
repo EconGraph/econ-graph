@@ -339,6 +339,7 @@ mod tests {
 
     /// Anything but a clean answer is "can't tell", never "doesn't exist" or "exists".
     #[tokio::test]
+    #[serial_test::serial(series_check_log)]
     async fn failures_are_unavailable() {
         let id = Uuid::new_v4();
         let mut servers = Vec::new();
@@ -376,6 +377,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial(series_check_log)]
     async fn a_slow_or_down_data_plane_is_unavailable() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -425,7 +427,11 @@ mod tests {
     /// Even given a URL holding secrets (config refuses one, so this builds the client
     /// directly), a failed check's log line, its error detail and the client's `Debug` show
     /// only the redacted URL.
+    ///
+    /// Serial with the other tests that reach the same `warn!` without a subscriber: run
+    /// alongside them, the scoped subscriber here intermittently captured nothing.
     #[tokio::test]
+    #[serial_test::serial(series_check_log)]
     async fn failed_checks_never_log_the_full_url() {
         let buffer = Buffer(Arc::new(std::sync::Mutex::new(Vec::new())));
         let writer = buffer.clone();

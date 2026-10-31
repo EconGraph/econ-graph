@@ -632,10 +632,6 @@ mod tests {
     /// lock is released. A test that instead just ran two `run_migrations` calls concurrently
     /// would pass even without the lock, since both would likely finish before either raced the
     /// other (few migrations, no contention to force a slow one to wait).
-    ///
-    /// Connects directly with `DATABASE_URL` (unlike the other tests here) because
-    /// `TestContainer` always starts a throwaway Docker container even when pointed at an
-    /// external database, and this test's environment has no Docker daemon.
     #[tokio::test]
     #[serial_test::serial]
     async fn test_migrations_block_while_another_session_holds_the_lock() {
