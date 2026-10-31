@@ -5,16 +5,20 @@
 # Usage:
 #   scripts/deploy/check-public-site.sh --host econgraph.com             # local gateway
 #   scripts/deploy/check-public-site.sh --host econgraph.com --via-cloudflare
+#   scripts/deploy/check-public-site.sh --host econgraph.com --main-host econgraph.com # apex rollback
+#
+# MAIN_HOST defaults to www.HOST; --main-host overrides the environment.
 #
 # What it checks:
 #   - the frontend, and a /graphql search sent with the public Origin;
 #   - the Keycloak discovery document, whose issuer must be
-#     https://HOST/idp/realms/econ-graph;
+#     https://MAIN_HOST/idp/realms/econ-graph;
 #   - the sign-in page for the web client: Keycloak accepts the public
 #     redirect URI and does not answer "HTTPS required", and refuses a
 #     http://localhost redirect URI (the live realm, not just the rendered one);
-#   - CORS for the public origin, and the www.HOST redirect: a 301 to
-#     https://HOST with the path and query kept and no port;
+#   - CORS for both public origins and refusal of unrelated origins;
+#   - HTTP on both names and HTTPS on the alternate name redirect by 301
+#     to https://MAIN_HOST with the path and query kept and no port;
 #   - spoofing: X-Forwarded-Proto/-Host/-Port sent by the client change
 #     neither the issuer, the sign-in form, nor the redirect, and plain http
 #     is redirected to https;
@@ -36,6 +40,7 @@
 set -euo pipefail
 
 HOST=""
+MAIN_HOST="${MAIN_HOST:-}"
 VIA_CLOUDFLARE=false
 LOCAL_INGRESS_IP="${LOCAL_INGRESS_IP:-127.0.0.1}"
 LOCAL_HTTPS_PORT="${LOCAL_HTTPS_PORT:-443}"
@@ -47,11 +52,21 @@ SPOOF_HOST="spoofed.invalid"
 while [ $# -gt 0 ]; do
     case "$1" in
         --host)
-            HOST="${2:-}"
+            [ $# -ge 2 ] || { echo "--host needs a value" >&2; exit 2; }
+            HOST="$2"
             shift 2
             ;;
         --host=*)
             HOST="${1#--host=}"
+            shift
+            ;;
+        --main-host)
+            [ $# -ge 2 ] || { echo "--main-host needs a value" >&2; exit 2; }
+            MAIN_HOST="$2"
+            shift 2
+            ;;
+        --main-host=*)
+            MAIN_HOST="${1#--main-host=}"
             shift
             ;;
         --via-cloudflare)
@@ -69,9 +84,15 @@ while [ $# -gt 0 ]; do
     esac
 done
 [ -n "$HOST" ] || {
-    echo "usage: $0 --host HOST [--via-cloudflare]" >&2
+    echo "usage: $0 --host HOST [--main-host HOST] [--via-cloudflare]" >&2
     exit 2
 }
+MAIN_HOST="${MAIN_HOST:-www.${HOST}}"
+case "$MAIN_HOST" in
+    "$HOST") ALTERNATE_HOST="www.${HOST}" ;;
+    "www.${HOST}") ALTERNATE_HOST="$HOST" ;;
+    *) echo "--main-host must be ${HOST} or www.${HOST}" >&2; exit 2 ;;
+esac
 for tool in curl python3; do
     command -v "$tool" >/dev/null || {
         echo "$tool not found" >&2
@@ -79,11 +100,10 @@ for tool in curl python3; do
     }
 done
 
-PUBLIC_URL="https://${HOST}"
+PUBLIC_URL="https://${MAIN_HOST}"
 ISSUER="${PUBLIC_URL}/idp/realms/${REALM}"
-BASE="https://${HOST}"
-WWW_BASE="https://www.${HOST}"
-HTTP_BASE="http://${HOST}"
+BASE="$PUBLIC_URL"
+ALTERNATE_BASE="https://${ALTERNATE_HOST}"
 CURL=(curl -sS --max-time 20)
 if [ "$VIA_CLOUDFLARE" = true ]; then
     echo "==> Checking ${BASE} through Cloudflare"
@@ -91,7 +111,8 @@ else
     CURL+=(--insecure
         --connect-to "${HOST}:443:${LOCAL_INGRESS_IP}:${LOCAL_HTTPS_PORT}"
         --connect-to "www.${HOST}:443:${LOCAL_INGRESS_IP}:${LOCAL_HTTPS_PORT}"
-        --connect-to "${HOST}:80:${LOCAL_INGRESS_IP}:${LOCAL_HTTP_PORT}")
+        --connect-to "${HOST}:80:${LOCAL_INGRESS_IP}:${LOCAL_HTTP_PORT}"
+        --connect-to "www.${HOST}:80:${LOCAL_INGRESS_IP}:${LOCAL_HTTP_PORT}")
     echo "==> Checking ${HOST} on the local gateway (${LOCAL_INGRESS_IP}), as the tunnel would send it"
 fi
 SPOOF=(-H "X-Forwarded-Proto: http" -H "X-Forwarded-Host: ${SPOOF_HOST}" -H "X-Forwarded-Port: 8443")
@@ -159,7 +180,7 @@ fi
 status="$(fetch discovery "${BASE}/idp/realms/${REALM}/.well-known/openid-configuration")"
 issuer="$(json discovery issuer)"
 auth_endpoint="$(json discovery authorization_endpoint)"
-if [ "$issuer" = "$ISSUER" ]; then
+if [ "$status" = 200 ] && [ "$issuer" = "$ISSUER" ]; then
     pass "discovery issuer is ${ISSUER}"
 else
     fail "discovery returned ${status} with issuer '${issuer}', expected ${ISSUER}"
@@ -200,40 +221,41 @@ else
     fail "sign-in page returned ${status} for http://localhost/auth/callback; the realm still accepts localhost"
 fi
 
-# 5. CORS: the API answers a preflight from the public origin.
-status="$(fetch cors -X OPTIONS -H "Origin: ${PUBLIC_URL}" \
-    -H 'Access-Control-Request-Method: POST' \
-    -H 'Access-Control-Request-Headers: content-type, authorization' "${BASE}/graphql")"
-allowed="$(header cors Access-Control-Allow-Origin)"
-if [ "$allowed" = "$PUBLIC_URL" ]; then
-    pass "CORS preflight from ${PUBLIC_URL} allowed"
-else
-    fail "CORS preflight returned ${status}, Access-Control-Allow-Origin '${allowed}', expected ${PUBLIC_URL}"
-fi
+# 5. Both public names remain allowed as CORS origins during the host switch.
+# The request URL is canonical, independent of the Origin being checked.
+for origin in "https://${HOST}" "https://www.${HOST}"; do
+    status="$(fetch cors -X OPTIONS -H "Origin: ${origin}" \
+        -H 'Access-Control-Request-Method: POST' \
+        -H 'Access-Control-Request-Headers: content-type, authorization' "${BASE}/graphql")"
+    allowed="$(header cors Access-Control-Allow-Origin)"
+    if [[ "$status" == 2* ]] && [ "$allowed" = "$origin" ]; then
+        pass "CORS preflight from ${origin} allowed"
+    else
+        fail "CORS preflight returned ${status}, Access-Control-Allow-Origin '${allowed}', expected ${origin}"
+    fi
+done
+for origin in 'https://refused.invalid' 'http://localhost:3000'; do
+    status="$(fetch cors-refused -X OPTIONS -H "Origin: ${origin}" \
+        -H 'Access-Control-Request-Method: POST' \
+        -H 'Access-Control-Request-Headers: content-type, authorization' "${BASE}/graphql")"
+    allowed="$(header cors-refused Access-Control-Allow-Origin)"
+    if { [[ "$status" == 2* ]] || [ "$status" = 400 ] || [ "$status" = 403 ]; } && [ -z "$allowed" ]; then
+        pass "CORS preflight from ${origin} refused"
+    else
+        fail "CORS preflight from ${origin} returned ${status}, Access-Control-Allow-Origin '${allowed}', expected no allowed origin"
+    fi
+done
 
-# 6. www redirects to the apex on https, keeping the path and query, with no port
-# spelled out: econ-graph-www-redirect's 301 (scripts/deploy/render-public-host.py).
-# Any other status means something else answered, such as an old ingress or a
-# Cloudflare redirect rule.
-WWW_TARGET="${PUBLIC_URL}/series/smoke-check?from=www"
-# Until production is cut over to the gateway, and only until then (ECO-800 removes
-# this): ingress-nginx still answers www with a 308 that spells out :443 (ECO-709).
-# That exact response, with nginx's own redirect page as its body (which a Cloudflare
-# redirect rule would not send), is reported as known; any other one fails.
-INGRESS_NGINX_WWW_TARGET="https://${HOST}:443/series/smoke-check?from=www"
-# ingress_nginx_www NAME STATUS LOCATION: the response saved as NAME is ingress-nginx's.
-ingress_nginx_www() {
-    [ "$2" = 308 ] && [ "$3" = "$INGRESS_NGINX_WWW_TARGET" ] &&
-        grep -qF '<center>nginx</center>' "$tmp/$1"
-}
-status="$(fetch www "${WWW_BASE}/series/smoke-check?from=www")"
-location="$(header www Location)"
-if [ "$status" = 301 ] && [ "$location" = "$WWW_TARGET" ]; then
-    pass "www.${HOST} redirects (301) to ${location}"
-elif ingress_nginx_www www "$status" "$location"; then
-    pass "www.${HOST} redirects (308) through ingress-nginx, with :443 (ECO-709: production not yet cut over to the gateway)"
+# 6. The alternate HTTPS host redirects to the canonical origin exactly once.
+# The frontend check above verifies that canonical HTTPS serves, rather than redirects.
+REDIRECT_PATH='/series/smoke-check?from=alternate'
+REDIRECT_TARGET="${PUBLIC_URL}${REDIRECT_PATH}"
+status="$(fetch alternate "${ALTERNATE_BASE}${REDIRECT_PATH}")"
+location="$(header alternate Location)"
+if [ "$status" = 301 ] && [ "$location" = "$REDIRECT_TARGET" ]; then
+    pass "${ALTERNATE_HOST} redirects (301) to ${location}"
 else
-    fail "www.${HOST} redirects (${status}) to '${location}', expected a 301 to ${WWW_TARGET}"
+    fail "${ALTERNATE_HOST} redirects (${status}) to '${location}', expected a 301 to ${REDIRECT_TARGET}"
 fi
 
 # 7. Spoofing. A client's X-Forwarded-Proto/-Host/-Port must not reach anything
@@ -253,33 +275,24 @@ if [ "$status" = 200 ] && grep -q "action=\"${PUBLIC_URL}/idp/" "$tmp/spoof-logi
 else
     fail "with spoofed X-Forwarded-* headers the sign-in page returned ${status} or changed its form target"
 fi
-status="$(fetch spoof-www "${SPOOF[@]}" "${WWW_BASE}/series/smoke-check?from=www")"
-location="$(header spoof-www Location)"
-if [ "$status" = 301 ] && [ "$location" = "$WWW_TARGET" ]; then
-    pass "spoofed X-Forwarded-* headers leave the www redirect on ${PUBLIC_URL}"
-elif ingress_nginx_www spoof-www "$status" "$location"; then
-    pass "spoofed X-Forwarded-* headers leave ingress-nginx's www redirect on ${HOST}:443 (ECO-709: production not yet cut over to the gateway)"
+status="$(fetch spoof-alternate "${SPOOF[@]}" "${ALTERNATE_BASE}${REDIRECT_PATH}")"
+location="$(header spoof-alternate Location)"
+if [ "$status" = 301 ] && [ "$location" = "$REDIRECT_TARGET" ]; then
+    pass "spoofed X-Forwarded-* headers leave the alternate redirect on ${PUBLIC_URL}"
 else
-    fail "with spoofed X-Forwarded-* headers www redirects (${status}) to '${location}'"
+    fail "with spoofed X-Forwarded-* headers ${ALTERNATE_HOST} redirects (${status}) to '${location}'"
 fi
-# Plain http, claiming to be https: still redirected to https, never served.
-status="$(fetch plain -H "X-Forwarded-Proto: https" "${HTTP_BASE}/idp/realms/${REALM}/.well-known/openid-configuration")"
-location="$(header plain Location)"
-case "$status" in
-    301 | 302 | 307 | 308)
-        case "$location" in
-            "${PUBLIC_URL}/"*) pass "plain http (even claiming https) is redirected to ${PUBLIC_URL}" ;;
-            *) fail "plain http redirects (${status}) to '${location}', not to ${PUBLIC_URL}" ;;
-        esac
-        ;;
-    *)
-        if [ "$VIA_CLOUDFLARE" = true ]; then
-            fail "plain http returned ${status}: turn on Cloudflare's Always Use HTTPS"
-        else
-            fail "plain http with X-Forwarded-Proto: https returned ${status}, expected a redirect to https"
-        fi
-        ;;
-esac
+# HTTP on both names must redirect directly to canonical HTTPS, including when
+# the client claims it is already using HTTPS.
+for name in "$HOST" "www.${HOST}"; do
+    status="$(fetch plain -H "X-Forwarded-Proto: https" "http://${name}${REDIRECT_PATH}")"
+    location="$(header plain Location)"
+    if [ "$status" = 301 ] && [ "$location" = "$REDIRECT_TARGET" ]; then
+        pass "plain http://${name} (even claiming https) redirects (301) to ${location}"
+    else
+        fail "plain http://${name} redirects (${status}) to '${location}', expected a 301 to ${REDIRECT_TARGET}"
+    fi
+done
 
 # 8. Not served on the public host. An unrouted path falls through to the app,
 # which answers with its own HTML (id="root"); anything else that answers 2xx,
@@ -320,4 +333,4 @@ if [ "$failures" -gt 0 ]; then
     echo "==> ${failures} check(s) failed"
     exit 1
 fi
-echo "==> All checks passed for ${HOST}"
+echo "==> All checks passed for ${MAIN_HOST}"

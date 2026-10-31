@@ -11,7 +11,7 @@ need a person or a long observation period.
 
 ```bash
 QA_LAB_TARGET_OK=lab-1.example scripts/qa/run-scenarios.sh --target https://lab-1.example --profile lab
-scripts/qa/run-scenarios.sh --target https://econgraph.com --profile production --json out.json
+scripts/qa/run-scenarios.sh --target https://www.econgraph.com --profile production --json out.json
 QA_LAB_TARGET_OK=lab-1.example scripts/qa/run-scenarios.sh --target https://lab-1.example --profile lab \
     --only anonymous-api,mcp-reads
 scripts/qa/run-scenarios.sh --list
@@ -47,7 +47,7 @@ unclear counts as changing state.
 
 | Profile | Runs | Targets |
 |---|---|---|
-| `lab` | every scenario | only hosts named in `QA_LAB_TARGET_OK`, never `econgraph.com` or a host in `QA_PRODUCTION_HOSTS` |
+| `lab` | every scenario | only hosts named in `QA_LAB_TARGET_OK`, never `econgraph.com`, `www.econgraph.com`, or a host in `QA_PRODUCTION_HOSTS` |
 | `ci` | every scenario except the lab-only ones | the same |
 | `production` | the scenarios that change nothing, plus `annotation-round-trip` as a dedicated QA account | any |
 
@@ -87,7 +87,7 @@ deployed realm.
 
 | Scenario | Changes state | Profiles | What it checks |
 |---|---|---|---|
-| `public-site` | no | all | Runs [`scripts/deploy/check-public-site.sh`](../../scripts/deploy/check-public-site.sh) against the target's host: routing, the issuer, the sign-in page (which must refuse a `http://localhost` redirect URI), CORS, forwarded-header spoofing, and admin, metrics and playground not served. Each of its lines is a check. It reaches the host through DNS, as a visitor does; `QA_PUBLIC_SITE_ROUTE=gateway` sends it to the gateway on the runner's host instead (`LOCAL_INGRESS_IP` and the ports `check-public-site.sh` reads) |
+| `public-site` | no | all | Runs [`scripts/deploy/check-public-site.sh`](../../scripts/deploy/check-public-site.sh) against the target's host: routing, canonical-host redirects, the issuer, the sign-in page (which must refuse a `http://localhost` redirect URI), both public CORS origins and refused-origin preflights, forwarded-header spoofing, and admin, metrics and playground not served. Each of its lines is a check. It reaches the host through DNS, as a visitor does; `QA_PUBLIC_SITE_ROUTE=gateway` sends it to the gateway on the runner's host instead (`LOCAL_INGRESS_IP` and the ports `check-public-site.sh` reads) |
 | `anonymous-api` | no | all | Without a token, through `/graphql`: a search, the series, its observations and the world map's cross-section. The same search and observations through `/data/graphql` must match |
 | `anonymous-browser` | no | all | Signed out, in Chromium: the home page without script errors, a search, a series page and its chart, the CSV download against the page's newest point, and the world map's colored countries and value table |
 | `annotation-round-trip` | yes | all, production only as a `qa-*` account | Signs in, creates a private annotation, retries the create with the same idempotency key and gets the same annotation, checks that it is stored once and invisible to an anonymous reader, then deletes it. Anything it created is deleted even when a check fails |
@@ -103,6 +103,33 @@ deployed realm.
 `QA_SEARCH_QUERY` (default `GDP`) is the search the read scenarios use. Each scenario's header
 documents its inputs and outputs in full.
 
+### Main address and sign-in checks
+
+The production target is `https://www.econgraph.com`. `PUBLIC_HOST=econgraph.com`
+remains the base domain, and `MAIN_HOST` defaults to www. For an explicit apex
+rollback, use the apex target and the checker's `--main-host econgraph.com` override.
+See [Main public address](../deployment/MAIN_HOST.md) for operator-only commands.
+These browser/token checks supplement the public-site scenario; do not treat a
+passing routing probe as proof that authentication completed.
+
+| Check | Expected result |
+| --- | --- |
+| Open HTTP on each public name and HTTPS on the apex, with a page path and query | 301 to the same path/query on `https://www.econgraph.com`; the destination serves content without another canonical-host redirect |
+| Open HTTPS www directly, in both a fresh and an existing browser profile | App loads without a redirect loop; the canonical link uses HTTPS www and the path, without query/fragment. Clear cached permanent redirects if an existing profile retains the opposite redirect |
+| Start sign-in from a page reached through each name | Both flows reach the same www realm, complete the callback on www, and return to the intended page |
+| Reload, renew a token, and sign out after signing in | Session restore/renewal and logout use www callbacks; no apex issuer or callback is introduced |
+| Complete a sign-in already in progress when the host changes | Old state either completes safely on the main host or offers a fresh sign-in; no loop or unrecoverable callback error |
+| Inspect discovery and a newly issued token | Issuer is exactly `https://www.econgraph.com/idp/realms/econ-graph`, matching backend validation and the frontend's resolved relative issuer |
+| Use a token from before the issuer change in an isolated QA deployment | Backend rejects the old issuer; a newly issued token succeeds. The release notice tells users to sign in again |
+| Preflight from both public origins | Both origins are allowed through the switch; `http://localhost` stays allowed and `http://localhost:3000` and arbitrary refused origins do not receive an allow-origin header |
+| Preview/apply the switch and apex rollback twice in a stubbed test or isolated QA deployment | Dry run makes no changes; reruns converge; rollback restores the apex issuer and inverse redirect matrix while retaining both public CORS origins and TLS names |
+
+Do not run state-changing switch, token or rollback tests against production from an
+agent. Use the targeted tests with `kubectl` and `curl` stubbed; never glob-run
+`scripts/deploy/test-*.sh`. Production execution and browser acceptance are Joe's
+steps. Record an independent adversarial review of redirect loops, sign-in from
+both names, issuer changes, and CORS during the switch.
+
 ### The cluster scenarios
 
 `branch-isolation`, `data-survives-redeploy` and `gateway-routes-only` read the kind cluster. Each
@@ -116,7 +143,7 @@ the Postgres pods: the data database is `econ_graph` in `postgresql-0`, and each
 
 ```bash
 # Exit criterion 5, read-only:
-QA_KUBE_CONTEXT=kind-econ-graph scripts/qa/run-scenarios.sh --target https://econgraph.com \
+QA_KUBE_CONTEXT=kind-econ-graph scripts/qa/run-scenarios.sh --target https://www.econgraph.com \
     --profile production --only gateway-routes-only
 
 # Exit criterion 1, against a deployed branch, as a user of the branch's realm:

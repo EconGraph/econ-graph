@@ -7,7 +7,7 @@
 #   2. load     scripts/deploy/load-release-images.sh --tag TAG
 #   3. keycloak scripts/deploy/backup-keycloak-db.sh (a verified dump of Keycloak's database)
 #   4. precheck scripts/deploy/precheck-db-migration.sh --stop-crawler
-#   5. deploy   scripts/deploy/deploy.sh, with PUBLIC_HOST from the host's deploy config
+#   5. deploy   scripts/deploy/deploy.sh, with PUBLIC_HOST and MAIN_HOST from deploy config
 #   6. verify   scripts/deploy/verify-release-images.sh --tag TAG
 #
 # The backup comes before the load: once the load has put the new images on
@@ -359,7 +359,15 @@ fi
 if [ "$marker" = 0 ] && [ -z "$CONFIRM_PRODUCTION" ] && [ "$DRY_RUN" != true ] && [ ! -t 0 ]; then
     die "deploying to the production cluster needs --confirm-production with the first 8 characters of its kube-system UID, or a terminal to type them on; --yes alone does not answer it. Read the UID from the cluster's identity above, on the terminal you deploy from"
 fi
-export PUBLIC_HOST
+main_host_init || die "could not choose MAIN_HOST; nothing was changed"
+if [ "$marker" = 0 ] && [ -n "$PUBLIC_HOST" ] && [ "$served" = "$PUBLIC_HOST" ]; then
+    served_main="$(public_main_host_in_cluster "$PUBLIC_HOST")" ||
+        die "could not read the current main host; nothing was changed"
+    [ "$served_main" = "$MAIN_HOST" ] ||
+        die "MAIN_HOST=${MAIN_HOST} differs from the live main host ${served_main}; run scripts/deploy/switch-main-host.sh --context ${CONTEXT} --host ${PUBLIC_HOST} --main-host ${MAIN_HOST} for the coordinated issuer/session change, or retain MAIN_HOST=${served_main} in the deploy config. Nothing was changed"
+fi
+export PUBLIC_HOST MAIN_HOST
+echo "  MAIN_HOST       ${MAIN_HOST:-(none: localhost only)}"
 echo "  PUBLIC_HOST     ${PUBLIC_HOST:-(none: localhost only)} (from ${DEPLOY_ENV})"
 # The gateway certificate's issuer, only with a public host (without one the
 # certificate is removed and the config line is not read).

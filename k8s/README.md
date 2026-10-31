@@ -91,7 +91,7 @@ terraform init
 terraform apply
 ```
 
-Only on the production cluster (the one that serves <https://econgraph.com>), mark it as
+Only on the production cluster (the one that serves <https://www.econgraph.com>), mark it as
 production once, after creating it and again after every recreate. See
 [Production marker](#production-marker). On every other cluster, run it with `--unmark`
 once instead.
@@ -141,14 +141,14 @@ admin and database passwords on its first run and keeps them afterwards. `deploy
 does not exist.
 
 ```bash
-# Optional, for Google sign-in (redirect URI https://<PUBLIC_HOST>/idp/realms/econ-graph/broker/google/endpoint,
+# Optional, for Google sign-in (redirect URI https://<MAIN_HOST>/idp/realms/econ-graph/broker/google/endpoint,
 # or http://localhost/idp/... without a PUBLIC_HOST):
 export KEYCLOAK_GOOGLE_CLIENT_ID=... KEYCLOAK_GOOGLE_CLIENT_SECRET=...
 ./scripts/deploy/create-secrets.sh
 ./scripts/deploy/deploy.sh
 ```
 
-- Issuer: `http://localhost/idp/realms/econ-graph`, or `https://<PUBLIC_HOST>/idp/realms/econ-graph`
+- Issuer: `http://localhost/idp/realms/econ-graph`, or `https://<MAIN_HOST>/idp/realms/econ-graph`
   with a public host (see [Public site](#-public-site-cloudflare-tunnel)). Only `/idp/realms/econ-graph`
   and `/idp/resources` are routed by the gateway; the master realm and the admin console are not
   reachable from outside the cluster.
@@ -261,7 +261,7 @@ dashboard change that retires it. Its header lists every step.
 
 ## 🌍 Public site (Cloudflare Tunnel)
 
-Production is served at <https://econgraph.com> (no hyphen) through a Cloudflare Tunnel:
+Production is served at <https://www.econgraph.com> (no hyphen) through a Cloudflare Tunnel:
 
 ```text
 browser --https--> Cloudflare edge --tunnel--> cloudflared (pod) --https--> gateway (listener https) --> app, Keycloak
@@ -273,21 +273,24 @@ the host, and it runs in the cluster, so it comes back with the cluster after a 
 recreate. It reaches the gateway's https listener, so the scheme the gateway passes on is the
 connection's own.
 
-**The host name is one setting, `PUBLIC_HOST`.** `deploy.sh` and `restart-k8s-rollout.sh`
-apply it through `scripts/deploy/lib/public-host.sh` and
-`scripts/deploy/render-public-host.py`. The committed manifests stay localhost-only, and
-`http://localhost` still serves the app on the host, but signing in works only on
-`https://econgraph.com`: the realm accepts no localhost redirect:
+**`PUBLIC_HOST` is the base domain; `MAIN_HOST` is the main address.** With
+`PUBLIC_HOST=econgraph.com`, `MAIN_HOST` defaults to `www.econgraph.com`. Set
+`MAIN_HOST=econgraph.com` explicitly to use the apex instead. `deploy.sh` and
+`restart-k8s-rollout.sh` apply these settings through
+`scripts/deploy/lib/public-host.sh` and `scripts/deploy/render-public-host.py`.
+The committed manifests stay localhost-only. `http://localhost` still serves the app
+on the host, but a public deployment accepts sign-in redirects only on its main HTTPS
+origin.
 
-| What | Value for `PUBLIC_HOST=econgraph.com` |
+| What | Value for `PUBLIC_HOST=econgraph.com` with the default `MAIN_HOST` |
 | --- | --- |
 | Gateway | listener `https` (port 443, no host name, so any TLS server name gets the certificate), certificate `econ-graph-tls` for `econgraph.com` and `www.econgraph.com` from ClusterIssuer `GATEWAY_TLS_ISSUER` (default `econ-graph-selfsigned`: only the tunnel connector sees it, unverified) |
-| HTTPRoutes | a separate `<name>-public` route per localhost one, for `econgraph.com` on listener `https` only, labelled `econgraph.io/public-host=true`, without `/admin`, `/api/admin` and `/playground`; the rate limits cover them |
-| `www.econgraph.com` and plain http | `econ-graph-www-redirect` and `econ-graph-public-redirect`: permanent redirects to `https://econgraph.com`, same path |
-| Keycloak `KC_HOSTNAME` | `https://econgraph.com/idp`; the admin console stays on the port-forward (`KC_HOSTNAME_ADMIN`) |
-| Realm client `econ-graph-web` | redirect URIs and web origins for `https://econgraph.com` only (`KC_WEB_BASE_URL` and `KC_WEB_E2E_BASE_URL`); without a public host, `http://localhost` |
-| Backend `OIDC_ISSUER` | `https://econgraph.com/idp/realms/econ-graph`; the signing keys are still fetched in-cluster (`OIDC_JWKS_URL`) |
-| Backend `CORS_ALLOWED_ORIGINS` | `https://econgraph.com` added to `http://localhost,http://localhost:3000` |
+| HTTPRoutes | a separate `<name>-public` route per localhost one, for `www.econgraph.com` on listener `https` only, labelled `econgraph.io/public-host=true`, without `/admin`, `/api/admin` and `/playground`; the rate limits cover them |
+| Apex HTTPS and both names on HTTP | `econ-graph-www-redirect` and `econ-graph-public-redirect`: 301 redirects to `https://www.econgraph.com`, preserving path and query |
+| Keycloak `KC_HOSTNAME` | `https://www.econgraph.com/idp`; the admin console stays on the port-forward (`KC_HOSTNAME_ADMIN`) |
+| Realm client `econ-graph-web` | redirect URIs and web origins for `https://www.econgraph.com` only (`KC_WEB_BASE_URL` and `KC_WEB_E2E_BASE_URL`); without a public host, `http://localhost` |
+| Backend `OIDC_ISSUER` | `https://www.econgraph.com/idp/realms/econ-graph`; the signing keys are still fetched in-cluster (`OIDC_JWKS_URL`) |
+| Backend `CORS_ALLOWED_ORIGINS` | `https://econgraph.com,https://www.econgraph.com,http://localhost`; both public names stay allowed during a main-host switch |
 
 `PUBLIC_HOST=` (empty) removes every piece again: the public routes, the https listener and its
 certificate, and cloudflared's replicas. With `PUBLIC_HOST` unset, a cluster that serves no
@@ -310,11 +313,15 @@ logged for in-cluster callers are not audit-grade.
 
 The frontend image needs no rebuild per host: `build-images.sh` builds it with the issuer
 `/idp/realms/econ-graph`, which the app resolves against the page's origin at runtime.
-Images built before ECO-457 have an absolute issuer baked in, so rebuild them once.
+The release-image build check rejects an empty issuer. The app's canonical link uses the
+main page origin and path, without a query or fragment.
 
-www is redirected rather than served because sign-in uses one Keycloak issuer that the
-backend checks exactly. A second origin would need its own redirect URIs, web origins and
-CORS entry, and would split sessions between hosts.
+The apex redirects to www before the app starts, so sign-in uses one Keycloak issuer
+that the backend checks exactly. Allowing both public CORS origins does not create a
+second issuer. Changing the main host changes the issuer and forces users to sign in
+again; existing sessions and old-issuer tokens are no longer usable. See
+[Main public address](../docs/deployment/MAIN_HOST.md) for the operator commands,
+rollback, and release notice.
 
 **Tunnel token.** The token is the Secret `cloudflare-tunnel` (key `token`). Enter it
 yourself with hidden input, on the production cluster only, after marking it. It is never
@@ -358,8 +365,8 @@ HTTP Host Header* empty, so that cloudflared sends the visitor's host (`econgrap
 gateway without DNS or the tunnel, connecting over https as cloudflared does. It checks:
 
 - the frontend and a `/graphql` search;
-- the Keycloak discovery document (issuer `https://econgraph.com/idp/realms/econ-graph`) and the sign-in page;
-- CORS and the www redirect;
+- the Keycloak discovery document (issuer `https://www.econgraph.com/idp/realms/econ-graph`) and the sign-in page;
+- both allowed public CORS origins, refused-origin preflights, and the full 301 redirect matrix;
 - that spoofed `X-Forwarded-Proto`, `-Host` and `-Port` headers change nothing, and that plain http is redirected;
 - that `/idp/admin`, `/idp/realms/master`, `/metrics`, `/playground`, `/api/admin` and encoded traversals of them are not served.
 
@@ -367,7 +374,7 @@ Add `--via-cloudflare` to go through Cloudflare the way a visitor does. The Prom
 `CloudflareTunnelDown` and `CloudflareTunnelNoConnections`
 (`k8s/monitoring/prometheus-rules-tunnel.yaml`) cover the connector.
 
-**Google sign-in** needs `https://econgraph.com/idp/realms/econ-graph/broker/google/endpoint`
+**Google sign-in** needs `https://www.econgraph.com/idp/realms/econ-graph/broker/google/endpoint`
 as an authorized redirect URI of the Google OAuth client (ECO-13).
 
 **Facebook sign-in** is disabled ([ECO-470](https://linear.app/econgraph/issue/ECO-470)):

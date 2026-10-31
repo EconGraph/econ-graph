@@ -6,10 +6,10 @@
 # cluster; don't run it.
 #
 # PUBLIC_HOST decides what the cluster serves:
-#   PUBLIC_HOST=econgraph.com  http://localhost and https://econgraph.com
-#                              (www.econgraph.com redirects there), reached
-#                              through the cloudflared tunnel; sign-in returns
-#                              to https://econgraph.com only;
+#   PUBLIC_HOST=econgraph.com  base domain; MAIN_HOST defaults to www.econgraph.com.
+#                              HTTP on both names and HTTPS on the alternate name
+#                              redirect to https://MAIN_HOST through the tunnel.
+#                              MAIN_HOST=econgraph.com restores the apex address;
 #   PUBLIC_HOST= (empty)       http://localhost only; every public-host piece
 #                              left by an earlier deploy is removed;
 #   unset                      the same as empty on a cluster that serves no
@@ -58,6 +58,44 @@ public_host_in_cluster() {
     printf '%s\n' "$hosts" | sed -n '/./{s/^www\.//;p;q;}'
 }
 
+# The current canonical host is the frontend's public HTTPS route. Before the
+# gateway cutover it is the base host. Failed API reads must not silently switch
+# the sign-in realm to a different host.
+public_main_host_in_cluster() {
+    local host="${1:-}" main=""
+    [ -n "$host" ] || return 0
+    if kc get crd httproutes.gateway.networking.k8s.io >/dev/null 2>&1; then
+        main="$(kc -n econ-graph get httproute econ-graph-frontend-public --ignore-not-found \
+            -o jsonpath='{.spec.hostnames[0]}')" || return 1
+    fi
+    printf '%s\n' "${main:-$host}"
+}
+
+# Resolve the main name without querying or changing the cluster. Explicit
+# environment wins, then a deploy-config MAIN_HOST for the same base domain,
+# then www.PUBLIC_HOST. No public host means no canonical public name.
+main_host_init() {
+    local configured configured_base
+    if [ -z "${PUBLIC_HOST:-}" ] || [ "$PUBLIC_HOST" = none ]; then
+        MAIN_HOST=""
+        export MAIN_HOST
+        return 0
+    fi
+    if [ -z "${MAIN_HOST+x}" ]; then
+        configured="$(deploy_config_value MAIN_HOST "host name")" || return 1
+        configured_base="$(deploy_config_value PUBLIC_HOST "host name")" || return 1
+        if [ -n "$configured" ] && { [ -z "$configured_base" ] || [ "${configured_base,,}" = "${PUBLIC_HOST,,}" ]; }; then
+            MAIN_HOST="$configured"
+        else
+            MAIN_HOST="www.${PUBLIC_HOST}"
+        fi
+    fi
+    MAIN_HOST="${MAIN_HOST,,}"
+    MAIN_HOST="$MAIN_HOST" "$(dirname "${BASH_SOURCE[0]}")/../render-public-host.py" \
+        "$PUBLIC_HOST" /dev/null >/dev/null || return 1
+    export MAIN_HOST
+}
+
 # The PUBLIC_HOST in the host's deploy config (deploy_config_path in
 # lib/deploy-config.sh: ${XDG_CONFIG_HOME:-~/.config}/econgraph/deploy.env, or
 # ECONGRAPH_CONFIG_DIR/deploy.env, or ECONGRAPH_DEPLOY_ENV): a line
@@ -88,7 +126,7 @@ read_configured_public_host() {
         host="${host,,}"
     fi
     if [ -n "$host" ] &&
-        ! "$(dirname "${BASH_SOURCE[0]}")/../render-public-host.py" "$host" /dev/null >/dev/null; then
+        ! MAIN_HOST="$host" "$(dirname "${BASH_SOURCE[0]}")/../render-public-host.py" "$host" /dev/null >/dev/null; then
         PUBLIC_HOST_CONFIG_ERROR="${DEPLOY_ENV} sets PUBLIC_HOST='${host}', which is not a public DNS name"
         return 1
     fi
@@ -116,14 +154,28 @@ public_host_init() {
         exit 1
     fi
     PUBLIC_HOST="${PUBLIC_HOST:-}"
+    [ "$PUBLIC_HOST" != none ] || PUBLIC_HOST=""
+    PUBLIC_HOST="${PUBLIC_HOST,,}"
     export PUBLIC_HOST
+    main_host_init || exit 1
+    if [ -n "$current" ] && [ -n "$PUBLIC_HOST" ]; then
+        local served_main
+        served_main="$(public_main_host_in_cluster "$current")" || {
+            echo "❌ Could not read the canonical public route"
+            exit 1
+        }
+        if [ "$served_main" != "$MAIN_HOST" ]; then
+            echo "❌ The cluster serves https://${served_main}, but MAIN_HOST selects ${MAIN_HOST}."
+            echo "   Use scripts/deploy/switch-main-host.sh to change the issuer and invalidate existing sessions safely."
+            exit 1
+        fi
+    fi
     if [ -n "$PUBLIC_HOST" ]; then
-        ./scripts/deploy/render-public-host.py "$PUBLIC_HOST" /dev/null >/dev/null || exit 1
         # Checked before anything is applied, so a refused deploy changes nothing.
         if ! cluster_is_marked_production; then
             refuse_public_host
         fi
-        echo "🌐 Public host: https://${PUBLIC_HOST} (www.${PUBLIC_HOST} redirects to it)"
+        echo "🌐 Public host: https://${MAIN_HOST} (base domain ${PUBLIC_HOST}; alternate name redirects to it)"
         # The certificate's issuer, chosen as apply-gateway-routes.sh will
         # (tls_issuer_choose): a bad GATEWAY_TLS_ISSUER line in the deploy config, or
         # one that would change the issuer implicitly, stops the deploy here, before
@@ -160,7 +212,7 @@ public_host_init() {
 # Print manifest(s) (or stdin, "-") with the public host applied, if any.
 render_manifest() {
     if [ -n "$PUBLIC_HOST" ]; then
-        ./scripts/deploy/render-public-host.py "$PUBLIC_HOST" "$@"
+        MAIN_HOST="${MAIN_HOST:-www.${PUBLIC_HOST}}" ./scripts/deploy/render-public-host.py "$PUBLIC_HOST" "$@"
     else
         cat "$@"
     fi
@@ -182,7 +234,7 @@ render_manifest() {
 apply_public_edge() {
     local args=(--context "$CLUSTER_ROLE_CONTEXT")
     [ "${CLUSTER_ROLE_DRY_RUN:-false}" != true ] || args+=(--dry-run)
-    PUBLIC_HOST="${PUBLIC_HOST:-none}" ./scripts/deploy/apply-gateway-routes.sh "${args[@]}"
+    PUBLIC_HOST="${PUBLIC_HOST:-none}" MAIN_HOST="${MAIN_HOST:-}" ./scripts/deploy/apply-gateway-routes.sh "${args[@]}"
 }
 
 # Stop the deploy: PUBLIC_HOST is set on a cluster that is not production

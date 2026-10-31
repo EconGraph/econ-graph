@@ -32,7 +32,8 @@
 #      controller, the Ingresses it serves and what else to look out for. The
 #      public host (PUBLIC_HOST, scripts/deploy/lib/public-host.sh) is the one
 #      the public Ingresses serve, unless PUBLIC_HOST is given; it needs
-#      cert-manager.
+#      cert-manager. MAIN_HOST defaults to www.PUBLIC_HOST; set MAIN_HOST to
+#      PUBLIC_HOST explicitly to keep the apex as main during a gateway-only cutover.
 #   2. Save what a rollback needs to
 #      ${XDG_STATE_HOME:-~/.local/state}/econgraph/gateway-cutover/<UTC time>/
 #      (mode 700; the files 600): the Ingresses and NetworkPolicies of
@@ -212,22 +213,24 @@ install_gateway() {
 apply_routes() {
     local args=(--context "$KUBE_CONTEXT")
     [ "$DRY_RUN" = true ] && args+=(--dry-run)
-    PUBLIC_HOST="${PUBLIC_HOST:-none}" "$PROJECT_ROOT/scripts/deploy/apply-gateway-routes.sh" "${args[@]}"
+    PUBLIC_HOST="${PUBLIC_HOST:-none}" MAIN_HOST="${MAIN_HOST:-}" "$PROJECT_ROOT/scripts/deploy/apply-gateway-routes.sh" "${args[@]}"
 }
 
 # The public host's redirects: plain http for HOST and www.HOST, and https for
-# www.HOST, answer 301 to https://HOST. BASE_HTTP and BASE_HTTPS are where
+# the alternate host, answer 301 to https://MAIN_HOST. BASE_HTTP and BASE_HTTPS are where
 # the gateway's ports 80 and 443 answer.
 check_public_redirects() {
-    local base_http="$1" base_https="$2" status=0 got spec scheme name base
+    local base_http="$1" base_https="$2" status=0 got spec scheme name base alternate
+    alternate="$PUBLIC_HOST"
+    [ "$MAIN_HOST" != "$PUBLIC_HOST" ] || alternate="www.${PUBLIC_HOST}"
     for spec in "http ${PUBLIC_HOST} ${base_http}" "http www.${PUBLIC_HOST} ${base_http}" \
-        "https www.${PUBLIC_HOST} ${base_https}"; do
+        "https ${alternate} ${base_https}"; do
         read -r scheme name base <<<"$spec"
-        got="$(curl -sk -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 10 -H "Host: ${name}" "${base}/some/path")"
-        if [ "$got" = "301 https://${PUBLIC_HOST}/some/path" ]; then
-            echo "  ok    ${scheme}://${name}/some/path -> 301 https://${PUBLIC_HOST}/some/path"
+        got="$(curl -sk -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 10 -H "Host: ${name}" "${base}/some/path?from=redirect")"
+        if [ "$got" = "301 https://${MAIN_HOST}/some/path?from=redirect" ]; then
+            echo "  ok    ${scheme}://${name}/some/path?from=redirect -> 301 https://${MAIN_HOST}/some/path?from=redirect"
         else
-            echo "  FAIL  ${scheme}://${name}/some/path: got '${got}'"
+            echo "  FAIL  ${scheme}://${name}/some/path?from=redirect: got '${got}'"
             status=1
         fi
     done
@@ -241,7 +244,7 @@ check_routes_in_cluster() {
         echo "+ kubectl -n envoy-gateway-system port-forward svc/econ-graph-gateway-proxy <port>:80 <port2>:443"
         echo "+ scripts/deploy/test-gateway-routes.sh --rate-limit http://127.0.0.1:<port>"
         if [ -n "${PUBLIC_HOST:-}" ]; then
-            echo "+ ROUTE_HOST=${PUBLIC_HOST} scripts/deploy/test-gateway-routes.sh https://127.0.0.1:<port2>, and the redirects"
+            echo "+ ROUTE_HOST=${MAIN_HOST} scripts/deploy/test-gateway-routes.sh https://127.0.0.1:<port2>, and the redirects"
         fi
         return 0
     fi
@@ -264,8 +267,8 @@ check_routes_in_cluster() {
                 -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = True ] && break
             sleep 2
         done
-        echo "Public host ${PUBLIC_HOST}, over https as the tunnel connector sends it:"
-        ROUTE_HOST="$PUBLIC_HOST" "$PROJECT_ROOT/scripts/deploy/test-gateway-routes.sh" "https://127.0.0.1:$((port + 1))" || status=$?
+        echo "Main host ${MAIN_HOST}, over https as the tunnel connector sends it:"
+        ROUTE_HOST="$MAIN_HOST" "$PROJECT_ROOT/scripts/deploy/test-gateway-routes.sh" "https://127.0.0.1:$((port + 1))" || status=$?
         check_public_redirects "http://127.0.0.1:${port}" "https://127.0.0.1:$((port + 1))" || status=$?
     fi
     kill "$pf" 2>/dev/null || true
@@ -387,7 +390,7 @@ check_pod_reaches_proxy() {
 check_pods_reach_proxy() {
     check_pod_reaches_proxy "http://${PROXY_FQDN}" localhost || return 1
     if [ -n "${PUBLIC_HOST:-}" ]; then
-        check_pod_reaches_proxy "https://${PROXY_FQDN}" "$PUBLIC_HOST" || return 1
+        check_pod_reaches_proxy "https://${PROXY_FQDN}" "$MAIN_HOST" || return 1
     fi
 }
 
@@ -548,10 +551,16 @@ if [ -z "${PUBLIC_HOST+x}" ]; then
 fi
 [ "${PUBLIC_HOST:-}" = none ] && PUBLIC_HOST=""
 if [ -n "$PUBLIC_HOST" ]; then
-    echo "  public host: ${PUBLIC_HOST} (PUBLIC_HOST)"
+    MAIN_HOST="${MAIN_HOST:-www.${PUBLIC_HOST}}"
+    case "$MAIN_HOST" in
+        "$PUBLIC_HOST" | "www.${PUBLIC_HOST}") ;;
+        *) die "MAIN_HOST must be ${PUBLIC_HOST} or www.${PUBLIC_HOST}" ;;
+    esac
+    echo "  public host: ${PUBLIC_HOST} (PUBLIC_HOST); main host: ${MAIN_HOST} (MAIN_HOST)"
     kc get crd certificates.cert-manager.io >/dev/null 2>&1 ||
         die "the public host needs cert-manager (for the gateway's https listener certificate); install it first"
 else
+    MAIN_HOST=""
     echo "  public host: none"
 fi
 # Host names the Ingresses serve that the HTTPRoutes don't: after step 6 the
@@ -647,7 +656,7 @@ else
     echo "  rollback: scripts/deploy/cutover-to-gateway.sh --rollback ${STATE_DIR} --context ${KUBE_CONTEXT}"
 fi
 
-export PUBLIC_HOST
+export PUBLIC_HOST MAIN_HOST
 log "3/8 Gateway next to ingress-nginx (no host ports yet)"
 run kc label namespace "$NAMESPACE" --overwrite econgraph.io/gateway-access=true econgraph.io/env=production
 install_gateway false "$GATEWAY_MANIFESTS"
@@ -730,10 +739,10 @@ else
     failed=false
     "$PROJECT_ROOT/scripts/deploy/test-gateway-routes.sh" "$HOST_URL" || failed=true
     if [ -n "$PUBLIC_HOST" ]; then
-        ROUTE_HOST="$PUBLIC_HOST" "$PROJECT_ROOT/scripts/deploy/test-gateway-routes.sh" "$HOST_HTTPS_URL" || failed=true
+        ROUTE_HOST="$MAIN_HOST" "$PROJECT_ROOT/scripts/deploy/test-gateway-routes.sh" "$HOST_HTTPS_URL" || failed=true
         check_public_redirects "$HOST_URL" "$HOST_HTTPS_URL" || failed=true
         if [ "$TUNNEL" = true ]; then
-            check_pod_reaches_proxy "https://ingress-nginx-controller.ingress-nginx.svc.cluster.local" "$PUBLIC_HOST" || failed=true
+            check_pod_reaches_proxy "https://ingress-nginx-controller.ingress-nginx.svc.cluster.local" "$MAIN_HOST" || failed=true
         fi
     fi
     if [ "$failed" = true ]; then

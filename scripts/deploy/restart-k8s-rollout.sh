@@ -46,7 +46,17 @@ fi
 # Load port configuration
 if [ -f "ports.env" ]; then
     echo "📋 Loading port configuration from ports.env..."
+    caller_public_host_set="${PUBLIC_HOST+set}"
+    caller_public_host="${PUBLIC_HOST-}"
+    caller_main_host_set="${MAIN_HOST+set}"
+    caller_main_host="${MAIN_HOST-}"
     source ports.env
+    if [ "$caller_public_host_set" = set ]; then
+        export PUBLIC_HOST="$caller_public_host"
+    fi
+    if [ "$caller_main_host_set" = set ]; then
+        export MAIN_HOST="$caller_main_host"
+    fi
 else
     echo "⚠️  ports.env not found, using default ports"
     BACKEND_NODEPORT=30080
@@ -230,7 +240,8 @@ kubectl apply -f k8s/manifests/namespace.yaml
 # Every manifest goes through the same public-host step as deploy.sh
 # (scripts/deploy/lib/public-host.sh): applied as committed, they would put
 # Keycloak's issuer and the backend back on localhost and drop the public host.
-# PUBLIC_HOST must therefore be given when the cluster serves one.
+# PUBLIC_HOST must therefore be given when the cluster serves one; MAIN_HOST
+# selects its main name (default www.PUBLIC_HOST, or the persisted deploy config).
 # shellcheck source=scripts/deploy/lib/public-host.sh
 source "$PROJECT_ROOT/scripts/deploy/lib/public-host.sh"
 public_host_init

@@ -125,17 +125,18 @@ same name) are ignored, and the run says how many. A record that can't be writte
 the run: before any step, or at the step whose result it was recording. A record without
 `deploy_started` lines counts as never deployed.
 
-## PUBLIC_HOST
+## PUBLIC_HOST and MAIN_HOST
 
 `PUBLIC_HOST` comes from the host's deploy config, never from memory:
 `~/.config/econgraph/deploy.env` (`$XDG_CONFIG_HOME/econgraph/deploy.env`;
 `ECONGRAPH_CONFIG_DIR` names another directory; `ECONGRAPH_DEPLOY_ENV` names another file
 and wins over both). `ECONGRAPH_CONFIG_DIR` is also the backup scripts' variable
-(`scripts/backup/lib.sh`), so exporting it for a backup run redirects this lookup too. One
-line:
+(`scripts/backup/lib.sh`), so exporting it for a backup run redirects this lookup too.
+The public-domain and main-host settings are:
 
 ```sh
 PUBLIC_HOST=econgraph.com
+MAIN_HOST=www.econgraph.com
 ```
 
 The file is read, not sourced: surrounding blanks and one pair of quotes are dropped, and
@@ -164,6 +165,21 @@ production host it holds `econgraph.com`; a test cluster's host has no file, or
   routes first;
 - a cluster whose marker can't be read;
 - a `PUBLIC_HOST` in the environment that differs from the config.
+
+`MAIN_HOST` selects the main public address independently of the base domain. Its
+default is `www.${PUBLIC_HOST}`; the only other supported value is `PUBLIC_HOST`
+itself. The hostname setting drives gateway routes, Keycloak's hostname and realm
+`frontendUrl`, the web client, and the backend's token issuer. Normal deploys and
+release deploys refuse to change the main host of a live deployment; use the
+operator switch so existing realm sessions are invalidated. When installing this
+release on an existing apex deployment, retain `MAIN_HOST=econgraph.com` in the
+deploy configuration first. Deploy the reviewed release to install the matching
+realm ConfigMap and helper, then run the operator switch to select www.
+
+Keep an explicit `MAIN_HOST=econgraph.com` when using the apex after rollback so a
+later deploy does not restore www. See
+[Main public address](MAIN_HOST.md) for the coordinated operator procedure and
+forced-sign-out notice.
 
 ## APP_DATABASE
 

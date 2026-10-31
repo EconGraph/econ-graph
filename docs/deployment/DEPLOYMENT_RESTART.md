@@ -122,7 +122,10 @@ compatible with the resulting database schema before restoring it. If a deployme
 fails before reaching migrations and you abandon it, restore the recorded count
 only after checking that the failure left the worker safe to run.
 
-Choose **one** deployment command according to the intended public host:
+Choose **one** deployment command according to the intended public host.
+`PUBLIC_HOST=econgraph.com` serves `https://www.econgraph.com` by default; `MAIN_HOST`
+selects www or the apex independently. Preserve an explicit apex choice when rolling
+back; see [Main public address](MAIN_HOST.md).
 
 ```bash
 # Keep the public site on its production cluster (use its actual hostname).

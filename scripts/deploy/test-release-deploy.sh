@@ -120,6 +120,8 @@ case "$*" in
     "get namespace kube-system"*) printf '%s' "$uid" ;;
     "get namespace econ-graph --ignore-not-found -o name") echo namespace/econ-graph ;;
     "get crd httproutes.gateway.networking.k8s.io"*) ;;
+    "get httproute econ-graph-frontend-public "*)
+        printf '%s' "${STUB_SERVED_MAIN-www.econgraph.com}" ;;
     "get httproute -l econgraph.io/public-host=true "*)
         [ "${STUB_SERVED_HOST-}" != fail ] || exit 1
         printf '%s\n' "${STUB_SERVED_HOST-econgraph.com}" ;;
@@ -210,7 +212,7 @@ for step in load-release-images backup-postgres-now backup-keycloak-db precheck-
     cat >"$TREE/scripts/deploy/$step.sh" <<'STUB'
 #!/usr/bin/env bash
 name="$(basename "$0" .sh)"
-echo "$name $* | PUBLIC_HOST=${PUBLIC_HOST-<unset>} KIND_CLUSTER=${KIND_CLUSTER:-} KUBECTL=${KUBECTL:-} KUBECONFIG=${KUBECONFIG:-} DOCKER_HOST=${DOCKER_HOST:-} PWD=$PWD APP_DATABASE=${APP_DATABASE-<unset>} ISSUER=${GATEWAY_TLS_ISSUER-<unset>}" >>"$TEST_LOGS/steps.log"
+echo "$name $* | PUBLIC_HOST=${PUBLIC_HOST-<unset>} KIND_CLUSTER=${KIND_CLUSTER:-} KUBECTL=${KUBECTL:-} KUBECONFIG=${KUBECONFIG:-} DOCKER_HOST=${DOCKER_HOST:-} PWD=$PWD APP_DATABASE=${APP_DATABASE-<unset>} ISSUER=${GATEWAY_TLS_ISSUER-<unset>} MAIN_HOST=${MAIN_HOST-<unset>}" >>"$TEST_LOGS/steps.log"
 stamp="${STUB_STAMP:-20261028T080000Z}"
 case "$name" in
     backup-postgres-now)
@@ -1132,6 +1134,26 @@ if [ "$rc" -eq 0 ] && grep -qF "deploy  | PUBLIC_HOST=econgraph.com " "$LOGS/ste
 else
     fail "PUBLIC_HOST=ECONGRAPH.COM: exit $rc, $(cat "$LOGS/steps.log")"
 fi
+# The independent main-host setting reaches deploy and is validated before any step.
+printf 'PUBLIC_HOST=econgraph.com\nMAIN_HOST=econgraph.com\n' >"$CONFIG"
+run env STUB_SERVED_MAIN=econgraph.com "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+[ "$rc" -eq 0 ] && grep -q 'MAIN_HOST=econgraph.com' "$LOGS/steps.log" ||
+    fail "persisted apex rollback MAIN_HOST did not reach deploy"
+printf 'PUBLIC_HOST=econgraph.com\nMAIN_HOST=www.econgraph.com\n' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+[ "$rc" -eq 0 ] && grep -q 'MAIN_HOST=www.econgraph.com' "$LOGS/steps.log" ||
+    fail "persisted www MAIN_HOST did not reach deploy"
+printf 'PUBLIC_HOST=econgraph.com\nMAIN_HOST=elsewhere.example\n' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "an unrelated MAIN_HOST" "MAIN_HOST"
+printf 'PUBLIC_HOST=econgraph.com\n' >"$CONFIG"
+run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+[ "$rc" -eq 0 ] && grep -q 'MAIN_HOST=www.econgraph.com' "$LOGS/steps.log" ||
+    fail "default www MAIN_HOST did not reach deploy"
+
+run env STUB_SERVED_MAIN=econgraph.com "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "a release that would implicitly change the issuer" "switch-main-host.sh"
+
 # Several PUBLIC_HOST lines: the last one wins, as if the file were sourced.
 printf 'PUBLIC_HOST=econ-graph.com\nPUBLIC_HOST=econgraph.com\n' >"$CONFIG"
 run "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"

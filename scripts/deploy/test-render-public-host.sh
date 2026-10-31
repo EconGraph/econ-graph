@@ -10,6 +10,7 @@
 #
 # Needs python3 with PyYAML. Usage: scripts/deploy/test-render-public-host.sh
 set -euo pipefail
+unset MAIN_HOST
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 render="${repo_root}/scripts/deploy/render-public-host.py"
@@ -58,7 +59,7 @@ rendered="$("$render" econgraph.com \
 for r in econ-graph-frontend econ-graph-backend econ-graph-graphql econ-graph-data-graphql econ-graph-idp; do
   check "$r stays localhost-only on listener http" "hosts('$r') == ['localhost'] and sections('$r') == ['http']"
   check "$r-public serves econgraph.com only, on listener https only" \
-    "hosts('$r-public') == ['econgraph.com'] and sections('$r-public') == ['https']"
+    "hosts('$r-public') == ['www.econgraph.com'] and sections('$r-public') == ['https']"
   check "$r-public is labelled for cleanup" \
     "route('$r-public')['metadata']['labels'] == {'econgraph.io/public-host': 'true'}"
   check "$r-public keeps the rules' filters and backends" \
@@ -70,14 +71,14 @@ check "the public host leaves out the admin and debug paths" \
   "not any(p == x or p.startswith(x + '/') for r in ('econ-graph-frontend-public', 'econ-graph-backend-public') for p in paths(r) for x in ('/admin', '/api/admin', '/playground')) and '/api' in paths('econ-graph-backend-public')"
 check "the public Keycloak route serves only the econ-graph realm and its resources" \
   "paths('econ-graph-idp-public') == ['/idp/realms/econ-graph', '/idp/resources']"
-check "plain http for the host and www redirects permanently to https://econgraph.com" \
-  "hosts('econ-graph-public-redirect') == ['econgraph.com', 'www.econgraph.com'] and sections('econ-graph-public-redirect') == ['http'] and redirect('econ-graph-public-redirect') == {'scheme': 'https', 'hostname': 'econgraph.com', 'statusCode': 301}"
-check "https for www redirects permanently to https://econgraph.com" \
-  "hosts('econ-graph-www-redirect') == ['www.econgraph.com'] and sections('econ-graph-www-redirect') == ['https'] and redirect('econ-graph-www-redirect') == {'scheme': 'https', 'hostname': 'econgraph.com', 'statusCode': 301}"
+check "plain http for the host and www redirects permanently to https://www.econgraph.com" \
+  "hosts('econ-graph-public-redirect') == ['econgraph.com', 'www.econgraph.com'] and sections('econ-graph-public-redirect') == ['http'] and redirect('econ-graph-public-redirect') == {'scheme': 'https', 'hostname': 'www.econgraph.com', 'statusCode': 301}"
+check "https for the apex redirects permanently to https://www.econgraph.com" \
+  "hosts('econ-graph-www-redirect') == ['econgraph.com'] and sections('econ-graph-www-redirect') == ['https'] and redirect('econ-graph-www-redirect') == {'scheme': 'https', 'hostname': 'www.econgraph.com', 'statusCode': 301}"
 check "every route rule sets X-Forwarded-For to the address the gateway settled on" \
   "all(any(f['type'] == 'RequestHeaderModifier' and {'name': 'X-Forwarded-For', 'value': '%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%'} in f['requestHeaderModifier'].get('set', []) for f in r.get('filters', [])) for (k, n), d in docs.items() if k == 'HTTPRoute' and not n.endswith('-redirect') for r in d['spec']['rules'])"
 check "KC_HOSTNAME is the https public URL" \
-  "env('Deployment', 'keycloak', 'keycloak', 'KC_HOSTNAME') == 'https://econgraph.com/idp'"
+  "env('Deployment', 'keycloak', 'keycloak', 'KC_HOSTNAME') == 'https://www.econgraph.com/idp'"
 check "the admin console stays on the port-forward" \
   "env('Deployment', 'keycloak', 'keycloak', 'KC_HOSTNAME_ADMIN') == 'http://localhost:18080/idp'"
 check "Keycloak's proxy headers are still trusted" \
@@ -87,11 +88,13 @@ check "the backend's issuer is Keycloak's" \
 check "the JWKS is still fetched in-cluster" \
   "env('Deployment', 'econ-graph-backend', 'backend', 'OIDC_JWKS_URL').startswith('http://keycloak-service:8080/')"
 check "Keycloak's realm placeholders use the public origin" \
-  "env('Deployment', 'keycloak', 'keycloak', 'KC_WEB_BASE_URL') == 'https://econgraph.com' and env('Deployment', 'keycloak', 'keycloak', 'KC_WEB_E2E_BASE_URL') == 'https://econgraph.com'"
+  "env('Deployment', 'keycloak', 'keycloak', 'KC_WEB_BASE_URL') == 'https://www.econgraph.com' and env('Deployment', 'keycloak', 'keycloak', 'KC_WEB_E2E_BASE_URL') == 'https://www.econgraph.com'"
+check "the realm import resets its frontend URL to the canonical IdP" \
+  "env('Job', 'keycloak-realm-import', 'render-realm', 'KC_REALM_FRONTEND_URL') == 'https://www.econgraph.com/idp'"
 check "the realm import allows the public origin only" \
-  "env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_BASE_URL') == 'https://econgraph.com' and env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_E2E_BASE_URL') == 'https://econgraph.com'"
+  "env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_BASE_URL') == 'https://www.econgraph.com' and env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_E2E_BASE_URL') == 'https://www.econgraph.com'"
 check "CORS allows the public origin first and keeps the local one" \
-  "docs[('ConfigMap', 'econ-graph-config')]['data']['CORS_ORIGIN'] == 'https://econgraph.com,http://localhost,http://localhost:3000'"
+  "docs[('ConfigMap', 'econ-graph-config')]['data']['CORS_ORIGIN'] == 'https://econgraph.com,https://www.econgraph.com,http://localhost'"
 check "cloudflared is untouched (0 replicas, as committed)" \
   "docs[('Deployment', 'cloudflared')]['spec']['replicas'] == 0"
 
@@ -130,13 +133,47 @@ print(json.dumps({
 # With a public host, the web client accepts the public host only: no localhost redirect URI,
 # web origin or post-logout URI.
 public_client="$(web_client <<<"$rendered")"
-for uri in https://econgraph.com/auth/callback https://econgraph.com/silent-callback.html; do
+for uri in https://www.econgraph.com/auth/callback https://www.econgraph.com/silent-callback.html; do
   grep -qF -- "\"$uri\"" <<<"$public_client" || fail "public realm redirect URIs lack $uri"
 done
-grep -qF -- '"https://econgraph.com"' <<<"$public_client" || fail "public realm web origins lack the host"
+grep -qF -- '"https://www.econgraph.com"' <<<"$public_client" || fail "public realm web origins lack the host"
 if grep -q localhost <<<"$public_client"; then
   fail "public realm still allows localhost: $public_client"
 fi
+
+# Every HTTPS redirect has a distinct source and target; neither public app
+# routes nor IdP routes may serve the alternate host.
+check "canonical HTTPS cannot redirect to itself" \
+  "redirect('econ-graph-www-redirect')['hostname'] not in hosts('econ-graph-www-redirect')"
+
+# Explicit rollback restores the apex consistently, preserving dual-origin CORS.
+forward="$rendered"
+rendered="$(MAIN_HOST=econgraph.com "$render" econgraph.com \
+  "$manifests/gateway/routes/httproutes.yaml" "$manifests/keycloak/deployment.yaml" \
+  "$manifests/keycloak/realm-import-job.yaml" "$manifests/backend-deployment.yaml" "$manifests/configmap.yaml")"
+check "rollback serves the apex and redirects www" \
+  "hosts('econ-graph-frontend-public') == ['econgraph.com'] and hosts('econ-graph-www-redirect') == ['www.econgraph.com'] and redirect('econ-graph-www-redirect')['hostname'] == 'econgraph.com' and redirect('econ-graph-public-redirect')['hostname'] == 'econgraph.com'"
+check "rollback restores the issuer and sign-in client together" \
+  "env('Deployment', 'keycloak', 'keycloak', 'KC_HOSTNAME') == 'https://econgraph.com/idp' and env('Deployment', 'econ-graph-backend', 'backend', 'OIDC_ISSUER') == 'https://econgraph.com/idp/realms/econ-graph' and env('Job', 'keycloak-realm-import', 'render-realm', 'KC_WEB_BASE_URL') == 'https://econgraph.com'"
+check "rollback retains both CORS origins" \
+  "docs[('ConfigMap', 'econ-graph-config')]['data']['CORS_ORIGIN'] == 'https://econgraph.com,https://www.econgraph.com,http://localhost'"
+[ "$(MAIN_HOST=econgraph.com "$render" econgraph.com - <<<"$rendered")" = "$rendered" ] || fail "rollback is not idempotent"
+# The same generated manifests can also be switched back and forward safely.
+rendered="$(MAIN_HOST=econgraph.com "$render" econgraph.com - <<<"$forward")"
+check "rerendering to the apex keeps routes and issuer together" \
+  "hosts('econ-graph-idp-public') == ['econgraph.com'] and hosts('econ-graph-www-redirect') == ['www.econgraph.com'] and env('Deployment', 'keycloak', 'keycloak', 'KC_HOSTNAME') == 'https://econgraph.com/idp'"
+[ "$("$render" econgraph.com - <<<"$rendered")" = "$forward" ] || fail "forward/rollback rendered manifests did not round-trip"
+rendered="$forward"
+
+# Another base name works without hardcoded production host names.
+rendered="$("$render" example.org "$manifests/gateway/routes/httproutes.yaml")"
+check "alternate public domains use their www name" \
+  "hosts('econ-graph-frontend-public') == ['www.example.org'] and hosts('econ-graph-www-redirect') == ['example.org'] and redirect('econ-graph-public-redirect')['hostname'] == 'www.example.org'"
+for bad_main in '' other.example.org https://www.econgraph.com www.www.econgraph.com; do
+  if MAIN_HOST="$bad_main" "$render" econgraph.com /dev/null >/dev/null 2>&1; then
+    fail "MAIN_HOST '$bad_main' was accepted"
+  fi
+done
 
 # Without one (the committed manifests: local clusters), it keeps localhost.
 local_client="$(web_client <"$manifests/keycloak/realm-import-job.yaml")"
@@ -145,7 +182,7 @@ for uri in http://localhost/auth/callback http://localhost/silent-callback.html;
 done
 grep -qF -- '"http://localhost"' <<<"$local_client" || fail "local realm web origins lack localhost"
 
-for bad in localhost "" "econgraph" "https://econgraph.com" "econgraph.com/" "www.econgraph.com" \
+for bad in localhost "" "econgraph" "https://www.econgraph.com" "econgraph.com/" "www.econgraph.com" \
   "econ graph.com" "-econgraph.com"; do
   if "$render" "$bad" /dev/null >/dev/null 2>&1; then
     fail "host '$bad' was accepted"

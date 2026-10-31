@@ -68,10 +68,16 @@ if [ -f "ports.env" ]; then
     # config) wins over one in ports.env, which only configures ports.
     caller_public_host_set="${PUBLIC_HOST+set}"
     caller_public_host="${PUBLIC_HOST-}"
+    caller_main_host_set="${MAIN_HOST+set}"
+    caller_main_host="${MAIN_HOST-}"
     source ports.env
     if [ "$caller_public_host_set" = set ]; then
         PUBLIC_HOST="$caller_public_host"
         export PUBLIC_HOST
+    fi
+    if [ "$caller_main_host_set" = set ]; then
+        MAIN_HOST="$caller_main_host"
+        export MAIN_HOST
     fi
 else
     echo "⚠️  ports.env not found, using default ports"
@@ -110,7 +116,8 @@ ensure_kind_kubectl
 export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
 
 # Public host name (ECO-457): PUBLIC_HOST=econgraph.com also serves
-# https://econgraph.com through the cloudflared tunnel; empty serves
+# https://www.econgraph.com through the cloudflared tunnel (MAIN_HOST overrides
+# the main name independently); empty serves
 # http://localhost only. See scripts/deploy/lib/public-host.sh (which sources
 # lib/cluster-role.sh), shared with restart-k8s-rollout.sh, for the rules and
 # render_manifest. The frontend image needs no rebuild for it: it resolves its
@@ -502,8 +509,8 @@ echo "✅ Deployment completed successfully!"
 echo ""
 echo "🌐 Application URLs:"
 if [ -n "$PUBLIC_HOST" ]; then
-  echo "  Public:   https://${PUBLIC_HOST} (through the Cloudflare Tunnel; www redirects here)"
-  echo "            check: scripts/deploy/check-public-site.sh --host ${PUBLIC_HOST} [--via-cloudflare]"
+  echo "  Public:   https://${MAIN_HOST} (through the Cloudflare Tunnel; the other public name redirects here)"
+  echo "            check: scripts/deploy/check-public-site.sh --host ${PUBLIC_HOST} --main-host ${MAIN_HOST} [--via-cloudflare]"
 fi
 # The gateway's routes (k8s/manifests/gateway/routes/) answer on host localhost.
 echo "  Frontend: http://localhost"

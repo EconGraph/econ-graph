@@ -337,6 +337,12 @@ def merge_catalog_policy(realm, get):
     observed_attrs = (observed or {}).get("attributes") or {}
     attributes = dict(observed_attrs)
     attributes.update(realm.get("attributes") or {})
+    # A public deploy owns the issuer URL as well as KC_HOSTNAME. A stale
+    # realm-level frontendUrl otherwise overrides the new server hostname.
+    # Local/compose imports leave it alone: their web and IdP origins differ.
+    frontend_url = os.environ.get("KC_REALM_FRONTEND_URL")
+    if frontend_url:
+        attributes["frontendUrl"] = frontend_url
     # Completion is recorded by a separate container only after config-cli succeeds.
     attributes.pop(INITIALIZED, None)
     attributes.pop(PENDING, None)

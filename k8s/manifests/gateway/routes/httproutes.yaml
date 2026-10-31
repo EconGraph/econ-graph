@@ -1,7 +1,8 @@
 # The app's routes on Gateway econ-graph-gateway (k8s/manifests/gateway/),
 # applied by scripts/deploy/apply-gateway-routes.sh. Production is namespace
 # econ-graph, host localhost on listener http. For a public host
-# (PUBLIC_HOST), scripts/deploy/render-public-host.py adds a copy of each,
+# (PUBLIC_HOST base domain), scripts/deploy/render-public-host.py adds a copy
+# of each for MAIN_HOST (default www.PUBLIC_HOST),
 # named <name>-public, for that host on listener https. The namespace must
 # carry the label
 # econgraph.io/gateway-access: "true" (namespace.yaml), or the Gateway

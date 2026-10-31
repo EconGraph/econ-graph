@@ -4,6 +4,8 @@ import copy
 import io
 import importlib.util
 import json
+import os
+from unittest.mock import patch
 from pathlib import Path
 import unittest
 
@@ -181,6 +183,18 @@ class CatalogPolicyTests(unittest.TestCase):
         self.assertEqual(merged["attributes"]["frontendUrl"],"https://custom.test")
         self.assertEqual(merged["attributes"]["cli-state"],"existing-state")
         self.assertNotIn(preserve.INITIALIZED,merged["attributes"])
+
+    def test_public_import_overrides_old_frontend_url_and_preserves_policy(self):
+        self.state[self.prefix]["attributes"].update({
+            "frontendUrl": "https://econgraph.com/idp", "cli-state": "existing-state"})
+        for origin in ("https://www.econgraph.com/idp", "https://econgraph.com/idp"):
+            with self.subTest(origin=origin), patch.dict(os.environ, {"KC_REALM_FRONTEND_URL": origin}):
+                merged = self.merge()
+                self.assertEqual(merged["attributes"]["frontendUrl"], origin)
+                self.assertEqual(merged["attributes"]["cli-state"], "existing-state")
+                self.assertEqual(merged["attributes"][preserve.INITIALIZED], "true")
+                self.assertEqual(self.role(merged, "catalog-public")["composites"],
+                                 {"realm": [], "client": {}})
 
     def test_interrupted_old_realm_bootstrap_retries_only_originally_missing_resources(self):
         self.state[self.prefix]["attributes"]={}
