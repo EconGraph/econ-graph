@@ -20,7 +20,8 @@
 # seconds, default 60, or an unexpected answer) refuses a change, unless
 # ALLOW_UNCHECKED_APP_DATABASE=1 says to go ahead deliberately (for example to redeploy
 # while repairing a database); a positive answer that the tables are elsewhere is always
-# refused.
+# refused, and so is shared when econ_graph answers that it holds none and econ_graph_app
+# can't be asked: the override only covers a database state that is unknown on both sides.
 
 APP_DB_GUARD_RETRY="wait until postgresql-0 and app-postgres-0 run and accept connections, then rerun; to go ahead without the check (for example to repair a database), rerun with ALLOW_UNCHECKED_APP_DATABASE=1"
 
@@ -97,7 +98,16 @@ require_app_tables_not_moved() {
         *) if [[ "$data" == unknown:* ]]; then
             app_db_guard_unchecked "${data#unknown: }, and ${app#unknown: }"
         else
-            app_db_guard_unchecked "${app#unknown: }"
+            # econ_graph answered that it holds no app tables while econ_graph_app exists:
+            # half of a positive answer that they moved, so the override does not apply.
+            die "the data database econ_graph holds no app tables (public.users) and the app" \
+                "database econ_graph_app exists but can't be asked (${app#unknown: }): the" \
+                "conversion may have moved the accounts there, for example if it stopped after" \
+                "removing them and before switching app-database-url. APP_DATABASE=shared would" \
+                "point the backend at econ_graph, which would create empty app tables and lose" \
+                "every account. Start app-postgres-0 and rerun, or use APP_DATABASE=separate if" \
+                "the conversion finished (docs/deployment/APP_DATA_CONVERSION.md)." \
+                "ALLOW_UNCHECKED_APP_DATABASE=1 does not bypass this; nothing more was written"
         fi ;;
     esac
 }
