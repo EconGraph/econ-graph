@@ -2032,3 +2032,320 @@ async fn enrolled_inactive_rows_stay_inactive_until_listed() {
     drop(conn);
     db.drop().await;
 }
+
+// ECO-758: restriction reviews and successors of discontinued series.
+
+/// A FRED series with stored history, then restricted by a fetch's marker.
+async fn restricted_series(pool: &DatabasePool, id: &str) {
+    persist::persist_discovered(pool, SourceId::Fred, &[counter_series(id)])
+        .await
+        .unwrap();
+    persist::persist_series(pool, SourceId::Fred, id, &successful_history())
+        .await
+        .unwrap();
+    let mut conn = pool.get().await.unwrap();
+    conn.transaction::<_, AppError, _>(async |conn| {
+        record_restricted_conn(conn, SourceId::Fred, id).await
+    })
+    .await
+    .unwrap();
+}
+
+#[derive(QueryableByName, Debug, PartialEq)]
+struct Review {
+    #[diesel(sql_type = Text)]
+    status: String,
+    #[diesel(sql_type = Nullable<Timestamptz>)]
+    cleared_at: Option<DateTime<Utc>>,
+    #[diesel(sql_type = Nullable<Text>)]
+    reason: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Bool)]
+    series_active: bool,
+    #[diesel(sql_type = Text)]
+    crawl_status: String,
+    #[diesel(sql_type = diesel::sql_types::Bool)]
+    metadata_active: bool,
+}
+
+async fn review(pool: &DatabasePool, id: &str) -> Review {
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query(
+        "SELECT l.status, l.restriction_cleared_at AS cleared_at, \
+            l.restriction_clear_reason AS reason, es.is_active AS series_active, es.crawl_status, \
+            sm.is_active AS metadata_active \
+         FROM series_lifecycle l \
+         JOIN economic_series es USING (source_id, external_id) \
+         JOIN series_metadata sm USING (source_id, external_id) WHERE l.external_id=$1",
+    )
+    .bind::<Text, _>(id)
+    .get_result(&mut conn)
+    .await
+    .unwrap()
+}
+
+/// The events recorded for `id`, oldest first.
+async fn events(pool: &DatabasePool, id: &str) -> Vec<String> {
+    #[derive(QueryableByName)]
+    struct Event {
+        #[diesel(sql_type = Text)]
+        event: String,
+    }
+    let mut conn = pool.get().await.unwrap();
+    diesel::sql_query("SELECT event FROM series_lifecycle_events WHERE external_id=$1 ORDER BY id")
+        .bind::<Text, _>(id)
+        .load::<Event>(&mut conn)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|e| e.event)
+        .collect()
+}
+
+async fn lift(pool: &DatabasePool, id: &str, claimed_at: Option<DateTime<Utc>>) -> Option<String> {
+    let mut conn = pool.get().await.unwrap();
+    conn.transaction::<_, AppError, _>(async |conn| {
+        lift_reviewed_restriction_conn(conn, SourceId::Fred, id, claimed_at).await
+    })
+    .await
+    .unwrap()
+}
+
+fn assert_hidden(r: &Review) {
+    assert_eq!(r.status, "restricted");
+    assert!(!r.series_active && !r.metadata_active, "{r:?}");
+    assert_eq!(r.crawl_status, "restricted");
+}
+
+#[tokio::test]
+async fn restriction_review_is_refused_unless_it_can_be_confirmed() {
+    let Some(db) = fetch_counter_db("eco758_review_refusals").await else {
+        return;
+    };
+    let pool = &db.pool;
+    restricted_series(pool, "restricted").await;
+    persist::persist_discovered(pool, SourceId::Fred, &[counter_series("public")])
+        .await
+        .unwrap();
+    // An active lifecycle row (one fetch miss), not restricted.
+    fetch_miss(pool, "public").await;
+    let refused = [
+        // An adapter whose fetch can't see a marker could never confirm the review.
+        request_restriction_review(pool, SourceId::Fred, false, "restricted", "fine").await,
+        request_restriction_review(pool, SourceId::Fred, true, "restricted", "  ").await,
+        request_restriction_review(pool, SourceId::Fred, true, "restricted", &"x".repeat(501))
+            .await,
+        request_restriction_review(pool, SourceId::Fred, true, "public", "fine").await,
+        request_restriction_review(pool, SourceId::Fred, true, "unknown", "fine").await,
+    ];
+    for (i, r) in refused.iter().enumerate() {
+        assert!(
+            matches!(r, Err(AppError::ValidationError(_))),
+            "case {i}: {r:?}"
+        );
+    }
+    let r = review(pool, "restricted").await;
+    assert_hidden(&r);
+    assert_eq!(r.cleared_at, None);
+    assert!(events(pool, "restricted").await.is_empty());
+    request_restriction_review(pool, SourceId::Fred, true, "restricted", &"x".repeat(500))
+        .await
+        .unwrap();
+    let r = review(pool, "restricted").await;
+    // Still hidden: only a later fetch can publish it.
+    assert_hidden(&r);
+    assert!(r.cleared_at.is_some());
+    assert_eq!(
+        events(pool, "restricted").await,
+        ["restriction_clearance_requested"]
+    );
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn only_a_fetch_claimed_after_the_review_lifts_the_restriction() {
+    let Some(db) = fetch_counter_db("eco758_review_lift").await else {
+        return;
+    };
+    let pool = &db.pool;
+    restricted_series(pool, "s").await;
+    // No review: no fetch publishes it.
+    assert_eq!(
+        lift(pool, "s", Some(Utc::now() + chrono::Duration::days(1))).await,
+        None
+    );
+    request_restriction_review(pool, SourceId::Fred, true, "s", "false positive")
+        .await
+        .unwrap();
+    let reviewed_at = review(pool, "s").await.cleared_at.unwrap();
+    for claimed in [
+        None,
+        Some(reviewed_at - chrono::Duration::milliseconds(1)),
+        Some(reviewed_at),
+    ] {
+        assert_eq!(
+            lift(pool, "s", claimed).await,
+            None,
+            "claimed at {claimed:?}"
+        );
+        assert_hidden(&review(pool, "s").await);
+    }
+    assert_eq!(
+        lift(
+            pool,
+            "s",
+            Some(reviewed_at + chrono::Duration::milliseconds(1))
+        )
+        .await
+        .as_deref(),
+        Some("active")
+    );
+    let r = review(pool, "s").await;
+    assert_eq!(
+        r,
+        Review {
+            status: "active".into(),
+            cleared_at: None,
+            reason: None,
+            series_active: true,
+            crawl_status: "success".into(),
+            metadata_active: true,
+        }
+    );
+    assert_eq!(
+        events(pool, "s").await,
+        ["restriction_clearance_requested", "restriction_lifted"]
+    );
+    // Lifted once; a later fetch changes nothing.
+    assert_eq!(
+        lift(pool, "s", Some(Utc::now() + chrono::Duration::days(1))).await,
+        None
+    );
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn new_restriction_evidence_cancels_a_review() {
+    let Some(db) = fetch_counter_db("eco758_review_cancel").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let later = || Some(Utc::now() + chrono::Duration::days(1));
+    // A fetch that finds the marker again.
+    restricted_series(pool, "fetched").await;
+    request_restriction_review(pool, SourceId::Fred, true, "fetched", "false positive")
+        .await
+        .unwrap();
+    let mut conn = pool.get().await.unwrap();
+    conn.transaction::<_, AppError, _>(async |conn| {
+        record_restricted_conn(conn, SourceId::Fred, "fetched").await
+    })
+    .await
+    .unwrap();
+    drop(conn);
+    assert_eq!(review(pool, "fetched").await.cleared_at, None);
+    assert_eq!(lift(pool, "fetched", later()).await, None);
+    assert_hidden(&review(pool, "fetched").await);
+    assert_eq!(
+        events(pool, "fetched").await,
+        [
+            "restriction_clearance_requested",
+            "restriction_clearance_cancelled"
+        ]
+    );
+    // A catalog that still marks one series restricted cancels its review, and only its.
+    restricted_series(pool, "listed").await;
+    restricted_series(pool, "unmarked").await;
+    for id in ["listed", "unmarked"] {
+        request_restriction_review(pool, SourceId::Fred, true, id, "false positive")
+            .await
+            .unwrap();
+    }
+    let facts = CatalogLifecycle {
+        restricted_ids: vec!["listed".into()],
+        ..Default::default()
+    };
+    reconcile_at(
+        pool,
+        &[counter_series("listed"), counter_series("unmarked")],
+        &facts,
+        Utc::now(),
+    )
+    .await;
+    let listed = review(pool, "listed").await;
+    assert_hidden(&listed);
+    assert_eq!(listed.cleared_at, None);
+    assert_eq!(lift(pool, "listed", later()).await, None);
+    let unmarked = review(pool, "unmarked").await;
+    // A catalog without the marker keeps the series restricted, under review, until a fetch.
+    assert_hidden(&unmarked);
+    assert!(unmarked.cleared_at.is_some());
+    assert_eq!(
+        events(pool, "unmarked").await,
+        ["restriction_clearance_requested"]
+    );
+    assert_eq!(
+        lift(pool, "unmarked", later()).await.as_deref(),
+        Some("active")
+    );
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn discontinued_series_get_successor_proposals_and_confirmations() {
+    let Some(db) = fetch_counter_db("eco758_discontinued_successor").await else {
+        return;
+    };
+    let pool = &db.pool;
+    let titled = |id: &str| DiscoveredSeries {
+        title: "Same measure".into(),
+        ..counter_series(id)
+    };
+    let listed = [titled("old"), titled("new")];
+    persist::persist_discovered(pool, SourceId::Fred, &listed)
+        .await
+        .unwrap();
+    persist::persist_series(pool, SourceId::Fred, "new", &successful_history())
+        .await
+        .unwrap();
+    let proposal = async |discontinued: &[&str]| {
+        let facts = CatalogLifecycle {
+            discontinued_ids: discontinued.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+        reconcile_at(pool, &listed, &facts, Utc::now()).await;
+        let mut conn = pool.get().await.unwrap();
+        let old: State = diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id,in_accepted_catalog FROM series_lifecycle WHERE external_id='old'")
+            .get_result(&mut conn).await.unwrap();
+        (old.status, old.proposed_successor_id)
+    };
+    // A discontinued candidate is no successor.
+    assert_eq!(
+        proposal(&["old", "new"]).await,
+        ("discontinued".to_string(), None)
+    );
+    assert!(confirm_successor(pool, SourceId::Fred, "old", "new")
+        .await
+        .is_err());
+    // Without a proposal, nothing; an active series is never superseded.
+    assert_eq!(proposal(&[]).await, ("active".to_string(), None));
+    assert!(confirm_successor(pool, SourceId::Fred, "old", "new")
+        .await
+        .is_err());
+    let new_id = crate::stable_series_id(SourceId::Fred, "new");
+    assert_eq!(
+        proposal(&["old"]).await,
+        ("discontinued".to_string(), Some(new_id))
+    );
+    confirm_successor(pool, SourceId::Fred, "old", "new")
+        .await
+        .unwrap();
+    let mut conn = pool.get().await.unwrap();
+    let old: State = diesel::sql_query("SELECT external_id,status,since,missing_refreshes,last_seen_at,proposed_successor_id,successor_id,in_accepted_catalog FROM series_lifecycle WHERE external_id='old'")
+        .get_result(&mut conn).await.unwrap();
+    assert_eq!(
+        (old.status.as_str(), old.successor_id),
+        ("superseded", Some(new_id))
+    );
+    drop(conn);
+    db.drop().await;
+}

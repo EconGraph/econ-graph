@@ -164,43 +164,29 @@ catalog absence evidence: a delisted series can still serve historical observati
 | `superseded` | History stays separate, with a human-confirmed successor link |
 
 `restricted` is sticky. Once a catalog or a fetch reports a legal restriction, no later
-catalog, rule change, successful fetch or accepted guarded catalog clears it; the series stays
-hidden even if upstream lifts the restriction. Lifting it is a reviewed manual change in the
-data database. First confirm upstream that the restriction is gone (otherwise the next
-catalog or fetch restricts it again), then run this in one transaction with `psql` against
-the data database, setting the source's `data_sources.name` and the series id:
+catalog, rule change, successful fetch or accepted guarded catalog clears it on its own; the
+series stays hidden even if upstream lifts the restriction. To publish it again (a
+false-positive copyright marker, say), first confirm upstream that the restriction is gone,
+then record the review:
 
-```sql
-\set source 'Federal Reserve Economic Data (FRED)'
-\set series 'SERIES_ID'
-BEGIN;
--- Lifts only a row that is restricted now, and only reactivates rows for that row. Raises,
--- and so rolls back, unless exactly one lifecycle row changed.
-CREATE TEMP TABLE lifted ON COMMIT DROP AS
-WITH changed AS (
-  UPDATE series_lifecycle l SET status = 'active', since = NULL
-    FROM data_sources ds
-   WHERE ds.id = l.source_id AND ds.name = :'source' AND l.external_id = :'series'
-     AND l.status = 'restricted'
-  RETURNING l.source_id, l.external_id)
-SELECT * FROM changed;
-DO $$ BEGIN
-  IF (SELECT count(*) FROM lifted) <> 1 THEN
-    RAISE EXCEPTION 'expected exactly one restricted series, found %', (SELECT count(*) FROM lifted);
-  END IF;
-END $$;
-UPDATE economic_series es SET is_active = true, crawl_status = 'success'
-  FROM lifted WHERE es.source_id = lifted.source_id AND es.external_id = lifted.external_id;
-UPDATE series_metadata sm SET is_active = true
-  FROM lifted WHERE sm.source_id = lifted.source_id AND sm.external_id = lifted.external_id;
-COMMIT;
+```sh
+crawler clear-restriction --source FRED --series SERIES_ID --reason "what the review found"
 ```
 
-The series' observations were retained while it was restricted; the next scheduled fetch
-brings it current.
+The series stays restricted, and hidden, until a fetch whose job was claimed after the review
+succeeds and finds no restriction marker; the command queues that fetch at the highest
+priority. That fetch then makes the series `active` and visible, and the next catalog sets any
+other publication state. If the fetch, or a catalog, still finds the marker, the review is
+cancelled and the series stays hidden. If a fetch of the series was already running, the
+command says so: run it again once that fetch has ended. Every review, lift and cancellation
+is recorded in `series_lifecycle_events` with the reason. Only a source whose fetch checks
+restriction markers (FRED) can be reviewed this way; the command refuses any other, and a
+licence-gated one.
 
 Data Sources shows lifecycle counts. Series pages distinguish proposed successors from
-confirmed successors. A proposed match is a review hint: compare source definitions, units
+confirmed successors. A `missing_from_catalog`, `retired` or `discontinued` series gets a
+proposal when exactly one listed, public series that is not itself discontinued has the same
+title and frequency. A proposed match is a review hint: compare source definitions, units
 and base periods before confirming it against the data database:
 
 ```sh

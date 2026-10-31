@@ -302,6 +302,14 @@ pub trait SourceAdapter: Send + Sync {
         false
     }
 
+    /// Whether every history fetch checks the upstream restriction marker and refuses a
+    /// marked series with [`CrawlError::Restricted`](crate::CrawlError::Restricted), so that a
+    /// successful fetch is evidence no marker is present. Only then can an operator's review
+    /// of a restriction (`crawler clear-restriction`) publish the series again.
+    fn checks_restriction_markers(&self) -> bool {
+        false
+    }
+
     /// Verified publication facts from the last complete successful catalog. Facts are kept
     /// separate from fetch health, so a successful history fetch cannot revive a retired id.
     fn catalog_lifecycle(&self) -> crate::lifecycle::CatalogLifecycle {

@@ -6,6 +6,14 @@
 //! review; an operator can accept it with `crawler accept-guarded-catalog`. Rows,
 //! observations and old catalog labels are never deleted.
 //!
+//! A restriction is positive legal evidence and never lapses on its own. An operator's review
+//! (`crawler clear-restriction`, [`request_restriction_review`]) keeps the series restricted
+//! and hidden; only a fetch by an adapter that
+//! [checks restriction markers](crate::SourceAdapter::checks_restriction_markers), claimed
+//! after the review, publishes it again ([`lift_reviewed_restriction_conn`]). A marker found
+//! by a fetch or a catalog first cancels the review. Each step is recorded in
+//! `series_lifecycle_events`.
+//!
 //! Locking: catalog reconciliation and successor confirmation take an exclusive
 //! per-source transaction advisory lock. Per-series writers (fetch success, NotFound,
 //! restriction) take that lock shared, then an exclusive per-series advisory lock, so
@@ -317,21 +325,23 @@ async fn apply_snapshot(
             review and run `crawler accept-guarded-catalog` to accept this snapshot");
     }
     // Suggest only a unique exact-title/frequency match. It is a proposal, never an
-    // automatic successor link or a merge of values (which may use a different base).
+    // automatic successor link or a merge of values (which may use a different base). A
+    // discontinued series is still listed but has ended, so it gets proposals too; a
+    // discontinued candidate is no successor.
     let candidates_listed: Vec<String> = snapshot
         .listed
         .iter()
-        .filter(|id| !facts.restricted_ids.contains(id))
+        .filter(|id| !facts.restricted_ids.contains(id) && !facts.discontinued_ids.contains(id))
         .cloned()
         .collect();
     let ended: Vec<String> = states
         .iter()
-        .filter(|s| s.status == "missing_from_catalog" || s.status == "retired")
+        .filter(|s| ENDED_STATUSES.contains(&s.status.as_str()))
         .map(|s| s.external_id.clone())
         .collect();
     let proposals = successor_proposals(conn, source_id, &ended, &candidates_listed).await?;
     for state in &mut states {
-        if state.status == "missing_from_catalog" || state.status == "retired" {
+        if ENDED_STATUSES.contains(&state.status.as_str()) {
             state.proposed_successor_id = proposals.get(&state.external_id).copied();
         }
     }
@@ -356,6 +366,19 @@ async fn apply_snapshot(
         !guarded,
     )
     .await?;
+    // A catalog that still marks a series restricted cancels an operator's pending review
+    // of it (guarded or not: legal restrictions are positive evidence).
+    let cancelled = cancel_restriction_reviews_conn(
+        conn,
+        source_id,
+        &facts.restricted_ids,
+        "the catalog still marks it restricted",
+    )
+    .await?;
+    if cancelled > 0 {
+        tracing::warn!(%source, series = cancelled, "restriction reviews cancelled: the catalog \
+            still marks those series restricted; they stay hidden");
+    }
     let listed: BTreeSet<&str> = snapshot.listed.iter().map(String::as_str).collect();
     let unselected_tracked = facts
         .unselected(&listed, existing.iter().map(|s| s.external_id.as_str()))
@@ -569,6 +592,10 @@ async fn successor_proposals(
     .await?;
     Ok(rows.into_iter().map(|r| (r.external_id, r.id)).collect())
 }
+
+/// Publication ended without a confirmed successor: these get successor proposals, and
+/// [`confirm_successor`] accepts them.
+const ENDED_STATUSES: [&str; 3] = ["missing_from_catalog", "retired", "discontinued"];
 
 #[derive(QueryableByName)]
 struct Id {
@@ -1071,6 +1098,18 @@ pub(crate) async fn record_restricted_conn(
         status='restricted',since=CASE WHEN series_lifecycle.status='restricted' THEN series_lifecycle.since ELSE NOW() END
         RETURNING CASE WHEN old.status='restricted' THEN NULL ELSE status END AS status")
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).get_result::<StatusChange>(&mut *conn).await?;
+    if cancel_restriction_reviews_conn(
+        conn,
+        source_id,
+        &[external_id.to_string()],
+        "a fetch found a restriction marker",
+    )
+    .await?
+        > 0
+    {
+        tracing::warn!(%source, series_id = external_id, "restriction review cancelled: a fetch \
+            found a restriction marker; the series stays hidden");
+    }
     diesel::sql_query("UPDATE economic_series SET crawl_status='restricted',is_active=false WHERE source_id=$1 AND external_id=$2")
         .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).execute(&mut *conn).await?;
     diesel::sql_query(
@@ -1081,6 +1120,188 @@ pub(crate) async fn record_restricted_conn(
     .execute(&mut *conn)
     .await?;
     Ok(change.status)
+}
+
+/// Longest reason [`request_restriction_review`] records.
+const MAX_REVIEW_REASON: usize = 500;
+
+/// Record an operator's review of a `restricted` series (a false-positive marker, say). The
+/// series stays restricted, and hidden, until a fetch job claimed after this review succeeds
+/// without a restriction marker ([`lift_reviewed_restriction_conn`]); restriction evidence
+/// from a fetch or a catalog first cancels the review. Repeating it restarts the review.
+/// Refuses a source whose adapter does not
+/// [check restriction markers](crate::SourceAdapter::checks_restriction_markers) (pass
+/// `checks_markers`), and a series that is not restricted.
+pub async fn request_restriction_review(
+    pool: &DatabasePool,
+    source: SourceId,
+    checks_markers: bool,
+    external_id: &str,
+    reason: &str,
+) -> AppResult<()> {
+    let reason = reason.trim();
+    if !checks_markers {
+        return Err(AppError::ValidationError(format!(
+            "{source}'s fetch does not check restriction markers, so no fetch could confirm the \
+             restriction is gone"
+        )));
+    }
+    if reason.is_empty() || reason.chars().count() > MAX_REVIEW_REASON {
+        return Err(AppError::ValidationError(format!(
+            "a reason of 1 to {MAX_REVIEW_REASON} characters is required"
+        )));
+    }
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let external = external_id.to_string();
+    let reason_text = reason.to_string();
+    conn.transaction::<(), AppError, _>(async move |conn| {
+        let source_id = persist::data_source_id_conn(conn, source).await?;
+        lock_source_shared(conn, source_id).await?;
+        lock_series(conn, source_id, &external).await?;
+        let changed = diesel::sql_query(
+            "UPDATE series_lifecycle SET restriction_cleared_at=NOW(),restriction_clear_reason=$3 \
+             WHERE source_id=$1 AND external_id=$2 AND status='restricted'",
+        )
+        .bind::<SqlUuid, _>(source_id)
+        .bind::<Text, _>(&external)
+        .bind::<Text, _>(&reason_text)
+        .execute(&mut *conn)
+        .await?;
+        if changed != 1 {
+            return Err(AppError::ValidationError(format!(
+                "{source} {external} is not restricted"
+            )));
+        }
+        record_event_conn(
+            conn,
+            source_id,
+            &external,
+            "restriction_clearance_requested",
+            &reason_text,
+        )
+        .await
+    })
+    .await?;
+    tracing::warn!(%source, series_id = external_id, reason, "restriction review requested; \
+        the series stays hidden until a fetch claimed from now on finds no restriction marker");
+    Ok(())
+}
+
+/// After a successful fetch by an adapter that
+/// [checks restriction markers](crate::SourceAdapter::checks_restriction_markers) (call it
+/// for no other), publish a reviewed `restricted` series again: only when an operator reviewed
+/// it before `claimed_at`, the time this fetch's job was claimed (so the fetch read upstream
+/// after the review). Becomes `active`; the next catalog sets any other publication state.
+/// Returns the new status when it changed. Run in the fetch's commit, after its upsert.
+pub(crate) async fn lift_reviewed_restriction_conn(
+    conn: &mut AsyncPgConnection,
+    source: SourceId,
+    external_id: &str,
+    claimed_at: Option<DateTime<Utc>>,
+) -> AppResult<Option<String>> {
+    #[derive(QueryableByName)]
+    struct Lifted {
+        #[diesel(sql_type = Text)]
+        reason: String,
+    }
+    let Some(claimed_at) = claimed_at else {
+        return Ok(None);
+    };
+    let source_id = persist::data_source_id_conn(conn, source).await?;
+    lock_series(conn, source_id, external_id).await?;
+    let Some(lifted) = diesel::sql_query(
+        "UPDATE series_lifecycle SET status='active',since=NULL, \
+            restriction_cleared_at=NULL,restriction_clear_reason=NULL \
+         WHERE source_id=$1 AND external_id=$2 AND status='restricted' \
+            AND restriction_cleared_at IS NOT NULL AND restriction_cleared_at < $3 \
+         RETURNING old.restriction_clear_reason AS reason",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(external_id)
+    .bind::<Timestamptz, _>(claimed_at)
+    .get_result::<Lifted>(&mut *conn)
+    .await
+    .optional()?
+    else {
+        return Ok(None);
+    };
+    diesel::sql_query(
+        "UPDATE economic_series SET crawl_status='success',is_active=TRUE \
+         WHERE source_id=$1 AND external_id=$2",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(external_id)
+    .execute(&mut *conn)
+    .await?;
+    diesel::sql_query(
+        "UPDATE series_metadata SET is_active=TRUE WHERE source_id=$1 AND external_id=$2",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(external_id)
+    .execute(&mut *conn)
+    .await?;
+    record_event_conn(
+        conn,
+        source_id,
+        external_id,
+        "restriction_lifted",
+        &format!(
+            "a fetch found no restriction marker; review: {}",
+            lifted.reason
+        ),
+    )
+    .await?;
+    tracing::warn!(%source, series_id = external_id, "restriction lifted after review: a fetch \
+        found no restriction marker; the series is published again");
+    Ok(Some("active".into()))
+}
+
+/// Cancel pending restriction reviews of `external_ids` (new restriction evidence), recording
+/// `why`. Returns how many were cancelled.
+async fn cancel_restriction_reviews_conn(
+    conn: &mut AsyncPgConnection,
+    source_id: Uuid,
+    external_ids: &[String],
+    why: &str,
+) -> AppResult<usize> {
+    if external_ids.is_empty() {
+        return Ok(0);
+    }
+    Ok(diesel::sql_query(
+        "WITH cancelled AS ( \
+             UPDATE series_lifecycle SET restriction_cleared_at=NULL,restriction_clear_reason=NULL \
+             WHERE source_id=$1 AND external_id = ANY($2) AND restriction_cleared_at IS NOT NULL \
+             RETURNING external_id) \
+         INSERT INTO series_lifecycle_events(source_id,external_id,event,detail) \
+         SELECT $1,external_id,'restriction_clearance_cancelled',$3 FROM cancelled",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<diesel::sql_types::Array<Text>, _>(external_ids)
+    .bind::<Text, _>(why)
+    .execute(&mut *conn)
+    .await?)
+}
+
+async fn record_event_conn(
+    conn: &mut AsyncPgConnection,
+    source_id: Uuid,
+    external_id: &str,
+    event: &str,
+    detail: &str,
+) -> AppResult<()> {
+    diesel::sql_query(
+        "INSERT INTO series_lifecycle_events(source_id,external_id,event,detail) VALUES($1,$2,$3,$4)",
+    )
+    .bind::<SqlUuid, _>(source_id)
+    .bind::<Text, _>(external_id)
+    .bind::<Text, _>(event)
+    .bind::<Text, _>(detail)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
 }
 
 /// Human confirmation of a proposed successor. Both ids must exist under the same
@@ -1113,7 +1334,7 @@ pub async fn confirm_successor(
                 AND status IN ('missing_from_catalog','retired','discontinued') AND external_id<>$4")
             .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).bind::<SqlUuid,_>(successor)
             .bind::<Text,_>(successor_external_id).execute(&mut *conn).await?;
-        if changed!=1 { return Err(AppError::ValidationError("no matching unconfirmed successor proposal for this missing series".into())); }
+        if changed!=1 { return Err(AppError::ValidationError("no matching unconfirmed successor proposal for this ended (missing, retired or discontinued) series".into())); }
         diesel::sql_query("UPDATE economic_series SET crawl_status='superseded' WHERE source_id=$1 AND external_id=$2")
             .bind::<SqlUuid,_>(source_id).bind::<Text,_>(external_id).execute(&mut *conn).await?;
         Ok(())

@@ -1065,6 +1065,12 @@ impl SourceAdapter for FredAdapter {
         true
     }
 
+    /// [`fetch`](FredAdapter::fetch) reads the series' notes before anything else, even when
+    /// its validators say nothing changed, and refuses a copyright-restricted series.
+    fn checks_restriction_markers(&self) -> bool {
+        true
+    }
+
     fn catalog_scope(&self) -> Option<String> {
         self.catalog
             .lock()
