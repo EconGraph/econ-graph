@@ -141,6 +141,7 @@ describe('useSeriesData paging', () => {
       value,
       revisionDate: '2026-07-01',
       isOriginalRelease: true,
+      revisedFromOriginal: false,
     });
     servePages({
       first: page(

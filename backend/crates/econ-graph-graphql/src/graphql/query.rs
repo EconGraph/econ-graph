@@ -412,7 +412,12 @@ impl Query {
 
         let cursor = |position: i64| Some(position.to_string());
         Ok(DataPointConnection {
-            nodes: points.into_iter().map(DataPointType::from).collect(),
+            // `page.revised` is keyed by point id, which a transformation keeps; it was
+            // computed from the stored values.
+            nodes: points
+                .into_iter()
+                .map(|point| DataPointType::with_revised(point, &page.revised))
+                .collect(),
             total_count: i32::try_from(page.total_count).unwrap_or(i32::MAX),
             page_info: PageInfo {
                 has_next_page,

@@ -531,7 +531,8 @@ impl EconGraphMcpServer {
         }))
     }
 
-    /// Get metadata and bounded observations for one existing series.
+    /// Get metadata and bounded observations for one existing series: each date once, at its
+    /// latest revision, as the site's charts read it (`latestRevisionOnly`).
     async fn get_series_payload(
         &self,
         series_id: &str,
@@ -552,7 +553,7 @@ impl EconGraphMcpServer {
         "#
         );
         let variables = json!({"seriesId": series_id, "limit": limit,
-            "filter": {"startDate": start_date, "endDate": end_date}});
+            "filter": {"startDate": start_date, "endDate": end_date, "latestRevisionOnly": true}});
         let response = self.execute_graphql_query(query, Some(variables)).await?;
         let mut series = response["data"]["series"].clone();
         if !series.is_object() {

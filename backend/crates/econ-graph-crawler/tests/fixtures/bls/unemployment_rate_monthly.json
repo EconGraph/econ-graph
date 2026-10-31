@@ -1,0 +1,44 @@
+{
+  "status": "REQUEST_SUCCEEDED",
+  "responseTime": 143,
+  "message": [],
+  "Results": {
+    "series": [
+      {
+        "seriesID": "LNS14000000",
+        "catalog": {
+          "series_title": "(Seas) Unemployment Rate",
+          "series_id": "LNS14000000",
+          "seasonality": "Seasonally Adjusted",
+          "survey_name": "Labor Force Statistics from the Current Population Survey",
+          "survey_abbreviation": "LN",
+          "measure_data_type": "Percent or rate"
+        },
+        "data": [
+          {
+            "year": "2024",
+            "period": "M03",
+            "periodName": "March",
+            "latest": "true",
+            "value": "3.8",
+            "footnotes": [{}]
+          },
+          {
+            "year": "2024",
+            "period": "M02",
+            "periodName": "February",
+            "value": "3.9",
+            "footnotes": [{}]
+          },
+          {
+            "year": "2024",
+            "period": "M01",
+            "periodName": "January",
+            "value": "3.7",
+            "footnotes": [{}]
+          }
+        ]
+      }
+    ]
+  }
+}
