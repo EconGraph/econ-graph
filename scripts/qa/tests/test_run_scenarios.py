@@ -949,9 +949,9 @@ exit {exit_code}
 
     def test_public_site_calls_the_existing_check(self):
         for profile, route, route_args in (
-                ('production', None, '--host site.example --via-cloudflare'),
-                ('lab', None, '--host site.example --via-cloudflare'),
-                ('lab', 'gateway', '--host site.example')):
+                ('production', None, '--host site.example --main-host site.example --via-cloudflare'),
+                ('lab', None, '--host site.example --main-host site.example --via-cloudflare'),
+                ('lab', 'gateway', '--host site.example --main-host site.example')):
             with self.subTest(profile=profile, route=route):
                 extra = self.fake_check_public_site(0)
                 if route:
@@ -966,6 +966,13 @@ exit {exit_code}
                                               self.fake_check_public_site(1))
         self.assertEqual(code, 1)
         self.assertFalse(self.checks(results['public-site'])['/metrics not served (404)'])
+
+    def test_public_site_www_target_separates_base_and_main(self):
+        code, results, _ = self.run_scenarios('https://www.site.example', 'production',
+                                              'public-site', self.fake_check_public_site(0))
+        self.assertEqual(code, 0, results)
+        self.assertEqual((self.dir / 'args').read_text().strip(),
+                         '--host site.example --main-host www.site.example --via-cloudflare')
 
     def test_public_site_skips_a_plain_http_target(self):
         code, results, _ = self.run_scenarios('http://localhost:18081', 'ci', 'public-site',

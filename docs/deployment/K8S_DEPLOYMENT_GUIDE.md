@@ -90,7 +90,7 @@ done
 
 `VITE_OIDC_ISSUER` defaults to the path `/idp/realms/econ-graph`, which the app
 resolves against its own origin at runtime, so one image serves `http://localhost`
-and the public host (`PUBLIC_HOST`, see the Public site section of `k8s/README.md`)
+and the main public host (`MAIN_HOST`, default `www.${PUBLIC_HOST}`; see the Public site section of `k8s/README.md`)
 alike. Set a full URL only for a Keycloak on another origin. The frontend build
 fails on an empty issuer unless `--build-arg VITE_OIDC_SIGN_IN_DISABLED=true` is
 also passed, which builds the image with sign-in hidden.
@@ -130,7 +130,9 @@ kubectl apply -f k8s/manifests/letsencrypt-issuer.yaml
 
 The public site is served through the Cloudflare Tunnel: TLS for visitors ends at Cloudflare,
 and the tunnel reaches the gateway's https listener. `PUBLIC_HOST=econgraph.com
-./scripts/deploy/deploy.sh` sets it up; see "Public site" in `k8s/README.md`.
+./scripts/deploy/deploy.sh` serves `https://www.econgraph.com` by default. `PUBLIC_HOST`
+keeps the base domain; `MAIN_HOST` selects the main address. See [Main public
+address](MAIN_HOST.md) and "Public site" in `k8s/README.md`.
 
 ## Service URLs
 

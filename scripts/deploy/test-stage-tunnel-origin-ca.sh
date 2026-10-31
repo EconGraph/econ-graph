@@ -320,7 +320,7 @@ with tempfile.TemporaryDirectory() as folder:
     deploy = tree / 'scripts/deploy'
     (deploy / 'lib').mkdir(parents=True)
     for name in ['apply-gateway-routes.sh', 'render-public-host.py', 'lib/cluster-role.sh',
-                 'lib/deploy-config.sh']:
+                 'lib/deploy-config.sh', 'lib/public-host.sh']:
         shutil.copy2(root / 'scripts/deploy' / name, deploy / name)
     shutil.copytree(root / 'k8s/manifests/gateway', tree / 'k8s/manifests/gateway')
     stage = deploy / 'stage-tunnel-origin-ca.sh'
@@ -337,6 +337,8 @@ case "$*" in
     *"config current-context"*) echo kind-current ;;
     *"get crd certificates.cert-manager.io"*) echo customresourcedefinition/certificates.cert-manager.io ;;
     *"get certificate econ-graph-tls"*) printf '%s' "${CURRENT_ISSUER:-}" ;;
+    *"get httproute econ-graph-frontend-public"*) printf '%s' "${CURRENT_MAIN_HOST:-}" ;;
+    *"get httproute -l"*) printf '%s' "${CURRENT_MAIN_HOST:-}" ;;
     *--field-manager*)
         all="$*"; file="${all##* -f }"
         echo "issuer $(sed -n '/issuerRef:/,/name:/s/^ *name: //p' "$file")" >>"$LOG" ;;
@@ -349,9 +351,12 @@ exit 0
         log.write_text('')
         environment = dict(os.environ, KUBECTL=str(kubectl), LOG=str(log), PUBLIC_HOST='econgraph.com',
                            HOME=str(home), ECONGRAPH_CONFIG_DIR=str(config_dir))
-        for name in ['GATEWAY_TLS_ISSUER', 'ECONGRAPH_DEPLOY_ENV', 'XDG_CONFIG_HOME']:
+        for name in ['GATEWAY_TLS_ISSUER', 'ECONGRAPH_DEPLOY_ENV', 'XDG_CONFIG_HOME', 'MAIN_HOST']:
             environment.pop(name, None)
-        environment.update(updates)
+        environment.update({key: value for key, value in updates.items() if value is not None})
+        for key, value in updates.items():
+            if value is None:
+                environment.pop(key, None)
         result = subprocess.run([str(deploy / 'apply-gateway-routes.sh'), *args], env=environment,
                                 text=True, capture_output=True)
         return result, log.read_text().splitlines()
@@ -360,6 +365,19 @@ exit 0
     origin = {'GATEWAY_TLS_ISSUER': 'econ-graph-origin-ca'}
     result, lines = routes('--context', 'kind-test', **origin)
     assert result.returncode == 0, result.stderr
+    assert all(line.startswith('kubectl --context kind-test ') for line in lines
+               if line.startswith('kubectl ')), lines
+    assert 'Public host www.econgraph.com (base econgraph.com)' in result.stdout
+    # Explicit rollback and bare maintenance apply do not change canonical host.
+    rollback, rollback_lines = routes('--context', 'kind-test', MAIN_HOST='econgraph.com')
+    assert rollback.returncode == 0 and 'Public host econgraph.com (base econgraph.com)' in rollback.stdout
+    assert all(line.startswith('kubectl --context kind-test ') for line in rollback_lines
+               if line.startswith('kubectl ')), rollback_lines
+    for canonical in ['econgraph.com', 'www.econgraph.com']:
+        kept, kept_lines = routes('--context', 'kind-test', PUBLIC_HOST=None, CURRENT_MAIN_HOST=canonical)
+        assert kept.returncode == 0 and f'Public host {canonical} (base econgraph.com)' in kept.stdout, kept
+        assert all(line.startswith('kubectl --context kind-test ') for line in kept_lines
+                   if line.startswith('kubectl ')), kept_lines
     stage_line = lines.index('stage --context kind-test --apply')
     assert stage_line < https_apply(lines), 'staging must precede the certificate'
     # The retained issuer of a later deploy stages too (idempotent).
