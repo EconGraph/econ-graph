@@ -2,8 +2,9 @@
 
 Adapter: `backend/crates/econ-graph-crawler/src/sources/bea.rs`. Selection rules:
 `backend/crates/econ-graph-crawler/data/catalog_selection/bea.toml`. Fixtures: `tests/fixtures/bea/`
-(`GetData` for each NIPA table and frequency the default selection rules match, BEA's NIPA
-and Regional table-title lists, SAGDP2 line codes, areas and line 1, and an error). API key required (`BEA_API_KEY`); without it every call is `Permanent` before
+(`GetData` for six NIPA tables at each frequency, short extracts of BEA's NIPA and Regional
+table-title lists, SAGDP2 line codes, areas and line 1, and an error). API key required
+(`BEA_API_KEY`); without it every call is `Permanent` before
 any request.
 
 ## What we fetch today
@@ -11,6 +12,13 @@ any request.
 - **Ids** are BEA's own codes: `bea_nipa/{table}.{line_number}.{frequency}` (for example
   `bea_nipa/T10105.1.Q`, GDP quarterly) and `bea_regional/{table}.{line_code}.{geo_fips}`
   (for example `bea_regional/SAGDP2.1.06000`, California GDP).
+- **Tables**: 25, one rule each: NIPA headline tables from sections 1 to 7 (GDP and prices,
+  GDI, personal income and consumption, government, foreign transactions, saving and
+  investment, compensation and corporate profits by industry, per capita series), Regional
+  GDP by state (SAGDP2) and the state personal income summary (SAINC1). A full refresh is
+  about 300 requests, about ten minutes at the 30-a-minute policy rate. A test checks the
+  rules against BEA's published table lists
+  (`tests/fixtures/bea/published_table_names.txt`).
 - **Discovery**: rules select dataset, table family prefix, optional title text and frequencies
   from BEA's current `TableName` catalogs. NIPA `GetData` for the last three years lists lines;
   Regional `GetParameterValuesFiltered` lists `LineCode` and `GeoFips`, limited to the US,

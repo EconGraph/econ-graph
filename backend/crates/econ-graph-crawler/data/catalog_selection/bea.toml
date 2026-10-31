@@ -1,15 +1,24 @@
 # Match BEA's current table names; the prefixes follow families through suffix renames.
 # Expansion beyond these bounds stops the discovery rather than silently truncating it.
+# Each rule selects one table. Neighbouring tables that a prefix also matches (SAINC1 also
+# matches SAINC11 and SAINC12) are listed in `exclude`.
 max_tables = 32
 max_series = 20000
 # SAGDP2S is the discontinued SIC-basis GDP by state (1963-1997); its industry lines do not
 # match the NAICS tables the SAGDP2 prefix is meant to follow (SAGDP2, and SAGDP2N while BEA
-# listed the table under that name).
-exclude = ["SAGDP2S"]
+# listed the table under that name). SAINC11 and SAINC12 share the SAINC1 prefix but are
+# different tables.
+exclude = ["SAGDP2S", "SAINC11", "SAINC12"]
 
+# NIPA Section 1: domestic product and income.
 [[rule]]
 dataset = "NIPA"
 prefix = "T10101"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T10104"
 frequencies = ["A", "Q"]
 
 [[rule]]
@@ -24,7 +33,33 @@ frequencies = ["A", "Q"]
 
 [[rule]]
 dataset = "NIPA"
+prefix = "T10107"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T10109"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T11000"
+frequencies = ["A", "Q"]
+
+# NIPA Section 2: personal income and outlays.
+[[rule]]
+dataset = "NIPA"
 prefix = "T20100"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T20301"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T20305"
 frequencies = ["A", "Q"]
 
 [[rule]]
@@ -37,7 +72,73 @@ dataset = "NIPA"
 prefix = "T20804"
 frequencies = ["M"]
 
+# NIPA Section 3: government current receipts and expenditures.
+[[rule]]
+dataset = "NIPA"
+prefix = "T30100"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T30200"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T30300"
+frequencies = ["A", "Q"]
+
+# NIPA Section 4: foreign transactions.
+[[rule]]
+dataset = "NIPA"
+prefix = "T40100"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T40205B"
+frequencies = ["A", "Q"]
+
+# NIPA Section 5: saving and investment.
+[[rule]]
+dataset = "NIPA"
+prefix = "T50100"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T50301"
+frequencies = ["A", "Q"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T50305"
+frequencies = ["A", "Q"]
+
+# NIPA Section 6: income and employment by industry (annual-only tables list A alone).
+[[rule]]
+dataset = "NIPA"
+prefix = "T60200D"
+frequencies = ["A"]
+
+[[rule]]
+dataset = "NIPA"
+prefix = "T61600D"
+frequencies = ["A", "Q"]
+
+# NIPA Section 7: supplemental tables.
+[[rule]]
+dataset = "NIPA"
+prefix = "T70100"
+frequencies = ["A", "Q"]
+
+# Regional: GDP by state and the state personal income summary.
 [[rule]]
 dataset = "Regional"
 prefix = "SAGDP2"
+frequencies = ["A"]
+
+[[rule]]
+dataset = "Regional"
+prefix = "SAINC1"
 frequencies = ["A"]

@@ -326,10 +326,11 @@ mod tests {
         .into_iter()
         .collect()
     }
-    /// The shipped Regional rule follows SAGDP2 through its N-suffix rename but not to the
-    /// discontinued SIC-basis SAGDP2S or to other families.
+    /// The shipped Regional rules follow SAGDP2 through its N-suffix rename but not to the
+    /// discontinued SIC-basis SAGDP2S, and select SAINC1 but not SAINC11, SAINC12 or other
+    /// families.
     #[test]
-    fn shipped_regional_rule_selects_sagdp2_and_sagdp2n_only() {
+    fn shipped_regional_rules_select_sagdp2_sagdp2n_and_sainc1_only() {
         let shipped = BeaSelection::parse(
             &std::fs::read_to_string(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -345,10 +346,12 @@ mod tests {
             .filter(|r| r.dataset == "NIPA")
             .map(|r| (r.prefix.clone(), "NIPA table".to_string()))
             .collect();
-        let regional = ["SAGDP2", "SAGDP2N", "SAGDP2S", "SAINC1", "CAGDP2"]
-            .into_iter()
-            .map(|n| (n.to_string(), "GDP".to_string()))
-            .collect();
+        let regional = [
+            "SAGDP2", "SAGDP2N", "SAGDP2S", "SAINC1", "SAINC11", "SAINC12", "CAGDP2",
+        ]
+        .into_iter()
+        .map(|n| (n.to_string(), "GDP".to_string()))
+        .collect();
         let catalogs = [(BeaDataset::Nipa, nipa), (BeaDataset::Regional, regional)]
             .into_iter()
             .collect();
@@ -360,7 +363,7 @@ mod tests {
             .map(|t| t.table_name)
             .collect();
         selected.sort();
-        assert_eq!(selected, ["SAGDP2", "SAGDP2N"]);
+        assert_eq!(selected, ["SAGDP2", "SAGDP2N", "SAINC1"]);
     }
 
     #[test]
@@ -457,6 +460,74 @@ mod tests {
             Frequency::Annual,
             Some("GDP")
         ));
+    }
+
+    /// The shipped rules against BEA's published table lists select exactly the intended tables:
+    /// each prefix matches one table (neighbours such as SAINC11 are excluded), and the table
+    /// count leaves headroom under `max_tables` for a rename that briefly lists both names.
+    #[test]
+    fn shipped_rules_select_the_intended_tables_from_the_published_lists() {
+        let rules = BeaSelection::parse(include_str!("../data/catalog_selection/bea.toml"))
+            .expect("shipped BEA rules parse");
+        let mut catalogs: HashMap<BeaDataset, HashMap<String, String>> = HashMap::new();
+        for line in include_str!("../tests/fixtures/bea/published_table_names.txt").lines() {
+            if line.starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            let (dataset, name) = line.split_once(' ').expect("dataset and name");
+            let dataset = match dataset {
+                "NIPA" => BeaDataset::Nipa,
+                "Regional" => BeaDataset::Regional,
+                other => panic!("unknown dataset {other}"),
+            };
+            catalogs
+                .entry(dataset)
+                .or_default()
+                .insert(name.to_string(), format!("{name} title"));
+        }
+        let selected: Vec<(String, String)> = rules
+            .select(&catalogs)
+            .expect("shipped rules select within bounds")
+            .into_iter()
+            .map(|t| {
+                let freqs: Vec<&str> = t.frequencies.iter().map(|f| f.code()).collect();
+                (t.table_name, freqs.join(" "))
+            })
+            .collect();
+        let expected = [
+            ("T10101", "A Q"),
+            ("T10104", "A Q"),
+            ("T10105", "A Q"),
+            ("T10106", "A Q"),
+            ("T10107", "A Q"),
+            ("T10109", "A Q"),
+            ("T11000", "A Q"),
+            ("T20100", "A Q"),
+            ("T20301", "A Q"),
+            ("T20305", "A Q"),
+            ("T20600", "M"),
+            ("T20804", "M"),
+            ("T30100", "A Q"),
+            ("T30200", "A Q"),
+            ("T30300", "A Q"),
+            ("T40100", "A Q"),
+            ("T40205B", "A Q"),
+            ("T50100", "A Q"),
+            ("T50301", "A Q"),
+            ("T50305", "A Q"),
+            ("T60200D", "A"),
+            ("T61600D", "A Q"),
+            ("T70100", "A Q"),
+            ("SAGDP2", "A"),
+            ("SAINC1", "A"),
+        ];
+        let expected: Vec<(String, String)> = expected
+            .iter()
+            .map(|(t, f)| (t.to_string(), f.to_string()))
+            .collect();
+        assert_eq!(selected, expected);
+        assert_eq!(rules.rule.len(), expected.len(), "one rule per table");
+        assert!(expected.len() < rules.max_tables);
     }
 
     #[test]
