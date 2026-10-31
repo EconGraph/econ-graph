@@ -292,6 +292,18 @@ class CatalogPolicyTests(unittest.TestCase):
                          expected | {"catalog.sec:read"})
         self.assertNotIn("catalog.sec:read", scope["roles"])
 
+    def test_sec_signed_in_grant_is_explicit_and_live_policy_survives(self):
+        endpoint = self.prefix + "/roles/user/composites"
+        self.state[endpoint] = [{"name": "catalog-public", "clientRole": False}]
+        merged = self.merge()
+        self.assertNotIn("catalog.sec:read", self.role(merged, "user")["composites"]["client"]["econ-graph-api"])
+        self.state[endpoint].append({"name": "catalog.sec:read", "clientRole": True, "containerId": "api"})
+        merged = self.merge()
+        self.assertIn("catalog.sec:read", self.role(merged, "user")["composites"]["client"]["econ-graph-api"])
+        scope = next(e for e in merged["clientScopeMappings"]["econ-graph-api"]
+                     if e["client"] == "econgraph-anonymous")
+        self.assertNotIn("catalog.sec:read", scope["roles"])
+
     def test_live_admin_only_catalog_survives_a_deploy(self):
         # The state scripts/keycloak/set-catalog-access.sh --admin-only leaves: FRED out of
         # catalog-public and the anonymous scope, granted to admin. A deploy must keep it,
