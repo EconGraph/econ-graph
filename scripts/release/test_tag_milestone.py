@@ -203,6 +203,16 @@ print((root / (name + '.json')).read_text())
         self.assertIn("already exists locally", result.stderr)
         self.assertEqual(self.git("cat-file", "-t", "train-3"), "commit")
 
+    def test_follow_tags_cannot_publish_unrelated_product_tag(self):
+        self.git("config", "push.followTags", "true")
+        self.git("tag", "-a", "v4.1.0", "-m", "Unpublished product tag")
+        result = self.run_helper("--push")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        remote_refs = [line.split()[1] for line in self.git("ls-remote", "--tags", "origin").splitlines()]
+        self.assertEqual(sorted(remote_refs), ["refs/tags/train-3", "refs/tags/train-3^{}"])
+        self.assertEqual(self.git("cat-file", "-t", "v4.1.0"), "tag")
+        self.assertEqual(self.git("rev-parse", "v4.1.0^{commit}"), self.commit)
+
     def test_remote_duplicate_refused(self):
         self.git("tag", "-a", "train-3", "-m", "original")
         self.git("push", "origin", "train-3")
