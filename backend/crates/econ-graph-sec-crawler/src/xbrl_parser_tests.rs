@@ -459,53 +459,34 @@ fn test_taxonomy_cache_performance() {
     assert!(duration.as_millis() < 10);
 }
 
-#[test]
-fn test_validation_report_performance() {
-    // Test creating large validation reports
-    let start = std::time::Instant::now();
-
-    let mut errors = Vec::new();
-    let mut warnings = Vec::new();
-
-    for i in 0..1000 {
-        errors.push(format!("Error {}", i));
-        warnings.push(format!("Warning {}", i));
-    }
-
-    let report = ValidationReport {
-        is_valid: false,
-        errors,
-        warnings,
-    };
-
-    let duration = start.elapsed();
-
-    // Should be fast (less than 1ms)
-    assert!(duration.as_millis() < 1);
-    assert!(!report.is_valid);
-    assert_eq!(report.errors.len(), 1000);
-    assert_eq!(report.warnings.len(), 1000);
-}
-
 // ============================================================================
 // SERIALIZATION TESTS
 // ============================================================================
 
 #[test]
 fn test_validation_report_serialization() {
-    let report = ValidationReport {
-        is_valid: true,
-        errors: vec!["Test error".to_string()],
-        warnings: vec!["Test warning".to_string()],
-    };
+    // A large report must retain every diagnostic and its order across serialization.
+    // Allocator and scheduler timing on shared CI runners is not a report contract.
+    for report in [
+        ValidationReport {
+            is_valid: true,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        },
+        ValidationReport {
+            is_valid: false,
+            errors: (0..1000).map(|i| format!("Error {}", i)).collect(),
+            warnings: (0..1000).map(|i| format!("Warning {}", i)).collect(),
+        },
+    ] {
+        let serialized = serde_json::to_string(&report).expect("Failed to serialize");
+        let deserialized: ValidationReport =
+            serde_json::from_str(&serialized).expect("Failed to deserialize");
 
-    let serialized = serde_json::to_string(&report).expect("Failed to serialize");
-    let deserialized: ValidationReport =
-        serde_json::from_str(&serialized).expect("Failed to deserialize");
-
-    assert_eq!(report.is_valid, deserialized.is_valid);
-    assert_eq!(report.errors, deserialized.errors);
-    assert_eq!(report.warnings, deserialized.warnings);
+        assert_eq!(report.is_valid, deserialized.is_valid);
+        assert_eq!(report.errors, deserialized.errors);
+        assert_eq!(report.warnings, deserialized.warnings);
+    }
 }
 
 #[test]
