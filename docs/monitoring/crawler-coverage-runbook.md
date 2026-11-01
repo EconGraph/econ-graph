@@ -38,8 +38,12 @@ Refresh intervals depend on frequency: 1 day for daily series, 7 days for weekly
 adapter can fetch.
 
 Coverage excludes series that never had data when their fetch status is `not_found`
-or `absent`. The worker deactivates catalog-only rows when their first fetch returns NotFound.
-Historical series that later return NotFound still count because their data remains useful;
+or `absent`. For sources without catalog lifecycle tracking, the worker deactivates
+catalog-only rows on their first NotFound. FRED and BEA track lifecycle instead: fetch misses
+do not count toward retirement while the current accepted catalog lists the series; otherwise
+three consecutive NotFound responses or six consecutive omissions retire it. Tracked
+catalog-only rows remain in coverage until their publication state becomes non-active. Historical series
+with NotFound or absent fetch status still count while their publication state is active;
 they become overdue after ten intervals. See the [coverage calculation](../../backend/crates/econ-graph-crawler/src/coverage.rs).
 
 ## Metrics and alerts
@@ -499,8 +503,10 @@ Confirm that the overdue count returns to its baseline after the next gauge refr
 Check `crawler coverage` first: a source already under 95% fires the alert after six hours
 continuously below target without synthetic rows. Otherwise disable the scheduler and wait
 for its rollout before inserting rows, using the same commands as the stale-source test.
-The scheduler normally enqueues active catalog-only rows; a worker fetching a synthetic id
-can receive NotFound and deactivate the row, removing it from the coverage denominator.
+The scheduler normally enqueues active catalog-only rows. These synthetic FRED ids are not
+listed by an accepted catalog, so three consecutive NotFound fetches can retire them through
+lifecycle tracking, removing them from the coverage denominator. A first NotFound alone does
+not deactivate a FRED catalog-only row. Keep the fixtures unscheduled throughout the test.
 
 Reserve a fresh prefix for this experiment. The examples use `QA_UNFETCHED_ECO627_`.
 Run this preflight query and proceed only when all counts are zero; otherwise choose an
