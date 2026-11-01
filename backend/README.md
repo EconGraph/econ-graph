@@ -215,10 +215,11 @@ data database takes precedence. Logs show only the URL’s scheme, host, port, a
 For a production backend configured for remote data, with network access to the shared
 gateway, use
 `http://econ-graph-gateway-proxy.envoy-gateway-system.svc.cluster.local/data/graphql`.
-Set `DATA_GRAPHQL_HOST` to the route hostname (`localhost` for the local production
-manifests, or the configured public hostname). Without this override, requests use the
-URL’s host. The usual production backend has a direct data database and does not need
-this remote endpoint.
+Set `DATA_GRAPHQL_HOST=localhost` for this internal HTTP endpoint, including on
+public-host deployments. Public hostnames on the HTTP listener redirect to HTTPS, and
+the data-plane client does not follow redirects. Without the Host override, requests use
+the URL’s host. The usual production backend has a direct data database and does not
+need this remote endpoint.
 
 App-only branch namespaces instead use
 `DATA_GRAPHQL_URL=http://branch-data-proxy:8080/data/graphql` and
