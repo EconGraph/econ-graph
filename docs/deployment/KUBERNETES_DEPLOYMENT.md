@@ -62,7 +62,7 @@ Docker Desktop cluster: its databases use static PVs on host btrfs subvolumes.
    with both host subvolumes bind-mounted. A cluster created without those mounts needs
    the [host-storage migration procedure](HOST_STORAGE.md#moving-the-live-deployment),
    not just a new Service or port mapping. The
-   [manual Terraform setup](../../k8s/README.md#-manual-setup) is another creation entry
+   [Terraform cluster setup](../../k8s/README.md#1-create-kubernetes-cluster) is another creation entry
    point; use the same storage prerequisites.
 
 For a throwaway cluster, follow [scratch storage setup](HOST_STORAGE.md#testing-on-a-scratch-cluster)
