@@ -191,7 +191,7 @@ swaps it in by rename, retaining the previous database. A fresh database is
 required for a downgrade: `restore-dump.sh` uses `--clean`, which leaves
 objects absent from its archive, including tables added by newer Keycloak.
 Keycloak remains stopped; deploy a compatible image before bringing it back.
-See the rollback procedure in the [v4.0.0 QA plan](../release/v4.0.0-qa.md#the-target).
+See the rollback procedure in the [v4.0.0 QA plan](../release/v4.0.0-qa.md#keycloak-rollback).
 
 These upgrade dumps accumulate on the data disk by default, rather than on
 the backup pool. `offsite-restic.sh` does not upload them. Copy each useful
@@ -509,7 +509,8 @@ compatible service images, including a Keycloak version that can read the restor
    Pods. Ensure other clients and Jobs are stopped too.
 
 3. Run `sudo scripts/host/restore-snapshot.sh --dry-run [--from-pool] <snapshot>`,
-   then without `--dry-run`, checking that each succeeds before continuing. It refuses, changing nothing, while any pod
+   then without `--dry-run`, checking that each succeeds before continuing.
+   It refuses, changing nothing, while any pod
    still uses the subvolume:
    - the plane's Postgres pods (`postgresql-0` for `data-plane`;
      `app-postgres-0` and `keycloak-postgres-0` for `app-prod`), whether the
