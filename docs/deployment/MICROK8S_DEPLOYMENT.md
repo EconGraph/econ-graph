@@ -174,6 +174,7 @@ These commands assume the manifest copies, storage, Secrets and Gateway have bee
    microk8s kubectl -n econ-graph create configmap keycloak-realm \
      --from-file=econ-graph-realm.json=config/keycloak/econ-graph-realm.json \
      --from-file=render-realm.sh=scripts/keycloak/render-realm.sh \
+     --from-file=preserve-catalog-grants.py=scripts/keycloak/preserve-catalog-grants.py \
      --dry-run=client -o yaml | microk8s kubectl apply -f -
    microk8s kubectl apply -f "$MICROK8S_MANIFESTS/keycloak/deployment.yaml"
    microk8s kubectl -n econ-graph rollout status deployment/keycloak --timeout=900s
