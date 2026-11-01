@@ -24,7 +24,8 @@ Public tests mount the real App with MemoryRouter and QueryClientProvider; App
 supplies authentication and theme providers. They audit About, Privacy and the
 not-found route, including the shared header/sidebar. Admin tests mount the real
 App and theme provider, wait for the crawler dashboard to load, and stub only
-GraphQL fetch responses. App supplies its real Apollo and React Query providers.
+GraphQL fetch responses for the current crawler overview contract. App supplies
+its real React Query provider and uses the authenticated GraphQL client.
 Neither suite mocks UI components or filters/disables axe rules.
 
 Reports in each project's ignored `accessibility-results/` directory include

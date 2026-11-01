@@ -166,38 +166,40 @@ jobs:
 
       - name: Generate accessibility testing report
         run: |
-          echo "# Accessibility Testing Report" > accessibility-test-report.md
-          echo "" >> accessibility-test-report.md
-          echo "## Automated Checks (see job results)" >> accessibility-test-report.md
-          echo "- ESLint with jsx-a11y plugin configured" >> accessibility-test-report.md
-          echo "- Complete recommended jsx-a11y rules audited" >> accessibility-test-report.md
-          echo "- Covers ARIA, roles, and semantic HTML" >> accessibility-test-report.md
-          echo "" >> accessibility-test-report.md
-          echo "## Runtime Check Scope" >> accessibility-test-report.md
-          echo "- axe-core integration configured" >> accessibility-test-report.md
-          echo "- axe checks in jsdom; browser and manual checks remain necessary" >> accessibility-test-report.md
-          echo "- Vitest integration for automated testing" >> accessibility-test-report.md
-          echo "" >> accessibility-test-report.md
-          echo "## Manual Testing Checklist" >> accessibility-test-report.md
-          echo "### Keyboard Navigation" >> accessibility-test-report.md
-          echo "- [ ] Tab navigation works correctly" >> accessibility-test-report.md
-          echo "- [ ] Focus indicators are visible" >> accessibility-test-report.md
-          echo "- [ ] Skip links are available" >> accessibility-test-report.md
-          echo "" >> accessibility-test-report.md
-          echo "### Screen Reader Testing" >> accessibility-test-report.md
-          echo "- [ ] All interactive elements are announced" >> accessibility-test-report.md
-          echo "- [ ] Form labels are properly associated" >> accessibility-test-report.md
-          echo "- [ ] ARIA labels are descriptive" >> accessibility-test-report.md
-          echo "" >> accessibility-test-report.md
-          echo "### Visual Accessibility" >> accessibility-test-report.md
-          echo "- [ ] Color contrast meets WCAG AA standards" >> accessibility-test-report.md
-          echo "- [ ] Text is readable at 200% zoom" >> accessibility-test-report.md
-          echo "- [ ] No content relies solely on color" >> accessibility-test-report.md
-          echo "" >> accessibility-test-report.md
-          echo "### Mobile Accessibility" >> accessibility-test-report.md
-          echo "- [ ] Touch targets are at least 44px" >> accessibility-test-report.md
-          echo "- [ ] Gestures work with assistive technology" >> accessibility-test-report.md
-          echo "- [ ] Orientation changes are supported" >> accessibility-test-report.md
+          {
+            echo "# Accessibility Testing Report"
+            echo ""
+            echo "## Automated Checks (see job results)"
+            echo "- ESLint with jsx-a11y plugin configured"
+            echo "- Complete recommended jsx-a11y rules audited"
+            echo "- Covers ARIA, roles, and semantic HTML"
+            echo ""
+            echo "## Runtime Check Scope"
+            echo "- axe-core integration configured"
+            echo "- axe checks in jsdom; browser and manual checks remain necessary"
+            echo "- Vitest integration for automated testing"
+            echo ""
+            echo "## Manual Testing Checklist"
+            echo "### Keyboard Navigation"
+            echo "- [ ] Tab navigation works correctly"
+            echo "- [ ] Focus indicators are visible"
+            echo "- [ ] Skip links are available"
+            echo ""
+            echo "### Screen Reader Testing"
+            echo "- [ ] All interactive elements are announced"
+            echo "- [ ] Form labels are properly associated"
+            echo "- [ ] ARIA labels are descriptive"
+            echo ""
+            echo "### Visual Accessibility"
+            echo "- [ ] Color contrast meets WCAG AA standards"
+            echo "- [ ] Text is readable at 200% zoom"
+            echo "- [ ] No content relies solely on color"
+            echo ""
+            echo "### Mobile Accessibility"
+            echo "- [ ] Touch targets are at least 44px"
+            echo "- [ ] Gestures work with assistive technology"
+            echo "- [ ] Orientation changes are supported"
+          } > accessibility-test-report.md
 
       - name: Upload accessibility testing report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

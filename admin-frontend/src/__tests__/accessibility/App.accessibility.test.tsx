@@ -4,6 +4,7 @@ import { auditPage } from "./audit";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import App from "../../App";
 import { queryClient } from "../../lib/queryClient";
+import { OVERVIEW } from "../../hooks/useCrawlerAdmin";
 
 // Stub only the transport boundary. The app, providers, hooks, tabs and
 // dashboard markup remain real. Unexpected requests fail the test.
@@ -11,22 +12,30 @@ beforeEach(() => {
   queryClient.clear();
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string) => {
+    vi.fn(async (url: string, options: RequestInit) => {
       expect(url).toBe("/graphql");
+      expect(
+        JSON.parse(String(options.body)).query.replace(/\s|__typename/g, ""),
+      ).toBe(OVERVIEW.replace(/\s/g, ""));
       return new Response(
         JSON.stringify({
           data: {
-            crawlerStatus: { is_running: false, active_workers: 0 },
-            queueStatistics: {
-              total_items: 0,
-              completed_items: 0,
-              pending_items: 0,
-              processing_items: 0,
-              failed_items: 0,
-              retrying_items: 0,
+            crawlerStatus: {
+              isRunning: false,
+              activeWorkers: 0,
+              lastCrawl: null,
+              nextScheduledCrawl: null,
+              sources: [],
             },
-            crawlerLogs: [],
-            performanceMetrics: [],
+            queueStatistics: {
+              totalItems: 0,
+              completedItems: 0,
+              pendingItems: 0,
+              processingItems: 0,
+              failedItems: 0,
+              retryingItems: 0,
+            },
+            crawlerSources: [],
           },
         }),
         { headers: { "Content-Type": "application/json" } },
@@ -46,7 +55,12 @@ describe("App accessibility", () => {
         <App />
       </ThemeProvider>,
     );
-    expect(await screen.findByTestId("dashboard-title")).toBeVisible();
+    expect(
+      await screen.findByRole("table", { name: "Queue counts" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Crawler queue" }),
+    ).toBeVisible();
     expect(
       screen.getByRole("tab", { name: "Dashboard", selected: true }),
     ).toBeVisible();
