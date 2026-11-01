@@ -442,7 +442,7 @@ isolation. See [Kubernetes security guidance](../../k8s/README.md#-security) and
 Use the guarded teardown helper rather than deleting manifest directories. It targets
 the kind cluster's own context, backs up the databases and Secrets outside the cluster,
 and protects database and backup PVs before deletion. Review the
-[cleanup reference](../../k8s/README.md#-cleanup) and [Host Storage](HOST_STORAGE.md) for
+[Kubernetes reference](../../k8s/README.md), under **Cleanup**, and [Host Storage](HOST_STORAGE.md) for
 recovery requirements. A dry run runs checks and prints steps; it is not an offline plan.
 
 | Intended scope | Command | What remains |
