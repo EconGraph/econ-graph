@@ -20,7 +20,7 @@ root.
 
 | Mount point                  | Subvolume               | Contents                                                        |
 |------------------------------|-------------------------|-----------------------------------------------------------------|
-| `/srv/econgraph/data-plane`  | `@econgraph-data-plane` | `pg/`: main Postgres (`econ_graph`, pod `postgresql-0`); `objects/`: future Parquet/Iceberg |
+| `/srv/econgraph/data-plane`  | `@econgraph-data-plane` | `pg/`: main Postgres (`econ_graph`, pod `postgresql-0`); `objects/`: no active data producer |
 | `/srv/econgraph/app-prod`    | `@econgraph-app-prod`   | `app-pg/`: the app database (`econ_graph_app`, pod `app-postgres-0`); `keycloak-pg/` (pod `keycloak-postgres-0`, db `keycloak`) |
 | `/srv/econgraph/snapshots`   | `@econgraph-snapshots`  | read-only snapshots of the two above                            |
 | `/srv/econgraph-backups`     | `@econgraph-backups` on the 870 pool | `snapshots/` (root, 0700): copies of every snapshot, by send/receive; `dumps/`: nightly logical dumps. Created by `scripts/host/setup-backup-pool.sh` |
@@ -32,8 +32,10 @@ The 870 pool is three Samsung 870 SATA SSDs (`/dev/sda1`, `/dev/sdb1`,
 `a1e61098-087b-4403-8765-b714bf7b240b`, label `home-temp`, data RAID1 /
 metadata RAID1C3. It is **not empty**: its top level holds `@home` (ID 256)
 with nested snapshots `@home/.final-snap` and `@home/.final-snap2`, an older
-copy of `/home` (about 1.57 TiB) that the maintainer decides about separately; about
-2.59 TiB is free. The backup target is a new top-level subvolume
+copy of `/home` (about 1.57 TiB) that the maintainer decides about separately.
+The recorded setup observation was about 2.59 TiB free; use
+`df -h /srv/econgraph-backups` after mounting to check current capacity.
+The backup target is a new top-level subvolume
 `@econgraph-backups` beside it. Nothing here ever wipes, reformats or
 touches `@home` or its snapshots. Because the pool is a different filesystem
 from `/home`, snapshots reach it only by `btrfs send`/`receive`
@@ -44,7 +46,7 @@ from `/home`, snapshots reach it only by `btrfs send`/`receive`
 The kind cluster runs on the **rootful** Docker daemon at
 `unix:///var/run/docker.sock`: kind can't start under rootless Docker on this
 host, whose rootless data root is on btrfs (see
-`docs/deployment/HOST_STORAGE.md`). The operator's login shell exports `DOCKER_HOST`
+[Host Storage](HOST_STORAGE.md)). The operator's login shell exports `DOCKER_HOST`
 for the rootless daemon, so the backup scripts don't use that variable:
 `scripts/backup/lib.sh` sets `DOCKER_HOST=unix:///var/run/docker.sock` for
 itself and everything it runs, like `scripts/deploy/lib/kind-env.sh`.
@@ -64,8 +66,8 @@ The Postgres data directories (`data-plane/pg/`, `app-prod/app-pg/`,
 `app-prod/keycloak-pg/`)
 are owned by host UID **999**, mode 0700: the `postgres` user of the
 `postgres:18` image (`uid=999(postgres) gid=999(postgres)`), which the
-manifests run as (`runAsUser: 999`). Rootful Docker uses no user namespace,
-so UID 999 in the pod is UID 999 on the host. the operator cannot read them
+manifests run as (`runAsUser: 999`). This rootful Docker setup uses no user namespace,
+so UID 999 in the pod is UID 999 on the host. The operator cannot read them
 directly. Any copy has to preserve that ownership and mode, or Postgres
 refuses to start on it. btrfs snapshots and `btrfs send`/`receive` preserve
 it. A file-level copy has to be made as root with ownership kept
@@ -75,8 +77,8 @@ rootful daemon (root there is host root).
 Data written while the cluster still ran under rootless Docker is owned by
 host UID 100998 (999 mapped through `/etc/subuid`). The Postgres init
 containers on the host-storage layout (PR #421) re-own a data directory to
-999:999 when they find anything else, so a snapshot taken before the switch
-still starts.
+999:999 when they find anything else. They convert a pre-switch snapshot’s
+ownership during startup; no separate ownership conversion is required.
 
 ### Why snapshots are safe for a running Postgres
 
@@ -123,11 +125,11 @@ automatically.
 |---|---|---|---|
 | hourly, on the hour | `scripts/host/backup-snapshots.sh`: read-only snapshots of `data-plane` and `app-prod` into `/srv/econgraph/snapshots/<name>.<UTC stamp>`, then incremental `btrfs send`/`receive` of every snapshot not yet on the backup pool into `/srv/econgraph-backups/snapshots` (skipped with a message while the pool is not mounted) | root | `econgraph-backup-snapshots.timer` (system; installed by `scripts/host/install-backup-timer.sh`) |
 | hourly, :20 | `scripts/backup/check-freshness.sh`: freshness and space checks | operator | `econgraph-backup-freshness.timer` (user) |
-| nightly 10:00 UTC | `scripts/backup/dump-databases.sh`: verified `pg_dump -Fc` of `econ_graph`, `econ_graph_app` and `keycloak` | operator | `econgraph-dump.timer` (user) |
+| nightly 10:00 UTC, with up to 5 minutes randomized delay | `scripts/backup/dump-databases.sh`: verified `pg_dump -Fc` of `econ_graph`, `econ_graph_app` and `keycloak` | operator | `econgraph-dump.timer` (user) |
 | daily 10:45 UTC | `scripts/backup/offsite-restic.sh backup`: restic copy of the verified dumps (the unit does nothing until `restic.env` exists) | operator | `econgraph-offsite.timer` (user) |
 | Sundays 11:00 UTC | `scripts/backup/restore-drill.sh`: restore the newest dump into a throwaway Postgres 18 and check it | operator | `econgraph-restore-drill.timer` (user) |
 | before a risky change | `scripts/backup/snapshot-now.sh <reason>` | operator | by hand |
-| before a deploy that changes the Keycloak image | `scripts/deploy/backup-keycloak-db.sh`: Keycloak scaled to 0, `pg_dump -Fc` of `keycloak` into `~/econgraph-backups/keycloak/<UTC stamp>/`, verified by a restore into a scratch database with equal row counts. `scripts/deploy/restore-keycloak-db.sh` restores it as a fresh database swapped in by rename, the only way to downgrade Keycloak; `restore-dump.sh`'s `--clean` would leave the newer version's tables behind. These dumps are on the data disk, not the backup pool, and `offsite-restic.sh` doesn't ship them: copy each one off the disk by hand. See the [v4.0.0 QA plan](../release/v4.0.0-qa.md) | operator | by hand |
+| before a deploy that changes the Keycloak image | `scripts/deploy/backup-keycloak-db.sh`: [verified upgrade dump](#keycloak-upgrade-dumps) | operator | by hand |
 | when needed | `scripts/backup/restore-dump.sh`, `scripts/backup/branch-clone.sh` | operator | by hand |
 | when needed | `scripts/host/restore-snapshot.sh`, `scripts/host/delete-snapshots.sh` | root | by hand only |
 
@@ -157,21 +159,44 @@ Everything that needs root is a script under `scripts/host/`; each refuses
 to run without sudo, takes `--dry-run`, prints every action, and is safe to
 re-run. They are listed in order in [Needs sudo](#needs-sudo).
 The root timer runs a root-owned copy at
-`/usr/local/sbin/econgraph-backup-snapshots`, never the checkout, so root
-never executes a file the operator account can edit.
+`/usr/local/sbin/econgraph-backup-snapshots`, so changes in the checkout do
+not change the scheduled code.
 
 The user scripts read optional overrides from
 `~/.config/econgraph/backup.env` (plain `KEY=value`): `BACKUP_ROOT`, the
-freshness and space limits, `FRESHNESS_SKIP_SNAPSHOTS=1` (until the hourly
-timer is installed), and so on; see `scripts/backup/lib.sh` and the header
-of `check-freshness.sh` for the full list.
+freshness and space limits, `FRESHNESS_SKIP_SNAPSHOTS=1` (when the hourly
+timer is absent), and so on; see the [shared defaults](../../scripts/backup/lib.sh)
+and [freshness checker header](../../scripts/backup/check-freshness.sh) for the full list.
 
 Snapshots on the NVMe array share its disks: they protect against bad
 migrations, mistaken recrawls and deleted rows, not against losing the
 array. Until `setup-backup-pool.sh` has run, the dumps also sit on the same
-array (in `/home`). The 870 pool (snapshot copies plus the dumps) and the
-off-site copy are what cover losing the NVMe array; the 870 pool is in the
-same machine, so only the off-site copy covers losing the machine.
+array (in `/home`). Successful copies on the 870 pool (snapshots plus dumps)
+cover losing the NVMe array. The pool is in the same machine; protection
+against losing the machine requires an off-site target and successful copies
+to it.
+
+### Keycloak upgrade dumps
+
+Before a deploy that changes the Keycloak image, run
+[`backup-keycloak-db.sh`](../../scripts/deploy/backup-keycloak-db.sh). It
+scales Keycloak to zero and waits for its Pods to disappear, dumps `keycloak`
+to `~/econgraph-backups/keycloak/<UTC stamp>/` by default, and verifies a
+scratch-database restore with equal row counts before marking it VERIFIED.
+Directories are 0700 and files 0600. Keycloak stays stopped for the deploy.
+
+For rollback, [`restore-keycloak-db.sh`](../../scripts/deploy/restore-keycloak-db.sh)
+takes a safety dump, restores into a fresh database, verifies counts, and
+swaps it in by rename, retaining the previous database. A fresh database is
+required for a downgrade: `restore-dump.sh` uses `--clean`, which leaves
+objects absent from its archive, including tables added by newer Keycloak.
+Keycloak remains stopped; deploy a compatible image before bringing it back.
+See the rollback procedure in the [v4.0.0 QA plan](../release/v4.0.0-qa.md#keycloak-rollback).
+
+These upgrade dumps accumulate on the data disk by default, rather than on
+the backup pool. `offsite-restic.sh` does not upload them. Copy each useful
+upgrade dump off that disk by hand; the directory contains password hashes
+and client secrets and must remain private.
 
 ## Space alerts
 
@@ -237,8 +262,10 @@ It copies the scripts to `~/.local/lib/econgraph-backup/` (the timers run
 that reviewed copy, not whatever branch the checkout has), installs the
 units into `~/.config/systemd/user/`, and enables the dump, drill and
 freshness timers; the off-site timer only once `restic.env` exists. User
-timers need lingering to run while the operator is logged out; on threadripper
-`loginctl show-user "$USER" -p Linger` already reports `Linger=yes`.
+timers need lingering to run while the operator is logged out. Check
+`loginctl show-user "$USER" -p Linger` before installation; it must report
+`Linger=yes`. If it does not, enable lingering with
+`sudo loginctl enable-linger "$USER"`.
 
 Until the root hourly timer is installed, put `FRESHNESS_SKIP_SNAPSHOTS=1`
 in `~/.config/econgraph/backup.env`, or the hourly freshness check fails on
@@ -274,12 +301,18 @@ daemon, since the host's `kubectl` is a microk8s wrapper) and writes:
 ```
 ~/econgraph-backups/<YYYYMMDDTHHMMZ>/
   econ_graph.dump      econ_graph.dump.toc
-  econ_graph_app.dump  econ_graph_app.dump.toc
-  keycloak.dump        keycloak.dump.toc
+  econ_graph_app.dump  econ_graph_app.dump.toc   (if deployed)
+  keycloak.dump        keycloak.dump.toc         (if deployed)
   MANIFEST         sizes, TOC entry counts, row counts at dump time
   SHA256SUMS
-  VERIFIED         written last, only when every dump passed
+  VERIFIED         written last, when all attempted dumps passed archive checks
 ```
+
+`econ_graph` is never skipped. An app or Keycloak database is skipped only
+when both its StatefulSet and expected data PVC are absent; `MANIFEST`
+records `<db>.skipped=not deployed`. A `VERIFIED` directory can therefore
+contain fewer than three archives. The marker establishes archive checks
+for the dumps attempted, not a successful restore.
 
 Each archive is checked with `pg_restore --list` and a full read-through
 (`pg_restore --file=/dev/null`), using the `postgres:18` image because the
@@ -289,8 +322,8 @@ failure renames it to `<stamp>.failed` (kept for inspection, never mistaken
 for a good dump) and exits non-zero. No dump is ever deleted or pruned.
 It runs with `umask 077`, so every file is mode 0600 and every directory
 0700: the dumps hold all the data, Keycloak's secrets and password hashes
-included. (They are not encrypted; that is tracked separately.) Dumps
-written before this change keep their old modes; tighten them once with
+included. The local archives are not encrypted. Older dumps can retain
+less restrictive modes; tighten them once with
 `chmod -R go= ~/econgraph-backups /srv/econgraph-backups/dumps`.
 `--target-dir` (or `BACKUP_ROOT`) moves the output. By default the dumps go
 to `/srv/econgraph-backups/dumps` as soon as that directory exists and is
@@ -306,15 +339,20 @@ scripts/backup/restore-drill.sh --expect-series 10528 --expect-data-points 50300
 ```
 
 It starts `postgres:18` on a random localhost port, restores `econ_graph`
-(and `econ_graph_app` and `keycloak` from the same directory), and checks: `economic_series`,
+(and the `econ_graph_app` and `keycloak` archives from the same directory
+only if present), and checks: `economic_series`,
 `data_points` and `data_sources` are non-empty, no data point references a
 missing series, no data point lacks a date, the Diesel migration table is
-populated (in the app database too, once it has tables), Keycloak has
-realms, and any `--expect-*` counts match exactly.
+populated (in a restored app database too, once it has tables), a restored
+Keycloak database has realms, and any `--expect-*` counts match exactly.
+A pass covers the databases actually restored; missing companion archives
+do not cause failure.
 Without `--expect-*` it compares against the counts in the dump's
 `MANIFEST` and warns on a difference. It prints one `RESTORE DRILL PASS` or
 `RESTORE DRILL FAIL` line, removes the container, and on a pass records
-`~/.local/state/econgraph/restore-drill.last` for the freshness check.
+`~/.local/state/econgraph/restore-drill.last` for the freshness check. This
+happens even for an explicitly selected old or unverified dump: drill
+freshness measures when a drill passed, not whether today’s backups restore.
 
 First run, 2026-10-24, against `~/econgraph-backups/20261024T0442Z`:
 
@@ -345,16 +383,15 @@ the root hourly job. `--textfile FILE` also writes
 `econgraph_backup_last_success_timestamp_seconds`, `econgraph_backup_fresh`,
 `econgraph_backup_free_bytes`, `econgraph_backup_free_ratio` and
 `econgraph_backup_size_bytes` in node_exporter textfile format (the timer
-writes `~/.local/state/econgraph/backup-freshness.prom`). Nothing scrapes it
-yet: `k8s/monitoring` has Prometheus but no node_exporter or Pushgateway,
-and the in-cluster Prometheus can't see host files. Wiring it up means
-adding a node_exporter with `--collector.textfile.directory` pointed there,
-which is separate work.
+writes `~/.local/state/econgraph/backup-freshness.prom`). The checked-in
+[monitoring setup](../../k8s/monitoring) has Prometheus but
+no node_exporter or Pushgateway to collect it, and the in-cluster Prometheus
+cannot see host files. These metrics do not produce alerts in that setup.
 
 ## Off-site
 
-No off-site target has been chosen. `offsite-restic.sh` reads the repository
-and password from `~/.config/econgraph/restic.env` (outside the repo, mode
+The checked-in setup supplies no off-site target. `offsite-restic.sh` reads
+the repository and password from `~/.config/econgraph/restic.env` (outside the repo, mode
 600) and exits 2 with setup instructions until that file exists. To set it
 up once a target is chosen (any restic backend: SFTP to another machine,
 Backblaze B2, S3-compatible storage, a restic REST server):
@@ -373,15 +410,73 @@ Backblaze B2, S3-compatible storage, a restic REST server):
 Only verified dump directories are uploaded, and nothing is ever forgotten
 or pruned from the repository: `offsite-restic.sh` has no `forget` or
 `prune`, and `offsite-restic.sh restic forget|prune ...` is refused.
-Snapshots are not sent off-site: the dumps are a fraction of their size and
-restore anywhere.
+These wrapper rules prevent scheduled pruning, not deletion by a compromised
+operator account. The account holds the repository credentials and password
+and can run restic directly. Remote deletion resistance requires controls
+enforced by the backend independently of those credentials.
+Snapshots are not sent off-site: logical dumps can be restored on another host
+with compatible PostgreSQL tools and the required roles.
+
+## Recovery shell and shutdown checks
+
+Use Bash from the checkout for the restore procedures below. Obtain the
+maintainer’s sign-off and take the [pre-change snapshot and dump](#pre-change-snapshot)
+before changing production. Arrange a maintenance window: stop other
+clients, migration/import Jobs and deploy automation that could write to
+the affected databases or recreate the workloads. The selectors below cover
+the checked-in Deployments and StatefulSets, not arbitrary clients.
+
+Define these helpers once in the recovery shell:
+
+```bash
+k() { docker -H unix:///var/run/docker.sock exec econ-graph-control-plane kubectl -n econ-graph "$@"; }
+declare -A recovery_replicas
+record_replicas() {
+    local resource count
+    for resource in "$@"; do
+        count="$(k get "$resource" -o jsonpath='{.spec.replicas}')" || return 1
+        [[ "$count" =~ ^[0-9]+$ ]] || return 1
+        recovery_replicas["$resource"]="$count"
+        printf '%s %s\n' "$resource" "$count"
+    done
+}
+wait_gone() {
+    local pods
+    while :; do
+        pods="$(k get pods -l "$1" -o name)" || return 1
+        [[ -z "$pods" ]] && return 0
+        sleep 2
+    done
+}
+resume_recorded() {
+    local resource
+    for resource in "$@"; do
+        [[ -n "${recovery_replicas[$resource]+recorded}" ]] || return 1
+        k scale "$resource" --replicas="${recovery_replicas[$resource]}" || return 1
+    done
+}
+```
+
+Copy the printed counts into the maintenance record before scaling. Keep
+this shell open; the associative array is lost if it exits. If a command
+fails, stop and diagnose it before proceeding. Do not rerun the recording
+step after scaling to zero: that would overwrite the original counts.
+The `|| exit 1` checks end the recovery shell on failure; retain the
+maintenance record so that its counts survive that exit.
+Keep writers down until recovery and schema checks succeed. After a failed
+step, recover the saved counts from the maintenance record if necessary;
+do not blindly run the resume commands.
 
 ## Restore from a snapshot
 
-Use this to roll production back to a point in time (any hour since the
-hourly timer was installed, or any pre-change snapshot), e.g. after a bad
-migration. Everything written since the snapshot is lost; the current data
-is set aside, not deleted.
+Use this for a whole-plane rollback, for example after a bad migration.
+Everything written to that plane since the snapshot is lost; the current
+data is set aside, not deleted. A `data-plane.*` snapshot replaces `pg/`
+and `objects/`; an `app-prod.*` snapshot replaces both `app-pg/` and
+`keycloak-pg/`. With `APP_DATABASE=separate`, an app-prod rollback replaces
+app state and Keycloak accounts and sessions together. In shared mode, app
+state instead follows `econ_graph` in the data-plane snapshot. Choose
+compatible service images, including a Keycloak version that can read the restored schema.
 
 1. Pick the snapshot: `ls /srv/econgraph/snapshots/`. If the local one is
    gone (or the NVMe array was lost and rebuilt), use the copy on the backup
@@ -390,16 +485,32 @@ is set aside, not deleted.
    into `/srv/econgraph/snapshots`. It refuses a pool copy without a
    Received UUID, and a local snapshot of the same name that the pool copy
    was not received from.
-2. Stop everything that writes, then Postgres (no sudo):
-   ```sh
-   k() { docker -H unix:///var/run/docker.sock exec econ-graph-control-plane kubectl -n econ-graph "$@"; }
-   k scale deployment/econ-graph-backend deployment/crawler-worker --replicas=0
-   k scale statefulset/postgresql --replicas=0      # data-plane
-   # app-prod: k scale deployment/econ-graph-backend deployment/keycloak \
-   #   statefulset/app-postgres statefulset/keycloak-postgres --replicas=0
+
+2. Set up the [recovery shell](#recovery-shell-and-shutdown-checks). The
+   replacement affects only the chosen plane, but the required storage-node
+   restart interrupts **all three databases**. Record all their counts and
+   those of the backend, crawler and Keycloak, then stop writers before
+   stopping the databases:
+
+   ```bash
+   writers=(deployment/econ-graph-backend deployment/crawler-worker deployment/keycloak)
+   databases=(statefulset/postgresql statefulset/app-postgres statefulset/keycloak-postgres)
+   record_replicas "${writers[@]}" "${databases[@]}" || exit 1
+   k scale "${writers[@]}" --replicas=0 || exit 1
+   wait_gone 'app in (econ-graph-backend,crawler-worker,keycloak)' || exit 1
+   k scale "${databases[@]}" --replicas=0 || exit 1
+   wait_gone 'app in (postgresql,app-postgres,keycloak-postgres)' || exit 1
    ```
-3. `sudo scripts/host/restore-snapshot.sh --dry-run [--from-pool] <snapshot>`,
-   then without `--dry-run`. It refuses, changing nothing, while any pod
+
+   These commands assume all three databases are deployed, as in the host
+   layout above. If a resource is absent, establish the actual layout before
+   adapting the lists; a failed lookup is not confirmation of shutdown.
+   Proceed only after both pod checks return successfully with no matching
+   Pods. Ensure other clients and Jobs are stopped too.
+
+3. Run `sudo scripts/host/restore-snapshot.sh --dry-run [--from-pool] <snapshot>`,
+   then without `--dry-run`, checking that each succeeds before continuing.
+   It refuses, changing nothing, while any pod
    still uses the subvolume:
    - the plane's Postgres pods (`postgresql-0` for `data-plane`;
      `app-postgres-0` and `keycloak-postgres-0` for `app-prod`), whether the
@@ -426,48 +537,133 @@ is set aside, not deleted.
    `@econgraph-app-prod`), unmounts the subvolume, renames it to
    `@econgraph-<name>.replaced-<stamp>`, puts a writable snapshot of the
    chosen snapshot in its place under the original name, and remounts it.
-4. With Postgres still stopped, restart the kind node that holds the
+
+4. With all databases still stopped, restart the kind node that holds the
    storage, so it sees the new subvolume:
-   `docker -H unix:///var/run/docker.sock restart econ-graph-worker`.
-   Postgres runs on `econ-graph-worker` (labelled
+
+   ```bash
+   docker -H unix:///var/run/docker.sock restart econ-graph-worker || exit 1
+   k wait --for=condition=Ready node/econ-graph-worker --timeout=180s || exit 1
+   ```
+
+   All three databases run on `econ-graph-worker` (labelled
    `econgraph.io/host-storage=true`), which bind-mounts
    `/srv/econgraph/data-plane` and `/srv/econgraph/app-prod`. That bind mount
    keeps pointing at the old subvolume until the node container restarts;
-   skipping this starts Postgres on the old data. Wait for the node to be
-   `Ready` (`k get nodes`) before the next step.
-5. Scale Postgres back to 1, check the data, then the backend and crawler.
+   skipping this starts Postgres on the old data.
+
+5. Bring the database StatefulSets back to their recorded counts:
+
+   ```bash
+   resume_recorded "${databases[@]}" || exit 1
+   for resource in "${databases[@]}"; do
+       if (( recovery_replicas[$resource] > 0 )); then
+           k wait --for=condition=Ready "pod/${resource#statefulset/}-0" --timeout=180s || exit 1
+       fi
+   done
+   ```
+
+   Check the data in each resumed database. For data-plane recovery, check
+   `econ_graph` and its data plane migration history; for app-prod, check both `econ_graph_app` and
+   `keycloak`, including app migration history and Keycloak schema/image
+   compatibility. Reconcile the restored schemas with the deployed services
+   using the [migration guidance](../development/MIGRATIONS.md) before
+   resuming any writer. Starting the backend applies newer app plane
+   migrations, including to `econ_graph` in shared mode; data plane
+   migrations require an explicit command.
+
+   After those checks succeed, restore Keycloak first and wait for its
+   rollout if its original count was nonzero, then resume the backend and
+   crawler:
+
+   ```bash
+   resume_recorded deployment/keycloak || exit 1
+   if (( recovery_replicas[deployment/keycloak] > 0 )); then
+       k rollout status deployment/keycloak --timeout=180s || exit 1
+   fi
+   resume_recorded deployment/econ-graph-backend deployment/crawler-worker || exit 1
+   ```
+
 6. The set-aside subvolume stays until the operator deletes it by hand
-   (`sudo scripts/host/delete-snapshots.sh @econgraph-data-plane.replaced-<stamp>`).
-   To undo the restore instead, it is the old data.
+   (`sudo scripts/host/delete-snapshots.sh @econgraph-data-plane.replaced-<stamp>`
+   or the corresponding app-prod name). To undo the restore instead, it is
+   the old data.
 
 ## Restore from a dump
 
-For a database-level restore (e.g. one table's worth of damage where losing
-other recent writes is unacceptable, use a drill container and copy rows
-over; for a whole-database rollback, this):
+Use a whole-database rollback when losing all writes since the dump is
+acceptable. For selective row recovery, restore into an isolated container
+and copy the required rows instead. For a Keycloak downgrade, use the
+[fresh-database upgrade recovery](#keycloak-upgrade-dumps), because a clean
+restore can leave newer tables behind.
 
-```sh
-scripts/backup/snapshot-now.sh "before restoring econ_graph from 20261024T0442Z"
-k scale deployment/econ-graph-backend deployment/crawler-worker --replicas=0
-scripts/backup/restore-dump.sh --dry-run econ_graph ~/econgraph-backups/<stamp>/econ_graph.dump
-scripts/backup/restore-dump.sh econ_graph ~/econgraph-backups/<stamp>/econ_graph.dump
+Set up the [recovery shell](#recovery-shell-and-shutdown-checks), including
+its pre-change backup and maintenance prerequisites. Choose **one** target
+and its affected writers:
+
+For `econ_graph` (also includes app state in `APP_DATABASE=shared`):
+
+```bash
+database=econ_graph
+writers=(deployment/econ-graph-backend deployment/crawler-worker)
+writer_selector='app in (econ-graph-backend,crawler-worker)'
+```
+
+For the separate app database:
+
+```bash
+database=econ_graph_app
+writers=(deployment/econ-graph-backend)
+writer_selector='app=econ-graph-backend'
+```
+
+For Keycloak with a compatible schema and image:
+
+```bash
+database=keycloak
+writers=(deployment/keycloak)
+writer_selector='app=keycloak'
+```
+
+Set `dump` to the matching host-side archive, then record counts, stop the
+selected writers and confirm their Pods are gone. Keep the target database
+running; `restore-dump.sh` does not stop writers for you.
+
+```bash
+dump="$HOME/econgraph-backups/<stamp>/${database}.dump"   # replace <stamp> and root path
+record_replicas "${writers[@]}" || exit 1
+k scale "${writers[@]}" --replicas=0 || exit 1
+wait_gone "$writer_selector" || exit 1
+scripts/backup/restore-dump.sh --dry-run "$database" "$dump" || exit 1
+scripts/backup/restore-dump.sh "$database" "$dump" || exit 1
 ```
 
 `--dry-run` checks the archive and the pod and prints the plan. Without
-it, it waits up to 2 minutes for the pod to be Ready (and stops if it isn't),
-asks for the database name as confirmation (`--yes` skips that), then
-runs `pg_restore --clean --if-exists --single-transaction --exit-on-error`
-in the pod, so a failure rolls back. As with the in-cluster restore,
+it, the helper waits up to 2 minutes for the target database Pod to be Ready
+(and stops if it is not), asks for the database name as confirmation
+(`--yes` skips that), then runs
+`pg_restore --clean --if-exists --single-transaction --exit-on-error`
+in the pod, so a restore failure rolls back. It lists relations missing
+from the dump as a warning, not a refusal. As with the in-cluster restore,
 `--clean` only drops objects that are in the dump: tables added by later
-migrations stay and Diesel's migration history may disagree; check
-`__diesel_schema_migrations` afterwards. To restore into a fresh cluster
-whose database doesn't exist yet, create the empty database and the
-`econgraph` role first (the dump keeps object owners).
+migrations stay and Diesel's migration history may disagree. Check
+`__diesel_schema_migrations`, ownership and the schema against the deployed
+services, and resolve mismatches **before** resuming writers. The backend
+applies newer app plane migrations at startup; data plane migrations are
+explicit. To restore into a fresh cluster whose database does not exist yet,
+create the empty database and required owner roles first (the host dump
+keeps object owners; the app/data owner is `econgraph`).
 
-To inspect a dump without touching anything, run the restore drill on it:
-it leaves nothing behind except its pass/fail line. To keep a restored copy
-around for querying, run `docker run` of `postgres:18` yourself and
-`pg_restore --no-owner --no-privileges` into it.
+Only after a successful restore and data/schema checks, run:
+
+```bash
+resume_recorded "${writers[@]}" || exit 1
+```
+
+To inspect a dump without changing production, run the restore drill on it.
+The container is removed, but a pass updates the drill freshness record even
+for an old dump. To keep a restored copy around for querying, run `docker run`
+of `postgres:18` yourself and `pg_restore --no-owner --no-privileges` into it.
 
 ## Clone a snapshot for a branch
 
@@ -515,35 +711,42 @@ dump is read back in full and must hold at least one table, each is taken
 whether or not the others succeed, and the Job fails when any of them fails.
 Like everything in this runbook it deletes nothing: it used to prune its dumps after 14 days (`BACKUP_RETENTION_DAYS`), and
 [#427](https://github.com/EconGraph/econ-graph/pull/427) removed that, so its dumps stay until the operator removes them by hand
-(`POSTGRES_BACKUP_RESTORE.md` says how). It is kept as an
+([manual retention instructions](POSTGRES_BACKUP_RESTORE.md#retention) show how). It is kept as an
 independent second copy: the two share no files, schedule or lock, run
 through different paths (the CronJob over the Services from inside the
 cluster, `dump-databases.sh` with `kubectl exec` through the kind node), and
 neither touches the other's dumps. The host-side dumps are the primary copy
-on threadripper. The CronJob is not pointed at the new layout because:
+on threadripper. The CronJob remains an independent copy, with these limits:
 
-- its PVC is kind local-path storage inside the kind node container: deleting
-  or recreating the kind cluster destroys it together with the database,
-  which is exactly the failure backups are for, and its PV's reclaim policy
-  is currently `Delete`;
-- moving it onto a host path would need a static PV and kind `extraMounts`
-  (owned by the cluster wiring work, not this), and the obvious host path,
-  inside `data-plane`, would put backups on the subvolume they back up;
-- it has no restore drill or freshness check, and no alert watches its Job.
+- Its PVC uses dynamically provisioned kind local-path storage inside a kind
+  node container. Removing that node or cluster loses this storage. The three
+  production database PVs instead use host directories and `Retain`; kind
+  deletion does not delete those directories.
+- `scripts/deploy/protect-postgres-pv.sh`, invoked by deploy and teardown,
+  sets a **bound** backup PV to `Retain`. If `postgres-backup-data` is still
+  Pending, that protection is skipped. After the first Job binds it, rerun
+  the protection helper and verify the bound PV's reclaim policy before
+  relying on preservation after PVC deletion. Source configuration alone
+  does not establish the policy of the current live PV.
+- `Retain` preserves the PV and its files after PVC deletion, leaving it
+  Released; it does not preserve a kind container that is deleted or make
+  the volume automatically reusable. See [Reattaching a retained volume](POSTGRES_BACKUP_RESTORE.md#reattaching-a-retained-volume).
+- The CronJob has no restore drill or freshness check, and the checked-in
+  monitoring setup has no alert for its Job.
 
-Retire it (remove the three manifests and their references in
-`scripts/deploy/`) once the host timers have run cleanly for two weeks.
-Removing the PVC deletes its dumps with it (reclaim policy `Delete`), so
-copy off anything worth keeping first, by hand.
+Export useful dumps before removing cluster storage or retiring the CronJob.
+Do not rely on deleting a PVC to preserve or remove its files without checking
+its bound PV's policy and storage location.
 
 ## Unprivileged btrfs: what works without root
 
-Tested on threadripper (kernel 7.0, btrfs-progs 6.17.1) as the operator, first
-in a scratch directory on `/home`, then on the real layout
+The recorded permission experiments on threadripper used kernel 7.0 and
+btrfs-progs 6.17.1. They ran as the operator, first in a scratch directory on
+`/home`, then on the real layout
 (`snapshot-now.sh` from `/srv/econgraph/data-plane` and `app-prod`, both
 owned by the operator and holding only a test directory owned by UID 100998,
 the rootless-Docker mapping of UID 999 in use at the time,
-into `/srv/econgraph/snapshots`; `/home` is not mounted with
+into `/srv/econgraph/snapshots`; `/home` was not mounted with
 `user_subvol_rm_allowed`):
 
 | Operation | Without root |
@@ -582,16 +785,38 @@ Consequences:
 - Local snapshots are not protected from the operator: anything running as
   the operator can flip a snapshot writable and empty it through a container.
   They guard against bad changes, not against a hostile or runaway process
-  in this account. The copies on the 870 pool
-  (`/srv/econgraph-backups/snapshots`, root-only, mode 0700) and the
-  off-site copy are the ones that account can't reach.
+  in this account. Root-only mode 0700 on the 870 pool’s snapshot directory
+  blocks ordinary direct access, but the operator has [root-level access](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user)
+  through the rootful Docker daemon. It does not isolate those copies from
+  a compromised operator account. The account also holds restic credentials;
+  wrapper restrictions do not establish an off-site deletion boundary.
 
 ## Needs sudo
 
+Installation requires the following tools and privileges. Verify them before
+running the installation steps:
+
+```sh
+for tool in btrfs docker systemctl loginctl findmnt flock sha256sum python3; do
+    command -v "$tool" || exit 1
+done
+command -v restic                  # required for off-site copies
+id -nG                            # docker group grants rootful socket access
+ls -l /var/run/docker.sock         # confirm socket permissions
+loginctl show-user "$USER" -p Linger
+```
+
+The installers do not install packages. Supply missing tools before using
+the corresponding scripts. User timers need `Linger=yes` to run after
+logout; enabling it requires sudo as described in [Timers and installation](#timers-and-installation).
+Group membership and socket permissions must permit the operator to use the
+rootful daemon. This privilege gives root-level host access, even though
+dumps, drills, freshness checks, off-site copies, branch clones and
+pre-change snapshots are invoked without sudo.
+
 Each step is one checked-in script; run with `--dry-run` first. In order:
 
-1. **Create and mount the subvolumes** (from the `ops/host-storage-scripts`
-   branch; already done on 2026-10-24): `sudo scripts/host/setup-subvolumes.sh`. Creates
+1. **Create and mount the subvolumes**: `sudo scripts/host/setup-subvolumes.sh`. Creates
    `@econgraph-data-plane`, `@econgraph-app-prod` and
    `@econgraph-snapshots`, adds their `/etc/fstab` lines, mounts them and
    chowns each subvolume root to the operator (required for `snapshot-now.sh`).
@@ -615,8 +840,8 @@ Each step is one checked-in script; run with `--dry-run` first. In order:
    subvolume root root-owned (0755), and creates `snapshots/` (root, 0700)
    and `dumps/` (the operator, 0700), resetting their owner and mode on a
    rerun. It refuses an existing `/etc/fstab` entry or mount at
-   `/srv/econgraph-backups` that is not this pool's `@econgraph-backups`. `scripts/host/inspect-sata-pool.sh` (same branch as
-   step 1) shows the pool read-only beforehand. From the next hourly run on,
+   `/srv/econgraph-backups` that is not this pool's `@econgraph-backups`. [`inspect-sata-pool.sh`](../../scripts/host/inspect-sata-pool.sh)
+   shows the pool read-only beforehand. From the next hourly run on,
    every snapshot is copied there, and the nightly dumps go to
    `/srv/econgraph-backups/dumps`, with nothing else to change.
 4. **By hand, when needed**: `sudo scripts/host/restore-snapshot.sh` (restore
@@ -624,12 +849,4 @@ Each step is one checked-in script; run with `--dry-run` first. In order:
    `sudo scripts/host/delete-snapshots.sh` (the only thing that deletes;
    see [Deleting by hand](#deleting-by-hand)).
 
-Not needed:
-
-- `loginctl enable-linger "$USER"`: already `Linger=yes`.
-- `user_subvol_rm_allowed`: see above; leave it off.
-- Anything for the dumps, drill, freshness check, off-site copy or branch
-  clones: they run as the operator.
-- Anything for pre-change snapshots: `snapshot-now.sh` runs as the operator.
-- Any package: everything uses `btrfs-progs`, Docker and restic, which are
-  already installed.
+Leave `user_subvol_rm_allowed` off, for the reasons above.
