@@ -525,6 +525,20 @@ clients, migration/import Jobs and deploy automation that could write to
 the affected databases or recreate the workloads. The selectors below cover
 the checked-in Deployments and StatefulSets, not arbitrary clients.
 
+For an encrypted logical bundle, authenticate and open it before stopping
+writers. Start the recovery shell at an operator terminal, replacing the
+bundle path with the selected backup:
+
+```bash
+scripts/backup/open-backup.sh "$HOME/econgraph-backups/<stamp>" -- bash --noprofile --norc
+```
+
+Define the helpers and run the logical restore and verification below inside
+that shell. `BACKUP_ACTIVE_DIR` names its disposable decrypted payload; leave
+the shell only after recovery checks finish, which removes that plaintext.
+For a retained legacy plaintext backup or a snapshot restore, use an ordinary
+Bash recovery shell instead.
+
 Define these helpers once in the recovery shell:
 
 ```bash
@@ -729,7 +743,7 @@ selected writers and confirm their Pods are gone. Keep the target database
 running; `restore-dump.sh` does not stop writers for you.
 
 ```bash
-dump="$HOME/econgraph-backups/<stamp>/${database}.dump"   # replace <stamp> and root path
+dump="${BACKUP_ACTIVE_DIR:-$HOME/econgraph-backups/<stamp>}/${database}.dump"   # replace <stamp> and root path for legacy backups
 record_replicas "${writers[@]}" || exit 1
 k scale "${writers[@]}" --replicas=0 || exit 1
 wait_gone "$writer_selector" || exit 1
