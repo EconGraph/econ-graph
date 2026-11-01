@@ -1,3 +1,4 @@
+import './financial-selection.css';
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -363,21 +364,21 @@ export const FinancialMobile: React.FC<FinancialMobileProps> = ({
                       <button
                         type='button'
                         key={statement.id}
-                        className='w-full text-left focus-visible:outline focus-visible:outline-2 flex items-center justify-between p-3 border rounded-lg'
+                        className='financial-selection financial-selection--mobile'
                         onClick={() => setSelectedStatement(statement.id)}
                       >
-                        <span className='flex items-center space-x-3'>
-                          <span className='p-2 bg-blue-100 rounded'>
+                        <span className='financial-selection__content'>
+                          <span className='financial-selection__icon financial-selection__icon--filing'>
                             <FileText className='h-4 w-4 text-blue-600' />
                           </span>
                           <span>
-                            <span className='block font-medium'>{statement.formType}</span>
-                            <span className='block text-sm text-gray-500'>
+                            <span className='financial-selection__title'>{statement.formType}</span>
+                            <span className='financial-selection__description'>
                               FY {statement.fiscalYear} Q{statement.fiscalQuarter}
                             </span>
                           </span>
                         </span>
-                        <span className='flex items-center space-x-2'>
+                        <span className='financial-selection__status'>
                           {statement.xbrlProcessingStatus === 'completed' ? (
                             <CheckCircle className='h-4 w-4 text-green-600' />
                           ) : (

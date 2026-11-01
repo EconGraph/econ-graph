@@ -12,6 +12,8 @@ export interface SourceNoticePanelProps {
   lastUpdated: string | null;
   /** The shown transformation's label, such as "Year-over-Year % Change"; empty for levels. */
   transformationLabel: string;
+  /** Distinguish repeated source-notice landmarks, such as dashboard cards. */
+  ariaLabel?: string;
 }
 
 /**
@@ -27,6 +29,7 @@ export function SourceNoticePanel({
   notice,
   lastUpdated,
   transformationLabel,
+  ariaLabel = 'Source notice',
 }: SourceNoticePanelProps): React.ReactElement | null {
   const derived = derivedValuesNote(transformationLabel, sourceName);
   if (!notice && !derived) return null;
@@ -34,7 +37,7 @@ export function SourceNoticePanel({
   return (
     <Box
       component='section'
-      aria-label='Source notice'
+      aria-label={ariaLabel}
       data-testid='source-notice'
       sx={{ mt: 2, color: 'text.secondary' }}
     >

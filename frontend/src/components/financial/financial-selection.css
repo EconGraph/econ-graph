@@ -1,0 +1,106 @@
+/* Native selection buttons must not depend on uncompiled utility classes. */
+.financial-selection {
+  appearance: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0.375rem;
+  padding: 0.5rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.financial-selection:hover {
+  background: rgb(127 127 127 / 12%);
+}
+
+.financial-selection:focus-visible {
+  outline: 2px solid #1976d2;
+  outline-offset: 2px;
+}
+
+.financial-selection--filing + .financial-selection--filing,
+.financial-selection--mobile + .financial-selection--mobile {
+  margin-top: 0.75rem;
+}
+
+.financial-selection--format,
+.financial-selection--mobile {
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.financial-selection--format {
+  padding: 1rem;
+}
+
+.financial-selection--format[aria-pressed='true'] {
+  border-color: #1976d2;
+  background: rgb(25 118 210 / 8%);
+}
+
+.financial-selection__content,
+.financial-selection__status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.financial-selection__status {
+  flex-shrink: 0;
+  gap: 0.5rem;
+}
+
+.financial-selection__icon {
+  display: flex;
+  flex-shrink: 0;
+  color: #1976d2;
+}
+
+.financial-selection__icon--filing {
+  border-radius: 0.25rem;
+  padding: 0.5rem;
+  background: #dbeafe;
+}
+
+.financial-selection__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.financial-selection__title,
+.financial-selection__description {
+  display: block;
+}
+
+.financial-selection__title {
+  font-weight: 500;
+}
+
+.financial-selection__description {
+  color: inherit;
+  opacity: 0.75;
+  font-size: 0.875rem;
+}
+
+.financial-format-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+@media (min-width: 768px) {
+  .financial-format-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

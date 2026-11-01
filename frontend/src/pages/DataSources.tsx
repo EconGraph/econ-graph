@@ -100,7 +100,7 @@ const DataSourcesContent: React.FC = () => {
         <Grid container spacing={3}>
           <Grid size={6}>
             <Box sx={{ textAlign: 'center' }}>
-              <Typography variant='h3' color='primary'>
+              <Typography variant='h3' component='div' color='primary'>
                 {dataSources.length}
               </Typography>
               <Typography
@@ -115,7 +115,7 @@ const DataSourcesContent: React.FC = () => {
           </Grid>
           <Grid size={6}>
             <Box sx={{ textAlign: 'center' }}>
-              <Typography variant='h3' color='primary'>
+              <Typography variant='h3' component='div' color='primary'>
                 {totalSeries.toLocaleString()}
               </Typography>
               <Typography
