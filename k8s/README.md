@@ -635,7 +635,7 @@ as `econgraph` into a fresh destination. Omitting owners from the dump does not 
 restore owner: restoring as `postgres` alone leaves the tables owned by `postgres`. See
 [restore ownership](../docs/deployment/POSTGRES_BACKUP_RESTORE.md#ownership) for the role and
 extension handling, and [host-storage migration](../docs/deployment/HOST_STORAGE.md#moving-the-live-deployment)
-and [production recovery](../docs/deployment/HOST_STORAGE.md#recovering-production-eco-432)
+and [production recovery](../docs/deployment/HOST_STORAGE.md#restoring-production-from-a-backup)
 for moving or recovering host-backed databases with their saved Secrets. Teardown and
 redeployment retain the host data; they do not reset database credentials or ownership.
 
