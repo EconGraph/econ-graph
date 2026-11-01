@@ -1,7 +1,8 @@
 # BEA (Bureau of Economic Analysis)
 
-Adapter: `backend/crates/econ-graph-crawler/src/sources/bea.rs`. Selection rules:
-`backend/crates/econ-graph-crawler/data/catalog_selection/bea.toml`. Fixtures: `tests/fixtures/bea/`
+The [adapter](../../backend/crates/econ-graph-crawler/src/sources/bea.rs) uses
+[selection rules](../../backend/crates/econ-graph-crawler/data/catalog_selection/bea.toml).
+The [BEA fixtures](../../backend/crates/econ-graph-crawler/tests/fixtures/bea/) cover
 (`GetData` for six NIPA tables at each frequency, short extracts of BEA's NIPA and Regional
 table-title lists, SAGDP2 line codes, areas and line 1, and an error). API key required
 (`BEA_API_KEY`); without it every call is `Permanent` before
@@ -39,6 +40,9 @@ any request.
   fetches, and it is then only probed occasionally. Histories remain public and
   badged; candidate successors need human confirmation and values are never merged. See the
   [catalog runbook](../monitoring/crawler-coverage-runbook.md#catalog-selection-and-retained-series).
+- **Fetch metadata**: fetches read the worker's in-process table-title cache. An unknown
+  title makes fetch omit metadata while still returning real points; persistence preserves
+  previously stored metadata rather than replacing a good title with a bare table name.
 - **Fetch**: `GetData` per NIPA table and frequency, or per Regional table and line with the
   requested areas comma-separated, batched up to 64 series. Always the whole history (`Year`
   `X` or `ALL`), since revisions reach back years. Values are scaled by `UNIT_MULT`;
@@ -56,14 +60,20 @@ any request.
 
 ## Sample
 
-Errors are HTTP 200 with `BEAAPI.Results.Error` (`error_invalid_userid.json`):
+The [BEA API guide](https://apps.bea.gov/api/_pdf/bea_web_service_api_user_guide.pdf#page=4)
+documents the `BEAAPI.Results.Error` envelope. The
+[invalid-UserID fixture](../../backend/crates/econ-graph-crawler/tests/fixtures/bea/error_invalid_userid.json)
+contains this `Results` excerpt:
 
 ```json
 {"Error": {"APIErrorCode": "3", "APIErrorDescription": "The UserId provided in the request is not valid."}}
 ```
 
-NIPA data (`nipa_t10105_q.json`, shaped from public docs; values illustrative):
-`GetData&DataSetName=NIPA&TableName=T10105&Frequency=Q&Year=X` returns rows like
+The [NIPA fixture](../../backend/crates/econ-graph-crawler/tests/fixtures/bea/nipa_t10105_q.json)
+illustrates the documented row shape (API guide, [Appendix B](https://apps.bea.gov/api/_pdf/bea_web_service_api_user_guide.pdf#page=23));
+its values are illustrative, not a live response recording. A full-history request is
+`GetData&DataSetName=NIPA&TableName=T10105&Frequency=Q&Year=X`. The fixture contains
+rows like:
 
 ```json
 {"BEAAPI": {"Results": {
@@ -77,32 +87,45 @@ NIPA data (`nipa_t10105_q.json`, shaped from public docs; values illustrative):
 }}}
 ```
 
-Regional data (`DataSetName=Regional&TableName=SAGDP2&LineCode=1&GeoFips=STATE`) returns
-rows with `GeoFips`, `GeoName`, `TimePeriod`, `DataValue`, `CL_UNIT`, `UNIT_MULT` and
-`NoteRef` (from public docs).
+The guide's [GetData examples](https://apps.bea.gov/api/_pdf/bea_web_service_api_user_guide.pdf#page=16)
+and [Appendix N](https://apps.bea.gov/api/_pdf/bea_web_service_api_user_guide.pdf#page=60)
+document Regional data and request parameters. The
+[Regional fixture](../../backend/crates/econ-graph-crawler/tests/fixtures/bea/regional_sagdp2_line1.json)
+illustrates `DataSetName=Regional&TableName=SAGDP2&LineCode=1&Year=ALL` with
+`GeoFips=00000,01000,06000,36000,56000`, selecting the US, Alabama, California, New York
+and Wyoming. Rows contain `GeoFips`, `GeoName`, `TimePeriod`, `DataValue`, `CL_UNIT`,
+`UNIT_MULT` and optional `NoteRef` fields. Its values are also illustrative. For an
+all-states request, the guide documents `GeoFips=STATE`.
 
 Values are strings with thousands separators; `UNIT_MULT` is a power of ten (`6` =
 millions). `TimePeriod` is `2024`, `2024Q1` or `2024M01`.
 
 ## Frequency and revisions
 
-Annual, quarterly and monthly depending on the table. NIPA estimates are revised on a fixed
-schedule: advance, second and third estimates for each quarter, annual updates that revise
-the last few years, and comprehensive updates that can revise the whole history (from
-public docs). The API returns current estimates only; vintages are published separately as
-archived releases, not through the API. So a revision shows up as a changed value between
-crawls; since every fetch covers the whole history, the next crawl overwrites it. Quarterly
-and monthly NIPA series are seasonally adjusted, and dollar levels are at annual rates.
+Frequency is annual, quarterly or monthly depending on the table. BEA's
+[GDP release guidance](https://www.bea.gov/news/gdp-release-additional-information)
+describes advance, second and third quarterly GDP estimates, annual updates that revise
+the last few years, and comprehensive updates that can revise the whole history.
+
+The API returns current estimates only; BEA publishes vintages separately through its
+[previously published estimates](https://www.bea.gov/data/gdp/gross-domestic-product).
+The adapter sets `revision_date = date` and `is_original_release = true`, so a revision
+appears as a changed value between crawls; since every fetch covers the whole history,
+the next crawl overwrites the stored value. The quarterly and monthly NIPA series crawled
+here are seasonally adjusted, and dollar levels are at annual rates.
 
 ## Flags and footnotes
 
-`NoteRef` on each row points into the `Notes` array (table notes, and per-cell notes such
-as `(D)` suppressed in Regional data, from public docs). Notes aren't stored; suppressed
-cells become points with no value.
+A row's `NoteRef`, when present, refers to entries in the `Notes` array. Notes can apply
+to a table or to individual cells, such as `(D)` for suppressed Regional data; see the guide's
+[GetData notes explanation](https://apps.bea.gov/api/_pdf/bea_web_service_api_user_guide.pdf#page=21).
+Notes aren't stored; suppressed cells become points with no value.
 
 ## Dataset mapping
 
-A BEA series is a table line (`data/datasets/bea.toml`):
+The [dataset contract](../../backend/crates/econ-graph-crawler/data/datasets/bea.toml)
+defines a NIPA series by table line and frequency, and a Regional series by table line
+and area:
 
 | Dataset | Dimensions | Measures |
 |---|---|---|
