@@ -156,9 +156,13 @@ against the running server's admin API, changing only what differs from the real
 file.
 
 Google-brokered accounts and sessions survive a redeploy. Users' role mappings
-also survive as long as the roles they are mapped to remain in the file. A realm
-role, client or mapper removed from the file is removed from the cluster on the
-next deploy; removing a role also removes users' mappings to it.
+survive while their roles still exist. Deletion of resources removed from the realm
+file depends on config-cli's ownership tracking and the resource type: roles and
+non-default clients it created are deleted when removed from the lists config-cli manages.
+An operator-created role survives removal from the file, along with its grants, unless
+its owning client is deleted. Removing a role also removes users' mappings to it.
+See the [catalog-grant preservation details](#catalog-access-including-anonymous-visitors)
+for the managed-list and client-deletion rules.
 
 Keycloak's native imports do not provide this reconciliation behavior.
 `--import-realm` skips existing realms and creates resources outside
