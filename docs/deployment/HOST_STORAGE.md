@@ -384,6 +384,15 @@ A backup from a shared-database deployment need not contain
 For retained-data recovery, only the matching saved Secrets are needed; no
 dumps or `counts.env` are read by that recovery branch.
 
+For a legacy shared-database recovery whose saved `econ-graph-secrets` lacks
+`app-database-url`, the operator must `export APP_DATABASE=shared` before
+the restore and deployment steps below. Both the dump bootstrap and deployment
+run `create-secrets.sh`, which refuses that legacy Secret without an explicit
+database choice. Keep shared mode until the
+[app/data conversion](APP_DATA_CONVERSION.md) has moved the app records;
+for saved Secrets that already contain `app-database-url`, leave `APP_DATABASE`
+unset to preserve their recorded shared or separate choice.
+
 Set `BACKUP_DIR` to the chosen directory. Run each script with `--dry-run`
 first and inspect the plan; a dry run cannot validate a restore that has not
 yet run. The steps can be re-run, subject to the restore protections below.
@@ -527,8 +536,11 @@ The app continues to use the data database until its rows are moved and
 `create-secrets.sh` is run with `APP_DATABASE=separate`. See
 [database settings](../../k8s/README.md#databases) for configuration details.
 
-Until the `app-postgres` StatefulSet exists, the nightly dump skips the app
-database and records the skip in its `MANIFEST`.
+The nightly dump skips the app database and records the skip in its `MANIFEST`
+only when successful resource lookups confirm that both the `app-postgres`
+StatefulSet and its `app-postgres-data-app-postgres-0` PVC are absent. A retained
+PVC or a failed lookup prevents this "not deployed" skip; if the app pod is
+unavailable, its dump fails instead.
 
 ## Testing on a scratch cluster
 
