@@ -332,8 +332,12 @@ kubectl apply -f k8s/monitoring/promtail-daemonset.yaml
 
 # Ensure Grafana dashboards are properly configured
 echo "📋 Configuring Grafana dashboards..."
-# Create ConfigMap with proper JSON embedding to avoid truncation
-cat > /tmp/grafana-dashboards.yaml << 'EOF'
+# Create ConfigMap with proper JSON embedding to avoid truncation. Built in a file of this run's
+# own under TMPDIR, removed on exit, so another run on the host never shares it.
+dashboards="$(mktemp --suffix=.yaml "${TMPDIR:-/tmp}/grafana-dashboards.XXXXXX")"
+# shellcheck disable=SC2064  # expand now: the trap removes this run's file
+trap "rm -f -- '${dashboards}'" EXIT
+cat > "$dashboards" << 'EOF'
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -346,19 +350,19 @@ data:
 EOF
 
 # Append the full JSON content with proper indentation
-cat grafana-dashboards/econgraph-overview.json | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
+cat grafana-dashboards/econgraph-overview.json | sed 's/^/    /' >> "$dashboards"
 
 # Add the logging dashboard
-cat >> /tmp/grafana-dashboards.yaml << 'EOF'
+cat >> "$dashboards" << 'EOF'
   logging-dashboard.json: |
 EOF
 
 # Extract and append the JSON content from the YAML file (compatible with kislyuk yq)
-yq -r '.data."logging-dashboard.json"' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
+yq -r '.data."logging-dashboard.json"' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> "$dashboards"
 
 # Apply the ConfigMap
-kubectl apply -f /tmp/grafana-dashboards.yaml
-rm -f /tmp/grafana-dashboards.yaml
+kubectl apply -f "$dashboards"
+rm -f "$dashboards"
 
 # Wait for all pods to be ready (including monitoring components)
 echo "⏳ Waiting for all pods to be ready..."
