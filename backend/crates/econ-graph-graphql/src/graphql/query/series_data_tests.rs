@@ -20,6 +20,7 @@ fn dec(s: &str) -> BigDecimal {
 fn point(date: NaiveDate, value: Option<&str>) -> econ_graph_core::models::DataPoint {
     let now = chrono::Utc::now();
     econ_graph_core::models::DataPoint {
+        attributes: None,
         id: Uuid::new_v4(),
         series_id: Uuid::nil(),
         date,

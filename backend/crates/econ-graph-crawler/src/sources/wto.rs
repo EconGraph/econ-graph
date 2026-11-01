@@ -471,6 +471,7 @@ impl SourceAdapter for WtoAdapter {
                                 value: Some(value.clone()),
                                 revision_date: *date,
                                 is_original_release: true,
+                                attributes: None,
                             })
                             .collect(),
                         dataset,

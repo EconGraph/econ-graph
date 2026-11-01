@@ -41,6 +41,7 @@
 
 pub mod graphql;
 pub mod imports;
+pub mod observation_json;
 pub mod source_notices;
 pub mod types;
 

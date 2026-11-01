@@ -1483,6 +1483,7 @@ version = "4.0.0"
 dependencies = [
  "anyhow",
  "async-graphql",
+ "async-graphql-warp",
  "async-trait",
  "bigdecimal",
  "chrono",
@@ -1504,6 +1505,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "warp",
  "wiremock",
 ]
 

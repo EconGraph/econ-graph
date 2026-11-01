@@ -39,6 +39,7 @@ use crate::schema::data_points;
 /// // A GDP data point showing a quarterly observation
 /// let gdp_series_uuid = Uuid::new_v4();
 /// let gdp_point = DataPoint {
+///     attributes: None,
 ///     id: Uuid::new_v4(),
 ///     series_id: gdp_series_uuid,
 ///     date: NaiveDate::from_ymd_opt(2024, 3, 31).unwrap(), // Q1 2024
@@ -78,7 +79,8 @@ pub struct DataPoint {
     pub revision_date: NaiveDate,
 
     /// Flag indicating whether this is the first published estimate for this observation
-    /// true: This is the initial/preliminary estimate (e.g., "advance" GDP estimate)
+    /// true: This is the first stored release; provider preliminary/estimated markers are
+    /// separate nullable attributes and must not be inferred from this flag.
     /// false: This is a revision of a previously published value
     pub is_original_release: bool,
 
@@ -89,6 +91,9 @@ pub struct DataPoint {
     /// Timestamp when this record was last modified
     /// Updated automatically on any field changes for change tracking
     pub updated_at: DateTime<Utc>,
+    /// Provider-supplied observation attributes. None means never captured, not no flags.
+    #[serde(default)]
+    pub attributes: Option<serde_json::Value>,
 }
 
 /// **NewDataPoint Model**
@@ -119,6 +124,7 @@ pub struct DataPoint {
 /// // Creating a new unemployment rate observation
 /// let unemployment_series_id = Uuid::new_v4();
 /// let new_point = NewDataPoint {
+///     attributes: None,
 ///     series_id: unemployment_series_id,
 ///     date: NaiveDate::from_ymd_opt(2024, 11, 30).unwrap(), // November 2024
 ///     value: Some(BigDecimal::from_str("4.1").unwrap()), // 4.1% unemployment
@@ -148,6 +154,9 @@ pub struct NewDataPoint {
     /// Whether this is the initial estimate (true) or a revision (false)
     /// Critical for distinguishing between real-time and final data
     pub is_original_release: bool,
+    /// Captured provider metadata; None preserves historical unknown attribute state.
+    #[serde(default)]
+    pub attributes: Option<serde_json::Value>,
 }
 
 /// **UpdateDataPoint Model**
@@ -622,6 +631,7 @@ impl DataPoint {
     /// use chrono::{NaiveDate, Utc};
     ///
     /// let current_gdp = DataPoint {
+    ///     attributes: None,
     ///     id: Uuid::new_v4(),
     ///     series_id: Uuid::new_v4(),
     ///     date: NaiveDate::from_ymd_opt(2024, 3, 31).unwrap(),
@@ -677,6 +687,7 @@ impl DataPoint {
     /// use chrono::{NaiveDate, Utc};
     ///
     /// let q2_gdp = DataPoint {
+    ///     attributes: None,
     ///     id: Uuid::new_v4(),
     ///     series_id: Uuid::new_v4(),
     ///     date: NaiveDate::from_ymd_opt(2024, 6, 30).unwrap(),
@@ -737,6 +748,7 @@ impl DataPoint {
     /// use chrono::{NaiveDate, Utc};
     ///
     /// let nov_employment = DataPoint {
+    ///     attributes: None,
     ///     id: Uuid::new_v4(),
     ///     series_id: Uuid::new_v4(),
     ///     date: NaiveDate::from_ymd_opt(2024, 11, 30).unwrap(),
@@ -766,6 +778,7 @@ impl DataPoint {
 impl Default for NewDataPoint {
     fn default() -> Self {
         Self {
+            attributes: None,
             series_id: Uuid::new_v4(),
             date: chrono::Utc::now().date_naive(),
             value: None,
@@ -950,6 +963,7 @@ mod inline_tests {
         // This is essential for economic analysis and matches FRED's calculation methodology
 
         let data_point = DataPoint {
+            attributes: None,
             id: Uuid::new_v4(),
             series_id: Uuid::new_v4(),
             date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),

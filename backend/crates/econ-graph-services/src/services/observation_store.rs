@@ -8,7 +8,7 @@ use super::series_service::{public_series_predicate, revised_from_original};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 pub use econ_graph_core::models::{
-    Observation, ObservationPage, ObservationRequest, PageContext, RevisionMode,
+    Observation, ObservationPage, ObservationRequest, PageContext, RevisionMode, TimeSeriesStore,
 };
 use econ_graph_core::{
     database::DatabasePool,
@@ -16,17 +16,6 @@ use econ_graph_core::{
     models::{DataPoint, DataQueryParams},
     schema::{data_points, economic_series},
 };
-use std::future::Future;
-
-/// Implementations must count, page and select transformation context in one snapshot.
-/// Consumers depend on this interface rather than a database pool or a physical encoding.
-/// Implementations must validate context windows with `ObservationRequest::validate`.
-pub trait TimeSeriesStore {
-    fn read_page(
-        &self,
-        request: ObservationRequest,
-    ) -> impl Future<Output = AppResult<ObservationPage>> + Send;
-}
 
 pub struct PostgresStore<'a> {
     pool: &'a DatabasePool,

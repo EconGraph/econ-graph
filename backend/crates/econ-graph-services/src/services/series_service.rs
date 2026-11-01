@@ -675,6 +675,7 @@ mod tests {
 
         let data_points = vec![
             DataPoint {
+                attributes: None,
                 id: Uuid::new_v4(),
                 series_id: Uuid::new_v4(),
                 date: NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
@@ -685,6 +686,7 @@ mod tests {
                 updated_at: chrono::Utc::now(),
             },
             DataPoint {
+                attributes: None,
                 id: Uuid::new_v4(),
                 series_id: Uuid::new_v4(),
                 date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),

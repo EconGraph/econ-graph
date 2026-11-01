@@ -79,6 +79,7 @@ async fn point(
     DataPoint::create(
         pool,
         &NewDataPoint {
+            attributes: None,
             series_id,
             date: day(date),
             value: value.map(|v| BigDecimal::from_str(v).unwrap()),

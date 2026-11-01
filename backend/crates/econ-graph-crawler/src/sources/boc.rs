@@ -352,6 +352,7 @@ fn parse_point(
         value,
         revision_date: date,
         is_original_release: true,
+        attributes: None,
     })
 }
 

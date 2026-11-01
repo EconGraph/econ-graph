@@ -84,6 +84,7 @@ async fn seed(pool: &DatabasePool) -> (Uuid, Uuid) {
                 value: Some(BigDecimal::from_str(value).unwrap()),
                 revision_date: day(revision_date),
                 is_original_release: original,
+                attributes: None,
             },
         )
         .await

@@ -1,7 +1,8 @@
 //! Storage-independent observation read contracts. Database writes deliberately remain in
 //! the crawler's caller-owned, lease-fenced transaction.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
+use std::future::Future;
 
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, NaiveDate, Utc};
@@ -9,6 +10,16 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{DataPoint, DataQueryParams};
+
+/// Observation stores return page, count and transformation context from one snapshot.
+/// Implementations validate context windows with [`ObservationRequest::validate`].
+/// Authorization remains request-scoped at the API boundary.
+pub trait TimeSeriesStore {
+    fn read_page(
+        &self,
+        request: ObservationRequest,
+    ) -> impl Future<Output = crate::error::AppResult<ObservationPage>> + Send;
+}
 
 /// Explicit vintage selection. Results always use (date, revision_date, id) ascending order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,7 +123,7 @@ impl ObservationRequest {
 
 /// Lossless observation DTO, independent of an ORM or physical decimal representation.
 /// JSON values are decimal strings (or null), never binary floating point. Attributes are
-/// additive; current Postgres has none and returns an empty map.
+/// additive; None means historical metadata was not captured, distinct from an empty object.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Observation {
     pub id: Uuid,
@@ -124,7 +135,7 @@ pub struct Observation {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
-    pub attributes: BTreeMap<String, serde_json::Value>,
+    pub attributes: Option<serde_json::Value>,
 }
 
 impl From<DataPoint> for Observation {
@@ -138,7 +149,7 @@ impl From<DataPoint> for Observation {
             is_original_release: point.is_original_release,
             created_at: point.created_at,
             updated_at: point.updated_at,
-            attributes: BTreeMap::new(),
+            attributes: point.attributes,
         }
     }
 }
@@ -154,6 +165,7 @@ impl From<Observation> for DataPoint {
             is_original_release: point.is_original_release,
             created_at: point.created_at,
             updated_at: point.updated_at,
+            attributes: point.attributes,
         }
     }
 }
@@ -180,4 +192,37 @@ impl ObservationPage {
     pub fn has_next_page(&self) -> bool {
         self.offset.saturating_add(self.points.len() as i64) < self.total_count
     }
+}
+
+/// A provider's verbatim footnote object, including absent keys, explicit nulls and extensions.
+/// The public map retains unknown field shapes and exact JSON numbers. String accessors
+/// interpret recognized fields without changing the object that is serialized.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ObservationFootnote(pub serde_json::Map<String, serde_json::Value>);
+
+impl ObservationFootnote {
+    /// The provider's code when it is a string. Missing, null and other shapes remain in the map.
+    pub fn code(&self) -> Option<&str> {
+        self.0.get("code").and_then(serde_json::Value::as_str)
+    }
+
+    /// The provider's text when it is a string. Missing, null and other shapes remain in the map.
+    pub fn text(&self) -> Option<&str> {
+        self.0.get("text").and_then(serde_json::Value::as_str)
+    }
+}
+
+/// Typed producer helper; raw JSON remains the storage/reader contract so unknown keys survive.
+/// Optional fields distinguish not captured (None) from captured-empty (Some(vec![])).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservationAttributes {
+    pub source: String,
+    pub status_flags: Option<Vec<String>>,
+    pub footnotes: Option<Vec<ObservationFootnote>>,
+    /// Whether explicitly marked preliminary, not an inference from original-release status.
+    pub preliminary: Option<bool>,
+    /// Whether explicitly marked estimated, not a guess from the observation's value.
+    pub estimated: Option<bool>,
+    pub raw_value: Option<String>,
 }
