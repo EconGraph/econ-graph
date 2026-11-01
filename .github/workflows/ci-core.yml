@@ -218,6 +218,19 @@ jobs:
             - 'backend/Cargo.lock'
             - 'backend/crates/econ-graph-core/data/**'
             - 'backend/crates/econ-graph-crawler/data/**'
+  # Reuse the manually/scheduled audits, but make their result part of the
+  # existing required Core CI Result. Merge groups run them unconditionally.
+  accessibility:
+    name: Accessibility
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.code == 'true' && needs.changes.outputs.backend_only != 'true' }}
+    uses: ./.github/workflows/accessibility-tests.yml
+    with:
+      branch: ${{ github.event.inputs.branch || '' }}
+      test_type: all
+    permissions:
+      contents: read
+
   backend-build-cache:
     name: Backend Build Cache
     runs-on: ubuntu-latest
@@ -2641,6 +2654,7 @@ jobs:
     if: ${{ always() }}
     needs:
       - changes
+      - accessibility
       - backend-build-cache
       - prometheus-rules
       - postgres-backup-scripts
@@ -2678,7 +2692,7 @@ jobs:
         EVENT: ${{ github.event_name }}
         # The ordinary suite: in a merge group each of these must succeed.
         MUST_RUN: >-
-          changes backend-build-cache prometheus-rules postgres-backup-scripts
+          changes accessibility backend-build-cache prometheus-rules postgres-backup-scripts
           deploy-manifests backend-migration-validation-tests keycloak-realm-import
           backend-smoke-tests
           chart-api-integration-tests backend-mcp-integration-tests
@@ -2690,4 +2704,3 @@ jobs:
 # Updated Wed Sep 17 08:11:38 PDT 2025
 
 # Workflow cache refresh: 2025-09-17 08:25:07 PDT
-

@@ -18,17 +18,18 @@ on:
           - "static"
           - "runtime"
           - "manual"
-  pull_request:
-    paths:
-      - "frontend/**"
-      - "admin-frontend/**"
-      - ".github/workflows/accessibility-tests.yml"
-  push:
-    branches: [main]
-    paths:
-      - "frontend/**"
-      - "admin-frontend/**"
-      - ".github/workflows/accessibility-tests.yml"
+  # Core CI calls the same audits so their result gates Core CI Result.
+  # PR/push triggers live in the caller; do not run duplicate audit matrices.
+  workflow_call:
+    inputs:
+      branch:
+        required: false
+        default: ""
+        type: string
+      test_type:
+        required: false
+        default: "all"
+        type: string
   schedule:
     # Run every Monday at 9 AM UTC (weekly accessibility audit)
     - cron: "0 9 * * 1"
@@ -151,11 +152,61 @@ jobs:
           path: ${{ matrix.project }}/accessibility-results/
           retention-days: 7
 
+  accessibility-browser-tests:
+    name: Financial keyboard and focus (Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.test_type == 'all' || inputs.test_type == 'runtime' }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.branch || github.ref }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked dependencies
+        id: install
+        run: npm ci
+      - name: Install locked Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Check financial selection layout, keyboard use and focus
+        id: audit
+        run: npm run test:accessibility:browser
+      - name: Record check outcomes
+        if: always()
+        env:
+          INSTALL_RESULT: ${{ steps.install.outcome }}
+          AUDIT_RESULT: ${{ steps.audit.outcome }}
+        run: |
+          mkdir -p accessibility-results
+          node --input-type=module -e '
+            import { writeFileSync } from "node:fs";
+            writeFileSync("accessibility-results/browser-status.json", JSON.stringify({
+              project: "frontend", check: "browser",
+              install: process.env.INSTALL_RESULT, audit: process.env.AUDIT_RESULT
+            }));'
+      - name: Preserve browser reports even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: accessibility-browser-frontend-${{ github.run_attempt }}
+          path: |
+            frontend/accessibility-results/
+            frontend/test-results/
+            frontend/playwright-report/
+          retention-days: 7
+
   accessibility-manual-tests:
     name: Accessibility Manual Testing Guidelines
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: ${{ github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'manual' || github.event_name == 'schedule' }}
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.test_type == 'all' || inputs.test_type == 'manual')) }}
 
     steps:
       - name: Checkout code
@@ -216,10 +267,17 @@ jobs:
       [
         accessibility-static-analysis,
         accessibility-runtime-tests,
+        accessibility-browser-tests,
         accessibility-manual-tests,
       ]
     if: always()
     steps:
+      - name: Checkout gate scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.branch || github.ref }}
+          sparse-checkout: ci/scripts
       - name: Download accessibility reports
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -230,13 +288,14 @@ jobs:
         env:
           STATIC_RESULT: ${{ needs.accessibility-static-analysis.result }}
           RUNTIME_RESULT: ${{ needs.accessibility-runtime-tests.result }}
+          BROWSER_RESULT: ${{ needs.accessibility-browser-tests.result }}
           MANUAL_RESULT: ${{ needs.accessibility-manual-tests.result }}
         run: |
           python - <<'PYTHON'
           import json, os
           from pathlib import Path
           lines = ['# Accessibility Testing Summary', '', '| Job | Result |', '| --- | --- |']
-          for name in ['STATIC', 'RUNTIME', 'MANUAL']:
+          for name in ['STATIC', 'RUNTIME', 'BROWSER', 'MANUAL']:
               lines.append(f'| {name.lower()} | {os.environ[name + "_RESULT"]} |')
           lines += ['', '| Project | Check | Install | Audit |', '| --- | --- | --- | --- |']
           reports = list(Path('accessibility-results').rglob('*-status.json'))
@@ -261,15 +320,10 @@ jobs:
           name: accessibility-summary-${{ github.run_attempt }}
           path: accessibility-summary.md
           retention-days: 30
-      - name: Fail summary when a required job failed or was cancelled
+      - name: Require every selected accessibility audit to pass
         if: always()
         env:
-          STATIC_RESULT: ${{ needs.accessibility-static-analysis.result }}
-          RUNTIME_RESULT: ${{ needs.accessibility-runtime-tests.result }}
-          MANUAL_RESULT: ${{ needs.accessibility-manual-tests.result }}
-        run: |
-          for result in "$STATIC_RESULT" "$RUNTIME_RESULT" "$MANUAL_RESULT"; do
-            if [[ "$result" == failure || "$result" == cancelled ]]; then
-              exit 1
-            fi
-          done
+          NEEDS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+          TEST_TYPE: ${{ inputs.test_type || 'all' }}
+        run: ci/scripts/check-accessibility-jobs.sh
