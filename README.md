@@ -104,7 +104,7 @@ scans; see the [development documentation](docs/development/) for the workflow.
 2. **Compare Data Sources**: Access FRED, BLS, Census, World Bank data
 3. **Test Transformations**: Try YoY, QoQ, MoM calculations
 4. **Export Data**: Download Explorer results as CSV or JSON, or series observations as CSV
-5. **API Testing**: Test GraphQL API with provided examples
+5. **API Testing**: Try the [GraphQL example queries](docs/api/GRAPHQL_API.md#example-queries)
 
 #### Series CSV exports
 
@@ -206,8 +206,8 @@ econ-graph/
 │   │   ├── components/      # Reusable UI components
 │   │   ├── pages/           # Application pages and routes
 │   │   ├── hooks/           # Custom React hooks for data fetching
-│   │   └── utils/           # Utility functions and GraphQL client
-│   └── __tests__/           # Frontend test suites
+│   │   ├── utils/           # Utility functions and GraphQL client
+│   │   └── __tests__/       # Frontend test suites (also colocated with components)
 │
 ├── 🏗️ terraform/           # Infrastructure as Code
 │   ├── modules/             # Reusable Terraform modules
