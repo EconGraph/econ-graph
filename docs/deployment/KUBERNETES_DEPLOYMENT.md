@@ -142,6 +142,15 @@ PUBLIC_HOST= ./scripts/deploy/deploy.sh
 PUBLIC_HOST=econgraph.com ./scripts/deploy/deploy.sh
 ```
 
+`PUBLIC_HOST` is the base domain; `MAIN_HOST` selects the canonical HTTPS name and
+must be either that domain or `www.<PUBLIC_HOST>`. An explicit `MAIN_HOST` overrides
+the value in the deploy configuration for the same base domain; otherwise the default
+is `www.<PUBLIC_HOST>`. With no override or configured main host, the public example
+above serves `https://www.econgraph.com`. Set `MAIN_HOST=econgraph.com` to select the
+apex instead. For an existing installation, retain its selected main host; follow
+[Main public address](MAIN_HOST.md) when changing it so routing, Keycloak and sign-in
+configuration move together.
+
 A nonempty `PUBLIC_HOST` on an unmarked cluster stops deployment before applying
 resources. An explicitly empty value serves local routes, removes the public routes,
 HTTPS listener and certificate, and stops the tunnel connector. If `PUBLIC_HOST` is
@@ -221,9 +230,17 @@ prefixes take precedence over `/`; path prefixes match whole segments. Grafana, 
 chart API, the admin UI and Keycloak's admin/master-realm endpoints have no dedicated
 Gateway routes. The frontend catch-all does not make those applications available.
 
-Public access uses `https://<PUBLIC_HOST>` through Cloudflare, cloudflared and the Gateway
-HTTPS listener; HTTP and the www host redirect to the canonical HTTPS origin. Public
-route copies attach to listener `https`, and its certificate lives with the Gateway.
+Public access uses `https://<MAIN_HOST>` through Cloudflare, cloudflared and the Gateway
+HTTPS listener. Public route copies attach to listener `https`, and their hostnames
+match `MAIN_HOST`; the certificate lives with the Gateway and covers both public names.
+Keycloak's `KC_HOSTNAME` is `https://<MAIN_HOST>/idp`, and the backend's `OIDC_ISSUER`
+is `https://<MAIN_HOST>/idp/realms/econ-graph`.
+
+HTTP on both public names and HTTPS on the alternate name redirect to the canonical
+HTTPS origin, preserving the path and query. Redirects to the apex use 301. Redirects
+to `www.<PUBLIC_HOST>` use 302 until `MAIN_HOST_PERMANENT` names it, then use 301;
+follow the [main-host switch procedure](MAIN_HOST.md#redirect-status) to finalize a switch.
+
 The HTTP listener admits namespaces labelled `econgraph.io/gateway-access: "true"`;
 HTTPS admits those labelled `econgraph.io/env: production`. The checked-in application
 namespace carries both labels; the production marker remains a separate deployment guard. See
