@@ -183,13 +183,23 @@ listener references that Secret. It does not consume the wildcard Secret in
 application DNS records. Keep the managed manifest as the owner; do not create a
 second Gateway or Certificate for its serving Secret.
 
-When `GATEWAY_TLS_ISSUER` is unset, the
-[route application script](../../scripts/deploy/apply-gateway-routes.sh) first uses
-a saved issuer in the operator deploy configuration, otherwise retains the existing
-Certificate's issuer. If no override, saved issuer or existing issuer is available,
-it uses `econ-graph-selfsigned`, which the Tunnel connector accepts
-without verification. Choosing a Let's Encrypt issuer does not change the visitor
-certificate served by Cloudflare or enable origin verification in the Tunnel.
+A nonempty `GATEWAY_TLS_ISSUER` environment value explicitly selects the issuer
+and may change it. Otherwise, the
+[issuer chooser](../../scripts/deploy/lib/deploy-config.sh) reads the saved
+`GATEWAY_TLS_ISSUER` from the operator deploy configuration. It accepts that value
+only if it matches the existing Certificate's issuer or no Certificate exists.
+A saved value that conflicts with the current issuer makes deployment fail;
+it does not silently select either issuer. Without a saved value, it retains the
+existing issuer, or uses `econ-graph-selfsigned` if none exists. The Tunnel
+connector accepts that default without verification. Choosing a Let's Encrypt
+issuer does not change the visitor certificate served by Cloudflare or enable
+origin verification in the Tunnel.
+
+The deploy configuration is nonempty `ECONGRAPH_DEPLOY_ENV`, otherwise `deploy.env`
+in `ECONGRAPH_CONFIG_DIR`, otherwise
+`${XDG_CONFIG_HOME:-$HOME/.config}/econgraph/deploy.env`. It is read as `NAME=value`
+lines, not sourced; use a plain `GATEWAY_TLS_ISSUER=issuer-name` line without
+`export` or a trailing comment. An environment override does not update this file.
 
 Check the Certificate that the Gateway actually uses, keeping Secret checks to
 metadata:
@@ -352,14 +362,27 @@ Create the DNS-01 issuer alongside the existing HTTP-01 issuer and test the
 separate staging Certificate first. Prepare the production DNS-01 issuer and
 verify it with the standalone production request before selecting it for the
 managed Gateway. Record the current `econ-graph-tls` issuer, host and serving
-configuration for rollback, then deploy with `GATEWAY_TLS_ISSUER` set to the
-production DNS-01 issuer as shown above. The deployment updates the existing
-explicit Certificate; do not introduce another Certificate for `econ-graph-tls`.
+configuration for rollback, including any saved `GATEWAY_TLS_ISSUER` in the
+operator deploy configuration described above. Then deploy with
+`GATEWAY_TLS_ISSUER` set to the production DNS-01 issuer as shown above. The
+deployment updates the existing explicit Certificate; do not introduce another
+Certificate for `econ-graph-tls`.
+
+After checking the selected issuer, have the operator reconcile the saved
+`GATEWAY_TLS_ISSUER` with that choice: update its value to the selected DNS-01
+issuer, or remove that setting to retain the Certificate's current issuer on
+subsequent deployments. Preserve the other deploy settings. Leaving the old
+HTTP-01 issuer saved causes the next deployment without an environment override
+to fail because the saved and current issuers conflict. Keeping an explicit saved
+issuer also selects it when deploying to a recreated cluster with no Certificate.
 
 Check that the Gateway Certificate becomes ready, verify the serving configuration
 with the public-site checks and monitor renewal. Keep the previous issuer
 available during the transition. If rollback is needed, redeploy the same public
-host with `GATEWAY_TLS_ISSUER` explicitly set to the previous issuer; omitting the
-variable retains the newly selected issuer. Recheck issuance and serving behavior
-after rollback. Remove the HTTP-01 issuer only when no remaining Certificates
-depend on it. Public Tunnel routing remains a separate operator concern.
+host with `GATEWAY_TLS_ISSUER` explicitly set to the previous issuer. Omitting
+the override retains the newly selected issuer only if the saved setting is absent
+or matches it; a conflicting saved setting refuses deployment instead of rolling
+back. After rollback, have the operator reconcile the saved setting with the
+restored issuer in the same way, then recheck issuance and serving behavior.
+Remove the HTTP-01 issuer only when no remaining Certificates depend on it.
+Public Tunnel routing remains a separate operator concern.
