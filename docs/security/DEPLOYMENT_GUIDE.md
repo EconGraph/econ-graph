@@ -45,8 +45,12 @@ URL and does not fall back to `DATABASE_URL`.
 
 Provision the chosen databases and supply their URLs through your local secret
 handling before starting a process. Do not commit credentials or paste them into
-shared logs. With no data URL, the backend can serve the app plane; data fields
-report `DATA_SERVED_REMOTELY`. See [database configuration](../../k8s/README.md#databases)
+shared logs. Without `DATA_DATABASE_URL`, the backend can serve the app plane;
+local data fields report `DATA_SERVED_REMOTELY`. If sign-in is enabled, set
+`DATA_GRAPHQL_URL` to the data plane's GraphQL endpoint so annotation series can
+be checked against catalog grants; startup fails when both data settings are
+absent. An anonymous app-only server can start without either. See
+[database configuration](../../k8s/README.md#databases)
 for the shared and separate layouts and [migrations](../development/MIGRATIONS.md)
 for migration ownership and CLI details.
 
@@ -61,6 +65,7 @@ cargo run --locked --bin econ-graph-backend
 ```
 
 The first command needs `DATA_DATABASE_URL`; omit it for an app-only backend.
+With sign-in enabled, that app-only backend still needs `DATA_GRAPHQL_URL`.
 Do not substitute a bare `diesel migration run` for both operations: the
 repository's Diesel default selects app migrations only. Diesel's CLI URL
 handling is distinct from the server's environment settings; use the migration
@@ -157,8 +162,10 @@ Deployment or a top-level `kubectl apply -f k8s/` as a substitute for orchestrat
    `scripts/deploy/deploy.sh` when ready to change the target cluster. It installs
    the Gateway and applies the maintained resources. After PostgreSQL is ready,
    it runs `crawler-migrate` before deploying the backend and worker. A failed
-   migration Job stops deployment. An app-only namespace without
-   `data-database-url` skips that Job.
+   migration Job stops deployment. The maintained deployment requires Secret key
+   `data-database-url` and aborts if it is missing: its backend enables sign-in
+   and has no `DATA_GRAPHQL_URL`. The configurable local app-only server above
+   is a different setup.
 3. Inspect rollout readiness and logs. A running pod alone does not establish
    database readiness, working sign-in or route policy enforcement. Use the
    acceptance checks below before treating the deployment as ready for traffic.
@@ -322,14 +329,18 @@ or sign-in.
 
 The [host backup runbook](../deployment/BACKUPS.md) covers snapshots of the data
 and app subvolumes, logical database dumps, dump verification, restore drills
-and freshness checks. The independent in-cluster nightly `postgres-backup`
-CronJob writes database dumps and a `MANIFEST` to its PVC. It selects app coverage
+and freshness checks. Host dump runs write a `MANIFEST` with verification
+results. The independent in-cluster nightly `postgres-backup` CronJob writes
+verified database dumps and latest-dump symlinks to its PVC. It selects app
+coverage
 from the backend's app URL: shared app tables are covered by the data dump;
 separate app state needs its own dump. Consult [backup scope and
 failures](../deployment/POSTGRES_BACKUP_RESTORE.md) for required versus skipped
 databases and partial-run handling. A successful data dump alone does not prove
-the whole run succeeded. The CronJob's kind-local PVC can be lost with the
-cluster; keep recoverable copies outside that failure boundary.
+the whole run succeeded. Check the CronJob's Job status and logs for failed or
+skipped dumps; its failure-status file is shared in an `emptyDir`, not retained
+as a PVC manifest. The CronJob's kind-local PVC can be lost with the cluster;
+keep recoverable copies outside that failure boundary.
 
 Treat backups, exported Secrets, database passwords, OIDC/provider credentials,
 tunnel tokens and any off-site encryption keys as sensitive recovery material.
@@ -339,9 +350,10 @@ and [cluster Secret reference](../../k8s/README.md#secrets). Database dumps are 
 a substitute for that material. Do not collect it into an unprotected `.env`
 archive or publish it as review evidence.
 
-Before recovery, choose a backup covering the intended databases, check its
-manifest and verification results, identify which writes will be lost, and
-stop the relevant writers. Use the human-run [dump restore
+Before recovery, choose a backup covering the intended databases and check
+verification results: the host run's `MANIFEST`, or the in-cluster Job status,
+logs and dump files. Identify which writes will be lost and stop the relevant
+writers. Use the human-run [dump restore
 procedures](../deployment/POSTGRES_BACKUP_RESTORE.md#restore) or [host
 recovery runbook](../deployment/BACKUPS.md), including their destination,
 ownership, confirmation and rollback steps. Snapshot recovery also depends on
