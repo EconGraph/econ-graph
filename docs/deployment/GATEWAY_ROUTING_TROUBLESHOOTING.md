@@ -71,7 +71,8 @@ alone do not establish readiness.
 
 | Symptom | Likely cause |
 | --- | --- |
-| Connection refused or reset on `localhost:80` | The proxy pod is not running on the control-plane node, or another pod holds host port 80 (`kubectl get pods -A -o wide` on that node). The proxy pod stays `Pending` while the port is taken. |
+| Connection refused or reset on `localhost:80` | The proxy is not running on the control-plane node, or it was installed without host ports. A running proxy reachable through its Service can still lack a host listener; check `GATEWAY_HOST_PORTS` and the installer warning described below. |
+| Proxy pod `Pending` with host-port conflict events | The pod requests host ports already held on the target node. Inspect `kubectl describe pod` events and other pods on that node. A conflict that appears after the installer's check, or applying the host-port manifest directly, can cause this; the installer's default `auto` mode avoids detected conflicts. |
 | 404 with an empty body for every path | No route matches the request Host on that listener. Compare the Host and listener with the route's `hostnames` and `parentRefs`: `localhost` (any port) uses `http`; the configured public host uses `<name>-public` routes on `https`. For missing public configuration, follow the `PUBLIC_HOST` workflow in [Public site](../../k8s/README.md#-public-site-cloudflare-tunnel) and apply routes as described in [Gateway](../../k8s/README.md#-gateway). |
 | A route is `Accepted: False` | Its namespace lacks the label `econgraph.io/gateway-access: "true"` (`k8s/manifests/namespace.yaml`), or the route attaches to listener `https` from a namespace without `econgraph.io/env: production`. |
 | `ResolvedRefs: False` | The backend Service or port in the route does not exist. |
@@ -79,6 +80,21 @@ alone do not establish readiness.
 | 429 on `/graphql` or `/data/graphql` | The per-client limit: 20 a second, bursts of 100. Requests from the host itself share one client address. |
 | The EnvoyPatchPolicy is `Programmed: False` | Inspect the reason/message and the base `BackendTrafficPolicy`: a missing GraphQL route or rate-limit policy leaves nothing to patch. Only an active base limit without its burst patch falls back to 20 a second with bursts of 20; a missing base policy does not provide that limit. |
 | `/idp/...` sign-in pages fail | Only `/idp/realms/econ-graph` and `/idp/resources` are routed. The issuer is the configured `KC_HOSTNAME` plus `/realms/econ-graph`; `MAIN_HOST` selects the public address (default `www.${PUBLIC_HOST}`) shown above. |
+
+The [gateway installer](../../scripts/deploy/install-gateway.sh) controls host listeners with
+`GATEWAY_HOST_PORTS`:
+
+- `auto` (default) checks for other pods holding host port 80 or 443 on nodes labelled
+  `ingress-ready=true`. If it finds one, it warns and installs the proxy without either
+  host port. The proxy can run and serve through its ClusterIP Service in this mode.
+- `true` requires host ports. A detected holder stops a normal installation before any
+  manifests are applied; `--dry-run` reports the conflict and continues its preview.
+- `false` always installs the proxy without host ports.
+
+For kind's ingress-nginx, follow the [Gateway cutover procedure](../../k8s/README.md#-gateway).
+For MicroK8s's ingress add-on, the installer advises disabling that add-on and rerunning
+the installer. Freeing a port alone does not update an already installed proxy that lacks
+host ports; rerun the installer with `auto` or `true` after resolving the conflict.
 
 ## Looking inside the proxy
 
