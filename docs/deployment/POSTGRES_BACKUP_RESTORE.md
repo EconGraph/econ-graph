@@ -296,6 +296,8 @@ read (API server, nodes, `kube-system` UID), stops either script before it
 changes anything. `--dry-run` shows the cluster and what would run, and
 starts nothing.
 
+<a id="restore"></a>
+
 ## Restore encrypted archives
 
 Recovery is an operator action. Copy the chosen `.dump.age` file off the PVC
@@ -632,7 +634,6 @@ A separate backup/restore pair also runs as uid 999 on private container
 tmpfs, with schema and row-count comparisons after restoration.
 The S3 fixture includes legacy plaintext, unrelated
 files, a partial ciphertext and a symlink, all of which must stay local.
-
 
 ## Object storage (optional)
 
