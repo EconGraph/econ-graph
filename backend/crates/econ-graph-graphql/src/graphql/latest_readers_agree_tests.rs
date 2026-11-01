@@ -231,7 +231,10 @@ const RAW_DATA_POINTS_SQL: &[(&str, bool)] = &[
     // The filters' own definitions.
     ("econ-graph-core/src/models/data_point.rs", true),
     // latestObservation.
-    ("econ-graph-graphql/src/graphql/dataloaders.rs", true),
+    (
+        "econ-graph-services/src/services/observation_compatibility.rs",
+        true,
+    ),
     (
         "econ-graph-services/src/services/cross_section_service.rs",
         true,

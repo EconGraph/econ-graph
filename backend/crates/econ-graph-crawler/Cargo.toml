@@ -17,6 +17,7 @@ required-features = ["testkit"]
 [dependencies]
 # Core dependencies
 econ-graph-core = { path = "../econ-graph-core" }
+econ-graph-timeseries = { path = "../econ-graph-timeseries" }
 
 # HTTP client for crawling
 reqwest.workspace = true
@@ -82,6 +83,7 @@ econ-graph-flags-build = { path = "../econ-graph-flags-build" }
 [dev-dependencies]
 # tests/catalog_roles.rs: every source's data_sources row maps to a catalog read role
 econ-graph-auth = { path = "../econ-graph-auth" }
+tempfile.workspace = true
 wiremock.workspace = true
 diesel-async.workspace = true
 # Paused (virtual) time for the rate limiter tests

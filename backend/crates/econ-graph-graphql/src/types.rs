@@ -252,40 +252,28 @@ impl EconomicSeriesType {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
-        use diesel::{ExpressionMethods, QueryDsl};
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::data_points::dsl;
-
-        let mut conn = pool.get().await?;
-        // One snapshot for the points and their dates' original releases.
-        let (data_points, revised) = conn
-            .build_transaction()
-            .repeatable_read()
-            .read_only()
-            .run(async |conn| {
-                let data_points = dsl::data_points
-                    .filter(dsl::series_id.eq(series_uuid))
-                    .filter(crate::graphql::dataloaders::public_data_points_predicate())
-                    .filter(models::exclude_synthetic_legacy_rows())
-                    .filter(models::revision_filter_excluding_synthetic(None, false))
-                    .order(dsl::date.desc())
-                    .limit(limit as i64)
-                    .load::<models::DataPoint>(conn)
-                    .await?;
-                let revised = econ_graph_services::services::series_service::revised_from_original(
-                    conn,
-                    series_uuid,
-                    &data_points,
-                )
-                .await?;
-                Ok::<_, diesel::result::Error>((data_points, revised))
-            })
-            .await?;
-
-        Ok(data_points
+        use econ_graph_services::services::observation_compatibility::{self, PointsQuery};
+        let (mut rows, revised) = observation_compatibility::points_batch_with_revised(
+            pool,
+            &[series_uuid],
+            PointsQuery {
+                start_date: None,
+                end_date: None,
+                revisions: models::RevisionMode::Latest,
+                exclude_synthetic: true,
+                descending: true,
+                limit: Some(i64::from(limit)),
+            },
+        )
+        .await?;
+        let limited_points = rows
+            .remove(&series_uuid)
+            .unwrap_or_default()
             .into_iter()
             .map(|point| DataPointType::with_revised(point, &revised))
-            .collect())
+            .collect();
+
+        Ok(limited_points)
     }
 
     /// Get data point count using direct database query
@@ -293,19 +281,12 @@ impl EconomicSeriesType {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
-        use diesel::{ExpressionMethods, QueryDsl};
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::data_points::dsl;
-
-        let mut conn = pool.get().await?;
-        let count = dsl::data_points
-            .filter(dsl::series_id.eq(series_uuid))
-            .filter(crate::graphql::dataloaders::public_data_points_predicate())
-            .count()
-            .get_result::<i64>(&mut conn)
-            .await?;
-
-        Ok(count as i32)
+        let counts = econ_graph_services::services::observation_compatibility::counts_batch(
+            pool,
+            &[series_uuid],
+        )
+        .await?;
+        Ok(i32::try_from(*counts.get(&series_uuid).unwrap_or(&0)).unwrap_or(i32::MAX))
     }
 
     /// The series' newest observation: its latest date, at the newest revision of that date.
@@ -346,64 +327,34 @@ impl EconomicSeriesType {
             filter.latest_revision_only = Some(true);
         }
 
-        // Query data points directly from database
-        use diesel::{ExpressionMethods, QueryDsl};
-        use diesel_async::RunQueryDsl;
-        use econ_graph_core::schema::data_points::dsl;
-
-        let mut conn = pool.get().await?;
-        let mut query = dsl::data_points
-            .filter(dsl::series_id.eq(series_uuid))
-            .filter(crate::graphql::dataloaders::public_data_points_predicate())
-            .into_boxed();
-
-        if let Some(start_date) = filter.start_date {
-            query = query.filter(dsl::date.ge(start_date));
-        }
-
-        if let Some(end_date) = filter.end_date {
-            query = query.filter(dsl::date.le(end_date));
-        }
-
-        let original_only = filter.original_only.unwrap_or(false);
-        let as_of_or_latest =
-            filter.as_of.is_some() || filter.latest_revision_only.unwrap_or(false);
-
-        if original_only || as_of_or_latest {
-            query = query.filter(models::exclude_synthetic_legacy_rows());
-        }
-
-        if original_only {
-            query = query.filter(dsl::is_original_release.eq(true));
-        }
-
-        if as_of_or_latest {
-            query = query.filter(models::revision_filter_excluding_synthetic(
-                filter.as_of,
-                original_only,
-            ));
-        }
-
-        // One snapshot for the points and their dates' original releases; from the stored
-        // values, before any transformation.
-        let (data_points, revised) = conn
-            .build_transaction()
-            .repeatable_read()
-            .read_only()
-            .run(async |conn| {
-                let data_points = query
-                    .order(dsl::date.asc())
-                    .load::<models::DataPoint>(conn)
-                    .await?;
-                let revised = econ_graph_services::services::series_service::revised_from_original(
-                    conn,
-                    series_uuid,
-                    &data_points,
-                )
-                .await?;
-                Ok::<_, diesel::result::Error>((data_points, revised))
-            })
-            .await?;
+        let request = models::ObservationRequest::from_legacy(
+            models::DataQueryParams {
+                series_id: series_uuid,
+                start_date: filter.start_date,
+                end_date: filter.end_date,
+                original_only: filter.original_only,
+                latest_revision_only: filter.latest_revision_only,
+                as_of: filter.as_of,
+                limit: None,
+                offset: None,
+            },
+            None,
+        );
+        use econ_graph_services::services::observation_compatibility::{self, PointsQuery};
+        let (mut rows, revised) = observation_compatibility::points_batch_with_revised(
+            pool,
+            &[series_uuid],
+            PointsQuery {
+                start_date: request.start_date,
+                end_date: request.end_date,
+                revisions: request.revisions,
+                exclude_synthetic: request.revisions != models::RevisionMode::All,
+                descending: false,
+                limit: None,
+            },
+        )
+        .await?;
+        let data_points = rows.remove(&series_uuid).unwrap_or_default();
 
         // Apply transformation if requested
         let data_points = match transformation {

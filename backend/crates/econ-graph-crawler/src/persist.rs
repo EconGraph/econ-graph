@@ -1077,7 +1077,7 @@ pub async fn persist_series(
     let mut conn = pool.get().await.map_err(conn_err)?;
     // Without the adapter registry, take the lifecycle lock as a tracking source would.
     conn.transaction::<SeriesWrite, AppError, _>(async move |conn| {
-        persist_series_conn(conn, source, external_id, fetched, true).await
+        persist_series_conn(conn, pool, source, external_id, fetched, true).await
     })
     .await
 }
@@ -1086,11 +1086,14 @@ pub async fn persist_series(
 /// `tracks_lifecycle` is the adapter's [`tracks_catalog_lifecycle`](crate::SourceAdapter::tracks_catalog_lifecycle).
 pub(crate) async fn persist_series_conn(
     conn: &mut AsyncPgConnection,
+    pool: &DatabasePool,
     source: SourceId,
     external_id: &str,
     fetched: &FetchedSeries,
     tracks_lifecycle: bool,
 ) -> AppResult<SeriesWrite> {
+    let storage = econ_graph_core::observation_storage::ObservationStorage::from_env()?;
+    storage.assert_write_allowed_conn(conn).await?;
     let source_id = data_source_id_conn(conn, source).await?;
     let meta = fetched.metadata.as_ref();
     let title = meta.and_then(|m| clip_opt(Some(&m.title), 500));
@@ -1240,6 +1243,10 @@ pub(crate) async fn persist_series_conn(
         .await?;
     }
 
+    if storage.mirror_iceberg {
+        mirror_series_conn(conn, pool, series_id, dataset_id).await?;
+    }
+
     Ok(SeriesWrite {
         series_id,
         series_created: row.inserted,
@@ -1247,6 +1254,135 @@ pub(crate) async fn persist_series_conn(
         points_new: new,
         latest_date,
     })
+}
+
+/// Publish the retained PostgreSQL rows and Iceberg pointer in the caller's fenced
+/// transaction. The bounded initial implementation stages object I/O while holding the
+/// lease/series locks; failure rolls back PostgreSQL, pointer, attempt and queue completion.
+async fn mirror_series_conn(
+    conn: &mut AsyncPgConnection,
+    pool: &DatabasePool,
+    series_id: Uuid,
+    dataset_id: Uuid,
+) -> AppResult<()> {
+    let seconds = match std::env::var("TIMESERIES_MIRROR_TIMEOUT_SECS") {
+        Err(std::env::VarError::NotPresent) => 120,
+        Ok(value) => value
+            .parse::<u64>()
+            .ok()
+            .filter(|seconds| (1..=3600).contains(seconds))
+            .ok_or_else(|| {
+                AppError::ConfigError("TIMESERIES_MIRROR_TIMEOUT_SECS must be 1..3600".into())
+            })?,
+        Err(_) => {
+            return Err(AppError::ConfigError(
+                "TIMESERIES_MIRROR_TIMEOUT_SECS must be valid Unicode".into(),
+            ))
+        }
+    };
+    tokio::time::timeout(
+        Duration::from_secs(seconds),
+        mirror_series_inner_conn(conn, pool, series_id, dataset_id),
+    )
+    .await
+    .map_err(|_| {
+        AppError::ServiceUnavailable(
+            "Iceberg mirror timed out; PostgreSQL transaction rolled back".into(),
+        )
+    })?
+}
+
+async fn mirror_series_inner_conn(
+    conn: &mut AsyncPgConnection,
+    pool: &DatabasePool,
+    series_id: Uuid,
+    dataset_id: Uuid,
+) -> AppResult<()> {
+    use econ_graph_core::models::{DataPoint, Observation};
+    use econ_graph_core::schema::data_points as dp;
+    let max_rows = match std::env::var("TIMESERIES_MIRROR_MAX_ROWS") {
+        Err(std::env::VarError::NotPresent) => 100_000,
+        Ok(value) => value
+            .parse::<i64>()
+            .ok()
+            .filter(|limit| *limit > 0 && *limit < i64::MAX)
+            .ok_or_else(|| {
+                AppError::ConfigError(
+                    "TIMESERIES_MIRROR_MAX_ROWS must be a positive bounded integer".into(),
+                )
+            })?,
+        Err(_) => {
+            return Err(AppError::ConfigError(
+                "TIMESERIES_MIRROR_MAX_ROWS must be valid Unicode".into(),
+            ))
+        }
+    };
+    let points = dp::table
+        .filter(dp::series_id.eq(series_id))
+        .order((dp::date.asc(), dp::revision_date.asc(), dp::id.asc()))
+        .limit(max_rows + 1)
+        .load::<DataPoint>(&mut *conn)
+        .await?;
+    if points.len() as i64 > max_rows {
+        return Err(AppError::ServiceUnavailable(
+            "Iceberg mirror exceeds TIMESERIES_MIRROR_MAX_ROWS; transaction rolled back".into(),
+        ));
+    }
+    let config = econ_graph_timeseries::StorageConfig::from_env()
+        .map_err(|_| AppError::ConfigError("invalid Iceberg storage configuration".into()))?;
+    let catalog = econ_graph_timeseries::SqlCatalog::new(pool.clone(), config);
+    let mirror_error = |stage: &'static str, error: anyhow::Error| {
+        // Raw error chains may contain signed URLs or credentials. Retain typed cause
+        // diagnostics and operation context without rendering untrusted error messages.
+        tracing::error!(%series_id, %dataset_id, stage,
+            cause = %mirror_cause(&error), "Iceberg mirror transaction failed");
+        AppError::ServiceUnavailable(
+            "Iceberg mirror failed; PostgreSQL transaction rolled back".into(),
+        )
+    };
+    if points.is_empty() {
+        catalog
+            .ensure_dataset_conn(conn, dataset_id)
+            .await
+            .map_err(|error| mirror_error("ensure_dataset", error))?;
+    } else {
+        let rows: Vec<Observation> = points.into_iter().map(Observation::from).collect();
+        let prepared = catalog
+            .prepare_append_conn(conn, Uuid::new_v4(), dataset_id, &rows)
+            .await
+            .map_err(|error| mirror_error("prepare_append", error))?;
+        econ_graph_timeseries::SqlCatalog::commit_prepared_conn(conn, &prepared)
+            .await
+            .map_err(|error| mirror_error("commit_prepared", error))?;
+    }
+    Ok(())
+}
+
+/// Bounded diagnostics containing no error Display/Debug or request URL.
+fn mirror_cause(error: &anyhow::Error) -> String {
+    for cause in error.chain() {
+        if let Some(error) = cause.downcast_ref::<diesel::result::Error>() {
+            return match error {
+                diesel::result::Error::DatabaseError(kind, _) => format!("database:{kind:?}"),
+                _ => "database:other".into(),
+            };
+        }
+        if let Some(error) = cause.downcast_ref::<std::io::Error>() {
+            return format!("io:{:?}", error.kind());
+        }
+        if let Some(error) = cause.downcast_ref::<reqwest::Error>() {
+            return format!(
+                "http:status={:?},timeout={},connect={}",
+                error.status().map(|status| status.as_u16()),
+                error.is_timeout(),
+                error.is_connect()
+            );
+        }
+        if let Some(error) = cause.downcast_ref::<serde_json::Error>() {
+            return format!("json:{:?}", error.classify());
+        }
+    }
+    "unclassified".into()
 }
 
 /// Upserts one `series_metadata` row per discovered series (key `(source_id, external_id)`), in
@@ -1575,6 +1711,25 @@ pub async fn latest_point_date_by_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mirror_diagnostics_preserve_cause_without_secret_messages() {
+        let error = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "secret-token=https://user:password@host",
+        ))
+        .context("signed-url?credential=secret");
+        assert_eq!(mirror_cause(&error), "io:PermissionDenied");
+        assert_eq!(
+            mirror_cause(&anyhow::anyhow!("secret-token")),
+            "unclassified"
+        );
+        let error = anyhow::Error::new(diesel::result::Error::DatabaseError(
+            diesel::result::DatabaseErrorKind::SerializationFailure,
+            Box::new("secret database detail".to_string()),
+        ));
+        assert_eq!(mirror_cause(&error), "database:SerializationFailure");
+    }
 
     #[test]
     fn clip_counts_characters() {

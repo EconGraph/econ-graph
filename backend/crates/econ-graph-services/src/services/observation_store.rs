@@ -19,11 +19,27 @@ use econ_graph_core::{
 
 pub struct PostgresStore<'a> {
     pool: &'a DatabasePool,
+    selection: Option<econ_graph_core::observation_storage::ObservationStorage>,
 }
 
 impl<'a> PostgresStore<'a> {
     pub fn new(pool: &'a DatabasePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            selection: None,
+        }
+    }
+
+    /// Runtime-selected reads validate durable backend state in the observation snapshot.
+    /// `new` remains available for explicit physical-store migration/parity reads.
+    pub fn with_selection(
+        pool: &'a DatabasePool,
+        selection: econ_graph_core::observation_storage::ObservationStorage,
+    ) -> Self {
+        Self {
+            pool,
+            selection: Some(selection),
+        }
     }
 }
 
@@ -48,6 +64,9 @@ impl TimeSeriesStore for PostgresStore<'_> {
             .repeatable_read()
             .read_only()
             .run(async |conn| {
+                if let Some(selection) = self.selection {
+                    selection.assert_read_selection_conn(conn).await?;
+                }
                 let total_count = filtered_data_points(&params)
                     .count()
                     .get_result::<i64>(conn)
