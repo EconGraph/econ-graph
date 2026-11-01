@@ -28,7 +28,8 @@ BACKUPS.md says how the two fit together and when the CronJob may be retired.
 The commands below run kubectl as `k`, the kind cluster's own kubectl and
 kubeconfig on its context. On the production host, plain `kubectl` is the
 MicroK8s snap wrapper, which reaches a different cluster. Define `k` once
-per shell:
+per shell. If restoring with `--context` or a custom kubectl/kubeconfig,
+adjust `k` to use that same cluster before running any commands below:
 
 ```sh
 k() { KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin/kubectl --context kind-econ-graph "$@"; }
@@ -134,7 +135,7 @@ read this way.
 must have `app-database-url`, so that losing it is noticed:
 
 ```sh
-kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump APP_REQUIRED=true
+k -n econ-graph set env cronjob/postgres-backup -c pg-dump APP_REQUIRED=true
 ```
 
 With `APP_DATABASE=separate`, the app database has tables once the backend has
@@ -154,7 +155,7 @@ cluster deployed without it, set `KEYCLOAK_REQUIRED` to `false` and the run
 logs that Keycloak is skipped:
 
 ```sh
-kubectl -n econ-graph set env cronjob/postgres-backup -c pg-dump KEYCLOAK_REQUIRED=false
+k -n econ-graph set env cronjob/postgres-backup -c pg-dump KEYCLOAK_REQUIRED=false
 ```
 
 `deploy.sh` re-applies the manifest, so `set env` is needed again after each
@@ -170,8 +171,8 @@ that succeeded. `sync.sh` then exits 1 (and also if `/status/failed` is
 missing), so the Job fails and its pod shows which dump failed:
 
 ```sh
-kubectl -n econ-graph get jobs -l app=postgres-backup
-kubectl -n econ-graph logs job/<job-name> --all-containers=true --prefix=true
+k -n econ-graph get jobs -l app=postgres-backup
+k -n econ-graph logs job/<job-name> --all-containers=true --prefix=true
 ```
 
 A container that exits non-zero fails the Job at once, without a retry
@@ -284,11 +285,11 @@ unless `--yes` is passed; it does not stop any clients for you.
    if you leave this shell during recovery:
 
    ```sh
-   kubectl -n econ-graph get deployment econ-graph-backend crawler-worker \
+   k -n econ-graph get deployment econ-graph-backend crawler-worker \
      -o custom-columns=NAME:.metadata.name,REPLICAS:.spec.replicas || exit 1
-   kubectl -n econ-graph scale deployment/econ-graph-backend deployment/crawler-worker --replicas=0 || exit 1
+   k -n econ-graph scale deployment/econ-graph-backend deployment/crawler-worker --replicas=0 || exit 1
    while :; do
-     writer_pods="$(kubectl -n econ-graph get pods \
+     writer_pods="$(k -n econ-graph get pods \
        -l 'app in (econ-graph-backend,crawler-worker)' -o name)" || exit 1
      [ -z "$writer_pods" ] && break
      sleep 2
@@ -393,11 +394,11 @@ restore a dump with the Keycloak version that wrote it, or a newer one.
 
    ```sh
    DUMP=keycloak-20260101-080000.dump
-   kubectl -n econ-graph run postgres-backup-copy --restart=Never --image=busybox:1.38 \
+   k -n econ-graph run postgres-backup-copy --restart=Never --image=busybox:1.38 \
      --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":999},"containers":[{"name":"copy","image":"busybox:1.38","command":["sleep","600"],"volumeMounts":[{"name":"backup-data","mountPath":"/backups","readOnly":true}]}],"volumes":[{"name":"backup-data","persistentVolumeClaim":{"claimName":"postgres-backup-data"}}]}}'
-   kubectl -n econ-graph wait --for=condition=Ready pod/postgres-backup-copy --timeout=120s
-   kubectl -n econ-graph cp "postgres-backup-copy:/backups/${DUMP}" "./${DUMP}"
-   kubectl -n econ-graph delete pod postgres-backup-copy
+   k -n econ-graph wait --for=condition=Ready pod/postgres-backup-copy --timeout=120s
+   k -n econ-graph cp "postgres-backup-copy:/backups/${DUMP}" "./${DUMP}"
+   k -n econ-graph delete pod postgres-backup-copy
    ```
 
    The dump holds password hashes and client secrets; keep the local copy
@@ -407,11 +408,11 @@ restore a dump with the Keycloak version that wrote it, or a newer one.
    database during the restore. Keep the count for the restart:
 
    ```sh
-   kubectl -n econ-graph get deployment keycloak \
+   k -n econ-graph get deployment keycloak \
      -o custom-columns=NAME:.metadata.name,REPLICAS:.spec.replicas || exit 1
-   kubectl -n econ-graph scale deployment/keycloak --replicas=0 || exit 1
+   k -n econ-graph scale deployment/keycloak --replicas=0 || exit 1
    while :; do
-     writer_pods="$(kubectl -n econ-graph get pods -l app=keycloak -o name)" || exit 1
+     writer_pods="$(k -n econ-graph get pods -l app=keycloak -o name)" || exit 1
      [ -z "$writer_pods" ] && break
      sleep 2
    done
@@ -422,9 +423,9 @@ restore a dump with the Keycloak version that wrote it, or a newer one.
 3. Recreate the database and restore the dump into it:
 
    ```sh
-   kubectl -n econ-graph exec keycloak-postgres-0 -- dropdb -U keycloak --if-exists keycloak || exit 1
-   kubectl -n econ-graph exec keycloak-postgres-0 -- createdb -U keycloak keycloak || exit 1
-   kubectl -n econ-graph exec -i keycloak-postgres-0 -- \
+   k -n econ-graph exec keycloak-postgres-0 -- dropdb -U keycloak --if-exists keycloak || exit 1
+   k -n econ-graph exec keycloak-postgres-0 -- createdb -U keycloak keycloak || exit 1
+   k -n econ-graph exec -i keycloak-postgres-0 -- \
      pg_restore -U keycloak -d keycloak --no-owner --no-privileges \
      --exit-on-error --single-transaction < "./${DUMP}" || exit 1
    ```
@@ -460,11 +461,11 @@ do not use it for these CronJob dumps.
    database, then stop it. Keep the count for the restart:
 
    ```sh
-   kubectl -n econ-graph get deployment econ-graph-backend \
+   k -n econ-graph get deployment econ-graph-backend \
      -o custom-columns=NAME:.metadata.name,REPLICAS:.spec.replicas || exit 1
-   kubectl -n econ-graph scale deployment/econ-graph-backend --replicas=0 || exit 1
+   k -n econ-graph scale deployment/econ-graph-backend --replicas=0 || exit 1
    while :; do
-     writer_pods="$(kubectl -n econ-graph get pods -l app=econ-graph-backend -o name)" || exit 1
+     writer_pods="$(k -n econ-graph get pods -l app=econ-graph-backend -o name)" || exit 1
      [ -z "$writer_pods" ] && break
      sleep 2
    done
@@ -476,9 +477,9 @@ do not use it for these CronJob dumps.
    as `econgraph`:
 
    ```sh
-   kubectl -n econ-graph exec app-postgres-0 -c postgres -- dropdb -U postgres --if-exists econ_graph_app || exit 1
-   kubectl -n econ-graph exec app-postgres-0 -c postgres -- createdb -U postgres -O econgraph econ_graph_app || exit 1
-   kubectl -n econ-graph exec -i app-postgres-0 -c postgres -- \
+   k -n econ-graph exec app-postgres-0 -c postgres -- dropdb -U postgres --if-exists econ_graph_app || exit 1
+   k -n econ-graph exec app-postgres-0 -c postgres -- createdb -U postgres -O econgraph econ_graph_app || exit 1
+   k -n econ-graph exec -i app-postgres-0 -c postgres -- \
      pg_restore -U postgres -d econ_graph_app --role=econgraph --no-owner --no-privileges \
      --exit-on-error --single-transaction < "./${DUMP}" || exit 1
    ```
@@ -605,7 +606,7 @@ volume, or a database on a cluster deliberately configured with dynamic
 storage, reattach the retained PV explicitly:
 
 1. Stop workloads using the affected claim and keep backup Jobs from
-   starting during recovery. Find the old Released PV with `kubectl get pv`.
+   starting during recovery. Find the old Released PV with `k get pv`.
    Confirm its capacity and `claimRef` identify the intended volume; record
    its StorageClass and access modes too.
 2. Check whether a replacement PVC already exists. If none exists, prepare
@@ -617,7 +618,7 @@ storage, reattach the retained PV explicitly:
    before deleting its PVC. Do not create a competing claim with another
    name or discard a bound replacement's data.
 3. Once no live claim uses the old Released PV, clear its stale claim:
-   `kubectl patch pv <pv-name> -p '{"spec":{"claimRef": null}}'`.
+   `k patch pv <pv-name> -p '{"spec":{"claimRef": null}}'`.
 4. Create the intended PVC with `spec.volumeName` set to the old PV's name,
    matching its StorageClass and access modes and requesting no more than its
    capacity. Use the workload's expected claim name; for a dynamically stored
