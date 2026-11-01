@@ -7,7 +7,7 @@ the affected deployments. Provisioning, configuration changes, and database migr
 require a separate deployment procedure.
 
 For MicroK8s installation and addon setup, see the
-[MicroK8s guide](MICROK8S_DEPLOYMENT.md#installation). For the separate kind workflow,
+[MicroK8s guide](MICROK8S_DEPLOYMENT.md). For the separate kind workflow,
 see the [kind restart guide](DEPLOYMENT_RESTART.md).
 
 ## Select the cluster and workloads
@@ -110,7 +110,10 @@ the installation's Vite settings when rebuilding, including `VITE_DATA_GRAPHQL_U
 issuer, and client ID. Set any site-specific values in this shell before building;
 the examples below supply defaults for the same-origin setup.
 The default path issuer below resolves against the browser's origin and requires
-Keycloak to be served under `/idp` on that origin. An empty issuer hides sign-in.
+Keycloak to be served under `/idp` on that origin. To intentionally hide sign-in,
+set `VITE_OIDC_ISSUER` to an empty string and `VITE_OIDC_SIGN_IN_DISABLED=true`
+before building. An empty issuer otherwise fails the build; this opt-out does not
+change backend authentication requirements.
 
 ```bash
 docker --context default build --target backend \
@@ -124,6 +127,7 @@ docker --context default build \
   --build-arg VITE_DATA_GRAPHQL_URL="${VITE_DATA_GRAPHQL_URL:-}" \
   --build-arg VITE_WS_URL="${VITE_WS_URL:-ws://localhost/graphql}" \
   --build-arg VITE_OIDC_ISSUER="${VITE_OIDC_ISSUER-/idp/realms/econ-graph}" \
+  --build-arg VITE_OIDC_SIGN_IN_DISABLED="${VITE_OIDC_SIGN_IN_DISABLED:-false}" \
   --build-arg VITE_OIDC_CLIENT_ID="${VITE_OIDC_CLIENT_ID:-econ-graph-web}" \
   --build-arg NODE_ENV=production \
   -t "econ-graph-frontend:$VERSION" frontend
@@ -181,13 +185,31 @@ namespace `econ-graph-gateway`; its controller and proxy run in
 `envoy-gateway-system`. Application HTTPRoutes live in `econ-graph`, which needs
 the label `econgraph.io/gateway-access: "true"` to attach routes to the Gateway.
 Configuration work installs prerequisites with
-[`install-gateway.sh --context microk8s`](../../scripts/deploy/install-gateway.sh)
-before applying routes with
-[`apply-gateway-routes.sh --context microk8s`](../../scripts/deploy/apply-gateway-routes.sh).
-Both helpers use a standalone `kubectl`, not the `mk` function: configure that
-kubectl's kubeconfig for this MicroK8s installation and confirm
-`kubectl --context microk8s get nodes -o wide` matches the nodes selected above
-before running either helper.
+[`install-gateway.sh`](../../scripts/deploy/install-gateway.sh) before applying
+routes with [`apply-gateway-routes.sh`](../../scripts/deploy/apply-gateway-routes.sh).
+Both helpers require an explicit `KUBECTL` executable to avoid selecting cached
+kind tooling and configuration; `--context` alone is insufficient. They do not
+use the `mk` function, and `KUBECTL="microk8s kubectl"` is not an executable path.
+Create a wrapper outside the checkout, read the context from MicroK8s, and confirm
+its nodes match those selected above before invoking either helper:
+
+```bash
+export MICROK8S_TOOLS="${MICROK8S_TOOLS:?Set an absolute path for local helper files}"
+mkdir -p "$MICROK8S_TOOLS"
+cat >"$MICROK8S_TOOLS/kubectl-microk8s" <<'EOF'
+#!/bin/sh
+exec microk8s kubectl "$@"
+EOF
+chmod 0755 "$MICROK8S_TOOLS/kubectl-microk8s"
+MICROK8S_CONTEXT="$(microk8s kubectl config current-context)"
+export MICROK8S_CONTEXT
+"$MICROK8S_TOOLS/kubectl-microk8s" --context "$MICROK8S_CONTEXT" get nodes -o wide
+
+KUBECTL="$MICROK8S_TOOLS/kubectl-microk8s" \
+  ./scripts/deploy/install-gateway.sh --context "$MICROK8S_CONTEXT"
+KUBECTL="$MICROK8S_TOOLS/kubectl-microk8s" \
+  ./scripts/deploy/apply-gateway-routes.sh --context "$MICROK8S_CONTEXT"
+```
 
 The installer accepts Kubernetes v1.33–v1.36 and needs a node labelled
 `ingress-ready=true` for the proxy. Direct host access requires free host ports
