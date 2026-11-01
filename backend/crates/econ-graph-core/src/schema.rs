@@ -773,6 +773,19 @@ diesel::table! {
         scope_fingerprint -> Text,
         in_accepted_catalog -> Bool,
         listed_in_accepted_catalog -> Bool,
+        restriction_cleared_at -> Nullable<Timestamptz>,
+        restriction_clear_reason -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    series_lifecycle_events (id) {
+        id -> Int8,
+        source_id -> Uuid,
+        external_id -> Text,
+        at -> Timestamptz,
+        event -> Text,
+        detail -> Text,
     }
 }
 
@@ -1041,6 +1054,7 @@ diesel::joinable!(global_indicator_data -> global_economic_indicators (indicator
 diesel::joinable!(reference_file_cache -> data_sources (source_id));
 diesel::joinable!(series_fetch_validators -> economic_series (series_id));
 diesel::joinable!(series_lifecycle -> data_sources (source_id));
+diesel::joinable!(series_lifecycle_events -> data_sources (source_id));
 diesel::joinable!(series_metadata -> data_sources (source_id));
 diesel::joinable!(user_data_source_preferences -> users (user_id));
 diesel::joinable!(user_sessions -> users (user_id));
@@ -1084,6 +1098,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     security_events,
     series_fetch_validators,
     series_lifecycle,
+    series_lifecycle_events,
     series_metadata,
     trade_relationships,
     user_data_source_preferences,

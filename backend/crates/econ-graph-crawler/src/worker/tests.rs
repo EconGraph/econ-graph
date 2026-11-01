@@ -1367,6 +1367,198 @@ async fn publication_restriction_on_fetch_preserves_history_and_hides_unscoped_s
     );
 }
 
+/// ECO-758: after an operator's review, a fetch that finds no restriction marker publishes a
+/// restricted series again, but only through an adapter that checks markers.
+#[tokio::test]
+async fn reviewed_restriction_is_lifted_only_by_a_marker_checking_fetch() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return;
+    };
+    let db = crate::persist::stable_id_tests::FreshDb::create(&url, "eco758_review_worker").await;
+    persist::sync_datasets(&db.pool, &test_catalog())
+        .await
+        .unwrap();
+    for (id, markers) in [("t5_review_checked", true), ("t5_review_unchecked", false)] {
+        let discovered = DiscoveredSeries {
+            external_id: id.to_string(),
+            title: id.to_string(),
+            description: None,
+            units: None,
+            frequency: Some("Monthly".into()),
+            data_url: None,
+            dataset: flat(),
+        };
+        persist::persist_discovered(&db.pool, SRC, &[discovered])
+            .await
+            .unwrap();
+        persist::persist_series(
+            &db.pool,
+            SRC,
+            id,
+            &BatchAdapter::default().series(id).unwrap(),
+        )
+        .await
+        .unwrap();
+        let mut conn = db.pool.get().await.unwrap();
+        diesel_async::AsyncConnection::transaction::<_, AppError, _>(&mut *conn, async |conn| {
+            crate::lifecycle::record_restricted_conn(conn, SRC, id).await
+        })
+        .await
+        .unwrap();
+        drop(conn);
+        crate::lifecycle::request_restriction_review(&db.pool, SRC, true, id, "false positive")
+            .await
+            .unwrap();
+        assert_eq!(
+            metadata_is_active(&db.pool, id).await,
+            Some(false),
+            "{id}: hidden while under review"
+        );
+        let adapter = Arc::new(BatchAdapter {
+            lifecycle_tracking: true,
+            restriction_markers: markers,
+            ..Default::default()
+        });
+        let w = batch_worker(&db.pool, &adapter, 1);
+        enqueue(&db.pool, SRC.as_str(), id, JobKind::FetchSeries, 5).await;
+        let result = w.run_once().await.expect("one fetch");
+        assert!(
+            matches!(result, JobOutcome::Completed(_)),
+            "{id}: {result:?}"
+        );
+        let mut conn = db.pool.get().await.unwrap();
+        #[derive(QueryableByName)]
+        struct Publication {
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            status: String,
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            crawl_status: String,
+            #[diesel(sql_type = diesel::sql_types::Bool)]
+            active: bool,
+        }
+        let row: Publication = diesel::sql_query(
+            "SELECT l.status, es.crawl_status, es.is_active AS active FROM series_lifecycle l \
+             JOIN economic_series es USING (source_id, external_id) WHERE l.external_id=$1",
+        )
+        .bind::<diesel::sql_types::Text, _>(id)
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+        drop(conn);
+        if markers {
+            assert_eq!(
+                (row.status.as_str(), row.crawl_status.as_str(), row.active),
+                ("active", "success", true),
+                "{id}"
+            );
+            assert_eq!(metadata_is_active(&db.pool, id).await, Some(true), "{id}");
+        } else {
+            assert_eq!(
+                (row.status.as_str(), row.crawl_status.as_str(), row.active),
+                ("restricted", "restricted", false),
+                "{id}"
+            );
+            assert_eq!(metadata_is_active(&db.pool, id).await, Some(false), "{id}");
+        }
+    }
+    db.drop().await;
+}
+
+/// ECO-758: a fetch claimed before the review never lifts the restriction, and a fetch that
+/// finds the marker cancels the review.
+#[tokio::test]
+async fn restriction_review_needs_a_later_claim_and_is_cancelled_by_a_marker() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return;
+    };
+    let db = crate::persist::stable_id_tests::FreshDb::create(&url, "eco758_review_claims").await;
+    persist::sync_datasets(&db.pool, &test_catalog())
+        .await
+        .unwrap();
+    let id = "t5_review_claims";
+    let discovered = DiscoveredSeries {
+        external_id: id.to_string(),
+        title: id.to_string(),
+        description: None,
+        units: None,
+        frequency: Some("Monthly".into()),
+        data_url: None,
+        dataset: flat(),
+    };
+    persist::persist_discovered(&db.pool, SRC, &[discovered])
+        .await
+        .unwrap();
+    let mut conn = db.pool.get().await.unwrap();
+    diesel_async::AsyncConnection::transaction::<_, AppError, _>(&mut *conn, async |conn| {
+        crate::lifecycle::record_restricted_conn(conn, SRC, id).await
+    })
+    .await
+    .unwrap();
+    drop(conn);
+    #[derive(QueryableByName)]
+    struct Pending {
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        status: String,
+        #[diesel(sql_type = diesel::sql_types::Bool)]
+        under_review: bool,
+    }
+    let pending = async || -> (String, bool) {
+        let mut conn = db.pool.get().await.unwrap();
+        let p: Pending = diesel::sql_query(
+            "SELECT status, restriction_cleared_at IS NOT NULL AS under_review \
+             FROM series_lifecycle WHERE external_id=$1",
+        )
+        .bind::<diesel::sql_types::Text, _>(id)
+        .get_result(&mut conn)
+        .await
+        .unwrap();
+        (p.status, p.under_review)
+    };
+    let clean = Arc::new(BatchAdapter {
+        lifecycle_tracking: true,
+        restriction_markers: true,
+        ..Default::default()
+    });
+    let w = batch_worker(&db.pool, &clean, 1);
+    // Claimed before the review: its fetch may have read upstream before the review.
+    let job = enqueue(&db.pool, SRC.as_str(), id, JobKind::FetchSeries, 5).await;
+    let claimed = CrawlQueueItem::claim_by_id(&db.pool, job, "t5-batch-worker")
+        .await
+        .unwrap()
+        .expect("claimed");
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    crate::lifecycle::request_restriction_review(&db.pool, SRC, true, id, "false positive")
+        .await
+        .unwrap();
+    let result = w.process(claimed).await;
+    assert!(matches!(result, JobOutcome::Completed(_)), "{result:?}");
+    assert_eq!(pending().await, ("restricted".to_string(), true));
+    assert_eq!(metadata_is_active(&db.pool, id).await, Some(false));
+    // A fetch that finds the marker cancels the review.
+    let marked = Arc::new(BatchAdapter {
+        lifecycle_tracking: true,
+        restriction_markers: true,
+        series_errors: HashMap::from([(
+            id.to_string(),
+            CrawlError::Restricted("redistribution prohibited".into()),
+        )]),
+        ..Default::default()
+    });
+    let w = batch_worker(&db.pool, &marked, 1);
+    enqueue(&db.pool, SRC.as_str(), id, JobKind::FetchSeries, 5).await;
+    let result = w.run_once().await.expect("one fetch");
+    assert!(matches!(result, JobOutcome::Failed { .. }), "{result:?}");
+    assert_eq!(pending().await, ("restricted".to_string(), false));
+    // So a clean fetch afterwards publishes nothing.
+    let w = batch_worker(&db.pool, &clean, 1);
+    enqueue(&db.pool, SRC.as_str(), id, JobKind::FetchSeries, 5).await;
+    let result = w.run_once().await.expect("one fetch");
+    assert!(matches!(result, JobOutcome::Completed(_)), "{result:?}");
+    assert_eq!(pending().await, ("restricted".to_string(), false));
+    assert_eq!(metadata_is_active(&db.pool, id).await, Some(false));
+    db.drop().await;
+}
+
 #[tokio::test]
 async fn unknown_source_and_missing_adapter_fail() {
     let Some(db) = db().await else { return };
@@ -2333,6 +2525,8 @@ async fn persist_discovered_rejects_a_dataset_key_collision_across_calls() {
 struct BatchAdapter {
     batching: bool,
     lifecycle_tracking: bool,
+    /// What `checks_restriction_markers()` returns.
+    restriction_markers: bool,
     /// When true, `tracks_vintages()` returns true, which must keep this adapter out of
     /// batching even when it has a `batch_key`.
     vintage_tracking: bool,
@@ -2421,6 +2615,10 @@ impl SourceAdapter for BatchAdapter {
 
     fn tracks_catalog_lifecycle(&self) -> bool {
         self.lifecycle_tracking
+    }
+
+    fn checks_restriction_markers(&self) -> bool {
+        self.restriction_markers
     }
 
     fn tracks_vintages(&self) -> bool {
