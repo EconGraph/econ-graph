@@ -76,8 +76,9 @@ if ! docker info --format '{{json .SecurityOptions}}' | grep -q rootless; then
     export FIXTURE_ALLOW_ROOTFUL_DOCKER=true
 fi
 
-W="${FIXTURE_TEST_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/fixture-test.XXXXXX")}"
-mkdir -p "${W}"
+scratch_parent="${FIXTURE_TEST_DIR:-${TMPDIR:-/tmp}}"
+mkdir -p "${scratch_parent}"
+W="$(mktemp -d "${scratch_parent}/fixture-test.XXXXXX")"
 W="$(cd "${W}" && pwd)"
 export HOME="${W}/home"
 export XDG_CONFIG_HOME="${HOME}/.config"
