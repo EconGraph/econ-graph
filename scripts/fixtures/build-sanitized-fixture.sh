@@ -10,6 +10,9 @@
 # sql/functions.sql), and dumped again with a MANIFEST and SHA256SUMS. See
 # docs/deployment/SANITIZED_FIXTURES.md.
 #
+# Inputs are operator-decrypted or legacy plaintext pg_dump archives, never
+# .age ciphertext or encrypted host bundles. Decrypt on the operator host into
+# private temporary storage first; no private identity belongs in Kubernetes.
 # Inputs, read only (mounted read-only into the container; nothing that holds
 # a dump or backup is ever written, moved or deleted):
 #   --data FILE       econ_graph dump. With APP_DATABASE=shared it also holds
@@ -140,6 +143,13 @@ fi
 if [[ -n "${FROM_DIR}" ]]; then
     [[ -z "${DATA}${APP}${KEYCLOAK}" ]] || die "--from-dir/--latest and --data/--app/--keycloak are exclusive"
     [[ -d "${FROM_DIR}" ]] || die "not a directory: ${FROM_DIR}"
+    # A mixed directory can retain stale plaintext beside newer ciphertext.
+    # Never silently select that old dump, including through --latest.
+    for encrypted in "${FROM_DIR}/backup.tar.age" "${FROM_DIR}"/*.dump.age; do
+        if [[ -e "${encrypted}" || -L "${encrypted}" ]]; then
+            die "encrypted backups in ${FROM_DIR}: decrypt the chosen archives on the operator host into private temporary storage, then pass plaintext --data/--app/--keycloak files; no private identity belongs in Kubernetes"
+        fi
+    done
     if [[ -e "${FROM_DIR}/econ_graph.dump" ]]; then
         # Host layout (dump-databases.sh).
         DATA="${FROM_DIR}/econ_graph.dump"
@@ -179,6 +189,7 @@ for role in "${ROLES[@]}"; do
         econ_graph_app) f="${APP}" ;;
         keycloak) f="${KEYCLOAK}" ;;
     esac
+    [[ "${f}" != *.age ]] || die "${role}: encrypted input is unsupported; decrypt on the operator host and pass a plaintext pg_dump archive"
     [[ -e "${f}" ]] || die "${role} dump not found: ${f}"
     f="$(readlink -f -- "${f}")"
     [[ -f "${f}" && -r "${f}" && -s "${f}" ]] || die "${role} dump is not a readable, non-empty file: ${f}"
@@ -213,8 +224,12 @@ build_key() {
 # The cap is an acceptance condition, not part of the content identity: an
 # existing fixture may be reused under another cap only when its actual dumps fit.
 dump_kib() {
-    local bytes
-    bytes="$(cat "$1"/*.dump | wc -c)" || return 1
+    local bytes=0 size file
+    for file in "$1"/*.dump; do
+        [[ -f "${file}" ]] || return 1
+        size="$(wc -c <"${file}")" || return 1
+        bytes=$((bytes + size))
+    done
     echo $(( (bytes + 1023) / 1024 ))
 }
 
@@ -270,8 +285,10 @@ KEY="$(build_key)"
 if [[ -e "${OUT}" ]]; then
     if [[ -f "${OUT}/MANIFEST" ]] && (cd "${OUT}" && sha256sum --quiet -c SHA256SUMS >/dev/null 2>&1) \
         && diff -q <(printf '%s\n' "${KEY}") <(grep -E '^(mode|subset\.series|subset\.max_points|input\.[a-z_]+\.sha256)=' "${OUT}/MANIFEST") >/dev/null; then
-        total_kb="$(dump_kib "${OUT}")" || die "could not measure existing fixture dumps"
-        check_subset_cap "${total_kb}"
+        if [[ "${MODE}" == ci-subset ]]; then
+            total_kb="$(dump_kib "${OUT}")" || die "could not measure existing fixture dumps"
+            check_subset_cap "${total_kb}"
+        fi
         log "${OUT} already holds this fixture (same mode and inputs); nothing to do"
         exit 0
     fi

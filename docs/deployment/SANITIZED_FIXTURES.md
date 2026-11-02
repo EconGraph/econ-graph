@@ -17,8 +17,26 @@ Fixtures are never overwritten and never pruned. Remove an old one by hand.
 
 ## Building one
 
-From the newest verified host dump (`scripts/backup/dump-databases.sh`,
-see [BACKUPS.md](BACKUPS.md)):
+The builder accepts **plaintext pg_dump archives**: either retained legacy dumps
+or copies decrypted by the operator into private temporary storage on the host.
+The current in-cluster backup job writes `.dump.age` ciphertext; those files
+cannot be passed directly to this builder. Follow
+[operator-host recovery](POSTGRES_BACKUP_RESTORE.md#restore) to decrypt the
+chosen archives, then supply their plaintext paths explicitly:
+
+```sh
+scripts/fixtures/build-sanitized-fixture.sh --data /dev/shm/fixture-stage/econ_graph.dump \
+  --app /dev/shm/fixture-stage/econ_graph_app.dump --keycloak /dev/shm/fixture-stage/keycloak.dump
+```
+
+Omit `--app` only for the shared-database layout. Keep private identities on the
+operator host, never in a pod or fixture output, and remove the operator-created
+plaintext staging after the build. Host backups that use `backup.tar.age` must
+also be opened by their operator before the extracted dump paths are supplied.
+This builder does not decrypt archives or manage identities.
+
+For retained **plaintext** verified host dumps (`scripts/backup/dump-databases.sh`,
+see [BACKUPS.md](BACKUPS.md)), the legacy convenience form is:
 
 ```sh
 scripts/fixtures/build-sanitized-fixture.sh --latest --dry-run   # the plan; starts and writes nothing
@@ -28,13 +46,18 @@ scripts/fixtures/build-sanitized-fixture.sh --latest --ci-subset
 
 Other inputs:
 
-- `--from-dir DIR`: a host dump directory (`econ_graph.dump`,
-  `econ_graph_app.dump`, `keycloak.dump`), or a copy of the in-cluster
+- `--from-dir DIR`: a plaintext host dump directory (`econ_graph.dump`,
+  `econ_graph_app.dump`, `keycloak.dump`), or a retained legacy plaintext copy of the in-cluster
   backup volume ([POSTGRES_BACKUP_RESTORE.md](POSTGRES_BACKUP_RESTORE.md)):
   `latest.dump`, `latest-econ_graph_app.dump` and `latest-keycloak.dump`,
   or, without those links (an S3 copy), the newest `econ_graph-<stamp>.dump`
   and the app and Keycloak dumps of the same stamp.
 - `--data FILE --keycloak FILE [--app FILE]`: the dumps themselves.
+
+`--from-dir` and `--latest` refuse directories containing encrypted archives,
+including mixed directories that retain older plaintext alongside ciphertext.
+They do not fall back to a stale plaintext dump. Decrypt the selected backups
+into a separate private staging directory and pass explicit paths instead.
 
 Both app database layouts work. With `APP_DATABASE=shared` there is no app
 dump: the app tables are in `econ_graph` and are sanitized there. With
@@ -238,6 +261,7 @@ Run it locally with `FIXTURE_DOCKER_HOST` set to the rootless socket and
 The suite first runs `scripts/fixtures/test_fixture_reuse.py`, an offline
 full-script check using synthetic files, a Docker-info stub and an uncontended
 lock stub. It exercises checksum/idempotency behavior and actual dump byte
-limits without starting containers or restoring data. The required workflow
+limits, and confirms encrypted inputs are refused before Docker access, without
+starting containers or restoring data. The required workflow
 lint job also checks that sanitizer failures and cancellations fail Core CI
 Result, and that the merge queue cannot pass a skipped sanitizer job.
