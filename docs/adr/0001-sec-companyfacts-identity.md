@@ -81,32 +81,46 @@ economic-period/unit/taxonomy separation, amendment identities and shared note
 references. Database checks verify that instant duplicates conflict, durations
 remain distinct, and source numeric precision survives storage.
 
-## API access during rollout
+## Target API and note rollout
 
-Company research reads require the explicit `catalog.sec:read` capability and the
-`financial_components` build flag. The source's exact catalog name is `SEC EDGAR`.
-A fresh realm grants SEC reads to signed-in users, while anonymous access remains
-ungranted. Existing realm imports preserve live catalog grants deliberately; they
-do not automatically expand a live user's privileges. After acceptance, an
-operator must explicitly grant `catalog.sec:read` to the intended existing realm
-role in Keycloak administration: open Realm roles → user → Associated roles,
-assign the `econ-graph-api` client role `catalog.sec:read`, and obtain a fresh
-access token. The existing `--make-public` helper grants anonymous access too,
-so it does not implement this signed-in-only rollout. Release builds keep the
-feature disabled until the full company-research acceptance gate passes.
+The following contract is for the dependent [API package (#799)](https://github.com/EconGraph/econ-graph/pull/799)
+and [notes package (#800)](https://github.com/EconGraph/econ-graph/pull/800), with
+calculations supplied by [#797](https://github.com/EconGraph/econ-graph/pull/797).
+The storage package supplies the evidence tables and identity adapters; the
+dependent packages must implement and validate these access and query behaviors
+before rollout. The role grants, resolvers and note attachment checks described
+below become applicable only after those packages land.
 
-The same schema snapshot describes development and release builds. A disabled
-company resolver returns `FEATURE_DISABLED` before opening a pool; an enabled
-resolver checks the SEC catalog grant before reading the data database. Source
-facts, companies and filings use the data plane. Local authored notes use the app
-plane and validate new attachments through an authorized data-plane target check.
-The Train 4 operation classifier must admit all shipped company query roots before
-this surface can pass the independent HTTP data-plane boundary.
+The API package must define the explicit `catalog.sec:read` capability and require
+it together with the `financial_components` build flag for company research reads.
+The source's exact catalog name is `SEC EDGAR`. Its fresh-realm configuration must
+grant SEC reads to signed-in users while leaving anonymous access ungranted.
+Existing realm imports must preserve live catalog grants deliberately rather than
+automatically expanding a live user's privileges.
 
-Company fact queries select a revision before pagination. Clients may explicitly
-request `includeRevisions: true` to inspect all retained filings under the query's
-as-of/accession filter. Statement calculations retain all source revisions before
-selecting operands, allowing changed-value restatements to remain visible. Period
-and unit filters never interpret SEC fiscal focus or calendar-frame labels as the
-economic period's identity. SIC peer comparisons use the identical requested dates
-and expose missing inputs rather than substituting a nearby calendar period.
+After the dependent packages have landed, the SEC client role exists, and the full
+company-research acceptance gate has passed, an operator must explicitly grant
+`catalog.sec:read` to the intended existing realm role in Keycloak administration:
+open Realm roles → user → Associated roles, assign the `econ-graph-api` client
+role `catalog.sec:read`, and obtain a fresh access token. The existing
+`--make-public` helper grants anonymous access too, so it does not implement this
+signed-in-only rollout. Release builds must keep the feature disabled until that
+acceptance gate passes.
+
+The API package must keep one schema snapshot for development and release builds.
+A disabled company resolver must return `FEATURE_DISABLED` before opening a pool;
+an enabled resolver must check the SEC catalog grant before reading the data
+database. Source facts, companies and filings belong to the data plane. The notes
+package must keep local authored notes in the app plane and validate new
+attachments through an authorized data-plane target check. The Train 4 operation
+classifier must admit all shipped company query roots before this surface can
+pass the independent HTTP data-plane boundary.
+
+Company fact queries must select a revision before pagination and support
+`includeRevisions: true` for inspecting all retained filings under the query's
+as-of/accession filter. Statement calculations must retain all source revisions
+before selecting operands, allowing changed-value restatements to remain visible.
+Period and unit filters must not interpret SEC fiscal focus or calendar-frame
+labels as the economic period's identity. SIC peer comparisons must use the
+identical requested dates and expose missing inputs rather than substituting a
+nearby calendar period.
