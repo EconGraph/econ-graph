@@ -322,6 +322,8 @@ jobs:
   sanitized-fixture:
     name: Sanitized Fixture Builder
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: ${{ needs.changes.outputs.code == 'true' }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -2713,7 +2715,8 @@ jobs:
         EVENT: ${{ github.event_name }}
         # The ordinary suite: in a merge group each of these must succeed.
         MUST_RUN: >-
-          changes accessibility backend-build-cache prometheus-rules postgres-backup-scripts sanitized-fixture
+          changes accessibility backend-build-cache prometheus-rules postgres-backup-scripts
+          sanitized-fixture
           deploy-manifests backend-migration-validation-tests keycloak-realm-import
           backend-smoke-tests
           chart-api-integration-tests backend-mcp-integration-tests

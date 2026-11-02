@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[2]
 class SanitizedFixtureGateTest(unittest.TestCase):
     def setUp(self):
         workflow = yaml.safe_load((ROOT / ".github/workflows/ci-core.yml").read_text())
+        self.fixture_job = workflow["jobs"]["sanitized-fixture"]
+        self.changes_job = workflow["jobs"]["changes"]
         self.result_job = workflow["jobs"]["ci-result"]
         self.step = next(s for s in self.result_job["steps"] if s.get("name") == "Check the job results")
 
@@ -35,6 +37,16 @@ class SanitizedFixtureGateTest(unittest.TestCase):
             for result in ("failure", "cancelled"):
                 with self.subTest(event=event, result=result):
                     self.assertNotEqual(self.gate(result, event), 0)
+
+    def test_docs_only_pr_can_skip_sanitizer(self):
+        self.assertIn("changes", self.fixture_job["needs"])
+        self.assertEqual(self.fixture_job["if"], "${{ needs.changes.outputs.code == 'true' }}")
+        # Non-PR events must force code=true, keeping the queue strict.
+        self.assertEqual(
+            self.changes_job["outputs"]["code"],
+            "${{ github.event_name != 'pull_request' || steps.code.outputs.code == 'true' }}",
+        )
+        self.assertEqual(self.gate("skipped", "pull_request"), 0)
 
     def test_merge_queue_cannot_pass_a_skipped_sanitizer(self):
         self.assertNotEqual(self.gate("skipped", "merge_group"), 0)
