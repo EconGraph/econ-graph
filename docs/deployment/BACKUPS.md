@@ -392,11 +392,16 @@ copies using `backup_seal_dir` from `scripts/backup/encryption.sh` after
 `backup_encryption_preflight`; verify an interactive restore before deciding
 what to do with the originals. Never delete originals automatically.
 
-This encrypts **host logical backup bundles**. Live database files, btrfs
-snapshots, the independent in-cluster backup CronJob/PVC, and the special
-Keycloak-upgrade backup format remain separate copies with their existing
-protection. In particular, these changes do not claim those copies are
-public-key encrypted; the in-cluster backup work must be integrated separately.
+This encrypts **host logical backup bundles**. The checked-in independent
+in-cluster CronJob also encrypts new archives before publishing them to its
+PVC or syncing them, once its public recipient is configured. Its operator
+configuration and encrypted recovery procedure are separate; see
+[PostgreSQL backup and restore](POSTGRES_BACKUP_RESTORE.md#encryption-setup).
+Retained legacy plaintext copies are not retroactively encrypted. These
+source changes do not establish the live cluster's configuration or backup
+state. Live database files, btrfs snapshots and the special Keycloak-upgrade
+backup format remain separate copies; encrypted upgrade backups are still
+tracked separately in #540.
 
 The encryption suite (`scripts/backup/test-encryption.sh`) uses a disposable
 synthetic identity and transport stubs. The concurrent-write regression
