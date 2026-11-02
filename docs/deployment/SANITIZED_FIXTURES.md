@@ -42,7 +42,9 @@ dump: the app tables are in `econ_graph` and are sanitized there. With
 
 `--output-dir DIR` chooses the output directory. A run into a directory
 that already holds a fixture of the same inputs and mode does nothing and
-exits 0; any other existing directory is refused.
+exits 0 if its actual dump size also meets the requested CI subset cap; any
+other existing directory is refused. A lower cap can reject an existing subset
+without replacing or deleting it.
 
 The CI subset takes `--subset-series N` (default 300: that many series in
 all, the same number from every source), `--subset-max-points N` (default
@@ -225,8 +227,17 @@ offline tokens, events and keys, and checks that:
 - leaving out any single sanitize step makes verification fail the run with
   nothing written, as does a secret no step covers;
 - `--dry-run` starts no container and writes nothing; a second run is a
-  no-op; a daemon that isn't rootless is refused; no input changes.
+  no-op when its dumps meet the requested cap; a stricter cap refuses an
+  oversized existing subset without changing it; a daemon that isn't rootless
+  is refused; no input changes.
 
 It runs in CI (the "Sanitized Fixture Builder" job) and needs only Docker.
 Run it locally with `FIXTURE_DOCKER_HOST` set to the rootless socket and
 `TMPDIR` on a disk with a few GB free.
+
+The suite first runs `scripts/fixtures/test_fixture_reuse.py`, an offline
+full-script check using synthetic files, a Docker-info stub and an uncontended
+lock stub. It exercises checksum/idempotency behavior and actual dump byte
+limits without starting containers or restoring data. The required workflow
+lint job also checks that sanitizer failures and cancellations fail Core CI
+Result, and that the merge queue cannot pass a skipped sanitizer job.
