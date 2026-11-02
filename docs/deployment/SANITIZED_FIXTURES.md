@@ -64,10 +64,13 @@ dump: the app tables are in `econ_graph` and are sanitized there. With
 `APP_DATABASE=separate` the app dump is given and sanitized on its own.
 
 `--output-dir DIR` chooses the output directory. A run into a directory
-that already holds a fixture of the same inputs and mode does nothing and
-exits 0 if its actual dump size also meets the requested CI subset cap; any
-other existing directory is refused. A lower cap can reject an existing subset
-without replacing or deleting it.
+that already holds a fixture of the same inputs and mode leaves its fixture
+files unchanged and exits 0 if its actual dump size also meets the requested
+CI subset cap; any other existing directory is refused. A lower cap can reject an existing subset
+without replacing or deleting it. The chosen output parent receives
+`.fixture-build.lock` even on reuse, and temporary sibling directories and the
+output during a new build. Choose an output parent separate from input backup
+directories to keep their directory listings untouched.
 
 The CI subset takes `--subset-series N` (default 300: that many series in
 all, the same number from every source), `--subset-max-points N` (default
@@ -82,8 +85,8 @@ MANIFEST records it (`total_kib`).
    with no network, on the **rootless** Docker daemon
    (`unix:///run/user/<uid>/docker.sock`, or `FIXTURE_DOCKER_HOST`). The
    script refuses any other daemon, so it never runs on the rootful daemon
-   the cluster runs on. Nothing that holds a dump or backup is written,
-   moved or deleted.
+   the cluster runs on. Input archive files are not changed, moved or deleted;
+   writes to the chosen output parent follow the rules above.
 2. Each dump is restored into its own database (`pg_restore --no-owner
    --no-privileges`).
 3. The sanitize steps (`scripts/fixtures/sql/steps.sql`) run on each database,
@@ -180,8 +183,8 @@ Annotation, comment and chart text is otherwise kept as written.
 
 ## Verification
 
-After sanitizing, and before anything is written, every database is
-checked; any finding fails the run (exit status 1, nothing written):
+After sanitizing, and before a fixture is published, every database is
+checked; any finding fails the run (exit status 1, no fixture published):
 
 - **The scan.** Every text, JSON and text-array column of every table is
   searched for e-mail addresses outside `example.invalid` and for
@@ -253,10 +256,10 @@ offline tokens, events and keys, and checks that:
 - Keycloak starts on the sanitized database and serves the realm with new
   keys;
 - leaving out any single sanitize step makes verification fail the run with
-  nothing written, as does a secret no step covers;
-- `--dry-run` starts no container and writes nothing; a second run is a
-  no-op when its dumps meet the requested cap; a stricter cap refuses an
-  oversized existing subset without changing it; a daemon that isn't rootless
+  no fixture published, as does a secret no step covers;
+- `--dry-run` starts no container and writes nothing; a second run reuses
+  unchanged fixture files when its dumps meet the requested cap; a stricter
+  cap refuses an oversized existing subset without changing it; a daemon that isn't rootless
   is refused; no input changes.
 
 It runs in CI (the "Sanitized Fixture Builder" job) and needs only Docker.

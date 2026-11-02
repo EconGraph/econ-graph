@@ -106,7 +106,7 @@ fi
             with self.subTest(cap=cap):
                 result = self.reuse(cap)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("nothing to do", result.stderr)
+                self.assertIn("fixture files unchanged", result.stderr)
                 self.assertEqual(self.snapshot(), before)
 
     def test_cap_counts_all_dumps_and_rounds_up_partial_kib(self):

@@ -13,8 +13,10 @@
 # Inputs are operator-decrypted or legacy plaintext pg_dump archives, never
 # .age ciphertext or encrypted host bundles. Decrypt on the operator host into
 # private temporary storage first; no private identity belongs in Kubernetes.
-# Inputs, read only (mounted read-only into the container; nothing that holds
-# a dump or backup is ever written, moved or deleted):
+# Input archive files remain unchanged and are mounted read-only into the container.
+# The chosen output parent receives a lock and, for a new build, temporary
+# siblings and output. Use a separate output parent to leave backup listings alone.
+# Inputs:
 #   --data FILE       econ_graph dump. With APP_DATABASE=shared it also holds
 #                     the app tables.
 #   --app FILE        econ_graph_app dump (APP_DATABASE=separate); optional.
@@ -35,8 +37,10 @@
 #                     econ_graph.dump, econ_graph_app.dump (when given),
 #                     keycloak.dump, MANIFEST and SHA256SUMS, files 0600.
 #                     If DIR already holds a fixture built from the same
-#                     inputs in the same mode, the run does nothing and exits 0;
-#                     any other existing DIR is refused.
+#                     inputs in the same mode and meets the requested subset cap,
+#                     its fixture files are unchanged and the run exits 0;
+#                     any other existing DIR is refused. The output parent
+#                     receives .fixture-build.lock even when reusing a fixture.
 #
 # Modes:
 #   (default)         the full sanitized copy of every database. Stays on the host.
@@ -260,7 +264,7 @@ fi
 
 if [[ "${DRY_RUN}" == true ]]; then
     log "dry run: mode ${MODE}; output ${OUT} (via a scratch directory in ${OUT_PARENT}, moved there only if verification passes)"
-    [[ -e "${OUT}" ]] && log "dry run: ${OUT} already exists; a run would do nothing if it holds this build, and refuse otherwise"
+    [[ -e "${OUT}" ]] && log "dry run: ${OUT} already exists; a run would reuse matching fixture files if they meet the requested cap, and refuse otherwise"
     for role in "${ROLES[@]}"; do
         log "dry run: ${role} <- ${INPUT[${role}]} ($(stat -c %s "${INPUT[${role}]}") bytes, read only)"
     done
@@ -289,7 +293,7 @@ if [[ -e "${OUT}" ]]; then
             total_kb="$(dump_kib "${OUT}")" || die "could not measure existing fixture dumps"
             check_subset_cap "${total_kb}"
         fi
-        log "${OUT} already holds this fixture (same mode and inputs); nothing to do"
+        log "${OUT} already holds this fixture (same mode and inputs); fixture files unchanged"
         exit 0
     fi
     die "${OUT} already exists and is not this build; choose another --output-dir (fixtures are never overwritten)"

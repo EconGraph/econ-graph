@@ -562,7 +562,7 @@ if run_build again --from-dir "${HOSTDIR}" --output-dir "${OUT_SHARED}"; then
 else
     bad "a second run into the same directory exits 0"; cat "${LOG}/again.log"
 fi
-check "and says there is nothing to do" grep -q "already holds this fixture" "${LOG}/again.log"
+check "and says the fixture already exists" grep -q "already holds this fixture" "${LOG}/again.log"
 check "and changes nothing" test "$(cd "${OUT_SHARED}" && sha256sum -- *)" == "${before}"
 if run_build other --from-dir "${PVCDIR}" --output-dir "${OUT_SHARED}"; then
     bad "a different build into an existing fixture is refused"
