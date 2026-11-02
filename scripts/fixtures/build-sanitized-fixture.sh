@@ -38,7 +38,8 @@
 #                     keycloak.dump, MANIFEST and SHA256SUMS, files 0600.
 #                     If DIR already holds a fixture built from the same
 #                     inputs in the same mode and meets the requested subset cap,
-#                     its fixture files are unchanged and the run exits 0;
+#                     its fixture files are unchanged and the run exits 0. An explicit
+#                     FIXTURE_SALT_FILE must match its recorded pseudonym key;
 #                     any other existing DIR is refused. The output parent
 #                     receives .fixture-build.lock even when reusing a fixture.
 #
@@ -67,7 +68,11 @@
 #                                (CI runners have only a rootful one).
 #   FIXTURE_PG_IMAGE             default postgres:18.
 #   FIXTURE_SALT_FILE            the pseudonym key, created (0600) on first
-#                                use; default ~/.config/econgraph/fixture-salt.
+#                                use for a fresh build; default ~/.config/econgraph/fixture-salt.
+#                                On cached reuse a nonempty explicit file must exist, be valid,
+#                                and match MANIFEST. Without an explicit override, reuse
+#                                retains the recorded key without opening a default key.
+#                                An empty override uses this implicit-retrieval policy.
 #                                The same key gives the same pseudonyms.
 #   FIXTURE_TEST_SKIP_STEPS      test only: space-separated steps to leave out,
 #                                to show that verification catches each one.
@@ -225,6 +230,18 @@ build_key() {
     done
 }
 
+# Shared with fresh builds: normalize exactly the key material used by SQL.
+read_pseudonym_key() {
+    local salt
+    salt="$(tr -dc '0-9a-f' <"$1")" || die "could not read pseudonym key $1"
+    [[ ${#salt} -ge 32 ]] || die "$1 must hold at least 32 hex digits"
+    printf '%s' "${salt}"
+}
+
+pseudonym_key_id() {
+    printf '%s' "$1" | sha256sum | cut -c1-16
+}
+
 # The cap is an acceptance condition, not part of the content identity: an
 # existing fixture may be reused under another cap only when its actual dumps fit.
 dump_kib() {
@@ -289,6 +306,16 @@ KEY="$(build_key)"
 if [[ -e "${OUT}" ]]; then
     if [[ -f "${OUT}/MANIFEST" ]] && (cd "${OUT}" && sha256sum --quiet -c SHA256SUMS >/dev/null 2>&1) \
         && diff -q <(printf '%s\n' "${KEY}") <(grep -E '^(mode|subset\.series|subset\.max_points|input\.[a-z_]+\.sha256)=' "${OUT}/MANIFEST") >/dev/null; then
+        # An explicit key selection is an acceptance condition for reuse.
+        # Without one, retrieve the immutable fixture without touching a default key.
+        if [[ -n "${FIXTURE_SALT_FILE:-}" ]]; then
+            requested_salt="$(read_pseudonym_key "${FIXTURE_SALT_FILE}")" || exit 1
+            requested_key_id="$(pseudonym_key_id "${requested_salt}")"
+            mapfile -t recorded_key_ids < <(sed -n 's/^pseudonym_key_id=//p' "${OUT}/MANIFEST")
+            [[ ${#recorded_key_ids[@]} -eq 1 && "${recorded_key_ids[0]}" =~ ^[0-9a-f]{16}$ \
+                && "${requested_key_id}" == "${recorded_key_ids[0]}" ]] ||
+                die "${OUT} was not built with the explicitly selected pseudonym key; choose another --output-dir (fixture files are unchanged)"
+        fi
         if [[ "${MODE}" == ci-subset ]]; then
             total_kb="$(dump_kib "${OUT}")" || die "could not measure existing fixture dumps"
             check_subset_cap "${total_kb}"
@@ -307,8 +334,7 @@ if [[ ! -s "${SALT_FILE}" ]]; then
     rm -f "${SALT_FILE}.new"
     log "created the pseudonym key ${SALT_FILE}"
 fi
-SALT="$(tr -dc '0-9a-f' <"${SALT_FILE}")"
-[[ ${#SALT} -ge 32 ]] || die "${SALT_FILE} must hold at least 32 hex digits"
+SALT="$(read_pseudonym_key "${SALT_FILE}")"
 
 WORK="$(mktemp -d "${OUT_PARENT}/.build-${STAMP}-XXXXXX")"
 CONTAINER="econgraph-fixture-${STAMP,,}-$$"
@@ -451,7 +477,7 @@ check_subset_cap "${total_kb}"
     echo "script_commit=$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo unknown)"
     echo "pg_image=${PG_IMAGE}"
     echo "pg_server=$(psql_db postgres -At -c 'show server_version')"
-    echo "pseudonym_key_id=$(printf '%s' "${SALT}" | sha256sum | cut -c1-16)"
+    echo "pseudonym_key_id=$(pseudonym_key_id "${SALT}")"
     echo "app_database=$([[ -n "${APP}" ]] && echo separate || echo shared)"
     echo "total_kib=${total_kb}"
     for role in "${ROLES[@]}"; do

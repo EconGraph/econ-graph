@@ -66,7 +66,13 @@ dump: the app tables are in `econ_graph` and are sanitized there. With
 `--output-dir DIR` chooses the output directory. A run into a directory
 that already holds a fixture of the same inputs and mode leaves its fixture
 files unchanged and exits 0 if its actual dump size also meets the requested
-CI subset cap; any other existing directory is refused. A lower cap can reject an existing subset
+CI subset cap. A nonempty `FIXTURE_SALT_FILE` must also be readable and valid,
+and its normalized key must match the single `pseudonym_key_id` in the cached
+MANIFEST. A missing key, invalid key or different key refuses reuse without
+changing the fixture or creating a key. Without that override (including an
+empty value), reuse retains the MANIFEST's original key without reading or
+creating a default key. Select a new output directory to build with a rotated
+key. Any other existing directory is refused. A lower cap can reject an existing subset
 without replacing or deleting it. The chosen output parent receives
 `.fixture-build.lock` even on reuse, and temporary sibling directories and the
 output during a new build. Choose an output parent separate from input backup
@@ -112,7 +118,11 @@ Pseudonyms are keyed by a host-local secret,
 key and the lower-cased value. The same address gets the same pseudonym in
 every table, every database and every fixture built with the same key, and
 without the key a guessed address can't be checked against a pseudonym. The
-MANIFEST records which key was used (`pseudonym_key_id`), not the key.
+MANIFEST records which key was used (`pseudonym_key_id`), not the key. Key
+files are normalized by retaining lowercase hex digits and must contain at
+least 32 such digits; the identifier is the first 16 hex digits of sha256 of
+that normalized value, without a trailing newline. Different paths or
+whitespace around the same normalized key therefore select the same key.
 
 ### App tables
 

@@ -63,10 +63,13 @@ fi
         self.docker_log = self.root / "docker.log"
         self.env = dict(os.environ, PATH=str(binary_dir) + os.pathsep + os.environ["PATH"],
                         FIXTURE_TEST_DOCKER_LOG=str(self.docker_log),
-                        ECONGRAPH_CONFIG_DIR=str(self.root / "config"))
+                        ECONGRAPH_CONFIG_DIR=str(self.root / "config"),
+                        XDG_CONFIG_HOME=str(self.root / "default-config"))
+        self.env.pop("FIXTURE_SALT_FILE", None)
 
     def manifest(self, mode="ci-subset"):
-        lines = ["mode=" + mode]
+        lines = ["mode=" + mode,
+                 "pseudonym_key_id=" + hashlib.sha256(("a" * 64).encode()).hexdigest()[:16]]
         if mode == "ci-subset":
             lines += ["subset.series=300", "subset.max_points=5000"]
         for name in ("econ_graph", "keycloak"):
@@ -108,6 +111,98 @@ fi
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("fixture files unchanged", result.stderr)
                 self.assertEqual(self.snapshot(), before)
+
+    def test_explicit_key_selection_must_match_cached_fixture(self):
+        before = self.snapshot()
+        for index, (value, accepted) in enumerate((("a" * 64, True), ("b" * 64, False),
+                                (" \n".join(["a" * 16] * 4) + "\n", True))):
+            key = self.root / ("key-" + str(index))
+            self.env["FIXTURE_SALT_FILE"] = str(key)
+            with self.subTest(accepted=accepted, normalized=value == "a" * 64):
+                key.write_text(value)
+                result = self.reuse(8)
+                if accepted:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("explicitly selected pseudonym key", result.stderr)
+                self.assertEqual(key.read_text(), value)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_missing_or_invalid_explicit_key_refuses_without_creating_key(self):
+        key = self.root / "absent-parent" / "key"
+        self.env["FIXTURE_SALT_FILE"] = str(key)
+        before = self.snapshot()
+        result = self.reuse(8)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not read pseudonym key", result.stderr)
+        self.assertFalse(key.parent.exists())
+        key.parent.mkdir()
+        for value in ("", "not a valid key"):
+            with self.subTest(value=value):
+                key.write_text(value)
+                result = self.reuse(8)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("at least 32 hex digits", result.stderr)
+                self.assertEqual(key.read_text(), value)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_implicit_reuse_does_not_create_or_read_default_key(self):
+        default_key = Path(self.env["XDG_CONFIG_HOME"]) / "econgraph/fixture-salt"
+        result = self.reuse(8)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(default_key.parent.exists())
+        self.env["FIXTURE_SALT_FILE"] = ""
+        result = self.reuse(8)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(default_key.parent.exists())
+        default_key.parent.mkdir(parents=True)
+        default_key.write_text("invalid default key must not be opened")
+        result = self.reuse(8)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(default_key.read_text(), "invalid default key must not be opened")
+
+    def test_explicit_key_requires_single_matching_manifest_identifier(self):
+        key = self.root / "key"
+        key.write_text("a" * 64)
+        self.env["FIXTURE_SALT_FILE"] = str(key)
+        manifest = self.output / "MANIFEST"
+        original = manifest.read_text()
+        identifier = next(line for line in original.splitlines()
+                          if line.startswith("pseudonym_key_id="))
+        for text in (original.replace(identifier + "\n", ""),
+                     original + identifier + "\n",
+                     original + "pseudonym_key_id=\n",
+                     original.replace(identifier, "pseudonym_key_id=not-hex")):
+            with self.subTest(manifest=text):
+                manifest.write_text(text)
+                self.checksums()
+                before = self.snapshot()
+                result = self.reuse(8)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("explicitly selected pseudonym key", result.stderr)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_explicit_matching_key_still_obeys_subset_cap(self):
+        key = self.root / "key"
+        key.write_text("a" * 64)
+        self.env["FIXTURE_SALT_FILE"] = str(key)
+        before = self.snapshot()
+        result = self.reuse(1)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("4 KiB, over --subset-max-kb 1", result.stderr)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_dry_run_does_not_read_or_create_explicit_key(self):
+        key = self.root / "absent-parent" / "key"
+        self.env["FIXTURE_SALT_FILE"] = str(key)
+        result = subprocess.run(
+            [shutil.which("bash"), str(BUILD), "--data", str(self.inputs / "econ_graph.dump"),
+             "--keycloak", str(self.inputs / "keycloak.dump"), "--output-dir", str(self.output),
+             "--dry-run"], env=self.env, text=True, capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(key.parent.exists())
 
     def test_cap_counts_all_dumps_and_rounds_up_partial_kib(self):
         (self.output / "keycloak.dump").write_bytes(b"y" * 1025)
