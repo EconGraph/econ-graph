@@ -319,6 +319,28 @@ jobs:
         scripts/deploy/test-postgres-backup-scripts.sh
         scripts/deploy/test-backup-postgres-now.sh
 
+  sanitized-fixture:
+    name: Sanitized Fixture Builder
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: ${{ needs.changes.outputs.code == 'true' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
+
+    # build-sanitized-fixture.sh against synthetic data, app and Keycloak dumps
+    # with planted e-mail addresses, JWTs, client secrets and sessions: all are
+    # scrubbed, leaving out any sanitize step fails verification, --dry-run
+    # writes nothing. The runner's daemon is rootful, which the test allows.
+    - name: Check the sanitized fixture builder
+      run: scripts/fixtures/test-build-sanitized-fixture.sh
+
   deploy-manifests:
     name: Deploy Manifest Rendering
     runs-on: ubuntu-latest
@@ -2658,6 +2680,7 @@ jobs:
       - backend-build-cache
       - prometheus-rules
       - postgres-backup-scripts
+      - sanitized-fixture
       - deploy-manifests
       - backend-migration-validation-tests
       - keycloak-realm-import
@@ -2693,6 +2716,7 @@ jobs:
         # The ordinary suite: in a merge group each of these must succeed.
         MUST_RUN: >-
           changes accessibility backend-build-cache prometheus-rules postgres-backup-scripts
+          sanitized-fixture
           deploy-manifests backend-migration-validation-tests keycloak-realm-import
           backend-smoke-tests
           chart-api-integration-tests backend-mcp-integration-tests
