@@ -393,6 +393,11 @@ jobs:
         shellcheck -x scripts/deploy/recreate-kind-cluster.sh scripts/deploy/test-recreate-kind-cluster.sh
         scripts/deploy/test-recreate-kind-cluster.sh
 
+    # teardown, recreate and migrate refuse before dumping, stopping or
+    # deleting anything when the encrypted backup can't be made (all stubs).
+    - name: Check that destructive scripts refuse without an encrypted backup
+      run: scripts/deploy/test-backup-refusals.sh
+
     # The operator scripts (Postgres backup/restore, Let's Encrypt setup and test)
     # reach only the kind cluster's kubectl with --context, never plain kubectl.
     - name: Check which cluster the operator scripts reach
@@ -420,6 +425,9 @@ jobs:
     # and no network (kubectl, kind, docker, curl and the rest are stubs here).
     - name: Check that the monitoring lint contacts nothing
       run: scripts/test-monitoring-lint-only.sh
+
+    - name: Check backup snapshots against concurrent PostgreSQL writers
+      run: python3 scripts/backup/test-snapshot-counts.py
 
     # install-kind.sh and the kind resolver in lib/kind-env.sh, offline:
     # curl and sha256sum are stubs, nothing is downloaded or installed.
@@ -734,6 +742,15 @@ jobs:
 
     - name: Check the branch-clone delete safety checks
       run: scripts/backup/test-branch-clone.sh
+
+    - name: Check public-key backup encryption and safe recovery
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y age
+        scripts/backup/test-encryption.sh
+
+    - name: Check the restore drill's encrypted-bundle guard and tmpfs data directory
+      run: scripts/backup/test-restore-drill.sh
 
     - name: Check that the off-site wrapper refuses forget and prune
       run: scripts/backup/test-offsite-restic.sh

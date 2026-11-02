@@ -72,6 +72,7 @@ esac
 [ -n "$FROM" ] || die "--from DIR is required"
 [ -d "$FROM" ] || die "$FROM is not a directory"
 FROM="$(cd "$FROM" && pwd)"
+FROM="$(backup_source_dir "$FROM")"
 [ "${DRY_RUN}" = "true" ] && log "DRY RUN: checks run for real; nothing is changed"
 
 # Fail loudly: a restore that doesn't reproduce the backup must not look like

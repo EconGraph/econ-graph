@@ -24,7 +24,8 @@ set -uo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+RAM="$(mktemp -d /dev/shm/econgraph-teardown-test.XXXXXXXX)"
+trap 'rm -rf "$WORK" "$RAM"' EXIT
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp"
 PLAIN="$WORK/plain-kubectl.log"
 KIND_CALLS="$WORK/kind-kubectl.log"
@@ -74,7 +75,18 @@ case " \$* " in
     *"{.status.phase}"*) echo "\${FAKE_PHASE:-Running}"; exit 0 ;;
     *" pg_dump "*) [ -z "\${FAKE_DUMP_FAILS:-}" ] || exit 1; echo "PGDMP stub archive"; exit 0 ;;
     *"to_regclass"*) echo t; exit 0 ;;
-    *" psql "*) echo 7; exit 0 ;;
+    *" psql "*)
+        # Snapshot export and count queries now arrive on stdin. Keep the
+        # exporter alive until its transaction is closed, as PostgreSQL does.
+        while IFS= read -r line; do
+            case "\$line" in
+                *pg_export_snapshot*) echo 00000001-00000001-1 ;;
+                *to_regclass*) echo t; exit 0 ;;
+                *count*) echo 7; exit 0 ;;
+                *ROLLBACK*) exit 0 ;;
+            esac
+        done
+        exit 0 ;;
     *" -o name"*) echo "persistentvolumeclaim/stub"; exit 0 ;;
     *"{.spec.volumeName}"*) echo pv-stub; exit 0 ;;
     *" patch "*) exit 0 ;;
@@ -109,6 +121,28 @@ case "\$1 \$2" in
 esac
 exit 0
 EOF
+# These stubs exercise publication ordering with synthetic bytes. Real
+# encryption and recipient parsing are tested by test-encryption.sh.
+cat >"$WORK/bin/age" <<'EOF'
+#!/bin/sh
+output=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -r|-i) shift 2 ;;
+        -o) output="$2"; shift 2 ;;
+        -d) shift ;;
+        *) cat "$1"; exit ;;
+    esac
+done
+if [ -n "$output" ]; then cat >"$output"; else cat; fi
+EOF
+cat >"$WORK/bin/age-keygen" <<'EOF'
+#!/bin/sh
+case "$1" in
+    -o) printf 'synthetic identity\n' >"$2" ;;
+    -y) echo age1synthetic ;;
+esac
+EOF
 chmod +x "$WORK/bin/"* "$WORK/kind-kubectl"
 # The scripts run kind from its pinned path (lib/kind-version.sh); the stub stands in there too.
 mkdir -p "$WORK/home/.local/share/econgraph/bin"
@@ -123,6 +157,7 @@ TEARDOWN_ENV=(
     -u ECONGRAPH_KUBE_DIR -u ECONGRAPH_SCRATCH_STORAGE -u DRY_RUN -u ASSUME_YES -u NAMESPACE
     -u ALLOW_MISSING_APP_DUMP -u ALLOW_MISSING_KEYCLOAK_DUMP
     HOME="$WORK/home" XDG_DATA_HOME="$WORK/home/.local/share" XDG_CACHE_HOME="$WORK/cache" TMPDIR="$WORK/tmp"
+    BACKUP_AGE_RECIPIENT=age1synthetic BACKUP_PLAINTEXT_ROOT="$RAM"
     ECONGRAPH_BACKUP_ROOT="$WORK/backups" PATH="$WORK/bin:/usr/local/bin:/usr/bin:/bin"
 )
 
@@ -304,7 +339,9 @@ first_dump="$(grep -n ' pg_dump ' "$KIND_CALLS" | head -1 | cut -d: -f1)"
 first_patch="$(grep -n ' patch ' "$KIND_CALLS" | head -1 | cut -d: -f1)"
 first_change="$(grep -nE ' (delete|patch) ' "$KIND_CALLS" | head -1 | cut -d: -f1)"
 if [ "$rc" -eq 0 ] && grep -q "App plane removed" <<<"$out" && [ -n "$backup_dir" ] &&
-    [ -s "$backup_dir/econ_graph.dump" ] && grep -q '^SERIES_COUNT=7$' "$backup_dir/counts.env" 2>/dev/null &&
+    [ -s "$backup_dir/backup.tar.age" ] && [ -s "$backup_dir/VERIFIED" ] &&
+    tar -xOf "$backup_dir/backup.tar.age" ./counts.env 2>/dev/null | grep -q '^SERIES_COUNT=7$' &&
+    tar -xOf "$backup_dir/backup.tar.age" ./econ_graph.dump 2>/dev/null | grep -q '^PGDMP' &&
     [ -n "$first_dump" ] && [ -n "$first_patch" ] && [ -n "$first_change" ] &&
     [ "$first_dump" -lt "$first_patch" ] && [ "$first_dump" -lt "$first_change" ]; then
     echo "ok   teardown.sh --yes dumps the databases and counts.env before it patches a PV to Retain or deletes anything"

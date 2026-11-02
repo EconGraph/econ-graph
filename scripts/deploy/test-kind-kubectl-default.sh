@@ -137,8 +137,10 @@ chmod +x "$WORK/bin/"* "$WORK/source/kubectl" "$CACHE/bin/kubectl" "$KIND_PINNED
 # deploy.sh runs from a copy of scripts/deploy only, so that it skips the
 # Grafana and monitoring linters (absent) and stops at its first apply.
 TREE="$WORK/tree"
-mkdir -p "$TREE/scripts" || exit 1
+mkdir -p "$TREE/scripts/backup" || exit 1
 cp -r "$PROJECT_ROOT/scripts/deploy" "$TREE/scripts/deploy" || exit 1
+# lib/kind-env.sh sources the backup encryption helpers.
+cp "$PROJECT_ROOT/scripts/backup/encryption.sh" "$TREE/scripts/backup/" || exit 1
 
 # run SCRIPT ARGS...: the script with none of KUBECTL, KUBECONFIG, DOCKER_HOST
 # (and the settings that would choose another cluster) set, the scratch HOME,
@@ -261,8 +263,9 @@ fi
 # read with a time limit, so a monitor left running fails the check instead of
 # hanging it.
 DTREE="$WORK/deploy-tree"
-mkdir -p "$DTREE/scripts" "$DTREE/k8s" || exit 1
+mkdir -p "$DTREE/scripts/backup" "$DTREE/k8s" || exit 1
 cp -r "$PROJECT_ROOT/scripts/deploy" "$DTREE/scripts/deploy" || exit 1
+cp "$PROJECT_ROOT/scripts/backup/encryption.sh" "$DTREE/scripts/backup/" || exit 1
 cp -r "$PROJECT_ROOT/k8s/manifests" "$DTREE/k8s/manifests" || exit 1
 for helper in apply-host-storage.sh create-secrets.sh protect-postgres-pv.sh install-gateway.sh; do
     printf '#!/bin/sh\necho "stub %s $*"\n' "$helper" >"$DTREE/scripts/deploy/$helper"
