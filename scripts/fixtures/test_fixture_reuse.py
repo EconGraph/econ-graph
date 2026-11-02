@@ -4,6 +4,7 @@
 Only Docker's rootless-info response and an uncontended flock are stubbed. The
 builder performs its real input hashing, checksum checks, identity comparison
 and byte counting. Run with Bash 4+ and GNU coreutils, as on the Linux CI runner.
+The --latest case also requires GNU find, which the host helper uses.
 """
 
 import hashlib
@@ -42,6 +43,7 @@ class FixtureReuseTest(unittest.TestCase):
         binary_dir.mkdir()
         stubs = {
             "docker": """#!/bin/sh
+printf '%s\\n' "$*" >>"$FIXTURE_TEST_DOCKER_LOG"
 if [ "$1" = info ]; then
     printf '28.0.0 ["name=rootless"]\\n'
 else
@@ -58,7 +60,10 @@ fi
             binary = binary_dir / name
             binary.write_text(content)
             binary.chmod(0o700)
-        self.env = dict(os.environ, PATH=str(binary_dir) + os.pathsep + os.environ["PATH"])
+        self.docker_log = self.root / "docker.log"
+        self.env = dict(os.environ, PATH=str(binary_dir) + os.pathsep + os.environ["PATH"],
+                        FIXTURE_TEST_DOCKER_LOG=str(self.docker_log),
+                        ECONGRAPH_CONFIG_DIR=str(self.root / "config"))
 
     def manifest(self, mode="ci-subset"):
         lines = ["mode=" + mode]
@@ -128,6 +133,49 @@ fi
         result = self.reuse(1, subset=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.snapshot(), before)
+
+    def test_mixed_encrypted_directory_never_selects_retained_plaintext(self):
+        for name in ("econ_graph-20261101-080000.dump.age", "latest.dump.age"):
+            with self.subTest(ciphertext=name):
+                encrypted = self.inputs / name
+                encrypted.symlink_to("missing-ciphertext")
+                result = subprocess.run(
+                    [shutil.which("bash"), str(BUILD), "--from-dir", str(self.inputs)],
+                    env=self.env, text=True, capture_output=True,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("decrypt the chosen archives on the operator host", result.stderr)
+                self.assertFalse(self.docker_log.exists())
+                encrypted.unlink()
+
+    def test_latest_encrypted_host_bundle_is_refused_without_falling_back(self):
+        find = subprocess.run(["find", "--version"], capture_output=True, text=True)
+        if "GNU findutils" not in find.stdout:
+            self.skipTest("The host --latest helper requires GNU find; exercised on Linux CI")
+        backup_root = self.root / "host-backups"
+        bundle = backup_root / "20261101T080000Z"
+        bundle.mkdir(parents=True)
+        (bundle / "VERIFIED").write_text("synthetic marker")
+        (bundle / "backup.tar.age").write_bytes(b"synthetic ciphertext")
+        result = subprocess.run(
+            [shutil.which("bash"), str(BUILD), "--latest"],
+            env=dict(self.env, BACKUP_ROOT=str(backup_root)), text=True, capture_output=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("decrypt the chosen archives on the operator host", result.stderr)
+        self.assertFalse(self.docker_log.exists())
+
+    def test_explicit_ciphertext_input_is_refused_before_docker_access(self):
+        archive = self.inputs / "econ_graph.dump.age"
+        archive.write_bytes(b"synthetic ciphertext")
+        result = subprocess.run(
+            [shutil.which("bash"), str(BUILD), "--data", str(archive),
+             "--keycloak", str(self.inputs / "keycloak.dump")],
+            env=self.env, text=True, capture_output=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("encrypted input is unsupported", result.stderr)
+        self.assertFalse(self.docker_log.exists())
 
 
 if __name__ == "__main__":
