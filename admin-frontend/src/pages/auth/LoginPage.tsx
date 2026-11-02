@@ -79,7 +79,6 @@ function LoginPage() {
             onChange={(e) => setUsername(e.target.value)}
             margin="normal"
             required
-            autoFocus
           />
           <TextField
             fullWidth

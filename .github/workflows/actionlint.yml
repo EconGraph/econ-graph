@@ -12,6 +12,8 @@ on:
       - 'ci/scripts/check_action_pins.py'
       - 'ci/scripts/test_action_pins.py'
       - 'ci/scripts/test_crawler_secrets.py'
+      - 'ci/scripts/test_accessibility_ci.py'
+      - 'ci/scripts/check-accessibility-jobs.sh'
       - 'ci/scripts/check-required-jobs.sh'
       - 'ci/scripts/test-check-required-jobs.sh'
       - 'scripts/github/**'
@@ -73,6 +75,7 @@ jobs:
         "$python" -m unittest discover -s ci/scripts -p 'test_action_pins.py'
         "$python" ci/scripts/check_action_pins.py
         "$python" -m unittest discover -s ci/scripts -p 'test_crawler_secrets.py'
+        "$python" -m unittest discover -s ci/scripts -p 'test_accessibility_ci.py'
 
     # The result jobs of the required workflows (ci-core.yml, release-e2e.yml)
     - name: Check the required-jobs gate

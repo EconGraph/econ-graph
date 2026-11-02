@@ -1,3 +1,4 @@
+import './financial-selection.css';
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -326,25 +327,25 @@ export const FinancialExport: React.FC<FinancialExportProps> = ({
                 <option value='CSV'>CSV</option>
                 <option value='JSON'>JSON</option>
               </select>
-              <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
+              <div className='financial-format-grid'>
                 {exportFormats.map(format => (
-                  <div
+                  <button
+                    type='button'
+                    aria-pressed={exportOptions.format === format.id}
                     key={format.id}
-                    className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                      exportOptions.format === format.id
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
+                    className='financial-selection financial-selection--format'
                     onClick={() => handleFormatChange(format.id)}
                   >
-                    <div className='flex items-center space-x-3'>
-                      <div className='text-blue-600'>{format.icon}</div>
-                      <div className='flex-1'>
-                        <h3 className='font-medium'>{format.name}</h3>
-                        <p className='text-sm text-muted-foreground'>{format.description}</p>
-                      </div>
-                    </div>
-                  </div>
+                    <span className='financial-selection__content'>
+                      <span className='financial-selection__icon'>{format.icon}</span>
+                      <span className='financial-selection__text'>
+                        <span className='financial-selection__title'>{format.name}</span>
+                        <span className='financial-selection__description'>
+                          {format.description}
+                        </span>
+                      </span>
+                    </span>
+                  </button>
                 ))}
               </div>
             </CardContent>

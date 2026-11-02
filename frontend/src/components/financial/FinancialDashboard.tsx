@@ -1,3 +1,4 @@
+import './financial-selection.css';
 import React, { useState, useEffect } from 'react';
 import {
   Card,
@@ -197,16 +198,17 @@ export const FinancialDashboard: React.FC<FinancialDashboardProps> = ({
                 <div className='space-y-3'>
                   {statements && statements.length > 0 ? (
                     statements.slice(0, 5).map((statement: any) => (
-                      <div
+                      <button
+                        type='button'
                         key={statement.id}
-                        className='flex items-center justify-between p-2 hover:bg-gray-50 rounded-md cursor-pointer'
+                        className='financial-selection financial-selection--filing'
                         onClick={() => setSelectedStatement(statement.id)}
                       >
-                        <Typography variant='body2'>
+                        <Typography variant='body2' component='span'>
                           {statement.type} - {statement.period}
                         </Typography>
                         <Clock size={16} className='text-muted-foreground' />
-                      </div>
+                      </button>
                     ))
                   ) : (
                     <Alert severity='info'>No financial statements available.</Alert>

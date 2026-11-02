@@ -10,7 +10,7 @@ export default function App() {
   const [tab, setTab] = useState(0);
   return (
     <QueryClientProvider client={queryClient}>
-      <Container maxWidth="xl" sx={{ py: 3 }}>
+      <Container component="main" maxWidth="xl" sx={{ py: 3 }}>
         <Paper sx={{ p: 3 }}>
           <Typography variant="h3" component="h1">
             EconGraph Crawler Administration

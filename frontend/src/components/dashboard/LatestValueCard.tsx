@@ -164,6 +164,7 @@ export const LatestValueCard: React.FC<LatestValueCardProps> = ({ entry }) => {
       {series && observation && (
         <Box sx={{ px: 2, pb: 2 }}>
           <SourceNoticePanel
+            ariaLabel={`Source notice for ${entry.label}`}
             sourceName={series.source?.name ?? ''}
             notice={series.source?.notice}
             lastUpdated={series.lastUpdated ?? null}

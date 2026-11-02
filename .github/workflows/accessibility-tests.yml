@@ -4,490 +4,326 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: 'Branch to run accessibility tests on (leave empty for current branch)'
+        description: "Branch to run accessibility tests on (leave empty for current branch)"
         required: false
-        default: ''
+        default: ""
         type: string
       test_type:
-        description: 'Type of accessibility tests to run'
+        description: "Type of accessibility tests to run"
         required: true
-        default: 'all'
+        default: "all"
         type: choice
         options:
-          - 'all'
-          - 'static'
-          - 'runtime'
-          - 'manual'
+          - "all"
+          - "static"
+          - "runtime"
+          - "manual"
+  # Core CI calls the same audits so their result gates Core CI Result.
+  # PR/push triggers live in the caller; do not run duplicate audit matrices.
+  workflow_call:
+    inputs:
+      branch:
+        required: false
+        default: ""
+        type: string
+      test_type:
+        required: false
+        default: "all"
+        type: string
   schedule:
     # Run every Monday at 9 AM UTC (weekly accessibility audit)
-    - cron: '0 9 * * 1'
+    - cron: "0 9 * * 1"
+
+permissions:
+  contents: read
 
 jobs:
   accessibility-static-analysis:
-    name: Accessibility Static Analysis (eslint-plugin-jsx-a11y)
+    name: Accessibility Static Analysis (${{ matrix.project }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    if: ${{ github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'static' || github.event_name == 'schedule' }}
-
+    timeout-minutes: 20
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.test_type == 'all' || inputs.test_type == 'static' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [frontend, admin-frontend]
+    defaults:
+      run:
+        working-directory: ${{ matrix.project }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      with:
-        persist-credentials: false
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Setup Node.js
-      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-      with:
-        node-version-file: '.nvmrc'
-        cache: 'npm'
-        cache-dependency-path: |
-          frontend/package-lock.json
-          admin-frontend/package-lock.json
-
-    - name: Install frontend dependencies
-      working-directory: frontend
-      run: npm ci
-
-    - name: Install admin-frontend dependencies
-      working-directory: admin-frontend
-      run: npm ci
-
-    - name: Install accessibility linting tools
-      run: |
-        echo "Installing eslint-plugin-jsx-a11y for accessibility linting..."
-        cd frontend && npm install --save-dev eslint-plugin-jsx-a11y
-        cd ../admin-frontend && npm install --save-dev eslint-plugin-jsx-a11y
-
-    - name: Configure ESLint for accessibility
-      run: |
-        echo "Configuring ESLint for accessibility testing..."
-
-        # Frontend ESLint config
-        cat > frontend/.eslintrc.accessibility.js << 'EOF'
-        module.exports = {
-          extends: [
-            'react-app',
-            'react-app/jest',
-            'plugin:jsx-a11y/recommended'
-          ],
-          plugins: ['jsx-a11y'],
-          rules: {
-            'jsx-a11y/aria-props': 'error',
-            'jsx-a11y/aria-proptypes': 'error',
-            'jsx-a11y/aria-unsupported-elements': 'error',
-            'jsx-a11y/role-has-required-aria-props': 'error',
-            'jsx-a11y/role-supports-aria-props': 'error',
-            'jsx-a11y/alt-text': 'error',
-            'jsx-a11y/anchor-has-content': 'error',
-            'jsx-a11y/anchor-is-valid': 'error',
-            'jsx-a11y/aria-activedescendant-has-tabindex': 'error',
-            'jsx-a11y/aria-props': 'error',
-            'jsx-a11y/aria-proptypes': 'error',
-            'jsx-a11y/aria-role': 'error',
-            'jsx-a11y/aria-unsupported-elements': 'error',
-            'jsx-a11y/click-events-have-key-events': 'error',
-            'jsx-a11y/heading-has-content': 'error',
-            'jsx-a11y/html-has-lang': 'error',
-            'jsx-a11y/iframe-has-title': 'error',
-            'jsx-a11y/img-redundant-alt': 'error',
-            'jsx-a11y/no-access-key': 'error',
-            'jsx-a11y/no-autofocus': 'error',
-            'jsx-a11y/no-distracting-elements': 'error',
-            'jsx-a11y/no-interactive-element-to-noninteractive-role': 'error',
-            'jsx-a11y/no-noninteractive-element-interactions': 'error',
-            'jsx-a11y/no-noninteractive-element-to-interactive-role': 'error',
-            'jsx-a11y/no-noninteractive-tabindex': 'error',
-            'jsx-a11y/no-redundant-roles': 'error',
-            'jsx-a11y/no-static-element-interactions': 'error',
-            'jsx-a11y/role-has-required-aria-props': 'error',
-            'jsx-a11y/role-supports-aria-props': 'error',
-            'jsx-a11y/scope': 'error',
-            'jsx-a11y/tabindex-no-positive': 'error'
-          }
-        };
-        EOF
-
-        # Admin-frontend ESLint config
-        cat > admin-frontend/.eslintrc.accessibility.js << 'EOF'
-        module.exports = {
-          extends: [
-            'react-app',
-            'react-app/jest',
-            'plugin:jsx-a11y/recommended'
-          ],
-          plugins: ['jsx-a11y'],
-          rules: {
-            'jsx-a11y/aria-props': 'error',
-            'jsx-a11y/aria-proptypes': 'error',
-            'jsx-a11y/aria-unsupported-elements': 'error',
-            'jsx-a11y/role-has-required-aria-props': 'error',
-            'jsx-a11y/role-supports-aria-props': 'error',
-            'jsx-a11y/alt-text': 'error',
-            'jsx-a11y/anchor-has-content': 'error',
-            'jsx-a11y/anchor-is-valid': 'error',
-            'jsx-a11y/aria-activedescendant-has-tabindex': 'error',
-            'jsx-a11y/aria-props': 'error',
-            'jsx-a11y/aria-proptypes': 'error',
-            'jsx-a11y/aria-role': 'error',
-            'jsx-a11y/aria-unsupported-elements': 'error',
-            'jsx-a11y/click-events-have-key-events': 'error',
-            'jsx-a11y/heading-has-content': 'error',
-            'jsx-a11y/html-has-lang': 'error',
-            'jsx-a11y/iframe-has-title': 'error',
-            'jsx-a11y/img-redundant-alt': 'error',
-            'jsx-a11y/no-access-key': 'error',
-            'jsx-a11y/no-autofocus': 'error',
-            'jsx-a11y/no-distracting-elements': 'error',
-            'jsx-a11y/no-interactive-element-to-noninteractive-role': 'error',
-            'jsx-a11y/no-noninteractive-element-interactions': 'error',
-            'jsx-a11y/no-noninteractive-element-to-interactive-role': 'error',
-            'jsx-a11y/no-noninteractive-tabindex': 'error',
-            'jsx-a11y/no-redundant-roles': 'error',
-            'jsx-a11y/no-static-element-interactions': 'error',
-            'jsx-a11y/role-has-required-aria-props': 'error',
-            'jsx-a11y/role-supports-aria-props': 'error',
-            'jsx-a11y/scope': 'error',
-            'jsx-a11y/tabindex-no-positive': 'error'
-          }
-        };
-        EOF
-
-    - name: Run accessibility linting on frontend
-      working-directory: frontend
-      run: |
-        echo "Running accessibility linting on frontend..."
-        npx eslint src --config .eslintrc.accessibility.js --format=json > accessibility-lint-results.json || true
-        npx eslint src --config .eslintrc.accessibility.js
-
-    - name: Run accessibility linting on admin-frontend
-      working-directory: admin-frontend
-      run: |
-        echo "Running accessibility linting on admin-frontend..."
-        npx eslint src --config .eslintrc.accessibility.js --format=json > accessibility-lint-results.json || true
-        npx eslint src --config .eslintrc.accessibility.js
-
-    - name: Upload accessibility lint results
-      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-      with:
-        name: accessibility-lint-results-${{ github.sha }}
-        path: |
-          frontend/accessibility-lint-results.json
-          admin-frontend/accessibility-lint-results.json
-        retention-days: 7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.branch || github.ref }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+      - name: Install locked dependencies
+        id: install
+        shell: bash
+        run: |
+          mkdir -p accessibility-results
+          set -o pipefail
+          npm ci 2>&1 | tee accessibility-results/static-install.log
+      - name: Run accessibility static checks
+        id: audit
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint:accessibility -- --format json --output-file accessibility-results/static.json 2>&1 | tee accessibility-results/static.log
+      - name: Record check outcomes
+        if: always()
+        env:
+          INSTALL_RESULT: ${{ steps.install.outcome }}
+          AUDIT_RESULT: ${{ steps.audit.outcome }}
+        run: |
+          mkdir -p accessibility-results
+          node --input-type=module -e '
+            import { writeFileSync } from "node:fs";
+            writeFileSync("accessibility-results/static-status.json", JSON.stringify({
+              project: "${{ matrix.project }}", check: "static",
+              install: process.env.INSTALL_RESULT, audit: process.env.AUDIT_RESULT
+            }));'
+          echo "${{ matrix.project }} static: install=$INSTALL_RESULT, audit=$AUDIT_RESULT" >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve reports and logs even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: accessibility-static-${{ matrix.project }}-${{ github.run_attempt }}
+          path: ${{ matrix.project }}/accessibility-results/
+          retention-days: 7
 
   accessibility-runtime-tests:
-    name: Accessibility Runtime Tests (axe-core)
+    name: Accessibility Runtime Tests (${{ matrix.project }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    if: ${{ github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'runtime' || github.event_name == 'schedule' }}
-
+    timeout-minutes: 20
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.test_type == 'all' || inputs.test_type == 'runtime' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [frontend, admin-frontend]
+    defaults:
+      run:
+        working-directory: ${{ matrix.project }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      with:
-        persist-credentials: false
-        ref: ${{ github.event.inputs.branch || github.ref }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.branch || github.ref }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+      - name: Install locked dependencies
+        id: install
+        shell: bash
+        run: |
+          mkdir -p accessibility-results
+          set -o pipefail
+          npm ci 2>&1 | tee accessibility-results/runtime-install.log
+      - name: Run accessibility runtime checks
+        id: audit
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:accessibility 2>&1 | tee accessibility-results/runtime.log
+      - name: Record check outcomes
+        if: always()
+        env:
+          INSTALL_RESULT: ${{ steps.install.outcome }}
+          AUDIT_RESULT: ${{ steps.audit.outcome }}
+        run: |
+          mkdir -p accessibility-results
+          node --input-type=module -e '
+            import { writeFileSync } from "node:fs";
+            writeFileSync("accessibility-results/runtime-status.json", JSON.stringify({
+              project: "${{ matrix.project }}", check: "runtime",
+              install: process.env.INSTALL_RESULT, audit: process.env.AUDIT_RESULT
+            }));'
+          echo "${{ matrix.project }} runtime: install=$INSTALL_RESULT, audit=$AUDIT_RESULT" >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve reports and logs even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: accessibility-runtime-${{ matrix.project }}-${{ github.run_attempt }}
+          path: ${{ matrix.project }}/accessibility-results/
+          retention-days: 7
 
-    - name: Setup Node.js
-      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-      with:
-        node-version-file: '.nvmrc'
-        cache: 'npm'
-        cache-dependency-path: |
-          frontend/package-lock.json
-          admin-frontend/package-lock.json
-
-    - name: Install frontend dependencies
-      working-directory: frontend
-      run: npm ci
-
-    - name: Install admin-frontend dependencies
-      working-directory: admin-frontend
-      run: npm ci
-
-    - name: Install accessibility testing tools
-      run: |
-        echo "Installing axe-core and jest-axe for runtime accessibility testing..."
-        cd frontend && npm install --save-dev @axe-core/react jest-axe
-        cd ../admin-frontend && npm install --save-dev @axe-core/react jest-axe
-
-    - name: Configure accessibility testing setup
-      run: |
-        echo "Setting up accessibility testing configuration..."
-
-        # Frontend setupTests.ts
-        cat > frontend/src/setupTests.accessibility.ts << 'EOF'
-        import { toHaveNoViolations } from 'jest-axe';
-        import '@axe-core/react';
-
-        expect.extend(toHaveNoViolations);
-        EOF
-
-        # Admin-frontend setupTests.ts
-        cat > admin-frontend/src/setupTests.accessibility.ts << 'EOF'
-        import { toHaveNoViolations } from 'jest-axe';
-        import '@axe-core/react';
-
-        expect.extend(toHaveNoViolations);
-        EOF
-
-        # Frontend accessibility test configuration
-        cat > frontend/jest.config.accessibility.js << 'EOF'
-        const baseConfig = require('./jest.config.js');
-
-        module.exports = {
-          ...baseConfig,
-          setupFilesAfterEnv: [
-            '<rootDir>/src/setupTests.accessibility.ts',
-            ...(baseConfig.setupFilesAfterEnv || [])
-          ],
-          testMatch: [
-            '**/__tests__/**/*.accessibility.test.{js,jsx,ts,tsx}',
-            '**/*.accessibility.test.{js,jsx,ts,tsx}'
-          ],
-          collectCoverageFrom: [
-            'src/**/*.{js,jsx,ts,tsx}',
-            '!src/**/*.d.ts',
-            '!src/setupTests.accessibility.ts'
-          ]
-        };
-        EOF
-
-        # Admin-frontend accessibility test configuration
-        cat > admin-frontend/jest.config.accessibility.js << 'EOF'
-        const baseConfig = require('./jest.config.js');
-
-        module.exports = {
-          ...baseConfig,
-          setupFilesAfterEnv: [
-            '<rootDir>/src/setupTests.accessibility.ts',
-            ...(baseConfig.setupFilesAfterEnv || [])
-          ],
-          testMatch: [
-            '**/__tests__/**/*.accessibility.test.{js,jsx,ts,tsx}',
-            '**/*.accessibility.test.{js,jsx,ts,tsx}'
-          ],
-          collectCoverageFrom: [
-            'src/**/*.{js,jsx,ts,tsx}',
-            '!src/**/*.d.ts',
-            '!src/setupTests.accessibility.ts'
-          ]
-        };
-        EOF
-
-    - name: Create sample accessibility tests
-      run: |
-        echo "Creating sample accessibility tests..."
-
-        # Frontend sample accessibility test
-        mkdir -p frontend/src/__tests__/accessibility
-        cat > frontend/src/__tests__/accessibility/App.accessibility.test.tsx << 'EOF'
-        import React from 'react';
-        import { render } from '@testing-library/react';
-        import { axe, toHaveNoViolations } from 'jest-axe';
-        import App from '../App';
-
-        expect.extend(toHaveNoViolations);
-
-        describe('App Accessibility Tests', () => {
-          it('should not have accessibility violations', async () => {
-            const { container } = render(<App />);
-            const results = await axe(container);
-            expect(results).toHaveNoViolations();
-          });
-        });
-        EOF
-
-        # Admin-frontend sample accessibility test
-        mkdir -p admin-frontend/src/__tests__/accessibility
-        cat > admin-frontend/src/__tests__/accessibility/App.accessibility.test.tsx << 'EOF'
-        import React from 'react';
-        import { render } from '@testing-library/react';
-        import { axe, toHaveNoViolations } from 'jest-axe';
-        import App from '../App';
-
-        expect.extend(toHaveNoViolations);
-
-        describe('App Accessibility Tests', () => {
-          it('should not have accessibility violations', async () => {
-            const { container } = render(<App />);
-            const results = await axe(container);
-            expect(results).toHaveNoViolations();
-          });
-        });
-        EOF
-
-    - name: Run accessibility runtime tests on frontend
-      working-directory: frontend
-      run: |
-        echo "Running accessibility runtime tests on frontend..."
-        npm test -- --config=jest.config.accessibility.js --coverage --testNamePattern="accessibility" || echo "Accessibility tests completed with results"
-
-    - name: Run accessibility runtime tests on admin-frontend
-      working-directory: admin-frontend
-      run: |
-        echo "Running accessibility runtime tests on admin-frontend..."
-        npm test -- --config=jest.config.accessibility.js --coverage --testNamePattern="accessibility" || echo "Accessibility tests completed with results"
-
-    - name: Upload accessibility test results
-      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-      with:
-        name: accessibility-test-results-${{ github.sha }}
-        path: |
-          frontend/coverage/
-          admin-frontend/coverage/
-        retention-days: 7
+  accessibility-browser-tests:
+    name: Financial keyboard and focus (Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.test_type == 'all' || inputs.test_type == 'runtime' }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.branch || github.ref }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked dependencies
+        id: install
+        run: npm ci
+      - name: Install locked Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Check financial selection layout, keyboard use and focus
+        id: audit
+        run: npm run test:accessibility:browser
+      - name: Record check outcomes
+        if: always()
+        env:
+          INSTALL_RESULT: ${{ steps.install.outcome }}
+          AUDIT_RESULT: ${{ steps.audit.outcome }}
+        run: |
+          mkdir -p accessibility-results
+          node --input-type=module -e '
+            import { writeFileSync } from "node:fs";
+            writeFileSync("accessibility-results/browser-status.json", JSON.stringify({
+              project: "frontend", check: "browser",
+              install: process.env.INSTALL_RESULT, audit: process.env.AUDIT_RESULT
+            }));'
+      - name: Preserve browser reports even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: accessibility-browser-frontend-${{ github.run_attempt }}
+          path: |
+            frontend/accessibility-results/
+            frontend/test-results/
+            frontend/playwright-report/
+          retention-days: 7
 
   accessibility-manual-tests:
     name: Accessibility Manual Testing Guidelines
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: ${{ github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'manual' || github.event_name == 'schedule' }}
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.test_type == 'all' || inputs.test_type == 'manual')) }}
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      with:
-        persist-credentials: false
-        ref: ${{ github.event.inputs.branch || github.ref }}
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.inputs.branch || github.ref }}
 
-    - name: Generate accessibility testing report
-      run: |
-        {
-          echo "# Accessibility Testing Report"
-          echo ""
-          echo "## Static Analysis Results"
-          echo "- ESLint with jsx-a11y plugin configured"
-          echo "- 50+ accessibility rules enabled"
-          echo "- Covers ARIA, roles, and semantic HTML"
-          echo ""
-          echo "## Runtime Testing Results"
-          echo "- axe-core integration configured"
-          echo "- WCAG compliance testing enabled"
-          echo "- Jest integration for automated testing"
-          echo ""
-          echo "## Manual Testing Checklist"
-          echo "### Keyboard Navigation"
-          echo "- [ ] Tab navigation works correctly"
-          echo "- [ ] Focus indicators are visible"
-          echo "- [ ] Skip links are available"
-          echo ""
-          echo "### Screen Reader Testing"
-          echo "- [ ] All interactive elements are announced"
-          echo "- [ ] Form labels are properly associated"
-          echo "- [ ] ARIA labels are descriptive"
-          echo ""
-          echo "### Visual Accessibility"
-          echo "- [ ] Color contrast meets WCAG AA standards"
-          echo "- [ ] Text is readable at 200% zoom"
-          echo "- [ ] No content relies solely on color"
-          echo ""
-          echo "### Mobile Accessibility"
-          echo "- [ ] Touch targets are at least 44px"
-          echo "- [ ] Gestures work with assistive technology"
-          echo "- [ ] Orientation changes are supported"
-        } > accessibility-test-report.md
+      - name: Generate accessibility testing report
+        run: |
+          {
+            echo "# Accessibility Testing Report"
+            echo ""
+            echo "## Automated Checks (see job results)"
+            echo "- ESLint with jsx-a11y plugin configured"
+            echo "- Complete recommended jsx-a11y rules audited"
+            echo "- Covers ARIA, roles, and semantic HTML"
+            echo ""
+            echo "## Runtime Check Scope"
+            echo "- axe-core integration configured"
+            echo "- axe checks in jsdom; browser and manual checks remain necessary"
+            echo "- Vitest integration for automated testing"
+            echo ""
+            echo "## Manual Testing Checklist"
+            echo "### Keyboard Navigation"
+            echo "- [ ] Tab navigation works correctly"
+            echo "- [ ] Focus indicators are visible"
+            echo "- [ ] Skip links are available"
+            echo ""
+            echo "### Screen Reader Testing"
+            echo "- [ ] All interactive elements are announced"
+            echo "- [ ] Form labels are properly associated"
+            echo "- [ ] ARIA labels are descriptive"
+            echo ""
+            echo "### Visual Accessibility"
+            echo "- [ ] Color contrast meets WCAG AA standards"
+            echo "- [ ] Text is readable at 200% zoom"
+            echo "- [ ] No content relies solely on color"
+            echo ""
+            echo "### Mobile Accessibility"
+            echo "- [ ] Touch targets are at least 44px"
+            echo "- [ ] Gestures work with assistive technology"
+            echo "- [ ] Orientation changes are supported"
+          } > accessibility-test-report.md
 
-    - name: Upload accessibility testing report
-      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-      with:
-        name: accessibility-test-report-${{ github.sha }}
-        path: accessibility-test-report.md
-        retention-days: 30
+      - name: Upload accessibility testing report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: accessibility-manual-${{ github.run_attempt }}
+          path: accessibility-test-report.md
+          retention-days: 30
 
   accessibility-summary:
     name: Accessibility Testing Summary
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [accessibility-static-analysis, accessibility-runtime-tests, accessibility-manual-tests]
+    needs:
+      [
+        accessibility-static-analysis,
+        accessibility-runtime-tests,
+        accessibility-browser-tests,
+        accessibility-manual-tests,
+      ]
     if: always()
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      with:
-        persist-credentials: false
-        ref: ${{ github.event.inputs.branch || github.ref }}
-
-    - name: Download accessibility artifacts
-      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-      with:
-        pattern: accessibility-*
-        path: accessibility-results/
-
-    - name: Generate accessibility summary
-      run: |
-        {
-          echo "# 🎯 Accessibility Testing Summary"
-          echo ""
-          echo "## 📊 Test Results Overview"
-          echo ""
-          echo "### Static Analysis (eslint-plugin-jsx-a11y)"
-          if [ -f "accessibility-results/accessibility-lint-results-${{ github.sha }}/frontend/accessibility-lint-results.json" ]; then
-            echo "✅ Frontend accessibility linting completed"
-          else
-            echo "⚠️ Frontend accessibility linting results not found"
-          fi
-          if [ -f "accessibility-results/accessibility-lint-results-${{ github.sha }}/admin-frontend/accessibility-lint-results.json" ]; then
-            echo "✅ Admin-frontend accessibility linting completed"
-          else
-            echo "⚠️ Admin-frontend accessibility linting results not found"
-          fi
-          echo ""
-          echo "### Runtime Testing (axe-core)"
-          if [ -d "accessibility-results/accessibility-test-results-${{ github.sha }}/frontend/coverage" ]; then
-            echo "✅ Frontend accessibility runtime tests completed"
-          else
-            echo "⚠️ Frontend accessibility runtime test results not found"
-          fi
-          if [ -d "accessibility-results/accessibility-test-results-${{ github.sha }}/admin-frontend/coverage" ]; then
-            echo "✅ Admin-frontend accessibility runtime tests completed"
-          else
-            echo "⚠️ Admin-frontend accessibility runtime test results not found"
-          fi
-          echo ""
-          echo "### Manual Testing Guidelines"
-          if [ -f "accessibility-results/accessibility-test-report-${{ github.sha }}/accessibility-test-report.md" ]; then
-            echo "✅ Manual testing checklist generated"
-          else
-            echo "⚠️ Manual testing checklist not found"
-          fi
-          echo ""
-          echo "## 🛠️ Tools Used"
-          echo "- **eslint-plugin-jsx-a11y**: Static accessibility linting"
-          echo "- **axe-core-react**: Runtime WCAG compliance testing"
-          echo "- **jest-axe**: Jest integration for accessibility testing"
-          echo ""
-          echo "## 📚 Documentation"
-          echo "- [Accessibility Testing Guidelines](../docs/technical/accessibility-testing-guidelines.md)"
-          echo "- [Frontend Developer Guide](../personas/frontend-developer.md)"
-          echo ""
-          echo "## 🎯 Next Steps"
-          echo "1. Review static analysis results and fix any accessibility violations"
-          echo "2. Run runtime tests locally: \`npm test -- --testPathPattern=accessibility\`"
-          echo "3. Follow manual testing checklist for comprehensive accessibility validation"
-          echo "4. Integrate accessibility testing into development workflow"
-        } > accessibility-summary.md
-
-    - name: Upload accessibility summary
-      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-      with:
-        name: accessibility-summary-${{ github.sha }}
-        path: accessibility-summary.md
-        retention-days: 30
-
-    - name: Comment on PR (if applicable)
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-      with:
-        script: |
-          const fs = require('fs');
-          const summary = fs.readFileSync('accessibility-summary.md', 'utf8');
-
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: summary
-          });
+      - name: Checkout gate scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.branch || github.ref }}
+          sparse-checkout: ci/scripts
+      - name: Download accessibility reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: accessibility-*-${{ github.run_attempt }}
+          path: accessibility-results
+      - name: Summarize actual job and check outcomes
+        if: always()
+        env:
+          STATIC_RESULT: ${{ needs.accessibility-static-analysis.result }}
+          RUNTIME_RESULT: ${{ needs.accessibility-runtime-tests.result }}
+          BROWSER_RESULT: ${{ needs.accessibility-browser-tests.result }}
+          MANUAL_RESULT: ${{ needs.accessibility-manual-tests.result }}
+        run: |
+          python - <<'PYTHON'
+          import json, os
+          from pathlib import Path
+          lines = ['# Accessibility Testing Summary', '', '| Job | Result |', '| --- | --- |']
+          for name in ['STATIC', 'RUNTIME', 'BROWSER', 'MANUAL']:
+              lines.append(f'| {name.lower()} | {os.environ[name + "_RESULT"]} |')
+          lines += ['', '| Project | Check | Install | Audit |', '| --- | --- | --- | --- |']
+          reports = list(Path('accessibility-results').rglob('*-status.json'))
+          for file in sorted(reports):
+              report = json.loads(file.read_text())
+              lines.append('| ' + ' | '.join(report[key] for key in ['project', 'check', 'install', 'audit']) + ' |')
+          if not reports:
+              lines += ['', 'No per-project outcome reports were available. Consult job logs; missing reports do not imply a pass.']
+          lines += ['', 'Static checks use ESLint jsx-a11y; runtime checks use Vitest and axe-core.',
+                    'A skipped audit did not run. A manual checklist is guidance, not a completed audit.',
+                    'Run locally in either project: `npm ci`, `npm run lint:accessibility`, `npm run test:accessibility`.',
+                    'jsdom cannot fully check layout, contrast, keyboard use or screen reader behavior; browser/manual audits remain necessary.']
+          summary = '\n'.join(lines) + '\n'
+          Path('accessibility-summary.md').write_text(summary)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write(summary)
+          PYTHON
+      - name: Upload accessibility summary
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: accessibility-summary-${{ github.run_attempt }}
+          path: accessibility-summary.md
+          retention-days: 30
+      - name: Require every selected accessibility audit to pass
+        if: always()
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+          TEST_TYPE: ${{ inputs.test_type || 'all' }}
+        run: ci/scripts/check-accessibility-jobs.sh
