@@ -2678,6 +2678,7 @@ jobs:
       - backend-build-cache
       - prometheus-rules
       - postgres-backup-scripts
+      - sanitized-fixture
       - deploy-manifests
       - backend-migration-validation-tests
       - keycloak-realm-import
@@ -2712,7 +2713,7 @@ jobs:
         EVENT: ${{ github.event_name }}
         # The ordinary suite: in a merge group each of these must succeed.
         MUST_RUN: >-
-          changes accessibility backend-build-cache prometheus-rules postgres-backup-scripts
+          changes accessibility backend-build-cache prometheus-rules postgres-backup-scripts sanitized-fixture
           deploy-manifests backend-migration-validation-tests keycloak-realm-import
           backend-smoke-tests
           chart-api-integration-tests backend-mcp-integration-tests

@@ -52,6 +52,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD="${ROOT}/scripts/fixtures/build-sanitized-fixture.sh"
+python3 "${ROOT}/scripts/fixtures/test_fixture_reuse.py"
 PG_IMAGE="postgres:18"
 KC_IMAGE="$(sed -n 's/^ *image: *\(quay.io\/keycloak\/keycloak:[^ ]*\).*/\1/p' \
     "${ROOT}/k8s/manifests/keycloak/deployment.yaml" | head -n 1)"
@@ -646,6 +647,18 @@ check "crawl state is emptied" \
 check "the app tables are whole and sanitized" \
     test "$(q subset "select (select count(*) from users) || ',' || (select count(*) from audit_logs) || ',' || (select count(*) from user_sessions)")" = "3,3,0"
 check "the subset carries the sanitized Keycloak dump" test -s "${OUT_SUB}/keycloak.dump"
+# Reusing a real subset must still honor the caller's cap. No new Docker build
+# is needed, and a refusal must leave the already published fixture untouched.
+SUB_SUMS="$(cd "${OUT_SUB}" && sha256sum -- *.dump MANIFEST SHA256SUMS)"
+if run_build subset-reuse-cap --from-dir "${HOSTDIR}" --ci-subset --subset-series 30 \
+    --subset-max-kb 1 --output-dir "${OUT_SUB}"; then
+    bad "an existing subset over a lower --subset-max-kb fails"
+else
+    check "an existing subset over a lower --subset-max-kb fails" \
+        grep -q "over --subset-max-kb 1" "${LOG}/subset-reuse-cap.log"
+fi
+check "a cap refusal preserves the existing subset" \
+    test "$(cd "${OUT_SUB}" && sha256sum -- *.dump MANIFEST SHA256SUMS)" = "${SUB_SUMS}"
 if run_build subset-cap --from-dir "${HOSTDIR}" --ci-subset --subset-max-kb 1 --output-dir "${W}/out/subset-cap"; then
     bad "a subset over --subset-max-kb fails"
 else

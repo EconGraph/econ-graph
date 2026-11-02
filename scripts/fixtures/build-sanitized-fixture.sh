@@ -210,6 +210,21 @@ build_key() {
     done
 }
 
+# The cap is an acceptance condition, not part of the content identity: an
+# existing fixture may be reused under another cap only when its actual dumps fit.
+dump_kib() {
+    local bytes
+    bytes="$(cat "$1"/*.dump | wc -c)" || return 1
+    echo $(( (bytes + 1023) / 1024 ))
+}
+
+check_subset_cap() {
+    local total_kb="$1"
+    if [[ "${MODE}" == ci-subset ]] && (( total_kb > SUBSET_MAX_KB )); then
+        die "the CI subset is ${total_kb} KiB, over --subset-max-kb ${SUBSET_MAX_KB}; fixture output is not modified"
+    fi
+}
+
 # ---------------------------------------------------------------- docker
 
 # (The --latest subshell's DOCKER_HOST never reaches here, as intended.)
@@ -255,6 +270,8 @@ KEY="$(build_key)"
 if [[ -e "${OUT}" ]]; then
     if [[ -f "${OUT}/MANIFEST" ]] && (cd "${OUT}" && sha256sum --quiet -c SHA256SUMS >/dev/null 2>&1) \
         && diff -q <(printf '%s\n' "${KEY}") <(grep -E '^(mode|subset\.series|subset\.max_points|input\.[a-z_]+\.sha256)=' "${OUT}/MANIFEST") >/dev/null; then
+        total_kb="$(dump_kib "${OUT}")" || die "could not measure existing fixture dumps"
+        check_subset_cap "${total_kb}"
         log "${OUT} already holds this fixture (same mode and inputs); nothing to do"
         exit 0
     fi
@@ -402,10 +419,8 @@ for role in "${ROLES[@]}"; do
     pg rm -f /tmp/check.dump
 done
 
-total_kb=$(( ($(cat "${WORK}"/*.dump | wc -c) + 1023) / 1024 ))
-if [[ "${MODE}" == ci-subset ]] && (( total_kb > SUBSET_MAX_KB )); then
-    die "the CI subset is ${total_kb} KiB, over --subset-max-kb ${SUBSET_MAX_KB}; nothing written to ${OUT}"
-fi
+total_kb="$(dump_kib "${WORK}")"
+check_subset_cap "${total_kb}"
 
 {
     echo "format=1"
