@@ -7,7 +7,7 @@
 # on), the units in scripts/backup/systemd/ to ~/.config/systemd/user/, and
 # enables:
 #   econgraph-dump.timer              nightly 10:00 UTC
-#   econgraph-restore-drill.timer     Sundays 11:00 UTC
+#   econgraph-restore-drill.timer     disabled: encrypted restore is interactive
 #   econgraph-backup-freshness.timer  hourly
 #   econgraph-offsite.timer           daily 10:45 UTC, only if
 #                                     ~/.config/econgraph/restic.env exists
@@ -55,9 +55,15 @@ if [ "$linger" != "yes" ]; then
 fi
 
 run mkdir -p "$LIB_DIR" "$UNIT_DIR"
-for f in "$SRC_DIR"/*.sh; do
+for f in "$SRC_DIR"/*.sh "$SRC_DIR"/unpack-backup.py; do
     case "$(basename "$f")" in install-user-units.sh) continue ;; esac
     run install -m 0755 "$f" "$LIB_DIR/"
+done
+# The nightly writer shares the deploy writer's verified payload and helpers.
+run mkdir -p "$LIB_DIR/kind-lib"
+for helper in kind-env.sh cluster-role.sh kind-version.sh agent-access.sh; do
+    [[ -f "$SRC_DIR/../deploy/lib/$helper" ]] || continue
+    run install -m 0755 "$SRC_DIR/../deploy/lib/$helper" "$LIB_DIR/kind-lib/"
 done
 rev="$(git -C "$SRC_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "+ record installed revision $rev in $LIB_DIR/INSTALLED_FROM"
@@ -70,7 +76,10 @@ done
 run systemctl --user daemon-reload
 
 if [ "$ENABLE" = "true" ]; then
-    timers=(econgraph-dump.timer econgraph-restore-drill.timer econgraph-backup-freshness.timer)
+    # Private identities are never installed for a timer. A restore drill is
+    # interactive after public-key encryption, rather than a false PASS.
+    run systemctl --user disable --now econgraph-restore-drill.timer
+    timers=(econgraph-dump.timer econgraph-backup-freshness.timer)
     if [ -f "${HOME}/.config/econgraph/restic.env" ]; then
         timers+=(econgraph-offsite.timer)
     else

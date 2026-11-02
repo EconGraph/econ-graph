@@ -17,8 +17,9 @@
 #   - every kubectl call goes to the kind cluster's own kubectl with --context kind-NAME
 #     (backup-kind-databases.sh's calls run on that cluster's own kubeconfig).
 #
-# Everything runs in a scratch directory: HOME, XDG_CACHE_HOME, TMPDIR, the backup root
-# and the Docker host point into it.
+# Everything runs in scratch directories: HOME, XDG_CACHE_HOME, TMPDIR, the backup root
+# and the Docker host point into one; plaintext staging uses private /dev/shm.
+# The age stubs process only synthetic bytes, never an operator identity.
 #
 # Usage: scripts/deploy/test-convert-app-data.sh (from anywhere)
 set -euo pipefail
@@ -32,12 +33,20 @@ fail() {
 }
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+ram=""
+trap 'rm -rf "$tmp" "$ram"' EXIT
+ram="$(mktemp -d /dev/shm/econgraph-conversion-test.XXXXXXXX)"
 export STUB_LOG="$tmp/log" STUB_KUBECTL="$tmp/kubectl"
 mkdir -p "$tmp/home" "$tmp/tmpdir" "$tmp/bin"
 export HOME="$tmp/home" XDG_CACHE_HOME="$tmp/cache" TMPDIR="$tmp/tmpdir"
 export ECONGRAPH_BACKUP_ROOT="$tmp/econgraph-backups"
 export ECONGRAPH_DOCKER_HOST="unix://$tmp/no-docker.sock"
+export ECONGRAPH_CONFIG_DIR="$tmp/no-operator-config"
+# This suite tests conversion ordering/cleanup, not cryptography. As in the
+# teardown stub suite, only synthetic bytes and a synthetic public recipient
+# are used; test-encryption.sh exercises real age parsing and round trips.
+export BACKUP_AGE_RECIPIENT=age1synthetic BACKUP_PLAINTEXT_ROOT="$ram"
+unset BACKUP_STAGING_LOCK_FD BACKUP_LOCK_NONBLOCK BACKUP_LOCK_TIMEOUT
 unset KUBECONFIG KUBECTL KIND_CLUSTER NAMESPACE ECONGRAPH_SCRATCH_STORAGE ECONGRAPH_KUBE_DIR PG_IMAGE
 export PYTHON="$tmp/bin/python-stub"
 export PATH="$tmp/bin:$PATH"
@@ -123,7 +132,17 @@ case "$*" in
   "exec postgresql-0 -c postgresql -- psql "*"to_regclass"*)
     case "${STUB_SOURCE_USERS:-t}" in fails) exit 1 ;; hang) exec sleep 300 ;; *) echo "${STUB_SOURCE_USERS:-t}" ;; esac ;;
   "exec "*" -- psql "*"to_regclass"*) echo t ;;
-  "exec "*" -- psql "*) echo 3 ;;
+  "exec "*" -- psql "*)
+    # Backup counts and pg_dump share a live exported snapshot. Queries arrive
+    # on stdin; keep its session open until the production code rolls it back.
+    while IFS= read -r line; do
+      case "$line" in
+        *pg_export_snapshot*) echo 00000001-00000001-1 ;;
+        *to_regclass*) echo t; exit 0 ;;
+        *count*) echo 3; exit 0 ;;
+        *ROLLBACK*) exit 0 ;;
+      esac
+    done ;;
   "get secret "*" -o name --ignore-not-found") ;;
   # create-secrets.sh, run by the wrapper to rewrite app-database-url. The URL it writes is
   # recorded without its password (host, port and database) in $STUB_LOG.app_url.
@@ -153,6 +172,30 @@ case "$*" in
   *) echo "stub kubectl: unexpected call: $*" >&2; exit 1 ;;
 esac
 STUB
+
+# Pass-through seal/open stubs preserve publication/checksum control flow.
+# No real identity or encryption is needed in this conversion-only suite.
+cat >"$tmp/bin/age" <<'STUB'
+#!/usr/bin/env bash
+output=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -r|-i) shift 2 ;;
+    -o) output="$2"; shift 2 ;;
+    -d) shift ;;
+    *) cat "$1"; exit ;;
+  esac
+done
+if [ -n "$output" ]; then cat >"$output"; else cat; fi
+STUB
+cat >"$tmp/bin/age-keygen" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  -o) printf 'synthetic identity\n' >"$2" ;;
+  -y) echo age1synthetic ;;
+esac
+STUB
+chmod +x "$tmp/bin/age" "$tmp/bin/age-keygen"
 
 # The stub conversion: records its arguments and checks the credentials it was given.
 #   STUB_PY_FAIL=WORD  exit 1 when an argument equals WORD (killing STUB_KILL_READER first)
@@ -264,6 +307,16 @@ STUB_SERVER=17.4 convert --cluster kg-test --source-map "$map" --dry-run && fail
 grep -q "pg_dump 18, the servers run PostgreSQL 17" "$tmp/out" || fail "no message for a version mismatch"
 STUB_ACTIVE_JOBS=crawler-migrate convert --cluster kg-test --source-map "$map" --dry-run && fail "running Job accepted"
 grep -q "Jobs are running (crawler-migrate)" "$tmp/out" || fail "no message for a running Job"
+
+# Missing encryption setup must fail closed before a backup or downtime.
+# The positive runs below prove that a configured synthetic backup can proceed.
+reset
+if BACKUP_AGE_RECIPIENT='' convert --cluster kg-test --source-map "$map"; then
+  fail "missing encryption recipient accepted"
+fi
+grep -q "set BACKUP_AGE_RECIPIENT" "$tmp/out" || fail "missing recipient: no setup message"
+never "scale |patch |port-forward|get secret .* jsonpath|pg_dump -Fc|^python " \
+  "missing recipient: acted before encrypted backup was configured"
 
 # A real copy run.
 reset

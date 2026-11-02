@@ -5,7 +5,10 @@
 # with row counts and the app Secrets the databases were initialised with:
 #
 #   ~/econgraph-backups/<UTC timestamp>/
-#     econ_graph.dump  keycloak.dump  counts.env  secrets/<name>.yaml   (owner-only)
+#     backup.tar.age  SHA256SUMS  VERIFIED   (owner-only)
+# The encrypted payload holds all dumps, counts.env and secrets/<name>.yaml.
+# Set BACKUP_AGE_RECIPIENT to the maintainer public age recipient.
+# Open it interactively with scripts/backup/open-backup.sh before restoring.
 #
 # Read-only against the cluster. restore-kind-databases.sh restores from it.
 # Never deletes or rotates older backups. --dry-run prints the steps; it fails
