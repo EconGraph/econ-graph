@@ -149,8 +149,13 @@ grants still belong to the same (pseudonymous) users.
 Realms, roles, clients (with their redirect URIs and scopes), client scopes,
 groups, role mappings, group memberships, authentication flows and identity
 provider definitions are kept. A fixture has no password for any account,
-the master realm's admin included: a lab creates its own admin with
-`kc.sh bootstrap-admin user` or `KC_BOOTSTRAP_ADMIN_*`, and its own users.
+the master realm's admin included. To recover lab administration, stop all
+Keycloak nodes and run `kc.sh bootstrap-admin user` with the same fixture
+database settings used by the server. Use that temporary administrator to
+create permanent lab access and users, then remove the temporary account.
+Startup `KC_BOOTSTRAP_ADMIN_*` variables do not recover access when the master
+realm already exists; follow Keycloak's
+[admin recovery guide](https://www.keycloak.org/server/bootstrap-admin-recovery).
 
 ### Data tables
 
