@@ -37,7 +37,8 @@ PRODUCTION_KEYCLOAK = {'db-password': 'restored-db-password', 'admin-username': 
 
 # The local names production's manifests run, as the candidate's do; production's daemon has
 # the backend's (pointing at production's image) and not the others.
-LOCAL_IMAGES = sorted({c['image'] for f in ('backend-deployment.yaml', 'crawler-worker.yaml', 'frontend-deployment.yaml')
+LOCAL_IMAGES = sorted({c['image'] for f in ('backend-deployment.yaml', 'crawler-worker.yaml', 'frontend-deployment.yaml',
+                                                        'chart-api-deployment.yaml')
                        for d in yaml.safe_load_all((ROOT / 'k8s/manifests' / f).read_text()) if d and d.get('spec')
                        for c in d['spec'].get('template', {}).get('spec', {}).get('containers', [])
                        if c.get('image', '').startswith('econ-graph-')})
@@ -182,7 +183,7 @@ elif prog in ('load-release-images.sh',):
     for image in CONFIG.get('local_images', []):
         state.setdefault('daemon_images', {})[image] = 'sha256:candidate'
     save()
-    code = 3
+    code = state.get('load_status', 3)
 elif prog == 'deploy.sh':
     import yaml
     docs = [d for d in yaml.safe_load_all(open('k8s/manifests/crawler-worker.yaml')) if d]
@@ -231,6 +232,7 @@ class DeployRcToQaTest(unittest.TestCase):
                        'k8s/manifests/keycloak/realm-import-job.yaml', 'k8s/manifests/keycloak/deployment.yaml',
                        'k8s/manifests/crawler-worker.yaml', 'k8s/manifests/backend-deployment.yaml',
                        'k8s/manifests/frontend-deployment.yaml', 'k8s/manifests/crawler-migrate-job.yaml',
+                       'k8s/manifests/chart-api-deployment.yaml',
                        'scripts/deploy/lib/agent-access.sh',
                        'scripts/deploy/lib/kind-version.sh'):
             target = self.repo / source
@@ -392,6 +394,27 @@ class DeployRcToQaTest(unittest.TestCase):
         self.assertIn('is not the btrfs subvolume this script created', result.stdout)
 
     # --- A full run, a rerun and a teardown ---------------------------------------------------
+
+    def test_chart_image_alias_is_restored_after_loading_candidate(self):
+        chart, = [ref for ref in LOCAL_IMAGES if ref.startswith('econ-graph-chart-api:')]
+        original = {LOCAL_IMAGES[0]: 'sha256:production', chart: 'sha256:production-chart'}
+        self.write_state({'daemon_images': original})
+        result = self.deploy()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.read_state()['daemon_images'], original)
+        self.assertTrue(any(c['prog'] == 'docker' and
+                            c['args'] == ['tag', 'sha256:production-chart', chart]
+                            for c in self.logged()))
+
+    def test_chart_image_alias_is_restored_when_loading_fails(self):
+        chart, = [ref for ref in LOCAL_IMAGES if ref.startswith('econ-graph-chart-api:')]
+        original = {LOCAL_IMAGES[0]: 'sha256:production', chart: 'sha256:production-chart'}
+        self.write_state({'daemon_images': original, 'load_status': 1})
+        result = self.deploy()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('load-release-images.sh failed', result.stdout)
+        self.assertEqual(self.read_state()['daemon_images'], original)
+        self.assertFalse(any(c['prog'] == 'deploy.sh' for c in self.logged()))
 
     def test_deploy_rerun_and_teardown(self):
         result = self.deploy()
