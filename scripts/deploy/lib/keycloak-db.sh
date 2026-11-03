@@ -26,10 +26,12 @@ KDB_DATABASE="keycloak"
 KDB_DEPLOYMENT="keycloak"
 # The context deploy.sh deploys to.
 KDB_DEFAULT_CONTEXT="kind-${KIND_CLUSTER}"
-# Where the dumps go: one directory per dump, named by its UTC time, under the
-# backup root of lib/kind-env.sh (ECONGRAPH_BACKUP_ROOT). Nothing here is ever
-# deleted by these scripts.
-KDB_BACKUP_ROOT="${KEYCLOAK_BACKUP_ROOT:-${BACKUP_ROOT}/keycloak}"
+# The writer and off-site selector read the same persistent root configuration.
+# Only root values cross this boundary; kind-env.sh retains its Docker/context settings.
+# shellcheck source=scripts/backup/keycloak-root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../backup/keycloak-root.sh"
+load_keycloak_backup_root || return
+KDB_BACKUP_ROOT="$KEYCLOAK_BACKUP_ROOT_RESOLVED"
 
 # Exact row count of every table in the public schema of database $1, one
 # "table<TAB>count" line per table, sorted by table name.

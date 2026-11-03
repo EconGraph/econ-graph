@@ -215,8 +215,25 @@ procedure in the [QA guide](../release/v4.0.0-qa.md#keycloak-rollback).
 These upgrade bundles accumulate on the data disk by default, rather than on
 the backup pool. Once configured, `offsite-restic.sh` includes verified upgrade
 directories alongside nightly bundles, using the same root overrides. An
-explicitly configured missing `KEYCLOAK_BACKUP_ROOT`, or failure to enumerate
-a backup root, refuses the upload. The absent default upgrade root is optional.
+explicitly configured missing `KEYCLOAK_BACKUP_ROOT`, or failure to inspect or
+enumerate a backup root, refuses the upload before restic runs. Writer and
+off-site selection use the same root resolver: assignments in
+`$ECONGRAPH_CONFIG_DIR/backup.env` (default `~/.config/econgraph/backup.env`)
+override inherited environment values. A nonempty `KEYCLOAK_BACKUP_ROOT` selects
+an explicit root; otherwise the root is `$ECONGRAPH_BACKUP_ROOT/keycloak`, or
+`~/econgraph-backups/keycloak` when that base is unset. The nightly `BACKUP_ROOT`
+(which may use the backup pool) never selects the upgrade root. Clearing
+`KEYCLOAK_BACKUP_ROOT` in the file restores the default-root behavior even if
+the environment supplied a value. Root selection does not import backup.env's
+unrelated Docker or cluster settings into the deploy writer.
+
+An absent default upgrade root is optional, including when only
+`ECONGRAPH_BACKUP_ROOT` supplies its base. Python 3 (also used by the host backup
+tools) checks the root: only a true not-found result permits that optional skip;
+permission errors, non-directory ancestors and other inspection errors fail.
+Both roots may be command-line symlinks to directories; enumeration follows
+those root links without following links inside the tree, and excludes
+unpublished `.partial` and `.failed` bundles.
 Legacy verified plaintext directories are included too; restic protects the
 remote copy but does not encrypt the original directory. Until off-site
 storage is configured, copy useful bundles to a second location off this disk.
