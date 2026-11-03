@@ -464,3 +464,11 @@ Steps:
 
 A squash is a normal PR (draft, review, CodeRabbit, CI). On a release branch it is forward-ported
 to `main` like any other fix.
+
+### Train 4 native observation storage
+
+The data migration set owns `iceberg_catalog`, `iceberg_commits`,
+`timeseries_recovery_state` and `timeseries_recovery_transitions`. The catalog
+records dataset metadata pointers and commit receipts; recovery state and its
+transition ledger serialize backend selection and fenced writes. PostgreSQL
+observations remain the rollback shadow.

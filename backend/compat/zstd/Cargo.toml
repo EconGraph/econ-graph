@@ -1,0 +1,27 @@
+[package]
+name = "zstd"
+version = "0.13.3"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Compatibility facade forwarding to patched zstd 0.14.3; contains no upstream implementation"
+
+[dependencies]
+zstd_patched = { package = "zstd", version = "=0.14.3", default-features = false }
+
+[features]
+arrays = ["zstd_patched/arrays"]
+bindgen = ["zstd_patched/bindgen"]
+debug = ["zstd_patched/debug"]
+default = ["legacy", "arrays", "zdict_builder"]
+doc-cfg = ["zstd_patched/doc-cfg"]
+experimental = ["zstd_patched/experimental"]
+fat-lto = ["zstd_patched/fat-lto"]
+legacy = ["zstd_patched/legacy"]
+no_asm = ["zstd_patched/no_asm"]
+pkg-config = ["zstd_patched/pkg-config"]
+thin = ["zstd_patched/thin"]
+thin-lto = ["zstd_patched/thin-lto"]
+wasm = ["zstd_patched/wasm"]
+zdict_builder = ["zstd_patched/zdict_builder"]
+zstdmt = ["zstd_patched/zstdmt"]

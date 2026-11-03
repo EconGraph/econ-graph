@@ -1,5 +1,5 @@
 # Build context for backend/Dockerfile. Only Cargo.toml, Cargo.lock, crates/,
-# migrations/ and flags/ are used.
+# compat/, migrations/ and flags/ are used.
 
 # Rust build artifacts
 target/
@@ -42,3 +42,8 @@ README.md
 tmp/
 temp/
 **/*.rs.bk
+
+# Workspace path facades are source inputs, not optional development tooling.
+!compat/
+!compat/**/Cargo.toml
+!compat/**/src/*.rs
