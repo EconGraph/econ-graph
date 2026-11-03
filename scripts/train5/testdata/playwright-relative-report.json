@@ -1,0 +1,55 @@
+{
+  "fixture_notice": "Recorded from installed Playwright 1.63.0 with a synthetic no-browser/no-backend test. Machine root anonymized; result/path structure unchanged.",
+  "config": {
+    "rootDir": "/recorded/frontend/tests/e2e/train5",
+    "metadata": {
+      "fixture_notice": "Synthetic reporter regression only; no real backend or browser.",
+      "actualWorkers": 1
+    }
+  },
+  "errors": [],
+  "suites": [
+    {
+      "title": "company-research.spec.ts",
+      "file": "company-research.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "company research workflow",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 8,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-31T18:02:35.555Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69f28297c24cb688197f-b93747236e5762bd2cb9",
+          "file": "company-research.spec.ts",
+          "line": 3,
+          "column": 1
+        }
+      ]
+    }
+  ]
+}
