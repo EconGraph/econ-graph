@@ -112,6 +112,13 @@ fn check_roots(
                         | "datasets"
                         | "dataset"
                         | "crossSection"
+                        | "companies"
+                        | "company"
+                        | "companyFacts"
+                        | "financialStatement"
+                        | "companyRatios"
+                        | "companyPeers"
+                        | "companyResearchTargetExists"
                         | "__typename"
                         | "__schema"
                         | "__type"
@@ -158,6 +165,8 @@ mod tests {
             "query Series { ...Control } fragment Control on Query { crawlerStatus { isRunning } }",
             "{ ... on Query { users { totalCount } } }",
             "{ users @skip(if:true) {totalCount} }",
+            "{ companyNotes(cik:\"42\") {id} }",
+            "{ ... on Query { note:companyNotes(cik:\"42\") @skip(if:true) {id} } }",
             "subscription { __typename }",
             "query A {__typename} query B {__typename}",
             "{...A} fragment A on Query {...B} fragment B on Query {...A}",
@@ -170,6 +179,9 @@ mod tests {
         }
         for query in [
             "{ seriesList { nodes { id } } }",
+            "{ companies {nodes {cik}} company(cik:\"42\") {cik} companyFacts(cik:\"42\") {nodes {value}} }",
+            "{ ...Company } fragment Company on Query { statement:financialStatement(cik:\"42\",kind:BALANCE_SHEET) {lines {key}} companyResearchTargetExists(anchor:\"{}\") }",
+            "{ companyRatios(cik:\"42\",periodEnd:\"2024-12-31\") {name} companyPeers(cik:\"42\",periodEnd:\"2024-12-31\") {company {cik}} }",
             "query Read { ...Data } fragment Data on Query { seriesData(seriesId:\"id\") {totalCount} }",
             "{... on Query { alias:datasets {id} }}",
         ] {

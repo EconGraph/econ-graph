@@ -294,3 +294,221 @@ async fn independent_data_does_not_downgrade_an_unverifiable_token_to_anonymous(
         "IDENTITY_UNAVAILABLE"
     );
 }
+
+/// Company research consumes the same independently signed data boundary as macro series.
+/// Run through `scripts/train5/with-company-api.sh` to exercise the feature candidate;
+/// the ordinary release profile proves that the disabled feature cannot expose its data.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn independent_company_http_keeps_catalog_audience_and_app_content_boundaries() {
+    use diesel_async::RunQueryDsl;
+    use econ_graph_core::models::{
+        AnnotationAnchor, CompanyFact, CompanyFactSubject, ResearchPeriod, SubjectRef,
+    };
+
+    let auth_db = ScratchDatabase::create("company_boundary_auth");
+    let data_db = ScratchDatabase::create("company_boundary_data");
+    run_migration_set(&auth_db.url, MigrationSet::App)
+        .await
+        .unwrap();
+    run_migration_set(&data_db.url, MigrationSet::Data)
+        .await
+        .unwrap();
+    let auth = AppPool(create_pool(&auth_db.url).await.unwrap());
+    let data = create_pool(&data_db.url).await.unwrap();
+    let day = chrono::NaiveDate::from_ymd_opt(2024, 12, 31).unwrap();
+    let fact = CompanyFact::new(
+        CompanyFactSubject {
+            cik: "0000000042".into(),
+            taxonomy: "us-gaap".into(),
+            concept: "Assets".into(),
+            period: ResearchPeriod::Instant { date: day },
+            unit: "USD".into(),
+        },
+        "0000000042-25-000001".into(),
+        chrono::NaiveDate::from_ymd_opt(2025, 2, 1).unwrap(),
+        "12345678901234567890.123456789".parse().unwrap(),
+        "10-K".into(),
+    )
+    .unwrap();
+    {
+        let mut conn = data.get().await.unwrap();
+        diesel::sql_query("INSERT INTO companies(id,cik,name,sic_code) VALUES($1,'0000000042','Company boundary fixture','3571')")
+            .bind::<diesel::sql_types::Uuid, _>(Uuid::new_v4())
+            .execute(&mut conn).await.unwrap();
+        diesel::sql_query("INSERT INTO company_facts(id,cik,taxonomy,concept,period_end,unit,accession,filed,value,form) VALUES($1,'0000000042','us-gaap','Assets','2024-12-31','USD','0000000042-25-000001','2025-02-01',$2,'10-K')")
+            .bind::<diesel::sql_types::Uuid, _>(fact.id)
+            .bind::<diesel::sql_types::Numeric, _>(&fact.value)
+            .execute(&mut conn).await.unwrap();
+    }
+    let anchor = AnnotationAnchor::V1 {
+        target: fact.reference().unwrap(),
+        chart_id: None,
+        observation_date: None,
+        observation_value: None,
+    };
+    let anchor_literal = serde_json::to_string(&serde_json::to_string(&anchor).unwrap()).unwrap();
+    let query = format!(
+        r#"{{
+        companies {{ nodes {{ cik }} }}
+        company(cik:"42") {{ cik }}
+        companyFacts(cik:"42") {{ nodes {{ value }} }}
+        financialStatement(cik:"42",kind:BALANCE_SHEET) {{ lines {{ key }} }}
+        companyRatios(cik:"42",periodEnd:"2024-12-31") {{ name }}
+        companyPeers(cik:"42",periodEnd:"2024-12-31") {{ company {{ cik }} }}
+        companyResearchTargetExists(anchor:{anchor_literal})
+    }}"#
+    );
+    let issuer = TestIssuer::start().await;
+    let mut config = issuer.config();
+    config.audience = super::data_access::DATA_AUDIENCE.into();
+    let verifier = OidcVerifier::with_client(
+        config,
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+    );
+    let (url, _server) = serve(
+        Databases {
+            app: auth,
+            data: Some(DataPool(data)),
+        },
+        verifier,
+        ServicePlane::Data,
+    );
+    let subject = Uuid::new_v4();
+    let mut claims = issuer.claims(subject, &["catalog.sec:read"]);
+    claims["aud"] = json!(["econ-graph-data"]);
+    let token = issuer.sign(&claims);
+
+    for bad in [None, Some("not-a-token")] {
+        assert_eq!(post(&url, bad, &query).await.0, 401);
+    }
+    let app_only = issuer.mint_token(subject, &["catalog.sec:read"]);
+    assert_eq!(post(&url, Some(&app_only), &query).await.0, 401);
+    let mut wrong_roles = claims.clone();
+    wrong_roles["roles"] = json!(["annotation:create"]);
+    assert_eq!(
+        post(&url, Some(&issuer.sign(&wrong_roles)), &query).await.0,
+        403
+    );
+    wrong_roles["roles"] = json!(["catalog.fred:read"]);
+    // Query each root separately: one non-null error in an aggregate query would
+    // otherwise erase the whole response and hide another root's missing guard.
+    for root_query in [
+        "{ companies { nodes { cik } } }".to_owned(),
+        "{ company(cik:\"42\") { cik } }".to_owned(),
+        "{ companyFacts(cik:\"42\") { nodes { value } } }".to_owned(),
+        "{ financialStatement(cik:\"42\",kind:BALANCE_SHEET) { lines { key } } }".to_owned(),
+        "{ companyRatios(cik:\"42\",periodEnd:\"2024-12-31\") { name } }".to_owned(),
+        "{ companyPeers(cik:\"42\",periodEnd:\"2024-12-31\") { company { cik } } }".to_owned(),
+        format!("{{ companyResearchTargetExists(anchor:{anchor_literal}) }}"),
+    ] {
+        let (status, denied) = post(&url, Some(&issuer.sign(&wrong_roles)), &root_query).await;
+        assert_eq!(status, 200, "{root_query}: {denied}");
+        assert_eq!(
+            denied["errors"][0]["extensions"]["code"],
+            if cfg!(flag_financial_components) {
+                "FORBIDDEN"
+            } else {
+                "FEATURE_DISABLED"
+            },
+            "{root_query}: {denied}"
+        );
+        assert!(
+            denied["data"].is_null()
+                || denied["data"]
+                    .as_object()
+                    .is_some_and(|fields| fields.values().all(Value::is_null)),
+            "{root_query}: {denied}"
+        );
+    }
+
+    let (status, result) = post(&url, Some(&token), &query).await;
+    assert_eq!(status, 200, "{result}");
+    if cfg!(flag_financial_components) {
+        assert!(result.get("errors").is_none(), "{result}");
+        assert_eq!(result["data"]["companies"]["nodes"][0]["cik"], "0000000042");
+        assert_eq!(result["data"]["company"]["cik"], "0000000042");
+        assert_eq!(
+            result["data"]["companyFacts"]["nodes"][0]["value"],
+            "12345678901234567890.123456789"
+        );
+        assert!(!result["data"]["financialStatement"]["lines"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(!result["data"]["companyRatios"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(result["data"]["companyPeers"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert_eq!(result["data"]["companyResearchTargetExists"], true);
+        // Exercise the app's actual preflight HTTP client against this signed data
+        // service, including its opt-in bearer forwarding and wrong-audience failure.
+        let client = econ_graph_services::services::series_check::DataPlaneClient::new(
+            &econ_graph_core::config::DataGraphqlConfig {
+                forward_authorization: true,
+                allow_insecure_authorization: true, // isolated loopback transport only
+                url: format!("{url}/graphql"),
+                host: None,
+                timeout: std::time::Duration::from_secs(5),
+            },
+        )
+        .unwrap();
+        assert!(client
+            .for_caller(Some(&format!("Bearer {token}")))
+            .company_research_target_exists(&anchor)
+            .await
+            .unwrap());
+        assert!(client
+            .for_caller(Some(&format!("Bearer {app_only}")))
+            .company_research_target_exists(&anchor)
+            .await
+            .is_err());
+        assert!(client
+            .company_research_target_exists(&anchor)
+            .await
+            .is_err());
+        let mut absent = anchor;
+        let AnnotationAnchor::V1 {
+            target: SubjectRef::FiledFact { filing, .. },
+            ..
+        } = &mut absent
+        else {
+            unreachable!()
+        };
+        filing.accession = "0000000042-25-000002".into();
+        let literal = serde_json::to_string(&serde_json::to_string(&absent).unwrap()).unwrap();
+        let result = post(
+            &url,
+            Some(&token),
+            &format!("{{companyResearchTargetExists(anchor:{literal})}}"),
+        )
+        .await
+        .1;
+        assert_eq!(
+            result["data"]["companyResearchTargetExists"], false,
+            "{result}"
+        );
+    } else {
+        assert_eq!(
+            result["errors"][0]["extensions"]["code"], "FEATURE_DISABLED",
+            "{result}"
+        );
+    }
+    // A valid SEC reader never gains the app-owned notes surface or write capability.
+    for forbidden in [
+        "{ companyNotes(cik:\"0000000042\") { id content } }",
+        "{ ...Notes } fragment Notes on Query { hidden:companyNotes(cik:\"0000000042\") {id} }",
+        "{ company(cik:\"42\") {cik} companyNotes(cik:\"0000000042\") @skip(if:true) {id} }",
+        "mutation { deleteCompanyNote(id:\"00000000-0000-0000-0000-000000000001\") }",
+    ] {
+        let (status, result) = post(&url, Some(&token), forbidden).await;
+        assert_eq!(status, 403, "{result}");
+        assert_eq!(
+            result["errors"][0]["extensions"]["code"], "DATA_READ_ONLY",
+            "{result}"
+        );
+    }
+}
