@@ -6,6 +6,10 @@ import sys
 import tomllib
 
 ADAPTERS = {
+    "thrift": {
+        "legacy": "0.17.0", "patched": "0.24.0", "alias": "thrift_patched",
+        "features": {"server"}, "default": ["server"], "license": "Apache-2.0",
+    },
     "zstd": {
         "legacy": "0.13.3", "patched": "0.14.3", "alias": "zstd_patched",
         "features": {"arrays", "bindgen", "debug", "doc-cfg", "experimental", "fat-lto", "legacy",
@@ -19,7 +23,7 @@ ADAPTERS = {
     },
 }
 REGISTRY = "registry+https://github.com/rust-lang/crates.io-index"
-FIXED_ADVISORIES = {"RUSTSEC-2026-0194", "RUSTSEC-2026-0195", "RUSTSEC-2026-0391"} | {
+FIXED_ADVISORIES = {"RUSTSEC-2026-0194", "RUSTSEC-2026-0195", "RUSTSEC-2026-0391", "RUSTSEC-2026-0435"} | {
     f"RUSTSEC-2026-{number:04}" for number in range(395, 407)
 }
 
@@ -29,7 +33,7 @@ def validate(backend):
     workspace = tomllib.loads((backend / "Cargo.toml").read_text())
     packages = tomllib.loads((backend / "Cargo.lock").read_text())["package"]
     evidence = []
-    if not {"compat/zstd", "compat/quick-xml"} <= set(workspace["workspace"].get("exclude", [])):
+    if not {"compat/" + name for name in ADAPTERS} <= set(workspace["workspace"].get("exclude", [])):
         problems.append("Facades must stay dependency-only so workspace all-features does not activate unused upstream features")
     for name, expected in ADAPTERS.items():
         adapter = backend / "compat" / name
@@ -42,7 +46,7 @@ def validate(backend):
         package = manifest["package"]
         if set(package) != {"name", "version", "edition", "license", "publish", "description"} or (
             package["name"], package["version"], package["edition"], package["license"], package["publish"]
-        ) != (name, expected["legacy"], "2024", "MIT", False):
+        ) != (name, expected["legacy"], "2024", expected.get("license", "MIT"), False):
             problems.append(f"{name}: compatibility identity or source-only package policy changed")
         if manifest["dependencies"] != {expected["alias"]: {
             "package": name, "version": "=" + expected["patched"], "default-features": False
@@ -74,7 +78,7 @@ def validate(backend):
         ignores = tomllib.loads(text).get("advisories", {}).get("ignore", [])
         ids = {item if isinstance(item, str) else item["id"] for item in ignores}
         if ids & FIXED_ADVISORIES:
-            problems.append(f"{policy.name}: fixed XML/zstd advisories must not be waived")
+            problems.append(f"{policy.name}: fixed dependency advisories must not be waived")
     return problems, evidence
 
 

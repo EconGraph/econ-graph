@@ -39,6 +39,32 @@ fn arrow_encoding_is_lossless_for_exact_values_and_attributes() -> Result<()> {
     Ok(())
 }
 #[test]
+fn parquet_metadata_and_exact_values_roundtrip_with_patched_thrift() -> Result<()> {
+    use parquet::arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ArrowWriter};
+    let rows = rows(Uuid::new_v4());
+    let schema = encoding::schema()?;
+    let batch = encoding::to_batch(&schema, &rows, 7)?;
+    let file = tempfile::tempfile()?;
+    let mut writer = ArrowWriter::try_new(file.try_clone()?, batch.schema(), None)?;
+    writer.write(&batch)?;
+    writer.close()?;
+    // Opening the footer decodes the generated Parquet Thrift metadata, and reading
+    // the batches verifies the decoded schema and page metadata remain usable.
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
+    assert_eq!(
+        builder.metadata().file_metadata().num_rows(),
+        rows.len() as i64
+    );
+    let batches = builder
+        .build()?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    assert_eq!(
+        encoding::canonical_rows(&encoding::from_batches(&batches)?)?,
+        encoding::canonical_rows(&rows)?
+    );
+    Ok(())
+}
+#[test]
 fn encoding_rejects_lossy_timestamps_and_nonobject_attributes() -> Result<()> {
     use chrono::Timelike;
     let schema = encoding::schema()?;

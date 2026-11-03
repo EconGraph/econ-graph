@@ -39,7 +39,7 @@ jobs:
       run: |
         python3 scripts/check_security_adapters.py
         python3 -m unittest discover -s scripts -p test_security_adapters.py -v
-        cargo test --locked -p zstd@0.13.3 -p quick-xml@0.39.4 --doc
+        cargo test --locked -p zstd@0.13.3 -p quick-xml@0.39.4 -p thrift@0.17.0 --doc
       working-directory: backend
 
     - name: Run Rust security audit

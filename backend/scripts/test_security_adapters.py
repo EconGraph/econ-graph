@@ -49,6 +49,14 @@ class AdapterInventoryTests(unittest.TestCase):
         self.replace("Cargo.lock", 'version = "0.14.3"', 'version = "0.13.2"')
         self.assertTrue(any("lock must contain" in p for p in guard.validate(self.root)[0]))
 
+    def test_thrift_registry_implementation_cannot_be_downgraded(self):
+        self.replace("Cargo.lock", 'version = "0.24.0"', 'version = "0.17.0"')
+        self.assertTrue(any("lock must contain" in p for p in guard.validate(self.root)[0]))
+
+    def test_thrift_advisory_cannot_be_waived(self):
+        self.replace(".cargo/audit.toml", 'ignore = [', 'ignore = ["RUSTSEC-2026-0435",')
+        self.assertTrue(any("must not be waived" in p for p in guard.validate(self.root)[0]))
+
     def test_fixed_advisory_cannot_be_waived(self):
         self.replace(".cargo/audit.toml", 'ignore = [', 'ignore = ["RUSTSEC-2026-0391",')
         self.assertTrue(any("must not be waived" in p for p in guard.validate(self.root)[0]))
