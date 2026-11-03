@@ -84,6 +84,8 @@ corresponding output in `actual`. The checker requires exact JSON equality.
 Use decimal strings for financial values. The reviewer derives `expected` from
 retained source evidence and documented calculation rules independently of the
 candidate implementation. Copying actual output into expected is not an audit.
+Audit comparisons preserve JSON numbers exactly and distinguish booleans from
+numbers, including inside nested objects and arrays; `false` cannot match `0`.
 
 Include complete supported statement-line and period lists in statement checks,
 including explicit unavailable results with reasons where source inputs are

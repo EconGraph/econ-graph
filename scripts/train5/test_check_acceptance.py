@@ -150,6 +150,46 @@ class AcceptanceTest(unittest.TestCase):
         self.manifest["company_audits"][0] = self.save(ref["path"], audit)
         self.rejected("differs from manual expectation")
 
+    def raw_manual_comparison(self, expected, actual):
+        # Insert raw JSON numbers without first rounding them through Python floats.
+        ref = self.manifest["company_audits"][0]
+        path = self.root / ref["path"]
+        audit = json.loads(path.read_text())
+        audit["checks"][0].update(
+            expected={"items": [{"value": "EXPECTED_RAW_JSON"}]},
+            actual={"items": [{"value": "ACTUAL_RAW_JSON"}]})
+        path.write_text(json.dumps(audit)
+                        .replace('"EXPECTED_RAW_JSON"', expected)
+                        .replace('"ACTUAL_RAW_JSON"', actual))
+        self.manifest["company_audits"][0] = {
+            "path": ref["path"], "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+    def test_manual_comparison_rejects_distinct_exact_json_numbers(self):
+        for expected, actual in [
+            ("9007199254740992.0", "9007199254740993.0"),
+            ("0.1000000000000000000001", "0.1000000000000000000002"),
+            ("1e-1000", "2e-1000"),
+        ]:
+            with self.subTest(expected=expected, actual=actual):
+                self.raw_manual_comparison(expected, actual)
+                self.rejected("differs from manual expectation")
+
+    def test_manual_comparison_distinguishes_booleans_from_json_numbers(self):
+        for expected, actual in [("false", "0"), ("true", "1"), ("0.0", "false")]:
+            with self.subTest(expected=expected, actual=actual):
+                self.raw_manual_comparison(expected, actual)
+                self.rejected("differs from manual expectation")
+
+    def test_manual_comparison_accepts_equivalent_exact_json_numbers(self):
+        for expected, actual in [
+            ("9007199254740993.0000000001", "9007199254740993.0000000001"),
+            ("1.2300", "1.23"),
+            ("123e2", "12300"),
+        ]:
+            with self.subTest(expected=expected, actual=actual):
+                self.raw_manual_comparison(expected, actual)
+                self.assertTrue(self.check()["accepted"])
+
     def test_balance_missing_values_count_as_failures(self):
         self.mutate("balance_checks", lambda data: data["periods"][0].update(assets=None))
         self.rejected("19/20 periods")

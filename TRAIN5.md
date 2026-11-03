@@ -66,11 +66,11 @@ PRs [#772](https://github.com/EconGraph/econ-graph/pull/772) through
 [#778](https://github.com/EconGraph/econ-graph/pull/778), accepted-main validation
 and the immutable `train-3` tag remain release gates.
 
-Train 4 remains an integration and production-release gate. Its independent data
-service is absent from main, so the focused company-query boundary adapter
-[#791](https://github.com/EconGraph/econ-graph/pull/791) remains separate from this
-main-root stack until that service lands. Reconcile and validate that adapter
-against the accepted Train 4 and Train 5 heads before release. Preserve the split
+Train 4 remains an integration and production-release gate. Main already contains
+the independent read-only data service; admitting company-query roots still needs
+the focused boundary adapter [#791](https://github.com/EconGraph/econ-graph/pull/791).
+Reconcile and validate that adapter against the accepted Train 4 and Train 5 heads
+before enabling company research on the independent service. Preserve the split
 between app-owned notes and data-owned companies, filings and facts; never
 introduce a cross-plane foreign key.
 

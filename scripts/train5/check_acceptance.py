@@ -53,8 +53,25 @@ def load_json(path):
             require(key not in result, f"duplicate JSON key: {key}")
             result[key] = value
         return result
-    return json.loads(path.read_text(), object_pairs_hook=unique_pairs,
+    return json.loads(path.read_text(), object_pairs_hook=unique_pairs, parse_float=Decimal,
                       parse_constant=lambda value: (_ for _ in ()).throw(Rejected(f"invalid JSON number {value}")))
+
+
+def same_json(expected, actual):
+    """Compare exact JSON values without Python's boolean/number coercion."""
+    if isinstance(expected, bool) or isinstance(actual, bool):
+        return type(expected) is type(actual) and expected == actual
+    if isinstance(expected, (int, Decimal)) and isinstance(actual, (int, Decimal)):
+        return expected == actual
+    if type(expected) is not type(actual):
+        return False
+    if isinstance(expected, dict):
+        return expected.keys() == actual.keys() and all(
+            same_json(value, actual[key]) for key, value in expected.items())
+    if isinstance(expected, list):
+        return len(expected) == len(actual) and all(
+            same_json(left, right) for left, right in zip(expected, actual))
+    return expected == actual
 
 
 class Evidence:
@@ -130,7 +147,7 @@ def validate(directory, candidate, now):
             covered.add(kind)
             expected, actual = check.get("expected"), check.get("actual")
             require(isinstance(expected, (dict, list)) and expected, f"{cik}/{kind}: nonempty manually expected data required")
-            require(actual == expected, f"{cik}/{kind}: actual output differs from manual expectation")
+            require(same_json(expected, actual), f"{cik}/{kind}: actual output differs from manual expectation")
         require(covered == REQUIRED_CHECKS, f"{cik}: missing manual checks: {sorted(REQUIRED_CHECKS - covered)}")
     require(audited == corpus, "manual audits do not match the fixed-company corpus")
 
