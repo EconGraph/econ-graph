@@ -1303,8 +1303,15 @@ async fn successful_fetches_of_different_series_do_not_wait_for_each_other() {
     fetch_miss(pool, "other").await;
     let mut conn = pool.get().await.unwrap();
     conn.transaction::<(), AppError, _>(async |conn| {
-        persist::persist_series_conn(conn, SourceId::Fred, "held", &successful_history(), true)
-            .await?;
+        persist::persist_series_conn(
+            conn,
+            &db.pool,
+            SourceId::Fred,
+            "held",
+            &successful_history(),
+            true,
+        )
+        .await?;
         let other_pool = pool.clone();
         tokio::time::timeout(
             std::time::Duration::from_secs(5),

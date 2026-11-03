@@ -107,47 +107,24 @@ impl BatchFn<Uuid, Vec<DataPoint>> for DataPointsBySeriesBatcher {
         let pool = self.pool.clone();
         let keys = keys.to_vec();
         async move {
-            use diesel::prelude::*;
-            use diesel_async::RunQueryDsl;
-            use econ_graph_core::schema::data_points::dsl;
-
-            let mut conn = match pool.get().await {
-                Ok(conn) => conn,
-                Err(e) => {
-                    eprintln!("Failed to get database connection: {}", e);
-                    return HashMap::new();
-                }
-            };
-
-            let data_points = match dsl::data_points
-                .filter(dsl::series_id.eq_any(&keys))
-                .filter(public_data_points_predicate())
-                .filter(econ_graph_core::models::exclude_synthetic_legacy_rows())
-                .filter(econ_graph_core::models::revision_filter_excluding_synthetic(None, false))
-                .order(dsl::date.desc())
-                .load::<DataPoint>(&mut conn)
-                .await
-            {
-                Ok(points) => points,
-                Err(e) => {
-                    eprintln!("Failed to load data points: {}", e);
-                    return HashMap::new();
-                }
-            };
-
-            let mut result: HashMap<Uuid, Vec<DataPoint>> = HashMap::new();
-
-            // Populate with data points
-            for point in data_points {
-                result.entry(point.series_id).or_default().push(point);
-            }
-
-            // Ensure all requested keys are in the result (empty vec for missing)
-            for key in keys {
-                result.entry(key).or_default();
-            }
-
-            result
+            use econ_graph_services::services::observation_compatibility::{self, PointsQuery};
+            observation_compatibility::points_batch(
+                &pool,
+                &keys,
+                PointsQuery {
+                    start_date: None,
+                    end_date: None,
+                    revisions: econ_graph_core::models::RevisionMode::Latest,
+                    exclude_synthetic: true,
+                    descending: true,
+                    limit: None,
+                },
+            )
+            .await
+            .unwrap_or_else(|error| {
+                tracing::error!("Observation batch unavailable: {error}");
+                HashMap::new()
+            })
         }
     }
 }
@@ -162,47 +139,20 @@ impl BatchFn<Uuid, i32> for DataPointCountBatcher {
         let pool = self.pool.clone();
         let keys = keys.to_vec();
         async move {
-            use diesel::prelude::*;
-            use diesel_async::RunQueryDsl;
-            use econ_graph_core::schema::data_points::dsl;
-
-            let mut conn = match pool.get().await {
-                Ok(conn) => conn,
-                Err(e) => {
-                    eprintln!("Failed to get database connection: {}", e);
-                    return HashMap::new();
-                }
-            };
-
-            let counts = match dsl::data_points
-                .filter(dsl::series_id.eq_any(&keys))
-                .filter(public_data_points_predicate())
-                .group_by(dsl::series_id)
-                .select((dsl::series_id, diesel::dsl::count(dsl::id)))
-                .load::<(Uuid, i64)>(&mut conn)
-                .await
+            match econ_graph_services::services::observation_compatibility::counts_batch(
+                &pool, &keys,
+            )
+            .await
             {
-                Ok(counts) => counts,
-                Err(e) => {
-                    eprintln!("Failed to load data point counts: {}", e);
-                    return HashMap::new();
+                Ok(rows) => rows
+                    .into_iter()
+                    .map(|(id, count)| (id, i32::try_from(count).unwrap_or(i32::MAX)))
+                    .collect(),
+                Err(error) => {
+                    tracing::error!("Observation counts unavailable: {error}");
+                    HashMap::new()
                 }
-            };
-
-            let mut result = HashMap::new();
-
-            // Create a map of found counts
-            let found_counts: HashMap<Uuid, i32> = counts
-                .into_iter()
-                .map(|(id, count)| (id, count as i32))
-                .collect();
-
-            // Ensure all requested keys are in the result (default to 0 for missing)
-            for key in keys {
-                result.insert(key, found_counts.get(&key).copied().unwrap_or(0));
             }
-
-            result
         }
     }
 }
@@ -323,21 +273,6 @@ impl BatchFn<Uuid, i32> for SeriesCountBatcher {
     }
 }
 
-/// One row of the latest-observation query
-#[derive(diesel::QueryableByName)]
-struct LatestObservationRow {
-    #[diesel(sql_type = diesel::sql_types::Uuid)]
-    series_id: Uuid,
-    #[diesel(sql_type = diesel::sql_types::Date)]
-    date: NaiveDate,
-    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Numeric>)]
-    value: Option<BigDecimal>,
-    #[diesel(sql_type = diesel::sql_types::Date)]
-    revision_date: NaiveDate,
-    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Jsonb>)]
-    attributes: Option<serde_json::Value>,
-}
-
 /// DataLoader batcher for each series' newest observation (latest date, newest revision)
 pub struct LatestObservationBatcher {
     pub pool: DatabasePool,
@@ -351,65 +286,32 @@ impl BatchFn<Uuid, Option<LatestObservationType>> for LatestObservationBatcher {
         let pool = self.pool.clone();
         let keys = keys.to_vec();
         async move {
-            use diesel_async::RunQueryDsl;
-
-            // On failure the map stays empty, so `try_load` reports an error for every key
-            // instead of answering "no data".
-            let mut conn = match pool.get().await {
-                Ok(conn) => conn,
-                Err(e) => {
-                    tracing::error!("Failed to get database connection: {}", e);
-                    return HashMap::new();
-                }
-            };
-
-            // One row per series: newest date, then newest revision of it. On a same-day tie
-            // between an original release and a revision, the revision wins. A synthetic
-            // legacy row never counts, as in `dataPoints` with `latestRevisionOnly`. A LATERAL
-            // `LIMIT 1` per key walks the unique index backwards and reads only the newest
-            // (date, revision_date) group, at most two rows sorted to put the revision first;
-            // DISTINCT ON would read and sort every row of every requested series.
-            let rows = match diesel::sql_query(format!(
-                "SELECT k.id AS series_id, dp.date, dp.value, dp.revision_date, dp.attributes \
-                 FROM unnest($1::uuid[]) AS k(id) \
-                 CROSS JOIN LATERAL ( \
-                     SELECT date, value, revision_date, attributes FROM data_points \
-                     WHERE series_id = k.id AND NOT {} \
-                     ORDER BY date DESC, revision_date DESC, is_original_release ASC \
-                     LIMIT 1 \
-                 ) dp \
-                 WHERE EXISTS (SELECT 1 FROM economic_series public_series \
-                     WHERE public_series.id = k.id \
-                       AND {})",
-                econ_graph_core::models::synthetic_legacy_row("data_points", "other_original"),
-                public_series_sql("public_series")
-            ))
-            .bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(&keys)
-            .load::<LatestObservationRow>(&mut conn)
+            match econ_graph_services::services::observation_compatibility::latest_batch(
+                &pool, &keys,
+            )
             .await
             {
-                Ok(rows) => rows,
-                Err(e) => {
-                    tracing::error!("Failed to load latest observations: {}", e);
-                    return HashMap::new();
+                Ok(rows) => rows
+                    .into_iter()
+                    .map(|(id, row)| {
+                        (
+                            id,
+                            row.map(|row| LatestObservationType {
+                                date: row.date,
+                                value: row.value,
+                                revision_date: row.revision_date,
+                                attributes: row
+                                    .attributes
+                                    .map(crate::observation_json::ObservationJson),
+                            }),
+                        )
+                    })
+                    .collect(),
+                Err(error) => {
+                    tracing::error!("Latest observations unavailable: {error}");
+                    HashMap::new()
                 }
-            };
-
-            let mut result: HashMap<Uuid, Option<LatestObservationType>> =
-                keys.into_iter().map(|key| (key, None)).collect();
-            for row in rows {
-                result.insert(
-                    row.series_id,
-                    Some(LatestObservationType {
-                        date: row.date,
-                        value: row.value,
-                        revision_date: row.revision_date,
-                        attributes: row.attributes.map(crate::observation_json::ObservationJson),
-                    }),
-                );
             }
-
-            result
         }
     }
 }
