@@ -38,7 +38,7 @@ docker compose up -d keycloak
 The volume name above assumes Compose uses the repository directory name as its
 project name. If you use `-p` or `COMPOSE_PROJECT_NAME`, use
 `<project-name>_keycloak_db_data` and the same project name for the Compose commands.
-In [Kubernetes](#kubernetes), the realm is re-applied on every deploy.
+The [Kubernetes deployment script](#kubernetes) reapplies the realm when Keycloak is enabled.
 
 ### Test users
 
@@ -110,7 +110,7 @@ The realm file reads these environment variables when it is imported:
 
 With `--import-realm` (docker-compose) placeholders are resolved once, when the realm
 is first imported; change a value later by [resetting the local realm](#reset-the-local-realm).
-In Kubernetes the realm-import Job renders them on every deploy with
+In Kubernetes the realm-import Job renders them on each Keycloak deployment with
 [`scripts/keycloak/render-realm.sh`](../../scripts/keycloak/render-realm.sh),
 so a rotated Google client secret in the Secret reaches Keycloak on the next deploy.
 
@@ -149,14 +149,16 @@ becomes the ConfigMap `keycloak-realm`; credentials live only in the Secret
 `econ-graph-keycloak`, written by
 [`scripts/deploy/create-secrets.sh`](../../scripts/deploy/create-secrets.sh).
 
-The [`keycloak-realm-import` Job](../../k8s/manifests/keycloak/realm-import-job.yaml)
-creates the realm on the first deploy and applies it on every deploy after that.
+[`scripts/deploy/deploy.sh`](../../scripts/deploy/deploy.sh) runs the
+[`keycloak-realm-import` Job](../../k8s/manifests/keycloak/realm-import-job.yaml)
+on each deployment when the `econ-graph-keycloak` Secret exists; without that Secret,
+it skips Keycloak. The Job creates a missing realm or updates an existing one.
 It runs [keycloak-config-cli](https://github.com/adorsys/keycloak-config-cli)
 against the running server's admin API, changing only what differs from the realm
 file.
 
-Google-brokered accounts and sessions survive a redeploy. Users' role mappings
-survive while their roles still exist. Deletion of resources removed from the realm
+The realm import preserves Google-brokered accounts and does not clear sessions.
+Users' role mappings survive while their roles still exist. Deletion of resources removed from the realm
 file depends on config-cli's recorded managed state and the resource type. Imported
 roles and non-default clients can be deleted when removed from managed lists, even if
 an operator originally created them. An operator-created role that was never imported
