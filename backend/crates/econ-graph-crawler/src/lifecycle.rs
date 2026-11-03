@@ -1168,10 +1168,12 @@ pub(crate) async fn record_restricted_conn(
 /// Longest reason [`request_restriction_review`] records.
 const MAX_REVIEW_REASON: usize = 500;
 
-/// Record an operator's review of a `restricted` series (a false-positive marker, say). The
-/// series stays restricted, and hidden, until a fetch job claimed after this review succeeds
-/// without a restriction marker ([`lift_reviewed_restriction_conn`]); restriction evidence
-/// from a fetch or a catalog first cancels the review. Repeating it restarts the review.
+/// Record an operator's review after the source stops marking a series as restricted, or a
+/// deployed restriction check no longer matches it. A review alone cannot override a marker
+/// the current check still detects. The series stays restricted, and hidden, until a fetch
+/// job claimed after this review succeeds without a restriction marker
+/// ([`lift_reviewed_restriction_conn`]); restriction evidence from a fetch or a catalog first
+/// cancels the review. Repeating it restarts the review.
 /// Refuses a source whose adapter does not
 /// [check restriction markers](crate::SourceAdapter::checks_restriction_markers) (pass
 /// `checks_markers`), and a series that is not restricted.

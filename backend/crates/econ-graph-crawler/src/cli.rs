@@ -135,10 +135,11 @@ pub enum Command {
         #[arg(long)]
         successor: String,
     },
-    /// After reviewing a series' restriction (a false-positive copyright marker, say), queue
-    /// a fetch that may publish it again. The series stays hidden until that fetch, or any
-    /// fetch claimed from now on, finds no restriction marker; restriction evidence first
-    /// cancels the review. Every step is recorded in series_lifecycle_events.
+    /// After the source stops marking a series as restricted, or a deployed restriction
+    /// check no longer matches it, queue a fetch that may publish it again. The series stays
+    /// hidden until a fetch claimed after the review finds no restriction marker; restriction
+    /// evidence first cancels the review. A review alone cannot override a marker the current
+    /// check still detects. Every step is recorded in series_lifecycle_events.
     ClearRestriction {
         /// Source of the series, e.g. FRED. Only a source whose fetch checks restriction
         /// markers can confirm a review.
