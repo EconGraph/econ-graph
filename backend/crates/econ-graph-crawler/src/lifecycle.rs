@@ -1204,8 +1204,10 @@ pub async fn request_restriction_review(
         let source_id = persist::data_source_id_conn(conn, source).await?;
         lock_source_shared(conn, source_id).await?;
         lock_series(conn, source_id, &external).await?;
+        // NOW() predates a wait for these locks. A fetch claimed during that wait
+        // must not qualify as evidence obtained after the operator's review.
         let changed = diesel::sql_query(
-            "UPDATE series_lifecycle SET restriction_cleared_at=NOW(),restriction_clear_reason=$3 \
+            "UPDATE series_lifecycle SET restriction_cleared_at=clock_timestamp(),restriction_clear_reason=$3 \
              WHERE source_id=$1 AND external_id=$2 AND status='restricted'",
         )
         .bind::<SqlUuid, _>(source_id)

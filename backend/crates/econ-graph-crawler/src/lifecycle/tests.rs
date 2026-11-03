@@ -2404,3 +2404,85 @@ async fn discontinued_series_get_successor_proposals_and_confirmations() {
     drop(conn);
     db.drop().await;
 }
+
+/// Transaction start can precede a wait for a catalog's lock. A fetch claimed during
+/// that wait must not qualify as evidence obtained after the review.
+#[tokio::test]
+async fn restriction_review_timestamp_follows_its_lock_wait() {
+    if std::env::var("DATABASE_URL").is_err() {
+        return;
+    }
+    // A UUID-named scratch database is dropped even if a lock-wait assertion panics.
+    let db = tokio::task::spawn_blocking(|| {
+        econ_graph_core::test_utils::ScratchDatabase::create("review_lock_time")
+    })
+    .await
+    .unwrap();
+    econ_graph_core::run_migrations(&db.url).await.unwrap();
+    let fixture_pool = econ_graph_core::create_pool(&db.url).await.unwrap();
+    let mut catalog = crate::DatasetCatalog::empty();
+    catalog
+        .load_adapter(&crate::testkit::echo::EchoAdapter::new(
+            "https://unused.invalid",
+        ))
+        .unwrap();
+    persist::sync_datasets(&fixture_pool, &catalog)
+        .await
+        .unwrap();
+    restricted_series(&fixture_pool, "waiting").await;
+    let mut blocker = fixture_pool.get().await.unwrap();
+    let pool = fixture_pool.clone();
+    let (review_task, claimed_during_wait) = blocker
+        .transaction::<_, AppError, _>(async |conn| {
+            let source_id = persist::data_source_id_conn(conn, SourceId::Fred).await?;
+            lock_source_exclusive(conn, source_id).await?;
+            let review_task = tokio::spawn(async move {
+                request_restriction_review(&pool, SourceId::Fred, true, "waiting", "review").await
+            });
+            #[derive(QueryableByName)]
+            struct Waiting {
+                #[diesel(sql_type = diesel::sql_types::Bool)]
+                present: bool,
+            }
+            // Observe the blocked request rather than assuming when the task is scheduled.
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let waiting: Waiting = diesel::sql_query(
+                        "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' \
+                         AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) \
+                         AND classid=$1::oid AND NOT granted) AS present",
+                    )
+                    .bind::<diesel::sql_types::Integer, _>(SOURCE_LOCK_CLASS)
+                    .get_result(&mut *conn)
+                    .await
+                    .unwrap();
+                    if waiting.present {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect("review must wait for the source lock");
+            #[derive(QueryableByName)]
+            struct Clock {
+                #[diesel(sql_type = Timestamptz)]
+                at: DateTime<Utc>,
+            }
+            let clock: Clock = diesel::sql_query("SELECT clock_timestamp() AS at")
+                .get_result(&mut *conn)
+                .await?;
+            Ok((review_task, clock.at))
+        })
+        .await
+        .unwrap();
+    drop(blocker);
+    review_task.await.unwrap().unwrap();
+    let reviewed = review(&fixture_pool, "waiting").await;
+    assert!(reviewed.cleared_at.unwrap() > claimed_during_wait);
+    assert_eq!(
+        lift(&fixture_pool, "waiting", Some(claimed_during_wait)).await,
+        None
+    );
+    assert_hidden(&review(&fixture_pool, "waiting").await);
+}

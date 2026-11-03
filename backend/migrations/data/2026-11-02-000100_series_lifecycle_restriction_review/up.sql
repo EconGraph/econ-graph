@@ -13,7 +13,7 @@ CREATE TABLE series_lifecycle_events (
     id BIGSERIAL PRIMARY KEY,
     source_id UUID NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
     external_id TEXT NOT NULL,
-    at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     event TEXT NOT NULL CHECK (event IN (
         'restriction_clearance_requested', 'restriction_lifted', 'restriction_clearance_cancelled')),
     detail TEXT NOT NULL
