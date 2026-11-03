@@ -44,6 +44,21 @@ grep -q "encrypted backup: run .*open-backup.sh .*$bundle" <<<"$out" ||
 grep -q 'no unattended restore was performed' <<<"$out" || fail "the drill did not say nothing was restored: $out"
 grep -q '^run' "$work/docker.log" && fail "the drill started a container for an encrypted bundle"
 
+# The suggested operator command must preserve both count checks and dry-run.
+# Compare the complete escaped command so absent options cannot be invented.
+check_open_command() {
+    local expected output
+    printf -v expected '%q ' "$root/scripts/backup/open-backup.sh" "$bundle" -- \
+        "$root/scripts/backup/restore-drill.sh" "$@" '@BACKUP@/econ_graph.dump'
+    output="$(drill "$@")" || true
+    grep -qF -- "run ${expected% } at an operator terminal" <<<"$output" ||
+        fail "the encrypted-backup command lost or changed drill options: $output"
+}
+check_open_command --dry-run
+check_open_command --expect-series 17
+check_open_command --expect-data-points 29
+check_open_command --expect-series 17 --expect-data-points 29 --dry-run
+
 # A plaintext dump (as open-backup.sh hands it over): PGDATA on tmpfs, the
 # dump directory read-only, no other volume.
 printf 'PGDMP' >"$work/plain/econ_graph.dump"
@@ -69,7 +84,7 @@ run_args="$(grep '^run ' "$work/docker.log" || true)"
 grep -q -- '--tmpfs /var/lib/postgresql/data\( \|$\)' <<<"$run_args" ||
     fail "the drill left a declared VOLUME off tmpfs: ${run_args:-no container: $(cat "$work/volumes.log")}"
 # PGDATA outside every tmpfs, or unknown: refuse before starting anything.
-for pgdata in /srv/pgdata ''; do
+for pgdata in /srv/pgdata '' /var/lib/postgresql/../pgdata /var/lib/postgresql/data/../../pgdata; do
     : >"$work/docker.log"
     if out="$(FAKE_PGDATA="$pgdata" drill "$work/plain/econ_graph.dump")"; then
         fail "the drill ran with PGDATA '$pgdata'"

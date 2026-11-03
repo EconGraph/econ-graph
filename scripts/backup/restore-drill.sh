@@ -29,11 +29,12 @@ expect_series=""
 expect_points=""
 dump=""
 DRY_RUN="false"
+drill_args=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --dry-run|-n) DRY_RUN="true"; shift ;;
-        --expect-series) expect_series="$2"; shift 2 ;;
-        --expect-data-points) expect_points="$2"; shift 2 ;;
+        --dry-run|-n) DRY_RUN="true"; drill_args+=(--dry-run); shift ;;
+        --expect-series) expect_series="$2"; drill_args+=(--expect-series "$2"); shift 2 ;;
+        --expect-data-points) expect_points="$2"; drill_args+=(--expect-data-points "$2"); shift 2 ;;
         -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
         -*) die "unknown option: $1" ;;
         *) dump="$1"; shift ;;
@@ -44,7 +45,9 @@ if [[ -z "${dump}" ]]; then
     dir="$(latest_verified_dump_dir || true)"
     [[ -n "${dir}" ]] || die "no VERIFIED dump directory under ${BACKUP_ROOT} (pass DUMP_FILE to drill an unverified dump)"
     self="$(readlink -f "$0")"
-    printf -v open_command '%q %q -- %q %q' "$(dirname "$self")/open-backup.sh" "$dir" "$self" '@BACKUP@/econ_graph.dump'
+    printf -v open_command '%q ' "$(dirname "$self")/open-backup.sh" "$dir" -- "$self" \
+        ${drill_args[@]+"${drill_args[@]}"} '@BACKUP@/econ_graph.dump'
+    open_command="${open_command% }"
     [[ ! -f "${dir}/backup.tar.age" ]] || die "encrypted backup: run $open_command at an operator terminal; no unattended restore was performed"
     dump="${dir}/econ_graph.dump"
 fi
@@ -82,6 +85,13 @@ volumes="$(docker image inspect --format '{{range $path, $_ := .Config.Volumes}}
     die "could not read the volumes of ${PG_IMAGE}"
 pgdata="$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${PG_IMAGE}" | sed -n 's/^PGDATA=//p')" ||
     die "could not read PGDATA of ${PG_IMAGE}"
+# A lexical prefix is not containment when a component can traverse back out.
+# Refuse ambiguous paths before docker run can materialize restored plaintext.
+case "/${pgdata}/" in
+    */../*|*/./*)
+        die "${PG_IMAGE}'s PGDATA (${pgdata}) is not under a tmpfs mount (traversal components); refusing to restore plaintext onto disk"
+        ;;
+esac
 tmpfs_args=()
 covered=false
 while IFS= read -r path; do
