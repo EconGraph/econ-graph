@@ -14,6 +14,19 @@ fn rows(series: Uuid) -> Vec<Observation> {
     [(1,1,true,Some("999")),(1,2,true,Some("12345678901234567890123456789012345678901234567890.1234567890123456789")),(1,3,false,None),(2,2,true,Some("0")),(3,3,true,Some("0.000000000000000000000000000000000000000000000000000000000001")),(3,3,false,Some("0.000000000000000000000000000000000000000000000000000000000001"))]
     .into_iter().enumerate().map(|(i,(date,revision,original,value))|serde_json::from_value(serde_json::json!({"id":Uuid::new_v5(&series,&i.to_be_bytes()),"series_id":series,"date":NaiveDate::from_ymd_opt(2020,date,1).unwrap(),"revision_date":NaiveDate::from_ymd_opt(2020,revision,1).unwrap(),"value":value,"is_original_release":original,"created_at":timestamp,"updated_at":timestamp,"attributes":{"source":"fixture","footnotes":[],"preliminary":false,"extra":{"unknown":null}}})).unwrap()).collect()
 }
+
+fn warehouse_object_count(path: &std::path::Path) -> Result<usize> {
+    let mut count = 0;
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        count += if entry.file_type()?.is_dir() {
+            warehouse_object_count(&entry.path())?
+        } else {
+            1
+        };
+    }
+    Ok(count)
+}
 fn request(series: Uuid, mode: RevisionMode) -> ObservationRequest {
     ObservationRequest {
         series_id: series,
@@ -492,15 +505,59 @@ async fn real_iceberg_roundtrip_parity_upserts_conflicts_and_atomicity() -> Resu
         )
         .await;
     assert!(expiry.is_err(), "future cutoff is refused");
+    use econ_graph_core::schema::iceberg_commits;
+    let mut conn = pool.get().await?;
+    let receipts = iceberg_commits::table
+        .filter(iceberg_commits::dataset_id.eq(dataset))
+        .count()
+        .get_result::<i64>(&mut conn)
+        .await?;
+    drop(conn);
+    let object_count = warehouse_object_count(temp.path())?;
+    for (cutoff, retain) in [(0, 1), (Utc::now().timestamp_millis(), usize::MAX)] {
+        assert!(catalog
+            .prepare_snapshot_expiry(Uuid::new_v4(), dataset, cutoff, retain)
+            .await?
+            .is_none());
+        assert_eq!(catalog.pointer(dataset).await?, Some(compact.next.clone()));
+        assert_eq!(warehouse_object_count(temp.path())?, object_count);
+        let mut conn = pool.get().await?;
+        assert_eq!(
+            iceberg_commits::table
+                .filter(iceberg_commits::dataset_id.eq(dataset))
+                .count()
+                .get_result::<i64>(&mut conn)
+                .await?,
+            receipts
+        );
+    }
     let expiry = catalog
         .prepare_snapshot_expiry(Uuid::new_v4(), dataset, Utc::now().timestamp_millis(), 1)
-        .await?;
+        .await?
+        .expect("older snapshots must expire");
     let mut conn = pool.get().await?;
     conn.build_transaction()
         .run::<_, anyhow::Error, _>(async |conn| {
             SqlCatalog::commit_prepared_conn(conn, &expiry).await
         })
         .await?;
+    drop(conn);
+    let object_count = warehouse_object_count(temp.path())?;
+    assert!(catalog
+        .prepare_snapshot_expiry(Uuid::new_v4(), dataset, Utc::now().timestamp_millis(), 1)
+        .await?
+        .is_none());
+    assert_eq!(catalog.pointer(dataset).await?, Some(expiry.next.clone()));
+    assert_eq!(warehouse_object_count(temp.path())?, object_count);
+    let mut conn = pool.get().await?;
+    assert_eq!(
+        iceberg_commits::table
+            .filter(iceberg_commits::dataset_id.eq(dataset))
+            .count()
+            .get_result::<i64>(&mut conn)
+            .await?,
+        receipts + 1
+    );
     drop(conn);
     assert_eq!(
         catalog

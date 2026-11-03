@@ -61,6 +61,17 @@ class AdapterInventoryTests(unittest.TestCase):
         self.replace(".cargo/audit.toml", 'ignore = [', 'ignore = ["RUSTSEC-2026-0391",')
         self.assertTrue(any("must not be waived" in p for p in guard.validate(self.root)[0]))
 
+    def test_tokio_advisory_cannot_be_waived_by_either_audit_policy(self):
+        for policy in (".cargo/audit.toml", "deny.toml"):
+            with self.subTest(policy=policy):
+                target = self.root / policy
+                original = target.read_text()
+                self.addCleanup(target.write_text, original)
+                target.write_text(original.replace('ignore = [', 'ignore = ["RUSTSEC-2026-0386",'))
+                problems, _ = guard.validate(self.root)
+                self.assertTrue(any(f"{target.name}: fixed dependency advisories must not be waived" == p for p in problems))
+                target.write_text(original)
+
 
 if __name__ == "__main__":
     unittest.main()

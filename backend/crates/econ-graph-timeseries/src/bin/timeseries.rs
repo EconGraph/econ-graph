@@ -270,15 +270,17 @@ async fn maintenance(
                 })
                 .await?;
         }
-        if apply && let Some(cutoff) = expire_before {
-            let prepared = catalog
+        if apply
+            && let Some(cutoff) = expire_before
+            && let Some(prepared) = catalog
                 .prepare_snapshot_expiry(
                     Uuid::new_v4(),
                     pointer.dataset_id,
                     cutoff.timestamp_millis(),
                     retain_last,
                 )
-                .await?;
+                .await?
+        {
             let mut conn = catalog.pool.get().await?;
             expired = conn
                 .build_transaction()

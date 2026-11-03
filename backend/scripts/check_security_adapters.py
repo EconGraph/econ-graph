@@ -23,7 +23,7 @@ ADAPTERS = {
     },
 }
 REGISTRY = "registry+https://github.com/rust-lang/crates.io-index"
-FIXED_ADVISORIES = {"RUSTSEC-2026-0194", "RUSTSEC-2026-0195", "RUSTSEC-2026-0391", "RUSTSEC-2026-0435"} | {
+FIXED_ADVISORIES = {"RUSTSEC-2026-0194", "RUSTSEC-2026-0195", "RUSTSEC-2026-0386", "RUSTSEC-2026-0391", "RUSTSEC-2026-0435"} | {
     f"RUSTSEC-2026-{number:04}" for number in range(395, 407)
 }
 
