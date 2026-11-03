@@ -12,7 +12,7 @@ use crate::schema::financial_annotations;
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct FinancialAnnotation {
     pub id: Uuid,
-    pub statement_id: Uuid,
+    pub statement_id: Option<Uuid>,
     pub line_item_id: Option<Uuid>,
     pub annotation_type: AnnotationType,
     pub title: String,
@@ -25,13 +25,16 @@ pub struct FinancialAnnotation {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub resolved_at: Option<DateTime<Utc>>,
+    pub research_anchor: Option<serde_json::Value>,
+    pub research_anchor_key: Option<String>,
+    pub research_cik: Option<String>,
 }
 
 /// Values needed to create a financial annotation.
 #[derive(Debug, Clone, Serialize, Deserialize, Insertable)]
 #[diesel(table_name = financial_annotations)]
 pub struct NewFinancialAnnotation {
-    pub statement_id: Uuid,
+    pub statement_id: Option<Uuid>,
     pub line_item_id: Option<Uuid>,
     pub annotation_type: AnnotationType,
     pub title: String,
@@ -41,6 +44,9 @@ pub struct NewFinancialAnnotation {
     pub assigned_to: Option<Uuid>,
     pub priority: Option<i32>,
     pub tags: Option<Vec<Option<String>>>,
+    pub research_anchor: Option<serde_json::Value>,
+    pub research_anchor_key: Option<String>,
+    pub research_cik: Option<String>,
 }
 
 impl NewFinancialAnnotation {
@@ -59,7 +65,7 @@ impl NewFinancialAnnotation {
             .take(255)
             .collect();
         Self {
-            statement_id,
+            statement_id: Some(statement_id),
             created_by,
             content,
             annotation_type,
@@ -69,6 +75,9 @@ impl NewFinancialAnnotation {
             assigned_to: None,
             priority: None,
             tags: None,
+            research_anchor: None,
+            research_anchor_key: None,
+            research_cik: None,
         }
     }
     /// Attach the annotation to a specific line item in its statement.
