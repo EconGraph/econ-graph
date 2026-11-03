@@ -32,7 +32,7 @@
 #      public BACKUP_AGE_RECIPIENT, publish it with SHA256SUMS and VERIFIED,
 #      and print its path. Plaintext stays in private tmpfs until exit.
 #      Encryption prerequisites are checked before Keycloak is stopped.
-#      Existing backups are never removed; failed ciphertext stays .partial.
+#      Existing backups are never removed; unpublished ciphertext stays .partial.
 #
 # Each run adds a new directory; nothing is ever deleted.
 #
@@ -87,12 +87,6 @@ fi
 umask 077
 mkdir -p "$KDB_BACKUP_ROOT"
 chmod 0700 "$KDB_BACKUP_ROOT"
-# One directory per second: wait for a free name rather than reuse one.
-while [ -e "$dest" ] || [ -e "${dest}.partial" ] || [ -e "${dest}.failed" ]; do
-    sleep 1
-    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-    dest="${KDB_BACKUP_ROOT}/${stamp}"
-done
 
 # The trap is set before the staging exists, so no failure can leave it behind.
 staging=""
@@ -108,7 +102,7 @@ on_exit() {
         rm -rf -- "$staging"
     fi
     if [ "$status" -ne 0 ]; then
-        echo "${KDB_SCRIPT}: failed; no verified backup was saved in ${dest}" >&2
+        echo "${KDB_SCRIPT}: failed; do not rely on this run as a completed backup (${dest})" >&2
     fi
     exit "$status"
 }
@@ -116,6 +110,13 @@ trap on_exit EXIT
 # One plaintext-staging writer at a time (with the host dumps), before
 # Keycloak is stopped.
 backup_staging_lock
+# One directory per second: wait for a free name rather than reuse one.
+while [ -e "$dest" ] || [ -e "${dest}.partial" ] || [ -e "${dest}.failed" ]; do
+    sleep 1
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    dest="${KDB_BACKUP_ROOT}/${stamp}"
+done
+
 staging="$(backup_plaintext_dir)"
 work="$staging/payload"
 mkdir "$work"

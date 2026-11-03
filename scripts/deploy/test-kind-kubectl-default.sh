@@ -241,7 +241,7 @@ grep -qF " config get-contexts -o name" "$LOGS/kind-kubectl.log" ||
 
 # A real run copies the node's kubectl into the cache, then stops at the dump.
 run env FAKE_FAIL=pg_dump "$DEPLOY/backup-keycloak-db.sh"
-expect "backup-keycloak-db.sh" nonzero "failed; no verified backup was saved in" \
+expect "backup-keycloak-db.sh" nonzero "failed; do not rely on this run as a completed backup" \
     "--context kind-econ-graph -n econ-graph exec -i keycloak-postgres-0 -c postgres -- pg_dump"
 expect_rootful "backup-keycloak-db.sh"
 grep -qF "cp -q -L econ-graph-control-plane:/usr/bin/kubectl $CACHE/bin/kubectl.new" "$LOGS/docker.log" ||

@@ -69,6 +69,9 @@ fi
 # Both encrypted host and Keycloak-upgrade bundles are selected, including
 # when their roots differ. Incomplete upgrade payloads are left out.
 mkdir -p "$BACKUP_ROOT/nightly" "$KEYCLOAK_BACKUP_ROOT/upgrade" "$KEYCLOAK_BACKUP_ROOT/incomplete"
+mkdir -p "$KEYCLOAK_BACKUP_ROOT/unpublished.partial"
+# The sealer writes the marker before its final rename; this is still unpublished.
+touch "$KEYCLOAK_BACKUP_ROOT/unpublished.partial/VERIFIED"
 touch "$BACKUP_ROOT/nightly/VERIFIED" "$KEYCLOAK_BACKUP_ROOT/upgrade/VERIFIED"
 expect 0 "" backup
 for expected in "$BACKUP_ROOT/nightly" "$KEYCLOAK_BACKUP_ROOT/upgrade"; do
@@ -77,7 +80,7 @@ for expected in "$BACKUP_ROOT/nightly" "$KEYCLOAK_BACKUP_ROOT/upgrade"; do
         failures=$((failures + 1))
     fi
 done
-if grep -qF "$KEYCLOAK_BACKUP_ROOT/incomplete" "$STUB_LOG"; then
+if grep -qF -e "$KEYCLOAK_BACKUP_ROOT/incomplete" -e "$KEYCLOAK_BACKUP_ROOT/unpublished.partial" "$STUB_LOG"; then
     echo "FAIL offsite backup included an incomplete upgrade payload"
     failures=$((failures + 1))
 fi
@@ -90,6 +93,16 @@ env -u KEYCLOAK_BACKUP_ROOT ECONGRAPH_BACKUP_ROOT="$tmp/unused-default" "$script
 mv "$BACKUP_ROOT" "$BACKUP_ROOT.saved"
 expect 1 "could not enumerate all configured backup roots" backup
 mv "$BACKUP_ROOT.saved" "$BACKUP_ROOT"
+
+# A failure in the second root must not upload only the successful first root.
+real_find="$(command -v find)"
+cat >"$tmp/bin/find" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "\$KEYCLOAK_BACKUP_ROOT" ]]; then exit 1; fi
+exec "$real_find" "\$@"
+EOF
+chmod +x "$tmp/bin/find"
+expect 1 "could not enumerate all configured backup roots" backup
 
 if [[ "${failures}" -ne 0 ]]; then
     echo "${failures} offsite-restic test(s) failed"

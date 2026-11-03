@@ -184,23 +184,42 @@ to it.
 
 Before a deploy that changes the Keycloak image, run
 [`backup-keycloak-db.sh`](../../scripts/deploy/backup-keycloak-db.sh). It
-scales Keycloak to zero and waits for its Pods to disappear, dumps `keycloak`
-to `~/econgraph-backups/keycloak/<UTC stamp>/` by default, and verifies a
-scratch-database restore with equal row counts before marking it VERIFIED.
-Directories are 0700 and files 0600. Keycloak stays stopped for the deploy.
+checks the public age recipient and private tmpfs staging before contacting the
+cluster, then takes the shared plaintext-staging lock before stopping Keycloak.
+Configure `age` and the public recipient as described under [Nightly dumps](#nightly-dumps).
+It dumps `keycloak` into private tmpfs and verifies a scratch-database restore
+with equal row counts. Only then does it seal the payload as `backup.tar.age`
+and publish the bundle under `~/econgraph-backups/keycloak/<UTC stamp>/`
+(`$ECONGRAPH_BACKUP_ROOT/keycloak`, or `KEYCLOAK_BACKUP_ROOT`, overrides this).
+The encrypted payload contains the dump, row counts, Keycloak image and cluster
+UID; the outer `VERIFIED` marker records successful sealing and the ciphertext
+has `SHA256SUMS`. Directories are 0700 and files 0600. The shared encryption
+helper checks decryption with a disposable key; this does not establish that
+the operator holds the identity for the configured recipient. Keycloak stays
+stopped for the deploy. Disposable plaintext is removed on exit; unpublished
+ciphertext is kept in `.partial` without a `VERIFIED` marker.
 
 For rollback, [`restore-keycloak-db.sh`](../../scripts/deploy/restore-keycloak-db.sh)
-takes a safety dump, restores into a fresh database, verifies counts, and
-swaps it in by rename, retaining the previous database. A fresh database is
-required for a downgrade: `restore-dump.sh` uses `--clean`, which leaves
-objects absent from its archive, including tables added by newer Keycloak.
-Keycloak remains stopped; deploy a compatible image before bringing it back.
-See the rollback procedure in the [v4.0.0 QA plan](../release/v4.0.0-qa.md#keycloak-rollback).
+opens encrypted bundles at an operator terminal, asking for the private
+identity path. `--yes` skips the database confirmation, not the identity prompt.
+Legacy plaintext verified directories remain supported. The restore checks
+its encrypted safety-backup prerequisites before contacting the cluster and
+takes the shared staging lock before stopping Keycloak. It then takes that
+safety backup, restores into a fresh database, verifies counts, and swaps it
+in by rename, retaining the previous database. A fresh database is required
+for a downgrade: `restore-dump.sh` uses `--clean`, which leaves objects absent
+from its archive, including tables added by newer Keycloak. Keycloak remains
+stopped; deploy a compatible image before bringing it back. See the rollback
+procedure in the [QA guide](../release/v4.0.0-qa.md#keycloak-rollback).
 
-These upgrade dumps accumulate on the data disk by default, rather than on
-the backup pool. `offsite-restic.sh` does not upload them. Copy each useful
-upgrade dump off that disk by hand; the directory contains password hashes
-and client secrets and must remain private.
+These upgrade bundles accumulate on the data disk by default, rather than on
+the backup pool. Once configured, `offsite-restic.sh` includes verified upgrade
+directories alongside nightly bundles, using the same root overrides. An
+explicitly configured missing `KEYCLOAK_BACKUP_ROOT`, or failure to enumerate
+a backup root, refuses the upload. The absent default upgrade root is optional.
+Legacy verified plaintext directories are included too; restic protects the
+remote copy but does not encrypt the original directory. Until off-site
+storage is configured, copy useful bundles to a second location off this disk.
 
 ## Space alerts
 
@@ -403,9 +422,9 @@ configuration and encrypted recovery procedure are separate; see
 [PostgreSQL backup and restore](POSTGRES_BACKUP_RESTORE.md#encryption-setup).
 Retained legacy plaintext copies are not retroactively encrypted. These
 source changes do not establish the live cluster's configuration or backup
-state. Live database files, btrfs snapshots and the special Keycloak-upgrade
-backup format remain separate copies; encrypted upgrade backups are still
-tracked separately in #540.
+state. The Keycloak-upgrade writer also seals its restore-tested payload with
+the shared public recipient. Live database files and btrfs snapshots remain
+separate copies with their existing protection.
 
 The encryption suite (`scripts/backup/test-encryption.sh`) uses a disposable
 synthetic identity and transport stubs. The concurrent-write regression

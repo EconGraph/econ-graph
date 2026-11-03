@@ -83,9 +83,9 @@ case "${cmd}" in
         [[ -z "${KEYCLOAK_BACKUP_ROOT:-}" || -d "$keycloak_root" ]] ||
             die "configured Keycloak backup root is missing: $keycloak_root"
         list_verified() {
-            find "${BACKUP_ROOT}" -mindepth 2 -maxdepth 2 -name VERIFIED -printf '%h\n' || return
+            find "${BACKUP_ROOT}" -mindepth 2 -maxdepth 2 -type f -name VERIFIED ! -path '*.partial/VERIFIED' ! -path '*.failed/VERIFIED' -printf '%h\n' || return
             if [[ -d "$keycloak_root" ]]; then
-                find "$keycloak_root" -mindepth 2 -maxdepth 2 -name VERIFIED -printf '%h\n' || return
+                find "$keycloak_root" -mindepth 2 -maxdepth 2 -type f -name VERIFIED ! -path '*.partial/VERIFIED' ! -path '*.failed/VERIFIED' -printf '%h\n' || return
             fi
         }
         listing="$(list_verified)" || die "could not enumerate all configured backup roots"
