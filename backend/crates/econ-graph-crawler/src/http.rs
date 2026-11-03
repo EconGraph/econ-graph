@@ -77,6 +77,15 @@ impl Default for HttpConfig {
 /// job's stuck threshold (`CRAWLER_STUCK_AFTER_SECS`, 30 minutes by default).
 pub const REFERENCE_FILE_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Metadata from a complete bounded bulk download.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadReceipt {
+    pub bytes: u64,
+    pub sha256: String,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+}
+
 /// A successful (or `304`) response: the status, the response's `ETag` and `Last-Modified` if it
 /// sent them, and the body (empty for `304`).
 struct RawResponse {
@@ -445,6 +454,96 @@ impl HttpFetcher {
             .and_then(|u| u.host_str().map(str::to_owned))
             .unwrap_or_else(|| "unknown".to_owned());
         CRAWLER_METRICS.record_error(&crawler_type, &host, err.kind());
+    }
+
+    /// Stream one bulk response to a caller-owned temporary file with a hard byte limit.
+    ///
+    /// Uses the same per-source limiter, HTTP status classification and metrics as ordinary
+    /// requests. There are no in-process retries: the caller must discard a partial file and
+    /// restart the download. The timeout includes reading the entire response. Only a complete
+    /// response returns its size, SHA-256 and upstream validators; callers must still validate
+    /// the archive before publishing or ingesting it.
+    pub async fn download_to_file(
+        &self,
+        source: SourceId,
+        url: &str,
+        file: &mut tokio::fs::File,
+        max_bytes: u64,
+        timeout: Duration,
+    ) -> Result<DownloadReceipt, CrawlError> {
+        use sha2::{Digest, Sha256};
+        use tokio::io::{AsyncSeekExt, AsyncWriteExt};
+
+        file.set_len(0)
+            .await
+            .map_err(|_| CrawlError::Permanent("resetting bulk temporary file failed".into()))?;
+        file.seek(std::io::SeekFrom::Start(0))
+            .await
+            .map_err(|_| CrawlError::Permanent("seeking bulk temporary file failed".into()))?;
+        let mut target = Target::new(source, Method::GET, url, &[], None, false)?;
+        target.timeout = Some(timeout);
+        let _permit = self.inner.limiter.acquire(source).await;
+        let start = Instant::now();
+        let mut response = self
+            .inner
+            .client
+            .get(target.url.clone())
+            .timeout(timeout)
+            .send()
+            .await
+            .map_err(|e| self.transport_error(&target, e, start))?;
+        let status = response.status();
+        if !status.is_success() {
+            let err = CrawlError::from_status(
+                status,
+                parse_retry_after(response.headers()),
+                target.context(),
+            );
+            self.record_request(&target, status.as_str(), start);
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                CRAWLER_METRICS.record_rate_limit_hit(&target.crawler_type, &target.host);
+            }
+            target.record_error(&err);
+            return Err(err);
+        }
+        let mut receipt = DownloadReceipt {
+            bytes: 0,
+            sha256: String::new(),
+            etag: header_string(response.headers(), ETAG),
+            last_modified: header_string(response.headers(), LAST_MODIFIED),
+        };
+        let mut hasher = Sha256::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| self.transport_error(&target, e, start))?
+        {
+            receipt.bytes = receipt.bytes.saturating_add(chunk.len() as u64);
+            if receipt.bytes > max_bytes {
+                let err = CrawlError::Permanent(format!(
+                    "{}: bulk response exceeds {max_bytes} bytes",
+                    target.context()
+                ));
+                target.record_error(&err);
+                self.record_request(&target, "too_large", start);
+                return Err(err);
+            }
+            file.write_all(&chunk)
+                .await
+                .map_err(|_| CrawlError::Permanent("writing bulk temporary file failed".into()))?;
+            hasher.update(&chunk);
+        }
+        file.flush()
+            .await
+            .map_err(|_| CrawlError::Permanent("flushing bulk temporary file failed".into()))?;
+        receipt.sha256 = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        self.record_request(&target, status.as_str(), start);
+        CRAWLER_METRICS.record_bytes_downloaded(&target.crawler_type, &target.host, receipt.bytes);
+        Ok(receipt)
     }
 
     /// GET `url` with `query` appended and deserialize the JSON body.
@@ -1966,5 +2065,75 @@ mod tests {
                 .unwrap_err();
             assert_eq!(err.kind(), "transient", "{err}");
         }
+    }
+}
+
+#[cfg(test)]
+mod bulk_download_tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn downloads_exact_bytes_and_restarts_a_partial_file() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/bulk.zip"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("last-modified", "Sat, 31 Oct 2026 09:00:00 GMT")
+                    .set_body_bytes(b"PK\x03\x04\xff\x00".to_vec()),
+            )
+            .expect(2)
+            .mount(&server)
+            .await;
+        let fetcher = HttpFetcher::new(HttpConfig::default(), HashMap::new()).unwrap();
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut file = tokio::fs::File::from_std(tmp.reopen().unwrap());
+        file.write_all(b"partial old download").await.unwrap();
+        let url = format!("{}/bulk.zip", server.uri());
+        assert!(fetcher
+            .download_to_file(SourceId::Sec, &url, &mut file, 3, Duration::from_secs(2))
+            .await
+            .is_err());
+        let receipt = fetcher
+            .download_to_file(SourceId::Sec, &url, &mut file, 100, Duration::from_secs(2))
+            .await
+            .unwrap();
+        assert_eq!(receipt.bytes, 6);
+        assert_eq!(std::fs::read(tmp.path()).unwrap(), b"PK\x03\x04\xff\x00");
+        assert_eq!(receipt.sha256, sha256_hex(b"PK\x03\x04\xff\x00"));
+        assert!(receipt.last_modified.is_some());
+        server.verify().await;
+    }
+    #[tokio::test]
+    async fn interrupted_download_returns_no_receipt() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0; 2048];
+            let _ = socket.read(&mut buffer).await;
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\npartial",
+                )
+                .await
+                .unwrap();
+        });
+        let fetcher = HttpFetcher::new(HttpConfig::default(), HashMap::new()).unwrap();
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut file = tokio::fs::File::from_std(tmp.reopen().unwrap());
+        assert!(fetcher
+            .download_to_file(
+                SourceId::Sec,
+                &format!("http://{address}/bulk.zip"),
+                &mut file,
+                1000,
+                Duration::from_secs(2)
+            )
+            .await
+            .is_err());
+        server.await.unwrap();
     }
 }
