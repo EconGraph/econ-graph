@@ -254,7 +254,15 @@ case " \$* " in
   *' -o '*)
     $(command -v age) "\$@"
     [ "\${*: -2:1}" = -o ]
-    printf '\377' | dd of="\${*: -1}" bs=1 seek=300 conv=notrunc status=none ;;
+    python3 -c 'import sys
+with open(sys.argv[1], "r+b") as ciphertext:
+    ciphertext.seek(300)
+    original = ciphertext.read(1)
+    if not original:
+        raise SystemExit("ciphertext too short for corruption fixture")
+    ciphertext.seek(300)
+    ciphertext.write(bytes([original[0] ^ 1]))
+' "\${*: -1}" ;;
   *) exec $(command -v age) "\$@" ;;
 esac
 STUB
