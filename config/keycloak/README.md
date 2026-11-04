@@ -4,13 +4,30 @@ Keycloak is EconGraph's identity provider. The realm is configuration as code:
 
 | File | Used by | Contents |
 |---|---|---|
-| `econ-graph-realm.json` | docker-compose and k8s | Realm settings, clients, roles and composites, token mappers, Google and Facebook identity providers |
-| `dev/econ-graph-users-0.json` | docker-compose only | Seeded test users. Never deployed |
-| `qa/econ-graph-users-1.json` | `docker-compose.qa-users.yml` only | QA users `qa-alice`, `qa-bob`. Never deployed |
+| [`econ-graph-realm.json`](econ-graph-realm.json) | docker-compose and k8s | Realm settings, clients, roles and composites, token mappers, Google and Facebook identity providers |
+| [`dev/econ-graph-users-0.json`](dev/econ-graph-users-0.json) | docker-compose only | Seeded test users. Never deployed |
+| [`qa/econ-graph-users-1.json`](qa/econ-graph-users-1.json) | [`docker-compose.qa-users.yml`](../../docker-compose.qa-users.yml) only | QA users `qa-alice`, `qa-bob`. Never deployed |
 
-Keycloak imports the mounted files on first start (`--import-realm`). An existing realm is
-not overwritten, so after editing a file, reset the realm by dropping Keycloak's
-database volume and starting again:
+## Local stack
+
+```bash
+docker compose up -d keycloak
+scripts/keycloak/dev-token.sh alice   # prints selected access-token claims, including roles
+```
+
+- Issuer: `http://localhost:8081/realms/econ-graph` (host port from `KEYCLOAK_PORT`)
+- Admin console: <http://localhost:8081/admin>, user `admin`, password `admin`
+  (override with `KEYCLOAK_ADMIN_USERNAME` / `KEYCLOAK_ADMIN_PASSWORD`)
+
+### Reset the local realm
+
+In the local Compose stack, Keycloak imports the mounted files on first start
+(`--import-realm`). It does not overwrite an existing realm. After editing an
+imported file, reset the local realm by removing Keycloak's database volume and
+starting again. This deletes all local Keycloak accounts and other state in that
+database, including changes made through the admin console.
+
+Run from the repository root:
 
 ```bash
 docker compose rm -sf keycloak keycloak-db
@@ -18,18 +35,10 @@ docker volume rm "$(basename "$PWD")_keycloak_db_data"
 docker compose up -d keycloak
 ```
 
-In Kubernetes the realm is re-applied on every deploy instead (see below).
-
-## Local stack
-
-```bash
-docker compose up -d keycloak
-scripts/keycloak/dev-token.sh alice   # prints iss, aud and sub of alice's access token
-```
-
-- Issuer: `http://localhost:8081/realms/econ-graph` (host port from `KEYCLOAK_PORT`)
-- Admin console: <http://localhost:8081/admin>, user `admin`, password `admin`
-  (override with `KEYCLOAK_ADMIN_USERNAME` / `KEYCLOAK_ADMIN_PASSWORD`)
+The volume name above assumes Compose uses the repository directory name as its
+project name. If you use `-p` or `COMPOSE_PROJECT_NAME`, use
+`<project-name>_keycloak_db_data` and the same project name for the Compose commands.
+The [Kubernetes deployment script](#kubernetes) reapplies the realm when Keycloak is enabled.
 
 ### Test users
 
@@ -82,7 +91,7 @@ enum variant, the client role and, if staff should have it, the composite.
   The password grant is enabled only where `KC_WEB_DIRECT_GRANTS=true`, which only
   docker-compose sets, so scripts and tests can get tokens without a browser.
 - `econ-graph-api`: bearer-only client representing the backend. It is the token
-  audience and will own the fine-grained client roles.
+  audience and owns the fine-grained client roles.
 
 ## Placeholders
 
@@ -100,8 +109,9 @@ The realm file reads these environment variables when it is imported:
 | `KC_FACEBOOK_CLIENT_ID`, `KC_FACEBOOK_CLIENT_SECRET` | `unset` | Facebook app credentials, read from the environment-specific Kubernetes Secret |
 
 With `--import-realm` (docker-compose) placeholders are resolved once, when the realm
-is first imported; change a value later by recreating the volume. In Kubernetes the
-realm-import Job renders them on every deploy with `scripts/keycloak/render-realm.sh`,
+is first imported; change a value later by [resetting the local realm](#reset-the-local-realm).
+In Kubernetes the realm-import Job renders them on each Keycloak deployment with
+[`scripts/keycloak/render-realm.sh`](../../scripts/keycloak/render-realm.sh),
 so a rotated Google client secret in the Secret reaches Keycloak on the next deploy.
 
 For Google sign-in locally, create an OAuth client in Google Cloud with redirect URI
@@ -117,8 +127,11 @@ docker compose up -d keycloak
 Two more realm-local users, `qa-alice` and `qa-bob` (passwords `qa-alice-password`
 and `qa-bob-password`), live in `qa/econ-graph-users-1.json` for the release QA
 suite to run a two-account check against a local compose stack. They are off by
-default; opt in explicitly. Users are imported only on the realm's first start, so
-reset the realm first (see above) if Keycloak has run before:
+default; opt in explicitly. Users are imported only on the realm's first start.
+If Keycloak has run before, follow the container and volume removal steps in
+[Reset the local realm](#reset-the-local-realm), including its data-loss and
+project-name guidance. Use the command below instead of that procedure's final
+startup command, so the QA users are mounted when the realm is first imported:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.qa-users.yml up -d keycloak
@@ -130,22 +143,35 @@ fails the build if they do. Real Google sign-in stays a manual QA step.
 
 ## Kubernetes
 
-See `k8s/manifests/keycloak/` and the Keycloak section of `k8s/README.md`. The realm
-file becomes the ConfigMap `keycloak-realm`; credentials live only in the Secret
-`econ-graph-keycloak`, written by `scripts/deploy/create-secrets.sh`.
+See the [Keycloak manifests](../../k8s/manifests/keycloak/) and the
+[deployment guide's Keycloak section](../../k8s/README.md#-keycloak). The realm file
+becomes the ConfigMap `keycloak-realm`; credentials live only in the Secret
+`econ-graph-keycloak`, written by
+[`scripts/deploy/create-secrets.sh`](../../scripts/deploy/create-secrets.sh).
 
-The realm is created (on the first deploy) and applied (on every deploy after) by the
-Job `keycloak-realm-import` (`realm-import-job.yaml`), which runs
-[keycloak-config-cli](https://github.com/adorsys/keycloak-config-cli) against the
-running server. Keycloak itself does not import anything: the alternatives were
-rejected because `--import-realm` creates resources directly, outside
-keycloak-config-cli's tracking, so removing one from the file later would leave it
-behind in the cluster; `kc.sh import --override true` deletes the realm and every
-account in it. keycloak-config-cli instead changes only what differs from the realm
-file, so Google-brokered accounts, sessions and every user's role mappings survive a
-redeploy — as long as the roles they're mapped to stay in the file. A realm role,
-client or mapper removed from the file is removed from the cluster on the next
-deploy, taking any user's mapping to that role with it.
+[`scripts/deploy/deploy.sh`](../../scripts/deploy/deploy.sh) runs the
+[`keycloak-realm-import` Job](../../k8s/manifests/keycloak/realm-import-job.yaml)
+on each deployment when the `econ-graph-keycloak` Secret exists; without that Secret,
+it skips Keycloak. The Job creates a missing realm or updates an existing one.
+It runs [keycloak-config-cli](https://github.com/adorsys/keycloak-config-cli)
+against the running server's admin API, changing only what differs from the realm
+file.
+
+The realm import preserves Google-brokered accounts and does not clear sessions.
+Users' role mappings survive while their roles still exist. Deletion of resources removed from the realm
+file depends on config-cli's recorded managed state and the resource type. Imported
+roles and non-default clients can be deleted when removed from managed lists, even if
+an operator originally created them. An operator-created role that was never imported
+is outside that state and keeps its grants, unless its owning client is deleted.
+Removing a role also removes users' mappings to it.
+See the [catalog-grant preservation details](#catalog-access-including-anonymous-visitors)
+for the managed-list and client-deletion rules.
+
+Keycloak's native imports do not provide this reconciliation behavior.
+`--import-realm` skips existing realms and creates resources outside
+keycloak-config-cli's tracking. Such resources remain outside its deletion tracking
+unless a later config-cli import includes them. `kc.sh import --override true` deletes the
+realm and every account in it.
 
 A maintainer enters the Google client with hidden input with
 `scripts/deploy/set-crawler-keys.sh --google`, which then restarts Keycloak and reruns
@@ -350,8 +376,8 @@ operator policy and are kept like the grants above. `preserve-catalog-grants.py`
 client's and client scope's live `catalog.*:read` scope mappings into the import. As with the
 grants above, a catalog read the file declares there seeds only a new realm (or the retry of an
 interrupted first import); after that, a client or client scope the import creates, or recreates
-after an operator deleted it, gets none. A client that config-cli created and the realm file no
-longer lists is deleted by the import, and its grants with it.
+after an operator deleted it, gets none. A non-default client recorded by a previous config-cli
+import and removed from the managed clients list is deleted, and its grants with it.
 Other `econ-graph-api` roles there, the anonymous reader's scope included, are configuration as
 code. When one was mapped in Keycloak but isn't declared, the import removes it and first names it
 in the Job's `render-realm` log, as in `warning: the realm import removes econ-graph-api scope
@@ -389,17 +415,25 @@ through its realm composites. Remove those scope mappings, and make a catalog pu
 realm default client scope admitting catalog reads is named with a warning: a recreated anonymous
 client would be assigned it.
 
-When a role leaves the realm file, the import deletes it if config-cli created it. Dropping a
-client's block under `roles.client` deletes the roles config-cli created for it. Dropping a client
-config-cli created deletes the client with every role on it, including roles made in Keycloak;
-Keycloak's own clients, such as `account`, are never deleted. config-cli
-records those in the realm's `de.adorsys.keycloak.config.state-default-*` attributes, and when that
-list shrinks it leaves an old chunk behind, which both it and the import ignore (the import names it
-in a warning). The role's live grants are then left out of the import, each named with a warning,
+config-cli records imported role and client names in the realm's
+`de.adorsys.keycloak.config.state-default-*` attributes, including resources that already
+existed before the import; see the pinned [StateService implementation](https://github.com/adorsys/keycloak-config-cli/blob/v6.5.1/src/main/java/de/adorsys/keycloak/config/service/state/StateService.java).
+Creating a role in Keycloak, declaring and importing it once, then removing its declaration
+can therefore delete that role and its grants. When `roles.realm` or `roles.client` is present,
+roles previously recorded for that kind but absent from the new list are deleted, except
+Keycloak default roles. Omitting an entire kind's list deletes none of that kind; dropping
+a client's block from a present `roles.client` map deletes its previously recorded roles.
+Dropping a previously recorded non-default client from a present `clients` list deletes
+the client with every role on it, including roles never imported. Keycloak's own clients,
+such as `account`, are never deleted. When a state list shrinks it leaves an old chunk behind,
+which both config-cli and the import ignore (the import names it in a warning).
+
+Grants of roles the import deletes are left out of the import, each named with a warning,
 because importing a grant of a deleted role fails the import part way. That covers grants on
 composites, on scope mappings and on the anonymous service account (its realm and client roles
-alike). A role an operator created in Keycloak isn't deleted, and its grants are kept. A state that
-can't be read stops the deploy.
+alike). A role an operator created in Keycloak and never imported stays outside config-cli's
+role deletion tracking, and its grants are kept unless its owning client is deleted. A state
+that can't be read stops the deploy.
 
 `scripts/keycloak/test-realm-import.sh` runs the import against a throwaway Keycloak, starting
 from the last release's realm as production does, and checks what it keeps, removes and refuses.
