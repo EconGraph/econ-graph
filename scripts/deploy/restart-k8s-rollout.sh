@@ -155,14 +155,14 @@ echo "🔒 Installing cert-manager for SSL certificates..."
 if ! kubectl get namespace cert-manager >/dev/null 2>&1; then
     echo "Installing cert-manager..."
     kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml
-    
+
     echo "Waiting for cert-manager namespace to be created..."
     kubectl wait --for=condition=ready namespace cert-manager --timeout=30s || true
-    
+
     echo "Waiting for cert-manager pods to be ready..."
     # Wait for pods to be created first
     sleep 10
-    
+
     # Check if pods exist before waiting
     if kubectl get pods -l app=cert-manager -n cert-manager --no-headers 2>/dev/null | grep -q .; then
         kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=120s || {
@@ -332,8 +332,13 @@ kubectl apply -f k8s/monitoring/promtail-daemonset.yaml
 
 # Ensure Grafana dashboards are properly configured
 echo "📋 Configuring Grafana dashboards..."
-# Create ConfigMap with proper JSON embedding to avoid truncation
-cat > /tmp/grafana-dashboards.yaml << 'EOF'
+# Create ConfigMap with proper JSON embedding to avoid truncation. Built in a file of this run's
+# own under TMPDIR, removed on exit, so another run on the host never shares it.
+dashboards="$(mktemp --suffix=.yaml "${TMPDIR:-/tmp}/grafana-dashboards.XXXXXX")"
+printf -v dashboards_cleanup 'rm -f -- %q' "$dashboards"
+# shellcheck disable=SC2064  # expand now: the trap removes this run's file
+trap "$dashboards_cleanup" EXIT
+cat > "$dashboards" << 'EOF'
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -346,19 +351,19 @@ data:
 EOF
 
 # Append the full JSON content with proper indentation
-cat grafana-dashboards/econgraph-overview.json | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
+cat grafana-dashboards/econgraph-overview.json | sed 's/^/    /' >> "$dashboards"
 
 # Add the logging dashboard
-cat >> /tmp/grafana-dashboards.yaml << 'EOF'
+cat >> "$dashboards" << 'EOF'
   logging-dashboard.json: |
 EOF
 
 # Extract and append the JSON content from the YAML file (compatible with kislyuk yq)
-yq -r '.data."logging-dashboard.json"' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> /tmp/grafana-dashboards.yaml
+yq -r '.data."logging-dashboard.json"' k8s/monitoring/grafana-logging-dashboard.yaml | sed 's/^/    /' >> "$dashboards"
 
 # Apply the ConfigMap
-kubectl apply -f /tmp/grafana-dashboards.yaml
-rm -f /tmp/grafana-dashboards.yaml
+kubectl apply -f "$dashboards"
+rm -f "$dashboards"
 
 # Wait for all pods to be ready (including monitoring components)
 echo "⏳ Waiting for all pods to be ready..."
@@ -484,7 +489,7 @@ echo ""
 echo "🔐 Checking SSL certificate status..."
 if kubectl get secret econ-graph-tls -n econ-graph-gateway >/dev/null 2>&1; then
     echo "  ✅ SSL Certificate: econ-graph-tls secret exists"
-    
+
     # Check certificate expiry
     CERT_INFO=$(kubectl get secret econ-graph-tls -n econ-graph-gateway -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -dates 2>/dev/null || echo "Unable to parse certificate")
     if [[ "$CERT_INFO" != "Unable to parse certificate" ]]; then
