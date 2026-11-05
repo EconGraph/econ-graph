@@ -19,7 +19,9 @@
 //! `data/catalog_selection/fred.toml`. Rules match live titles, id prefixes and frequency;
 //! a small include/exclude override list covers headline exceptions. Both the number of
 //! catalog rows inspected and the number of selected series are bounded before any observation
-//! work is enqueued. An empty catalog, failed page, changing count, truncated page or duplicate
+//! work is enqueued. Rules sharing a release or category reuse one complete catalog walk;
+//! the scan budget counts each catalog's rows once, while each rule keeps its own match count.
+//! An empty catalog, failed page, changing count, truncated page or duplicate
 //! id fails the entire discovery, so a temporary upstream problem cannot look like retirement.
 //!
 //! Discovery runs in chunks ([`crate::discovery_run`]): [`enumerate_discovery`] walks the
@@ -208,6 +210,12 @@ struct FredCatalogRule {
     title_contains: Option<String>,
     #[serde(default)]
     id_prefix: Option<String>,
+    /// A whole-identifier regular expression for upstream families that share titles
+    /// with other geographies. This selects a family, not a copied list of member ids.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id_pattern: Option<String>,
+    #[serde(skip)]
+    compiled_id_pattern: Option<regex::Regex>,
     #[serde(default)]
     frequencies: Vec<String>,
     /// How many catalog rows this rule is meant to match at most. Discovery doesn't enforce it
@@ -219,25 +227,27 @@ struct FredCatalogRule {
 
 impl FredCatalogRules {
     pub(crate) fn parse(text: &str) -> Result<Self, CrawlError> {
-        let rules: Self = toml::from_str(text)
+        let mut rules: Self = toml::from_str(text)
             .map_err(|e| CrawlError::Permanent(format!("FRED catalog rules: {e}")))?;
         if rules.max_series == 0
             || rules.max_series > 10_000
             || rules.max_catalog_series == 0
             || rules.max_catalog_series > 100_000
             || rules.rules.is_empty()
-            || rules.rules.len() > 16
+            // Multiple family predicates may share one bounded catalog walk. Bound
+            // rules separately from the selected-series and actual scan budgets.
+            || rules.rules.len() > 128
             || rules.include.len() > 32
             || rules.expected_missing.len() > 32
             || rules.exclude.len() > 32
         {
             return Err(CrawlError::Permanent(
                 "FRED catalog rules: positive limits required (at most 10000 selected, \
-                 100000 catalog rows, 16 rules and 32 include/exclude/expected_missing ids)"
+                 100000 catalog rows, 128 rules and 32 include/exclude/expected_missing ids)"
                     .into(),
             ));
         }
-        for rule in &rules.rules {
+        for rule in &mut rules.rules {
             if rule.release_id.is_some() == rule.category_id.is_some()
                 || rule.release_id == Some(0)
                 || rule
@@ -245,6 +255,10 @@ impl FredCatalogRules {
                     .as_ref()
                     .is_some_and(|s| s.trim().is_empty())
                 || rule.id_prefix.as_ref().is_some_and(|s| s.trim().is_empty())
+                || rule
+                    .id_pattern
+                    .as_ref()
+                    .is_some_and(|pattern| pattern.trim().is_empty() || pattern.len() > 256)
                 || rule.max_matches == Some(0)
                 || rule.frequencies.iter().any(|f| {
                     !matches!(
@@ -261,9 +275,22 @@ impl FredCatalogRules {
             {
                 return Err(CrawlError::Permanent(
                     "FRED catalog rule: specify exactly one release_id or category_id, \
-                     nonempty predicates and documented FRED frequencies"
+                     nonempty predicates, id patterns of at most 256 bytes and documented FRED frequencies"
                         .into(),
                 ));
+            }
+            if let Some(pattern) = &rule.id_pattern {
+                // Compile once at configuration load. Linear-time matching and bounded
+                // compiled/cache size keep a catalog's many rows independent of pattern cost.
+                rule.compiled_id_pattern = Some(
+                    regex::RegexBuilder::new(&format!(r"\A(?:{pattern})\z"))
+                        .size_limit(64 * 1024)
+                        .dfa_size_limit(64 * 1024)
+                        .build()
+                        .map_err(|error| {
+                            CrawlError::Permanent(format!("FRED catalog id_pattern: {error}"))
+                        })?,
+                );
             }
         }
         for id in rules.include.iter().chain(&rules.exclude) {
@@ -361,6 +388,9 @@ impl FredCatalogRule {
         if let Some(prefix) = &self.id_prefix {
             out.push_str(&format!(" id_prefix={prefix}"));
         }
+        if let Some(pattern) = &self.id_pattern {
+            out.push_str(&format!(" id_pattern={pattern:?}"));
+        }
         if !self.frequencies.is_empty() {
             out.push_str(&format!(" frequencies={}", self.frequencies.join(",")));
         }
@@ -387,6 +417,10 @@ impl FredCatalogRule {
             .id_prefix
             .as_ref()
             .is_none_or(|prefix| series.id.starts_with(prefix))
+            && self
+                .compiled_id_pattern
+                .as_ref()
+                .is_none_or(|pattern| pattern.is_match(&series.id))
             && (self.frequencies.is_empty()
                 || series.metadata.frequency.as_ref().is_some_and(|f| {
                     self.frequencies.iter().any(|want| {
@@ -592,7 +626,7 @@ pub(crate) struct CatalogSelection {
     /// Rows each rule matched (exclusions applied), in rule order. A series several rules match
     /// counts for each.
     pub rule_matches: Vec<usize>,
-    /// Catalog rows inspected, across every rule.
+    /// Catalog rows inspected, counted once per distinct release/category catalog.
     pub scanned: usize,
 }
 
@@ -746,29 +780,49 @@ impl FredAdapter {
         // re-frequencied out of a rule is still published upstream.
         let mut walked = BTreeSet::new();
         let mut scanned = 0;
-        let mut rule_matches = Vec::with_capacity(rules.rules.len());
+        let mut rule_matches = vec![0; rules.rules.len()];
+        // Group in first-appearance order without retaining catalogs between groups. A
+        // release and a category with the same numeric id are distinct catalogs. All
+        // predicates over one catalog see the same validated pages, fetched just once.
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for (index, rule) in rules.rules.iter().enumerate() {
+            if let Some(group) = groups.iter_mut().find(|group| {
+                let first = &rules.rules[group[0]];
+                (first.release_id, first.category_id) == (rule.release_id, rule.category_id)
+            }) {
+                group.push(index);
+            } else {
+                groups.push(vec![index]);
+            }
+        }
         // Pin the realtime date for every page of this catalog walk. Count/order validation
         // below also refuses common forms of a catalog changing during pagination.
         let realtime = chrono::Utc::now().date_naive().to_string();
-        for (index, rule) in rules.rules.iter().enumerate() {
+        for group in groups {
+            let rule = &rules.rules[group[0]];
             let rows = self
                 .catalog_rows(ctx, api_key, rule, rules, &realtime, scanned)
                 .await?;
             scanned += rows.len();
-            let mut matched = 0;
-            crate::catalog_selection::record_rule_matches(
-                "FRED",
-                &rule.label(index),
-                rows.iter()
+            for &index in &group {
+                let rule = &rules.rules[index];
+                rule_matches[index] = rows
+                    .iter()
                     .filter(|row| rule.matches(row) && !rules.exclude.contains(&row.id))
-                    .count(),
-            );
+                    .count();
+                crate::catalog_selection::record_rule_matches(
+                    "FRED",
+                    &rule.label(index),
+                    rule_matches[index],
+                );
+            }
             for row in rows {
                 walked.insert(row.id.clone());
-                if !rule.matches(&row) || rules.exclude.contains(&row.id) {
+                if rules.exclude.contains(&row.id)
+                    || !group.iter().any(|&index| rules.rules[index].matches(&row))
+                {
                     continue;
                 }
-                matched += 1;
                 if selected
                     .get(&row.id)
                     .is_some_and(|previous| previous != &row.metadata)
@@ -787,7 +841,6 @@ impl FredAdapter {
                     ));
                 }
             }
-            rule_matches.push(matched);
         }
         Ok(RuleWalk {
             selected,
@@ -1681,6 +1734,387 @@ mod tests {
         )
     }
 
+    fn shared_catalog_rules(max_series: usize, max_catalog: usize) -> String {
+        format!(
+            "max_series={max_series}\nmax_catalog_series={max_catalog}\n\
+             [[rules]]\nrelease_id=53\ntitle_contains='domestic product'\n\
+             [[rules]]\nrelease_id=53\nid_prefix='REAL'"
+        )
+    }
+
+    #[tokio::test]
+    async fn shared_catalog_rules_walk_once_count_overlap_and_agree_with_chunks() {
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &Route::get("/release/series").query("release_id", "53"),
+            catalog_page(
+                4,
+                0,
+                vec![
+                    catalog_row("GDP", "Gross Domestic Product"),
+                    catalog_row("OTHER", "Unrelated"),
+                    catalog_row("REALGDP", "Real Gross Domestic Product"),
+                    catalog_row("REALINCOME", "Real Personal Income"),
+                ],
+            ),
+            2, // One complete walk for direct discovery, one for chunk enumeration.
+        )
+        .await;
+        // Four actual catalog rows fit exactly; counting them once per predicate fails.
+        let text = shared_catalog_rules(3, 4);
+        let rules = FredCatalogRules::parse(&text).unwrap();
+        let adapter = FredAdapter::new(mock.base_url()).with_catalog_rules_text(&text);
+        let selected = adapter.select_catalog(&test_ctx(), &rules).await.unwrap();
+        assert_eq!(selected.scanned, 4);
+        assert_eq!(selected.rule_matches, [2, 2]);
+        assert_eq!(
+            selected
+                .found
+                .iter()
+                .map(|s| s.external_id.as_str())
+                .collect::<Vec<_>>(),
+            ["GDP", "REALGDP", "REALINCOME"]
+        );
+        assert_eq!(adapter.catalog_lifecycle().unselected_ids, ["OTHER"]);
+        assert_eq!(mock.received_requests().await.len(), 1);
+
+        let Enumeration::Units {
+            units, lifecycle, ..
+        } = adapter.enumerate_discovery(&test_ctx()).await.unwrap()
+        else {
+            panic!("FRED must enumerate individual series");
+        };
+        assert_eq!(lifecycle.unselected_ids, ["OTHER"]);
+        let chunk = adapter.discover_units(&test_ctx(), &units).await.unwrap();
+        assert_eq!(chunk.found, selected.found);
+        assert_eq!(mock.received_requests().await.len(), 2);
+        assert_eq!(
+            adapter.chunked_discovery().unwrap().catalog_scope,
+            adapter.catalog_scope()
+        );
+    }
+
+    #[tokio::test]
+    async fn shared_catalog_scan_budget_counts_each_distinct_catalog_and_kind() {
+        for max_catalog in [2, 3] {
+            let mock = MockSource::start().await;
+            mock.mount_expect(
+                &Route::get("/release/series").query("release_id", "53"),
+                catalog_page(
+                    2,
+                    0,
+                    vec![
+                        catalog_row("GDP", "Gross Domestic Product"),
+                        catalog_row("REALGDP", "Real Gross Domestic Product"),
+                    ],
+                ),
+                1,
+            )
+            .await;
+            mock.mount_expect(
+                &Route::get("/category/series").query("category_id", "53"),
+                catalog_page(1, 0, vec![catalog_row("INCOME", "Personal Income")]),
+                1,
+            )
+            .await;
+            let text = format!(
+                "{}\n[[rules]]\ncategory_id=53",
+                shared_catalog_rules(3, max_catalog)
+            );
+            let adapter = FredAdapter::new(mock.base_url());
+            let result = adapter
+                .select_catalog(&test_ctx(), &FredCatalogRules::parse(&text).unwrap())
+                .await;
+            if max_catalog == 2 {
+                assert!(is_catalog_volume_guard(&result.unwrap_err()));
+                assert!(adapter.catalog_scope().is_none());
+            } else {
+                let selected = result.unwrap();
+                assert_eq!(selected.scanned, 3);
+                assert_eq!(selected.rule_matches, [2, 1, 1]);
+                assert_eq!(selected.found.len(), 3);
+            }
+            assert_eq!(mock.received_requests().await.len(), 2);
+        }
+    }
+
+    #[test]
+    fn catalog_rule_bound_supports_family_coverage_without_raising_row_budgets() {
+        let prefix = "max_series=10000\nmax_catalog_series=100000\n";
+        let rule = "[[rules]]\nrelease_id=53\n";
+        assert!(FredCatalogRules::parse(&format!("{prefix}{}", rule.repeat(128))).is_ok());
+        assert!(FredCatalogRules::parse(&format!("{prefix}{}", rule.repeat(129))).is_err());
+        assert!(FredCatalogRules::parse(&format!(
+            "max_series=10001\nmax_catalog_series=100000\n{rule}"
+        ))
+        .is_err());
+        assert!(FredCatalogRules::parse(&format!(
+            "max_series=10000\nmax_catalog_series=100001\n{rule}"
+        ))
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn identifier_family_patterns_select_new_members_without_counties_or_metros() {
+        let mock = MockSource::start().await;
+        mock.mount_expect(
+            &Route::get("/release/series").query("release_id", "171"),
+            catalog_page(
+                5,
+                0,
+                [
+                    "ALSTHPI",
+                    "ATNHPIUS10180Q",
+                    "CASTHPI",
+                    "CASTHPIX",
+                    "ZZSTHPI",
+                ]
+                .into_iter()
+                .map(|id| catalog_row(id, "All-Transactions House Price Index"))
+                .collect(),
+            ),
+            1,
+        )
+        .await;
+        // ZZ is an illustrative new provider-shaped member, not a claimed live state code.
+        // A title/frequency predicate alone would also select the metro and suffix lookalike.
+        let rules = FredCatalogRules::parse(
+            "max_series=3\nmax_catalog_series=5\n[[rules]]\nrelease_id=171\n\
+             title_contains='House Price Index'\nfrequencies=['Quarterly']\n\
+             id_pattern='[A-Z]{2}STHPI'",
+        )
+        .unwrap();
+        let selected = FredAdapter::new(mock.base_url())
+            .select_catalog(&test_ctx(), &rules)
+            .await
+            .unwrap();
+        assert_eq!(selected.scanned, 5);
+        assert_eq!(selected.rule_matches, [3]);
+        assert_eq!(
+            selected
+                .found
+                .iter()
+                .map(|row| row.external_id.as_str())
+                .collect::<Vec<_>>(),
+            ["ALSTHPI", "CASTHPI", "ZZSTHPI"]
+        );
+        assert_eq!(mock.received_requests().await.len(), 1);
+    }
+
+    #[test]
+    fn identifier_patterns_are_bounded_and_part_of_selection_identity() {
+        let base = "max_series=10\nmax_catalog_series=20\n[[rules]]\nrelease_id=171\n";
+        let plain = FredCatalogRules::parse(base).unwrap();
+        // Old configurations keep the same serialized scope and therefore their fingerprint.
+        assert_eq!(
+            serde_json::to_string(&plain).unwrap(),
+            r#"{"include":[],"exclude":[],"rules":[{"release_id":171,"category_id":null,"title_contains":null,"id_prefix":null,"frequencies":[]}]}"#
+        );
+        let patterns =
+            |pattern: &str| FredCatalogRules::parse(&format!("{base}id_pattern='{pattern}'"));
+        let state = patterns("[A-Z]{2}STHPI").unwrap();
+        assert_ne!(plain.fingerprint(), state.fingerprint());
+        assert_ne!(
+            state.fingerprint(),
+            patterns("[A-Z]{2}POP").unwrap().fingerprint()
+        );
+        assert!(state.rule_summaries()[0].0.contains("id_pattern="));
+        for pattern in ["", "[", "(?:a{1000}){1000}"] {
+            assert!(
+                patterns(pattern).is_err(),
+                "accepted invalid or excessive pattern {pattern:?}"
+            );
+        }
+        assert!(patterns(&"A".repeat(257)).is_err());
+
+        let constrained = FredCatalogRules::parse(&format!(
+            "{base}id_pattern='[A-Z]{{2}}STHPI'\nid_prefix='CA'\n\
+             title_contains='House Price'\nfrequencies=['Quarterly']"
+        ))
+        .unwrap();
+        let rule = &constrained.rules[0];
+        let mut row = catalog_row("CASTHPI", "House Price Index");
+        assert!(rule.matches(&serde_json::from_value(row.clone()).unwrap()));
+        row["id"] = "ALSTHPI".into();
+        assert!(!rule.matches(&serde_json::from_value(row.clone()).unwrap()));
+        row["id"] = "CASTHPI".into();
+        row["frequency"] = "Annual".into();
+        assert!(!rule.matches(&serde_json::from_value(row.clone()).unwrap()));
+        row["frequency"] = "Quarterly".into();
+        row["title"] = "Income".into();
+        assert!(!rule.matches(&serde_json::from_value(row).unwrap()));
+    }
+
+    fn coverage_proposal() -> (FredCatalogRules, serde_json::Value, Vec<String>) {
+        let text = include_str!("../../data/catalog_selection/fred.toml");
+        let rules = FredCatalogRules::parse(text).unwrap();
+        let fixture = serde_json::from_str(include_str!(
+            "../../tests/fixtures/fred/coverage-family-witnesses.json"
+        ))
+        .unwrap();
+        let keys = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("# rule: "))
+            .map(|line| line.split(';').next().unwrap().trim().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(keys.len(), rules.rules.len());
+        assert_eq!(keys.iter().collect::<BTreeSet<_>>().len(), keys.len());
+        (rules, fixture, keys)
+    }
+
+    fn coverage_row(witness: &serde_json::Value) -> CatalogSeries {
+        serde_json::from_value(serde_json::json!({
+            "id": witness["series_id"],
+            "title": witness["title"],
+            "frequency": witness["frequency"],
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn proposed_coverage_matches_each_family_witness_with_its_actual_catalog() {
+        let (rules, fixture, keys) = coverage_proposal();
+        assert_eq!(fixture["format"], 1);
+        let inventory = fixture["rule_inventory"].as_array().unwrap();
+        assert_eq!(inventory.len(), rules.rules.len());
+        for (index, ((rule, key), item)) in rules.rules.iter().zip(&keys).zip(inventory).enumerate()
+        {
+            assert_eq!(item["index"].as_u64(), Some(index as u64));
+            assert_eq!(item["key"].as_str(), Some(key.as_str()));
+            assert_eq!(item["release_id"].as_u64(), rule.release_id.map(u64::from));
+            assert_eq!(
+                item["category_id"].as_u64(),
+                rule.category_id.map(u64::from)
+            );
+        }
+        let families = fixture["families"].as_array().unwrap();
+        assert_eq!(families.len(), 33);
+        assert_eq!(
+            families
+                .iter()
+                .map(|family| family["family"].as_u64().unwrap())
+                .collect::<BTreeSet<_>>(),
+            (1..=33).collect()
+        );
+        assert_eq!(
+            families
+                .iter()
+                .map(|family| family["historical_id_count"].as_u64().unwrap())
+                .sum::<u64>(),
+            1533
+        );
+        for family in families {
+            for key in family["rule_keys"].as_array().unwrap() {
+                let index = keys
+                    .iter()
+                    .position(|candidate| Some(candidate.as_str()) == key.as_str())
+                    .unwrap();
+                assert!(inventory[index]["families"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&family["family"]));
+            }
+            for id in family["headline_overrides"].as_array().unwrap() {
+                assert!(rules
+                    .include
+                    .iter()
+                    .any(|candidate| Some(candidate.as_str()) == id.as_str()));
+            }
+            let witnesses = family["positive_witnesses"].as_array().unwrap();
+            assert!(
+                !witnesses.is_empty(),
+                "family without a membership example: {family}"
+            );
+            for witness in witnesses {
+                let row = coverage_row(witness);
+                let actual = rules
+                    .rules
+                    .iter()
+                    .zip(&keys)
+                    .filter(|(rule, _)| {
+                        rule.release_id.map(u64::from) == witness["release_id"].as_u64()
+                            && rule.matches(&row)
+                            && !rules.exclude.contains(&row.id)
+                    })
+                    .map(|(_, key)| key.as_str())
+                    .collect::<Vec<_>>();
+                let expected = witness["matching_rule_keys"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|key| key.as_str().unwrap())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    actual, expected,
+                    "wrong catalog/predicate selection for {}",
+                    row.id
+                );
+                assert!(
+                    rules.include.contains(&row.id) || !actual.is_empty(),
+                    "family {} loses its representative {}",
+                    family["family"],
+                    row.id
+                );
+                assert!(matches!(
+                    witness["provenance"]["kind"].as_str(),
+                    Some("official_public_series_page" | "existing_repository_metadata_fixture")
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn proposed_regional_patterns_reject_neighboring_geographies_and_products() {
+        let (rules, fixture, keys) = coverage_proposal();
+        let positives = fixture["families"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|family| family["positive_witnesses"].as_array().unwrap())
+            .collect::<Vec<_>>();
+        let negatives = fixture["negative_identifier_witnesses"].as_array().unwrap();
+        assert!(!negatives.is_empty());
+        for negative in negatives {
+            let key = negative["rule_key"].as_str().unwrap();
+            let rule = &rules.rules[keys.iter().position(|candidate| candidate == key).unwrap()];
+            assert!(rule.compiled_id_pattern.is_some());
+            let positive = positives
+                .iter()
+                .find(|witness| {
+                    witness["matching_rule_keys"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|candidate| candidate.as_str() == Some(key))
+                })
+                .unwrap();
+            let mut row = coverage_row(positive);
+            assert!(rule.matches(&row));
+            // Change only the ID: unrelated title/frequency failures cannot hide an over-broad pattern.
+            row.id = negative["series_id"].as_str().unwrap().into();
+            assert!(
+                !rule.matches(&row),
+                "{key} admits neighboring product/geography {}",
+                row.id
+            );
+        }
+        let maturity = &rules.rules[keys
+            .iter()
+            .position(|key| key == "expected-inflation")
+            .unwrap()];
+        let mut new_member = coverage_row(
+            positives
+                .iter()
+                .find(|witness| witness["series_id"] == "EXPINF1YR")
+                .unwrap(),
+        );
+        new_member.id = "EXPINF99YR".into();
+        assert!(
+            maturity.matches(&new_member),
+            "a new provider-shaped maturity needs no new series allowlist entry"
+        );
+    }
+
     #[tokio::test]
     async fn catalog_automatically_selects_new_ids_and_reports_retired_overrides() {
         let mock = MockSource::start().await;
@@ -1957,9 +2391,8 @@ mod tests {
             )
             .await;
             let adapter = FredAdapter::new(mock.base_url());
-            let result = adapter
-                .discover_catalog(&test_ctx(), &catalog_rules(2000, 3000))
-                .await;
+            let rules = FredCatalogRules::parse(&shared_catalog_rules(2000, 1001)).unwrap();
+            let result = adapter.discover_catalog(&test_ctx(), &rules).await;
             if scenario == "valid" {
                 assert_eq!(result.unwrap().len(), 1001);
             } else {
@@ -2867,7 +3300,7 @@ mod tests {
     }
 
     /// The NBER recession indicator: `discover()` finds `USREC` in the
-    /// shipped list, and the copyright safety net keeps it given FRED's real notes for it.
+    /// headline overrides, and the copyright safety net keeps it given FRED's real notes for it.
     #[tokio::test]
     async fn discover_keeps_usrec_with_its_real_notes() {
         const SERIES_USREC: &str = include_str!("../../tests/fixtures/fred/series_usrec.json");
@@ -2878,15 +3311,24 @@ mod tests {
             1,
         )
         .await;
-        // USREC is an explicit override in catalog_selection/fred.toml, outside the GDP release.
+        // Keep this metadata/copyright check independent of the proposal's many catalog routes.
+        // The shipped configuration must still carry the headline exception.
+        assert!(
+            FredCatalogRules::parse(include_str!("../../data/catalog_selection/fred.toml"))
+                .unwrap()
+                .include
+                .iter()
+                .any(|id| id == "USREC")
+        );
         mock.mount(
             &Route::get("/release/series").query("release_id", "53"),
             catalog_page(1, 0, vec![catalog_row("GDP", "Gross Domestic Product")]),
         )
         .await;
-        mock.mount(&Route::get("/series"), Reply::json_str(SERIES_GDP))
-            .await;
         let found = FredAdapter::new(mock.base_url())
+            .with_catalog_rules_text(
+                "max_series=10\nmax_catalog_series=10\ninclude=['USREC']\n[[rules]]\nrelease_id=53",
+            )
             .discover(&test_ctx())
             .await
             .unwrap();
@@ -2906,6 +3348,7 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("National Bureau of Economic Research"));
+        assert_eq!(mock.received_requests().await.len(), 2);
         mock.server().verify().await;
     }
 
@@ -2953,8 +3396,22 @@ mod contract {
     use super::FredAdapter;
     use crate::testkit::{Reply, Route};
 
+    // This contract owns one GDP catalog fixture and headline/retirement metadata
+    // fixtures. Its HTTP routes must stay independent of the live selection scope;
+    // the coverage-family tests validate the shipped proposal separately.
+    const FIXTURE_RULES: &str = r#"
+max_catalog_series = 100
+max_series = 100
+include = ["CPIAUCSL", "UNRATE", "USREC", "PAYEMS", "FEDFUNDS", "DGS10", "INDPRO", "HOUST", "M2SL", "WPU00000000", "CAPUTLG2211S1"]
+expected_missing = ["WPU00000000", "CAPUTLG2211S1"]
+[[rules]]
+release_id = 53
+title_contains = "gross domestic product"
+frequencies = ["Quarterly", "Annual"]
+"#;
+
     crate::adapter_contract_tests! {
-        adapter: |base_url: String| FredAdapter::new(base_url),
+        adapter: |base_url: String| FredAdapter::new(base_url).with_catalog_rules_text(FIXTURE_RULES),
         external_id: "GDP",
         route: Route::get("/series/observations").query("series_id", "GDP"),
         ok_reply: Reply::json_str(include_str!("../../tests/fixtures/fred/observations_gdp.json")),
