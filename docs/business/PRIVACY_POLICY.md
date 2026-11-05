@@ -154,6 +154,8 @@ We do not sell, rent, or trade your personal information to third parties for mo
 - Customer support platforms
 - Email delivery services
 
+The privacy contact address, privacy@econgraph.com, uses Google Groups to forward email to our monitored mailbox. If you email that address, Google Groups processes the information in your message as part of delivering it.
+
 **Legal Requirements:**
 
 - When required by law or legal process

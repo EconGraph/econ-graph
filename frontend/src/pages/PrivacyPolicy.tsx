@@ -51,7 +51,8 @@ const PrivacyPolicy: React.FC = () => {
             }}
           >
             You can browse every chart and every public annotation on EconGraph without an account.
-            We store information about you only when you sign in.
+            When you sign in, we store the account information and content described below. If you
+            email us, we receive the information in your message.
           </Typography>
 
           <Typography variant='h6' component='h3' gutterBottom>
@@ -244,8 +245,7 @@ const PrivacyPolicy: React.FC = () => {
               marginBottom: '16px',
             }}
           >
-            We do not sell or share personal information. The parties involved in running the site
-            are:
+            We do not sell personal information. Services involved in running the site include:
           </Typography>
           <List dense>
             <ListItem>
@@ -258,6 +258,12 @@ const PrivacyPolicy: React.FC = () => {
               <ListItemText
                 primary='Our hosting provider'
                 secondary='Runs the servers and database that store the data described above'
+              />
+            </ListItem>
+            <ListItem>
+              <ListItemText
+                primary='Google Groups'
+                secondary='The privacy contact address uses Google Groups to forward email to our monitored mailbox'
               />
             </ListItem>
             <ListItem>
@@ -351,7 +357,7 @@ const PrivacyPolicy: React.FC = () => {
           EconGraph is an open-source economic data explorer. Browsing needs no account. If you sign
           in through a configured provider, we keep your basic profile and the annotations and
           comments you write. Annotations are private unless you make them public. We use no
-          trackers and share no personal information with third parties.
+          trackers. Sign-in, hosting, font and privacy-email services are described below.
         </Typography>
       </Paper>
 
