@@ -57,9 +57,9 @@ ENV FLAGS_PROFILE=${FLAGS_PROFILE}
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    cargo build --release --locked --bin econ-graph-backend --bin crawler-worker --bin crawler --bin sec-companyfacts-ingest --bin timeseries \
+    cargo build --release --locked --bin econ-graph-backend --bin crawler-worker --bin crawler --bin sec-companyfacts-ingest --bin timeseries --bin timeseries-recovery \
     && mkdir -p /out \
-    && cp target/release/econ-graph-backend target/release/crawler-worker target/release/crawler target/release/sec-companyfacts-ingest target/release/timeseries /out/
+    && cp target/release/econ-graph-backend target/release/crawler-worker target/release/crawler target/release/sec-companyfacts-ingest target/release/timeseries target/release/timeseries-recovery /out/
 
 ############################
 # Shared runtime base
@@ -88,8 +88,10 @@ COPY --from=builder --chown=econuser:econuser /out/crawler-worker /app/crawler-w
 COPY --from=builder --chown=econuser:econuser /out/crawler /app/crawler
 COPY --from=builder --chown=econuser:econuser /out/sec-companyfacts-ingest /app/sec-companyfacts-ingest
 # Bounded maintenance uses the same reviewed storage code.
-# Their operational gates remain explicit; copying a binary never enables a cutover/job.
+# Operational gates remain explicit; copying binaries never enables a cutover/job.
 COPY --from=builder --chown=econuser:econuser /out/timeseries /app/timeseries
+# Recovery tools retain their explicit target and operator acceptance gates.
+COPY --from=builder --chown=econuser:econuser /out/timeseries-recovery /app/timeseries-recovery
 # Reference data read at runtime (not compiled in), e.g. the BLS series list and dataset files.
 COPY --chown=econuser:econuser crates/econ-graph-crawler/data /app/data
 ENV CRAWLER_DATA_DIR=/app/data
