@@ -143,8 +143,22 @@ def export_credentials(module, state, env, recipients):
             exclusive_write(destination, seal(plaintext, recipients))
 
 
+CGROUP_CONTROLLERS = Path("/sys/fs/cgroup/cgroup.controllers")
+
+
+def verify_cgroup_v2(controllers=CGROUP_CONTROLLERS):
+    # libvirt only treats swap_hard_limit as swap alone on cgroup v2.
+    try:
+        available = controllers.read_text().split()
+    except OSError:
+        raise Refused("host must use cgroup v2 for the control-plane swap limit") from None
+    if "memory" not in available:
+        raise Refused("host cgroup v2 has no memory controller for the control-plane swap limit")
+
+
 def verify_host(config, host_state):
     owned(host_state, config)
+    verify_cgroup_v2()
     if not Path("/dev/kvm").exists():
         raise Refused("/dev/kvm is absent; VM creation/fit tests are unavailable")
     if config.get("dhcp_reservations_confirmed") is not True:

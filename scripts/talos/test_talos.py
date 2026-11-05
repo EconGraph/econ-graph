@@ -234,6 +234,21 @@ class TalosTests(unittest.TestCase):
         self.assertEqual(calls[3][1], ('-input=false', saved))
         self.assertFalse(Path(saved).parent.exists())
 
+    def test_host_without_cgroup_v2_memory_controller_is_refused(self):
+        controllers = self.directory / "cgroup.controllers"
+        with self.assertRaisesRegex(common.Refused, "must use cgroup v2"):
+            cluster.verify_cgroup_v2(controllers)
+        controllers.write_text("cpu io pids\n")
+        with self.assertRaisesRegex(common.Refused, "no memory controller"):
+            cluster.verify_cgroup_v2(controllers)
+        controllers.write_text("cpu io memory pids\n")
+        cluster.verify_cgroup_v2(controllers)
+
+    def test_verify_host_checks_cgroup_v2_before_host_changes(self):
+        with patch.object(cluster, "owned"), patch.object(cluster, "verify_cgroup_v2", side_effect=common.Refused("no cgroup v2")), patch.object(cluster, "call", side_effect=AssertionError("host tools must not run")):
+            with self.assertRaisesRegex(common.Refused, "no cgroup v2"):
+                cluster.verify_host(self.config, self.directory)
+
     def test_owned_vm_with_foreign_attached_disk_is_refused(self):
         name = self.config["name"] + "-worker-1"
         owner = f"econgraph-talos owner={self.config['owner_id']} cluster={self.config['name']} role=worker"

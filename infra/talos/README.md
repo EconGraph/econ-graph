@@ -46,9 +46,13 @@ build. Live allocation, pressure and cleanup remain fit-test evidence.
 The host's own swap needs no Talos or Kubernetes configuration, and worker VM
 memory stays free to swap. Each control-plane VM is capped at 1 GiB of host swap
 through libvirt's `swap_hard_limit`, because etcd is sensitive to stalls. libvirt
-writes that value directly to `memory.swap.max`, so this relies on the host using
-cgroup v2. On cgroup v1 it would limit memory plus swap instead. No VM sets
-`hard_limit` or locked memory.
+writes that value directly to `memory.swap.max`, so build and rebuild refuse a
+host without cgroup v2 and its memory controller. On cgroup v1 the value would
+limit memory plus swap instead. No VM sets `hard_limit` or locked memory.
+
+Changing a VM's libvirt settings on a running cluster can restart that VM, and
+`build` applies changes to every VM together. Change control-plane settings one
+VM at a time, checking etcd health between them, so the cluster keeps quorum.
 
 Workers expose `/dev/vdb` as an XFS `UserVolumeConfig` named `postgres`, mounted
 at `/var/mnt/postgres` and shared into kubelet with propagation. Workers carry
