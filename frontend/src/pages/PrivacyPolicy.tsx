@@ -35,7 +35,7 @@ import {
 } from '@mui/icons-material';
 
 const LAST_UPDATED = 'November 5, 2026';
-const PRIVACY_CONTACT_EMAIL = 'support@econgraph.com';
+const PRIVACY_CONTACT_EMAIL = 'privacy@econgraph.com';
 
 const PrivacyPolicy: React.FC = () => {
   const sections = [

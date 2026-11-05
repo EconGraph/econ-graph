@@ -244,7 +244,7 @@ In the event of a data breach that may affect your personal information, we will
 
 ### 7.5 How to Exercise Your Rights
 
-Contact us at support@econgraph.com with:
+Contact us at privacy@econgraph.com with:
 
 - Your request type
 - Verification of your identity
@@ -369,7 +369,7 @@ Your continued use of our Service after changes become effective constitutes acc
 
 For questions about this Privacy Policy or our data practices:
 
-**Email:** support@econgraph.com  
+**Email:** privacy@econgraph.com\
 **Address:** EconGraph Privacy Team  
 **Response Time:** Within 30 days
 
