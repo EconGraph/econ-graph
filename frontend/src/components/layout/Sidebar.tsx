@@ -69,6 +69,15 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onClose }) => {
     },
   ];
 
+  if (__FLAGS__.financial_components) {
+    navigationItems.push({
+      text: 'Company Research',
+      path: '/companies',
+      icon: <TrendingUpIcon />,
+      description: 'SEC financial statements and company research',
+    });
+  }
+
   const secondaryItems: NavigationItem[] = [
     {
       text: 'About',
