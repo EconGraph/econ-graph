@@ -642,6 +642,8 @@ pub struct FredAdapter {
     rules_text: Option<Arc<str>>,
     /// Units per `discover_chunk` job: [`UNITS_PER_CHUNK`], smaller in tests.
     units_per_chunk: usize,
+    #[cfg(test)]
+    audit: Option<Arc<audit::Recorder>>,
 }
 
 impl FredAdapter {
@@ -653,6 +655,8 @@ impl FredAdapter {
             catalog: Arc::default(),
             rules_text: None,
             units_per_chunk: UNITS_PER_CHUNK,
+            #[cfg(test)]
+            audit: None,
         }
     }
 
@@ -718,10 +722,25 @@ impl FredAdapter {
         let mut facts = CatalogLifecycle::default();
         for id in &rules.include {
             if rules.exclude.contains(id) || selected.contains_key(id) {
+                #[cfg(test)]
+                if let Some(audit) = &self.audit {
+                    audit.include_outcome(
+                        id,
+                        if rules.exclude.contains(id) {
+                            "excluded"
+                        } else {
+                            "selected_by_rule"
+                        },
+                    )?;
+                }
                 continue;
             }
             match self.fetch_metadata(ctx, api_key, id).await {
                 Ok((meta, _)) => {
+                    #[cfg(test)]
+                    if let Some(audit) = &self.audit {
+                        audit.include_outcome(id, "metadata_found")?;
+                    }
                     selected.insert(id.clone(), FredSeries::from_metadata(meta));
                     if selected.len() > rules.max_series {
                         return Err(catalog_volume_error(
@@ -731,7 +750,13 @@ impl FredAdapter {
                         ));
                     }
                 }
-                Err(CrawlError::NotFound(_)) => facts.confirmed_missing_ids.push(id.clone()),
+                Err(CrawlError::NotFound(_)) => {
+                    #[cfg(test)]
+                    if let Some(audit) = &self.audit {
+                        audit.include_outcome(id, "confirmed_not_found")?;
+                    }
+                    facts.confirmed_missing_ids.push(id.clone());
+                }
                 // Parse/permanent errors are not evidence of removal. Never publish a partial
                 // override list as a successful catalog, even if other entries succeeded.
                 Err(error) => return Err(error),
@@ -757,11 +782,16 @@ impl FredAdapter {
             .collect();
         *self.catalog.lock().unwrap_or_else(PoisonError::into_inner) =
             Some((rules.fingerprint(), facts));
-        Ok(CatalogSelection {
+        let selection = CatalogSelection {
             found,
             rule_matches,
             scanned,
-        })
+        };
+        #[cfg(test)]
+        if let Some(audit) = &self.audit {
+            audit.success(&selection, &self.catalog_lifecycle())?;
+        }
+        Ok(selection)
     }
 
     /// Walks every rule's complete release or category catalog: the rows the rules select
@@ -798,11 +828,19 @@ impl FredAdapter {
         // Pin the realtime date for every page of this catalog walk. Count/order validation
         // below also refuses common forms of a catalog changing during pagination.
         let realtime = chrono::Utc::now().date_naive().to_string();
+        #[cfg(test)]
+        if let Some(audit) = &self.audit {
+            audit.realtime(&realtime)?;
+        }
         for group in groups {
             let rule = &rules.rules[group[0]];
             let rows = self
                 .catalog_rows(ctx, api_key, rule, rules, &realtime, scanned)
                 .await?;
+            #[cfg(test)]
+            if let Some(audit) = &self.audit {
+                audit.catalog_complete(&group, &rows, rules)?;
+            }
             scanned += rows.len();
             for &index in &group {
                 let rule = &rules.rules[index];
@@ -886,6 +924,21 @@ impl FredAdapter {
                 ("realtime_start", realtime),
                 ("realtime_end", realtime),
             ];
+            #[cfg(test)]
+            let page: CatalogPage = if let Some(audit) = &self.audit {
+                ctx.http
+                    .get_json_audited(SourceId::Fred, &self.url(path), &query, |text| {
+                        audit.page(rule, rows.len(), text)
+                    })
+                    .await
+                    .map_err(classify_fred_error)?
+            } else {
+                ctx.http
+                    .get_json(SourceId::Fred, &self.url(path), &query)
+                    .await
+                    .map_err(classify_fred_error)?
+            };
+            #[cfg(not(test))]
             let page: CatalogPage = ctx
                 .http
                 .get_json(SourceId::Fred, &self.url(path), &query)
@@ -931,6 +984,10 @@ impl FredAdapter {
                 last_id = Some(row.id.clone());
                 rows.push(row);
             }
+            #[cfg(test)]
+            if let Some(audit) = &self.audit {
+                audit.page_validated(rule, &offset)?;
+            }
             if rows.len() == page.count {
                 break;
             }
@@ -950,6 +1007,36 @@ impl FredAdapter {
         api_key: &str,
         series_id: &str,
     ) -> Result<(NewSeriesMetadataLite, Option<String>), CrawlError> {
+        #[cfg(test)]
+        let body: SeriesResponse = if let Some(audit) = &self.audit {
+            ctx.http
+                .get_json_audited(
+                    SourceId::Fred,
+                    &self.url("/series"),
+                    &[
+                        ("series_id", series_id),
+                        ("api_key", api_key),
+                        ("file_type", "json"),
+                    ],
+                    |text| audit.metadata(series_id, text),
+                )
+                .await
+                .map_err(classify_fred_error)?
+        } else {
+            ctx.http
+                .get_json(
+                    SourceId::Fred,
+                    &self.url("/series"),
+                    &[
+                        ("series_id", series_id),
+                        ("api_key", api_key),
+                        ("file_type", "json"),
+                    ],
+                )
+                .await
+                .map_err(classify_fred_error)?
+        };
+        #[cfg(not(test))]
         let body: SeriesResponse = ctx
             .http
             .get_json(
@@ -3823,3 +3910,7 @@ frequencies = ["Quarterly", "Annual"]
         },
     }
 }
+
+// Temporary audit exporter: never compiled into the production adapter.
+#[cfg(test)]
+mod audit;

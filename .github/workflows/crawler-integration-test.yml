@@ -1,6 +1,6 @@
-name: Temporary FRED Count-Only Audit
+name: Temporary FRED Catalog Evidence Audit
 
-# TEMP audit branch only. Counts do not establish complete membership/witness coverage.
+# TEMP audit branch only. Evidence still requires independent membership/budget review.
 on:
   workflow_dispatch:
 
@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  fred-count-only:
+  fred-evidence:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -43,33 +43,50 @@ jobs:
       run: python3 -m unittest discover -s scripts/tests -p 'test_audit_fred_selection.py' -v
 
     # No API key is injected during compilation or dependency resolution.
-    - name: Build crawler only
-      run: cargo build --locked --manifest-path backend/Cargo.toml -p econ-graph-crawler --bin crawler
+    - name: Compile ignored exporter test without credentials
+      run: |
+        cargo test --locked --manifest-path backend/Cargo.toml -p econ-graph-crawler --lib \
+          --no-run --message-format=json > "$RUNNER_TEMP/fred-build.json"
+        python3 - <<'PYTHON'
+        import json, os
+        from pathlib import Path
+        messages = Path(os.environ['RUNNER_TEMP'], 'fred-build.json').read_text().splitlines()
+        binaries = [m['executable'] for m in map(json.loads, messages)
+                    if m.get('reason') == 'compiler-artifact' and m.get('executable')
+                    and m.get('target', {}).get('name') == 'econ_graph_crawler'
+                    and m.get('profile', {}).get('test') is True
+                    and 'lib' in m.get('target', {}).get('kind', [])]
+        if len(binaries) != 1:
+            raise SystemExit('Expected exactly one crawler lib test executable')
+        Path(os.environ['RUNNER_TEMP'], 'fred-test-binary.txt').write_text(binaries[0])
+        PYTHON
 
-    - name: Run read-only COUNT-ONLY audit
+    - name: Run exact ignored authenticated evidence test
       id: audit
       continue-on-error: true
       env:
         FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
       run: |
         python3 scripts/audit-fred-selection.py \
-          --binary backend/target/debug/crawler \
+          --mode exporter \
+          --binary "$(cat "$RUNNER_TEMP/fred-test-binary.txt")" \
+          --historical-csv scripts/audit-fixtures/fred-historical-1533.csv \
           --data-dir backend/crates/econ-graph-crawler/data \
-          --output "$RUNNER_TEMP/fred-count-sanitized" \
+          --output "$RUNNER_TEMP/fred-evidence-safe" \
           --revision '${{ github.sha }}'
 
-    - name: Upload only sanitized count artifacts
+    - name: Upload verified immutable evidence and sanitized logs
       if: ${{ always() && steps.audit.outcome != 'skipped' }}
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
-        name: fred-count-only-${{ github.sha }}
-        path: ${{ runner.temp }}/fred-count-sanitized/
+        name: fred-evidence-${{ github.sha }}
+        path: ${{ runner.temp }}/fred-evidence-safe/
         if-no-files-found: error
         retention-days: 7
 
     - name: Preserve actual audit failure
       if: ${{ always() && steps.audit.outcome != 'skipped' }}
       run: |
-        status=$(cat "$RUNNER_TEMP/fred-count-sanitized/exit-status.txt")
+        status=$(cat "$RUNNER_TEMP/fred-evidence-safe/exit-status.txt")
         case "$status" in ''|*[!0-9]*) exit 2 ;; esac
         exit "$status"

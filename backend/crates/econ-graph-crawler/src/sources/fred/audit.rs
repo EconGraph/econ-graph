@@ -1,0 +1,989 @@
+//! Temporary, opt-in evidence exporter. This module is compiled only with `cfg(test)`.
+//! No database, observation requests, alternate matcher, or alternate pagination loop.
+
+use super::*;
+use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
+
+const HISTORY_SHA256: &str = "006745a4e19f2faca561cbc8ca8ae295365aa2afbb637a7bec32f5a2a22343a8";
+const FIXTURE: &str = include_str!("../../../tests/fixtures/fred/coverage-family-witnesses.json");
+
+fn digest(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+fn failed() -> CrawlError {
+    // Neither IO errors, provider errors, configuration text nor URLs enter artifacts.
+    CrawlError::Permanent("FRED audit evidence could not be recorded safely".into())
+}
+
+fn canonical(value: Value) -> Value {
+    match value {
+        Value::Object(map) => serde_json::to_value(
+            map.into_iter()
+                .map(|(k, v)| (k, canonical(v)))
+                .collect::<BTreeMap<_, _>>(),
+        )
+        .expect("JSON values serialize"),
+        Value::Array(rows) => Value::Array(rows.into_iter().map(canonical).collect()),
+        other => other,
+    }
+}
+
+fn catalog_key(rule: &FredCatalogRule) -> String {
+    match rule.release_id {
+        Some(id) => format!("release-{id}"),
+        None => format!("category-{}", rule.category_id.expect("validated rule")),
+    }
+}
+
+#[derive(Clone)]
+struct Historical {
+    id: String,
+    family: usize,
+}
+
+fn history(bytes: &[u8]) -> Result<Vec<Historical>, CrawlError> {
+    if digest(bytes) != HISTORY_SHA256 {
+        return Err(failed());
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| failed())?;
+    let mut family = 0;
+    let mut rows = Vec::new();
+    for line in text.lines() {
+        if line.starts_with("# --- ") {
+            family += 1;
+        } else if !line.is_empty() && !line.starts_with('#') && line != "series_id" {
+            validate_catalog_id(line)?;
+            rows.push(Historical {
+                id: line.into(),
+                family,
+            });
+        }
+    }
+    if family != 33
+        || rows.len() != 1533
+        || rows.iter().map(|r| &r.id).collect::<BTreeSet<_>>().len() != 1533
+    {
+        return Err(failed());
+    }
+    Ok(rows)
+}
+
+struct State {
+    report: Value,
+    rules: FredCatalogRules,
+    keys: Vec<String>,
+    fixture: Value,
+    historical: Vec<Historical>,
+    seen: BTreeSet<String>,
+    bindings: BTreeMap<String, Vec<Value>>,
+}
+
+/// Deliberately does not derive Debug: the in-memory credential is never formatted.
+pub(super) struct Recorder {
+    directory: PathBuf,
+    secret: String,
+    state: Mutex<State>,
+}
+
+impl std::fmt::Debug for Recorder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FredAuditRecorder")
+    }
+}
+
+impl Recorder {
+    fn new(
+        directory: &Path,
+        secret: &str,
+        rules: &FredCatalogRules,
+        text: &str,
+        fixture: Value,
+        historical: Vec<Historical>,
+        revision: &str,
+    ) -> Result<Arc<Self>, CrawlError> {
+        if directory.join("manifest.json").exists() {
+            return Err(failed());
+        }
+        std::fs::create_dir_all(directory).map_err(|_| failed())?;
+        let keys: Vec<_> = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("# rule: "))
+            .map(|line| line.split(';').next().unwrap_or_default().trim().to_owned())
+            .collect();
+        let keys = if keys.len() == rules.rules.len() {
+            keys
+        } else {
+            (0..rules.rules.len())
+                .map(|i| format!("rule-{i}"))
+                .collect()
+        };
+        let mut catalogs = serde_json::Map::new();
+        for rule in &rules.rules {
+            catalogs.entry(catalog_key(rule)).or_insert(json!({
+                "complete": false, "pages": {}, "ids": []
+            }));
+        }
+        let recorder = Arc::new(Self {
+            directory: directory.into(),
+            secret: secret.into(),
+            state: Mutex::new(State {
+                report: json!({
+                    "format": 1, "complete": false, "selection_complete": false,
+                    "status": "partial_in_progress", "started_at": chrono::Utc::now().to_rfc3339(),
+                    "revision": revision, "rules_sha256": digest(text.as_bytes()),
+                    "scope_fingerprint": rules.fingerprint(), "fixture_sha256": digest(FIXTURE.as_bytes()),
+                    "bounds": {"copied_scan_guard": rules.max_catalog_series, "production_selected_guard": rules.max_series,
+                        "selected_hard_ceiling": 10000, "count_uncapped": true, "timeout_seconds": 1800,
+                        "requests_per_minute": 30, "ownership_lookup_cap": 2},
+                    "historical": {"commit": "4c51c29c20b47113b4574aad6ae44b01beef021f", "sha256": HISTORY_SHA256,
+                        "provided": !historical.is_empty(), "runtime_membership": false},
+                    "catalogs": catalogs, "rules": keys.iter().enumerate().map(|(i,key)| json!({
+                        "index":i,"key":key,"catalog":catalog_key(&rules.rules[i]),
+                        "description":rules.rules[i].describe(),"metric_label":rules.rules[i].label(i),
+                        "max_matches":rules.rules[i].max_matches,"complete":false,"ids":[]
+                    })).collect::<Vec<_>>(),
+                    "includes": rules.include.iter().map(|id| (id.clone(), json!({"outcome":"unvisited",
+                        "expected_missing":rules.expected_missing.contains(id)}))).collect::<BTreeMap<_,_>>(),
+                    "excludes": rules.exclude, "metadata_responses": {}, "ownership_responses": {},
+                    "completed_catalog_rows": 0, "selected_union": [], "positive_witnesses": [], "synthetic_boundaries": []
+                }),
+                rules: rules.clone(),
+                keys,
+                fixture,
+                historical,
+                seen: BTreeSet::new(),
+                bindings: BTreeMap::new(),
+            }),
+        });
+        recorder.update(|_| {})?;
+        Ok(recorder)
+    }
+
+    fn write(&self, name: &str, bytes: &[u8]) -> Result<(), CrawlError> {
+        let text = std::str::from_utf8(bytes).map_err(|_| failed())?;
+        if !crate::http::audit_text_is_safe(text, &self.secret) {
+            return Err(failed());
+        }
+        let path = self.directory.join(name);
+        let temporary = path.with_extension("pending");
+        std::fs::write(&temporary, bytes).map_err(|_| failed())?;
+        std::fs::rename(temporary, path).map_err(|_| failed())
+    }
+
+    fn update(&self, change: impl FnOnce(&mut State)) -> Result<(), CrawlError> {
+        let mut state = self.state.lock().map_err(|_| failed())?;
+        change(&mut state);
+        self.write(
+            "manifest.json",
+            &serde_json::to_vec_pretty(&state.report).map_err(|_| failed())?,
+        )
+    }
+
+    fn capture(&self, name: &str, text: &str) -> Result<Value, CrawlError> {
+        let raw_name = format!("{name}.response-text.json");
+        self.write(&raw_name, text.as_bytes())?;
+        let mut record = json!({"retrieved_at":chrono::Utc::now().to_rfc3339(),
+            "raw_representation":"response_text_utf8_not_http_wire", "raw_path":raw_name,
+            "raw_sha256":digest(text.as_bytes()), "validation":"downloaded_unvalidated"});
+        if let Ok(value) = serde_json::from_str::<Value>(text) {
+            let bytes =
+                serde_json::to_vec_pretty(&canonical(value.clone())).map_err(|_| failed())?;
+            let normalized_name = format!("{name}.normalized.json");
+            self.write(&normalized_name, &bytes)?;
+            record["normalized_path"] = json!(normalized_name);
+            record["normalized_sha256"] = json!(digest(&bytes));
+            record["advertised_count"] = value["count"].clone();
+            record["response_offset"] = value["offset"].clone();
+            record["response_limit"] = value["limit"].clone();
+        }
+        Ok(record)
+    }
+
+    pub(super) fn realtime(&self, realtime: &str) -> Result<(), CrawlError> {
+        self.update(|s| s.report["catalog_realtime"] = json!(realtime))
+    }
+
+    pub(super) fn page(
+        &self,
+        rule: &FredCatalogRule,
+        offset: usize,
+        text: &str,
+    ) -> Result<(), CrawlError> {
+        let key = catalog_key(rule);
+        let mut record = self.capture(&format!("{key}-{offset}"), text)?;
+        record["requested_offset"] = json!(offset);
+        self.update(|s| s.report["catalogs"][&key]["pages"][offset.to_string()] = record)
+    }
+
+    pub(super) fn page_validated(
+        &self,
+        rule: &FredCatalogRule,
+        offset: &str,
+    ) -> Result<(), CrawlError> {
+        self.update(|s| {
+            s.report["catalogs"][catalog_key(rule)]["pages"][offset]["validation"] =
+                json!("validated")
+        })
+    }
+
+    pub(super) fn catalog_complete(
+        &self,
+        group: &[usize],
+        rows: &[CatalogSeries],
+        rules: &FredCatalogRules,
+    ) -> Result<(), CrawlError> {
+        let key = catalog_key(&rules.rules[group[0]]);
+        self.update(|s| {
+            s.report["catalogs"][&key]["complete"] = json!(true);
+            s.report["completed_catalog_rows"] =
+                json!(s.report["completed_catalog_rows"].as_u64().unwrap_or(0) + rows.len() as u64);
+            s.report["catalogs"][&key]["ids"] =
+                json!(rows.iter().map(|r| &r.id).collect::<Vec<_>>());
+            for &index in group {
+                s.report["rules"][index]["complete"] = json!(true);
+                s.report["rules"][index]["ids"] = json!(rows
+                    .iter()
+                    .filter(
+                        |row| rules.rules[index].matches(row) && !rules.exclude.contains(&row.id)
+                    )
+                    .map(|row| &row.id)
+                    .collect::<Vec<_>>());
+            }
+            for (position, row) in rows.iter().enumerate() {
+                s.seen.insert(row.id.clone());
+                let offset = position / CATALOG_PAGE_SIZE * CATALOG_PAGE_SIZE;
+                let page = s.report["catalogs"][&key]["pages"][offset.to_string()].clone();
+                Self::bind(
+                    s,
+                    row,
+                    json!({"kind":"catalog", "catalog":key,
+                    "page":page,"realtime":s.report["catalog_realtime"]}),
+                    group,
+                );
+            }
+        })
+    }
+
+    fn bind(state: &mut State, row: &CatalogSeries, evidence: Value, group: &[usize]) {
+        let wanted = state.fixture["families"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|family| {
+                family["positive_witnesses"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+            })
+            .any(|w| w["series_id"].as_str() == Some(row.id.as_str()));
+        if wanted {
+            let matches = group
+                .iter()
+                .filter(|&&i| {
+                    state.rules.rules[i].matches(row) && !state.rules.exclude.contains(&row.id)
+                })
+                .map(|&i| &state.keys[i])
+                .collect::<Vec<_>>();
+            state.bindings.entry(row.id.clone()).or_default().push(json!({
+                "series_id":row.id,"title":row.metadata.title,"frequency":row.metadata.frequency,
+                "matching_rule_keys":matches,"evidence":evidence
+            }));
+        }
+    }
+
+    pub(super) fn metadata(&self, id: &str, text: &str) -> Result<(), CrawlError> {
+        let name = format!("series-{}", digest(id.as_bytes()));
+        let mut record = self.capture(&name, text)?;
+        record["realtime_pinned"] = json!(false);
+        let row = serde_json::from_str::<Value>(text)
+            .ok()
+            .and_then(|v| {
+                v["seriess"]
+                    .as_array()?
+                    .iter()
+                    .find(|r| r["id"].as_str() == Some(id))
+                    .cloned()
+            })
+            .and_then(|v| serde_json::from_value::<CatalogSeries>(v).ok());
+        record["requested_id_present"] = json!(row.is_some());
+        self.update(|s| {
+            s.report["metadata_responses"][id] = record.clone();
+            if let Some(row) = row {
+                Self::bind(
+                    s,
+                    &row,
+                    json!({"kind":"include_metadata","response":record}),
+                    &[],
+                );
+            }
+        })
+    }
+
+    pub(super) fn include_outcome(&self, id: &str, outcome: &str) -> Result<(), CrawlError> {
+        self.update(|s| s.report["includes"][id]["outcome"] = json!(outcome))
+    }
+
+    pub(super) fn success(
+        &self,
+        selection: &CatalogSelection,
+        facts: &CatalogLifecycle,
+    ) -> Result<(), CrawlError> {
+        self.update(|s| {
+            s.report["selection_complete"] = json!(true);
+            s.report["scanned_catalog_rows"] = json!(selection.scanned);
+            let mut memberships: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+            for (index, rule) in s.report["rules"].as_array().expect("rules").iter().enumerate() {
+                for id in rule["ids"].as_array().expect("rule IDs") {
+                    if let Some(id) = id.as_str() { memberships.entry(id.to_owned()).or_default().push(index); }
+                }
+            }
+            s.report["selected_union"] = json!(selection
+                .found
+                .iter()
+                .map(|row| json!({
+                    "id":row.external_id,"title":row.title,"frequency":row.frequency,
+                    "matching_rule_indices":memberships.get(&row.external_id).cloned().unwrap_or_default(),
+                    "included":s.rules.include.contains(&row.external_id),
+                    "restricted":facts.restricted_ids.contains(&row.external_id),
+                    "discontinued":facts.discontinued_ids.contains(&row.external_id)
+                }))
+                .collect::<Vec<_>>());
+            s.report["confirmed_missing_ids"] = json!(facts.confirmed_missing_ids);
+            s.report["rule_counts"] = json!(selection.rule_matches);
+        })
+    }
+
+    async fn ownership(&self, adapter: &FredAdapter, ctx: &CrawlCtx) -> Result<(), CrawlError> {
+        // Only the two include-only positives lack a configured catalog ownership witness.
+        // Official endpoint: https://fred.stlouisfed.org/docs/api/fred/series_release.html
+        let (ids, realtime) = {
+            let state = self.state.lock().map_err(|_| failed())?;
+            let ids: BTreeSet<String> = state.fixture["families"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|f| f["positive_witnesses"].as_array().into_iter().flatten())
+                .filter(|w| {
+                    w["matching_rule_keys"]
+                        .as_array()
+                        .is_some_and(Vec::is_empty)
+                })
+                .filter_map(|w| w["series_id"].as_str().map(str::to_owned))
+                .collect();
+            (
+                ids,
+                state.report["catalog_realtime"]
+                    .as_str()
+                    .ok_or_else(failed)?
+                    .to_owned(),
+            )
+        };
+        if ids.len() > 2 {
+            return Err(failed());
+        }
+        for id in ids {
+            let query = [
+                ("series_id", id.as_str()),
+                ("api_key", adapter.api_key(ctx)?),
+                ("file_type", "json"),
+                ("realtime_start", realtime.as_str()),
+                ("realtime_end", realtime.as_str()),
+            ];
+            let value: Value = ctx
+                .http
+                .get_json_audited(
+                    SourceId::Fred,
+                    &adapter.url("/series/release"),
+                    &query,
+                    |text| {
+                        let mut record =
+                            self.capture(&format!("ownership-{}", digest(id.as_bytes())), text)?;
+                        record["realtime_pinned"] = json!(true);
+                        self.update(|s| s.report["ownership_responses"][&id] = record)
+                    },
+                )
+                .await?;
+            let releases = value["releases"].as_array().ok_or_else(failed)?;
+            if releases.is_empty() || releases.iter().any(|r| r["id"].as_u64().is_none()) {
+                return Err(failed());
+            }
+            self.update(|s| {
+                s.report["ownership_responses"][&id]["release_ids"] =
+                    json!(releases.iter().map(|r| &r["id"]).collect::<Vec<_>>());
+                s.report["ownership_responses"][&id]["validation"] = json!("validated");
+            })?;
+        }
+        Ok(())
+    }
+
+    fn finish(&self, reason: Option<&str>) -> Result<bool, CrawlError> {
+        self.update(|s| {
+            let retrieval_complete = reason.is_none() && s.report["selection_complete"] == true;
+            s.report["retrieval_complete"] = json!(retrieval_complete);
+            s.report["finished_at"] = json!(chrono::Utc::now().to_rfc3339());
+            let selected: BTreeSet<String> = s.report["selected_union"].as_array().into_iter().flatten()
+                .filter_map(|r| r["id"].as_str().map(str::to_owned)).collect();
+            let matched: BTreeSet<String> = s.report["rules"].as_array().into_iter().flatten()
+                .flat_map(|rule|rule["ids"].as_array().into_iter().flatten())
+                .filter_map(|id|id.as_str().map(str::to_owned)).collect();
+            let positives = s.fixture["families"].as_array().into_iter().flatten().flat_map(|family| {
+                family["positive_witnesses"].as_array().into_iter().flatten().map(|w| {
+                    let id = w["series_id"].as_str().unwrap_or_default();
+                    let bindings = s.bindings.get(id).cloned().unwrap_or_default();
+                    let expected_keys = &w["matching_rule_keys"];
+                    let matched = bindings.iter().any(|b| {
+                        let ownership = if expected_keys.as_array().is_some_and(Vec::is_empty) {
+                            s.report["ownership_responses"][id]["release_ids"].as_array()
+                                .is_some_and(|ids| ids.contains(&w["release_id"]))
+                        } else {
+                            b["evidence"]["catalog"] == json!(format!("release-{}",w["release_id"]))
+                        };
+                        ownership && b["title"] == w["title"] && b["frequency"] == w["frequency"]
+                            && &b["matching_rule_keys"] == expected_keys
+                    });
+                    json!({"family":family["family"],"series_id":id,"kind":"authenticated_metadata_binding",
+                        "verified":matched && selected.contains(id),"bindings":bindings,
+                        "ownership_response":s.report["ownership_responses"][id],
+                        "absence_is_not_not_found":true})
+                }).collect::<Vec<_>>()
+            }).collect::<Vec<_>>();
+            let positive_bindings_accepted = positives.iter().all(|p| p["verified"] == true);
+            s.report["positive_witnesses"] = json!(positives);
+            let negatives = s.fixture["negative_identifier_witnesses"].as_array().into_iter().flatten().map(|n| {
+                let index = s.keys.iter().position(|k| Some(k.as_str()) == n["rule_key"].as_str());
+                let positive = s.fixture["families"].as_array().into_iter().flatten()
+                    .flat_map(|f| f["positive_witnesses"].as_array().into_iter().flatten())
+                    .find(|w| w["matching_rule_keys"].as_array().is_some_and(|keys| keys.contains(&n["rule_key"])));
+                let rejected = index.zip(positive).is_some_and(|(index,w)| {
+                    let mut row: CatalogSeries = serde_json::from_value(json!({"id":w["series_id"],"title":w["title"],"frequency":w["frequency"]})).expect("checked fixture");
+                    let initially_matches = s.rules.rules[index].matches(&row);
+                    row.id = n["series_id"].as_str().unwrap_or_default().into();
+                    initially_matches && !s.rules.rules[index].matches(&row)
+                });
+                json!({"kind":"synthetic_identifier_boundary","rule_key":n["rule_key"],"series_id":n["series_id"],
+                    "predicate_rejected":rejected,"upstream_existence_verified":false,"api_membership_claim":false})
+            }).collect::<Vec<_>>();
+            let synthetic_boundaries_accepted = negatives.iter().all(|n| n["predicate_rejected"] == true);
+            s.report["synthetic_boundaries"] = json!(negatives);
+            s.report["witness_bindings_accepted"] = json!(positive_bindings_accepted && synthetic_boundaries_accepted);
+            let complete = retrieval_complete && positive_bindings_accepted && synthetic_boundaries_accepted;
+            s.report["complete"] = json!(complete);
+            s.report["status"] = json!(reason.unwrap_or(if complete {"complete"} else {"witness_mismatch_or_unresolved"}));
+            s.report["historical"]["membership"] = json!(s.historical.iter().map(|h| {
+                let classification = if selected.contains(&h.id) {"selected"}
+                    else if s.rules.exclude.contains(&h.id) {"explicitly_excluded"}
+                    else if s.report["includes"][&h.id]["outcome"] == "confirmed_not_found" {"confirmed_not_found"}
+                    else if s.seen.contains(&h.id) {
+                        if s.report["selection_complete"] != true && matched.contains(&h.id) {"matched_rule_selection_incomplete"}
+                        else {"listed_in_complete_catalog_but_not_selected"}
+                    }
+                    else if s.report["selection_complete"] == true {"not_in_configured_catalogs_unresolved"}
+                    else {"unresolved_partial_scan"};
+                json!({"id":h.id,"family":h.family,"classification":classification})
+            }).collect::<Vec<_>>());
+        })?;
+        Ok(self.state.lock().map_err(|_| failed())?.report["complete"] == true)
+    }
+}
+
+fn error_kind(error: &CrawlError) -> &'static str {
+    if is_catalog_volume_guard(error) {
+        return "volume_guard";
+    }
+    match error {
+        CrawlError::Auth(_) => "authentication",
+        CrawlError::Parse(_) => "parse_or_credential_echo",
+        CrawlError::Transient(_) => "provider_or_pagination",
+        CrawlError::NotFound(_) => "provider_not_found",
+        CrawlError::RateLimited { .. } => "rate_limited",
+        _ => "selection_failed",
+    }
+}
+
+/// Runtime interface (none read by compilation/offline tests): FRED_AUDIT_OUTPUT_DIR,
+/// FRED_AUDIT_HISTORICAL_CSV, FRED_AUDIT_REVISION, CRAWLER_DATA_DIR, FRED_API_KEY.
+/// The runner must first copy the draft data and raise ONLY its scan guard to100000.
+#[tokio::test]
+#[ignore = "explicit authenticated audit only; never part of ordinary test execution"]
+async fn authenticated_catalog_evidence() {
+    async fn run() -> Result<(), CrawlError> {
+        let output = std::env::var_os("FRED_AUDIT_OUTPUT_DIR").ok_or_else(failed)?;
+        if !Path::new(&output).is_absolute() {
+            return Err(failed());
+        }
+        let historical = std::env::var_os("FRED_AUDIT_HISTORICAL_CSV").ok_or_else(failed)?;
+        let revision = std::env::var("FRED_AUDIT_REVISION").map_err(|_| failed())?;
+        if revision.len() != 40 || !revision.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(failed());
+        }
+        let secret = std::env::var("FRED_API_KEY").map_err(|_| failed())?;
+        if secret.trim().is_empty() {
+            return Err(failed());
+        }
+        let text =
+            std::fs::read_to_string(data_dir().join(CATALOG_RULES_FILE)).map_err(|_| failed())?;
+        let rules = FredCatalogRules::parse(&text)?;
+        if rules.max_catalog_series != 100000 {
+            return Err(failed());
+        }
+        let fixture: Value = serde_json::from_str(FIXTURE).map_err(|_| failed())?;
+        let historical = history(&std::fs::read(historical).map_err(|_| failed())?)?;
+        let recorder = Recorder::new(
+            Path::new(&output),
+            &secret,
+            &rules,
+            &text,
+            fixture,
+            historical,
+            &revision,
+        )?;
+        let keys = crate::adapter::ApiKeys {
+            fred: Some(secret),
+            ..Default::default()
+        };
+        let checker = crate::check_selection::Checker::live(
+            crate::http::HttpConfig::default(),
+            std::collections::HashMap::from([(
+                SourceId::Fred,
+                crate::policy::SourcePolicy::default_for(SourceId::Fred),
+            )]),
+            25,
+            keys,
+            chrono::Utc::now().date_naive(),
+        )?;
+        let adapter = FredAdapter {
+            audit: Some(recorder.clone()),
+            ..FredAdapter::default()
+        };
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1800), async {
+            adapter
+                .select_catalog(&checker.ctx, &rules.uncapped())
+                .await?;
+            recorder.ownership(&adapter, &checker.ctx).await
+        })
+        .await;
+        let reason = match &result {
+            Ok(Ok(())) => None,
+            Ok(Err(error)) => Some(error_kind(error)),
+            Err(_) => Some("timeout"),
+        };
+        if !recorder.finish(reason)? {
+            return Err(failed());
+        }
+        Ok(())
+    }
+    assert!(
+        run().await.is_ok(),
+        "FRED audit incomplete; inspect the credential-free manifest"
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testkit::{test_ctx, MockSource, Reply, Route, TEST_API_KEY};
+
+    fn rules_text() -> &'static str {
+        "max_series=50\nmax_catalog_series=10000\ninclude=['EXTRA']\nexclude=['ADROP']\n# rule: first\n[[rules]]\nrelease_id=53\nid_prefix='A'\n# rule: second\n[[rules]]\nrelease_id=53\nid_pattern='A.*'"
+    }
+    fn row(id: &str) -> Value {
+        json!({"id":id,"title":"Example","frequency":"Quarterly"})
+    }
+    fn page(count: usize, offset: usize, rows: Vec<Value>) -> Reply {
+        Reply::json_str(
+            json!({"count":count,"offset":offset,"limit":1000,"seriess":rows}).to_string(),
+        )
+    }
+    fn setup(dir: &Path, text: &str) -> (FredAdapter, FredCatalogRules, Arc<Recorder>) {
+        let rules = FredCatalogRules::parse(text).unwrap();
+        let recorder = Recorder::new(
+            dir,
+            TEST_API_KEY,
+            &rules,
+            text,
+            json!({"families":[],"negative_identifier_witnesses":[]}),
+            Vec::new(),
+            "offline",
+        )
+        .unwrap();
+        (
+            FredAdapter {
+                audit: Some(recorder.clone()),
+                ..FredAdapter::default()
+            },
+            rules,
+            recorder,
+        )
+    }
+    fn manifest(dir: &Path) -> Value {
+        serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn recorder_uses_one_real_walk_keeps_overlap_union_and_requires_finalization() {
+        let mock = MockSource::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        mock.mount_expect(
+            &Route::get("/release/series"),
+            page(3, 0, vec![row("AA"), row("AB"), row("ADROP")]),
+            1,
+        )
+        .await;
+        mock.mount(
+            &Route::get("/series").query("series_id", "EXTRA"),
+            Reply::json_str(json!({"seriess":[row("EXTRA")]}).to_string()),
+        )
+        .await;
+        let (mut adapter, rules, rec) = setup(dir.path(), rules_text());
+        adapter.base_url = mock.base_url();
+        let selected = adapter.select_catalog(&test_ctx(), &rules).await.unwrap();
+        assert_eq!(selected.rule_matches, vec![2, 2]);
+        assert_eq!(selected.scanned, 3);
+        let before = manifest(dir.path());
+        assert_eq!(before["complete"], false);
+        assert_eq!(before["selection_complete"], true);
+        rec.finish(None).unwrap();
+        let report = manifest(dir.path());
+        assert_eq!(report["complete"], true);
+        assert_eq!(report["rules"][0]["ids"], json!(["AA", "AB"]));
+        assert_eq!(report["rules"][1]["ids"], json!(["AA", "AB"]));
+        assert_eq!(report["selected_union"].as_array().unwrap().len(), 3);
+        assert_eq!(report["includes"]["EXTRA"]["outcome"], "metadata_found");
+        assert_eq!(
+            report["metadata_responses"]["EXTRA"]["realtime_pinned"],
+            false
+        );
+        let raw = std::fs::read(dir.path().join("release-53-0.response-text.json")).unwrap();
+        assert_eq!(
+            report["catalogs"]["release-53"]["pages"]["0"]["raw_sha256"],
+            digest(&raw)
+        );
+        assert_eq!(
+            report["catalogs"]["release-53"]["pages"]["0"]["validation"],
+            "validated"
+        );
+        mock.server().verify().await;
+    }
+
+    #[tokio::test]
+    async fn recorder_preserves_downloaded_pages_but_never_completes_drift_or_guard_failure() {
+        for guard in [false, true] {
+            let mock = MockSource::start().await;
+            let dir = tempfile::tempdir().unwrap();
+            let text = if guard {
+                "max_series=50\nmax_catalog_series=1\n[[rules]]\nrelease_id=53"
+            } else {
+                "max_series=50\nmax_catalog_series=2000\n[[rules]]\nrelease_id=53"
+            };
+            let rows = (0..1000).map(|i| row(&format!("A{i:04}"))).collect();
+            mock.mount(
+                &Route::get("/release/series").query("offset", "0"),
+                page(1001, 0, rows),
+            )
+            .await;
+            mock.mount(
+                &Route::get("/release/series").query("offset", "1000"),
+                page(1002, 1000, vec![row("Z")]),
+            )
+            .await;
+            let (mut adapter, rules, rec) = setup(dir.path(), text);
+            adapter.base_url = mock.base_url();
+            let error = adapter
+                .select_catalog(&test_ctx(), &rules)
+                .await
+                .unwrap_err();
+            rec.finish(Some(error_kind(&error))).unwrap();
+            let report = manifest(dir.path());
+            assert_eq!(report["complete"], false);
+            assert_eq!(report["selection_complete"], false);
+            assert_eq!(report["rules"][0]["complete"], false);
+            assert_eq!(report["selected_union"], json!([]));
+            assert!(dir.path().join("release-53-0.response-text.json").exists());
+            if guard {
+                assert_eq!(report["status"], "volume_guard");
+                assert_eq!(
+                    report["catalogs"]["release-53"]["pages"]["0"]["validation"],
+                    "downloaded_unvalidated"
+                );
+            } else {
+                assert!(dir
+                    .path()
+                    .join("release-53-1000.response-text.json")
+                    .exists());
+                assert_eq!(
+                    report["catalogs"]["release-53"]["pages"]["1000"]["validation"],
+                    "downloaded_unvalidated"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn recorder_omits_encoded_credential_echoes_and_provider_error_messages() {
+        for body in [json!({"count":1,"offset":0,"limit":1000,"seriess":[{"id":"AA","title":TEST_API_KEY,"frequency":"Quarterly"}]}).to_string(),
+            format!("{{\"count\":1,\"offset\":0,\"limit\":1000,\"seriess\":[{{\"id\":\"AA\",\"title\":\"{}\",\"frequency\":\"Quarterly\"}}]}}",TEST_API_KEY.bytes().map(|b|format!("\\u{b:04x}")).collect::<String>())] {
+            let mock=MockSource::start().await;let dir=tempfile::tempdir().unwrap();
+            mock.mount(&Route::get("/release/series"),Reply::json_str(body)).await;
+            let(mut adapter,rules,rec)=setup(dir.path(),rules_text());adapter.base_url=mock.base_url();
+            let error=adapter.select_catalog(&test_ctx(),&rules).await.unwrap_err();rec.finish(Some(error_kind(&error))).unwrap();
+            for path in std::fs::read_dir(dir.path()).unwrap(){let text=std::fs::read_to_string(path.unwrap().path()).unwrap();assert!(!text.contains(TEST_API_KEY));assert!(!text.contains("api_key"));}
+            assert!(!dir.path().join("release-53-0.response-text.json").exists());assert_eq!(manifest(dir.path())["complete"],false);
+        }
+    }
+
+    #[tokio::test]
+    async fn nested_and_mixed_credential_spellings_never_create_artifact_files() {
+        let key = "0123456789abcdef0123456789abcdef";
+        let unicode = |slashes: usize| {
+            key.chars()
+                .map(|c| format!("{}u{:04x}", "\\".repeat(slashes), c as u32))
+                .collect::<String>()
+        };
+        let mixed = key
+            .chars()
+            .enumerate()
+            .map(|(i, c)| match i % 3 {
+                0 => c.to_string(),
+                1 => format!("%{:02X}", c as u32),
+                _ => format!("\\\\\\u{:04X}", c as u32),
+            })
+            .collect::<String>();
+        let mut bodies = vec![unicode(1), unicode(2), unicode(24), mixed,
+            serde_json::to_string(&unicode(1)).unwrap()].into_iter().map(|title|
+            json!({"count":1,"offset":0,"limit":1000,"seriess":[{"id":"AA","title":title,"frequency":"Quarterly"}]}).to_string()).collect::<Vec<_>>();
+        let mut object_key = json!({"count":1,"offset":0,"limit":1000,"seriess":[row("AA")]});
+        object_key
+            .as_object_mut()
+            .unwrap()
+            .insert(unicode(3), json!("public value"));
+        bodies.push(object_key.to_string());
+        for body in bodies {
+            let mock = MockSource::start().await;
+            let dir = tempfile::tempdir().unwrap();
+            mock.mount(&Route::get("/release/series"), Reply::json_str(&body))
+                .await;
+            let rules = FredCatalogRules::parse(rules_text()).unwrap();
+            let recorder = Recorder::new(
+                dir.path(),
+                key,
+                &rules,
+                rules_text(),
+                json!({"families":[],"negative_identifier_witnesses":[]}),
+                Vec::new(),
+                "offline",
+            )
+            .unwrap();
+            let adapter = FredAdapter {
+                base_url: mock.base_url(),
+                audit: Some(recorder.clone()),
+                ..FredAdapter::default()
+            };
+            let mut ctx = test_ctx();
+            ctx.keys.fred = Some(key.into());
+            let error = adapter.select_catalog(&ctx, &rules).await.unwrap_err();
+            recorder.finish(Some(error_kind(&error))).unwrap();
+            // Defense at both boundaries: request hook and direct artifact recorder.
+            assert!(recorder.capture("direct-echo", &body).is_err());
+            let names = std::fs::read_dir(dir.path())
+                .unwrap()
+                .map(|e| e.unwrap().file_name())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                names,
+                vec![std::ffi::OsString::from("manifest.json")],
+                "raw, normalized and pending echo artifacts must all be absent"
+            );
+            assert_eq!(manifest(dir.path())["complete"], false);
+        }
+    }
+
+    #[test]
+    fn targeted_credential_detection_preserves_unrelated_response_text_exactly() {
+        let key = "0123456789abcdef0123456789abcdef";
+        let safe = r#" { "notes": "public \\u0030 and percent %30 are unrelated", "value": 12345678901234567890.123400, "unicode": "é" } "#;
+        assert!(crate::http::audit_text_is_safe(safe, key));
+        assert!(!crate::http::audit_text_is_safe(
+            r#"{"x":"\\u00e9\\ud83e\\udd80"}"#,
+            "é🦀"
+        ));
+        let dir = tempfile::tempdir().unwrap();
+        let rules = FredCatalogRules::parse(rules_text()).unwrap();
+        let recorder = Recorder::new(
+            dir.path(),
+            key,
+            &rules,
+            rules_text(),
+            json!({"families":[],"negative_identifier_witnesses":[]}),
+            Vec::new(),
+            "offline",
+        )
+        .unwrap();
+        let receipt = recorder.capture("unrelated", safe).unwrap();
+        let raw = std::fs::read(dir.path().join("unrelated.response-text.json")).unwrap();
+        assert_eq!(raw, safe.as_bytes());
+        assert_eq!(receipt["raw_sha256"], digest(safe.as_bytes()));
+    }
+
+    #[test]
+    fn draft_witnesses_use_real_matcher_and_label_all_thirteen_boundaries_synthetic() {
+        let text = include_str!("../../../data/catalog_selection/fred.toml");
+        let rules = FredCatalogRules::parse(text).unwrap();
+        let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let rec = Recorder::new(
+            dir.path(),
+            TEST_API_KEY,
+            &rules,
+            text,
+            fixture,
+            Vec::new(),
+            "offline",
+        )
+        .unwrap();
+        rec.finish(Some("offline_only")).unwrap();
+        let report = manifest(dir.path());
+        assert_eq!(report["positive_witnesses"].as_array().unwrap().len(), 33);
+        let negatives = report["synthetic_boundaries"].as_array().unwrap();
+        assert_eq!(negatives.len(), 13);
+        assert!(negatives.iter().all(|n| n["predicate_rejected"] == true
+            && n["upstream_existence_verified"] == false
+            && n["api_membership_claim"] == false));
+        assert!(report["positive_witnesses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|w| w["verified"] == false));
+        assert_eq!(report["complete"], false);
+    }
+
+    #[tokio::test]
+    async fn authenticated_bindings_require_catalog_fields_and_override_ownership() {
+        for release in [53, 99, 0] {
+            let mock = MockSource::start().await;
+            let dir = tempfile::tempdir().unwrap();
+            mock.mount(&Route::get("/release/series"), page(1, 0, vec![row("AA")]))
+                .await;
+            mock.mount(
+                &Route::get("/series"),
+                Reply::json_str(json!({"seriess":[row("EXTRA")]}).to_string()),
+            )
+            .await;
+            let reply = if release == 0 {
+                Reply::text(format!("provider refusal {TEST_API_KEY}")).with_status(403)
+            } else {
+                Reply::json_str(json!({"releases":[{"id":release}]}).to_string())
+            };
+            mock.mount(&Route::get("/series/release"), reply).await;
+            let rules = FredCatalogRules::parse(rules_text()).unwrap();
+            let fixture = json!({"families":[{"family":1,"positive_witnesses":[
+                {"series_id":"AA","title":"Example","frequency":"Quarterly","release_id":53,"matching_rule_keys":["first","second"]},
+                {"series_id":"EXTRA","title":"Example","frequency":"Quarterly","release_id":53,"matching_rule_keys":[]}
+            ]}],"negative_identifier_witnesses":[]});
+            let rec = Recorder::new(
+                dir.path(),
+                TEST_API_KEY,
+                &rules,
+                rules_text(),
+                fixture,
+                Vec::new(),
+                "offline",
+            )
+            .unwrap();
+            let adapter = FredAdapter {
+                base_url: mock.base_url(),
+                audit: Some(rec.clone()),
+                ..FredAdapter::default()
+            };
+            adapter.select_catalog(&test_ctx(), &rules).await.unwrap();
+            let ownership = rec.ownership(&adapter, &test_ctx()).await;
+            let complete = rec
+                .finish(ownership.as_ref().err().map(error_kind))
+                .unwrap();
+            let report = manifest(dir.path());
+            assert_eq!(complete, release == 53);
+            assert_eq!(report["selection_complete"], true);
+            assert_eq!(report["retrieval_complete"], release != 0);
+            assert_eq!(report["positive_witnesses"][0]["verified"], true);
+            assert_eq!(report["positive_witnesses"][1]["verified"], release == 53);
+            assert_eq!(
+                report["positive_witnesses"][0]["bindings"][0]["evidence"]["catalog"],
+                "release-53"
+            );
+            if release != 0 {
+                assert_eq!(
+                    report["ownership_responses"]["EXTRA"]["realtime_pinned"],
+                    true
+                );
+            } else {
+                assert_eq!(report["status"], "authentication");
+            }
+            assert!(!std::fs::read_to_string(dir.path().join("manifest.json"))
+                .unwrap()
+                .contains(TEST_API_KEY));
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_keeps_completed_catalog_evidence_and_unresolved_history_partial() {
+        let mock = MockSource::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let text = "max_series=50\nmax_catalog_series=10000\n[[rules]]\nrelease_id=53\n[[rules]]\nrelease_id=54";
+        mock.mount(
+            &Route::get("/release/series").query("release_id", "53"),
+            page(1, 0, vec![row("AA")]),
+        )
+        .await;
+        mock.mount(
+            &Route::get("/release/series").query("release_id", "54"),
+            page(1, 0, vec![row("ZZ")]).delay(std::time::Duration::from_secs(1)),
+        )
+        .await;
+        let (mut adapter, rules, rec) = setup(dir.path(), text);
+        rec.state.lock().unwrap().historical = vec![
+            Historical {
+                id: "AA".into(),
+                family: 1,
+            },
+            Historical {
+                id: "UNSEEN".into(),
+                family: 1,
+            },
+        ];
+        adapter.base_url = mock.base_url();
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            adapter.select_catalog(&test_ctx(), &rules)
+        )
+        .await
+        .is_err());
+        assert!(!rec.finish(Some("timeout")).unwrap());
+        let report = manifest(dir.path());
+        assert_eq!(report["catalogs"]["release-53"]["complete"], true);
+        assert_eq!(report["catalogs"]["release-54"]["complete"], false);
+        assert_eq!(
+            report["historical"]["membership"][0]["classification"],
+            "matched_rule_selection_incomplete"
+        );
+        assert_eq!(
+            report["historical"]["membership"][1]["classification"],
+            "unresolved_partial_scan"
+        );
+        assert_eq!(report["status"], "timeout");
+    }
+
+    #[test]
+    fn historical_input_rejects_wrong_provenance_and_decoded_secrets_never_reach_disk() {
+        assert!(history(b"series_id\nGDP\n").is_err());
+        let dir = tempfile::tempdir().unwrap();
+        let (_, _, rec) = setup(dir.path(), rules_text());
+        assert!(rec
+            .capture("unsafe", &json!({"value":TEST_API_KEY}).to_string())
+            .is_err());
+        assert!(!dir.path().join("unsafe.response-text.json").exists());
+    }
+}

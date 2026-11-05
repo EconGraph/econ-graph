@@ -1,5 +1,6 @@
 """Offline regressions for the temporary FRED count-only audit; no credentials/network."""
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,8 @@ SPEC = importlib.util.spec_from_file_location('audit_fred', SCRIPT)
 AUDIT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(AUDIT)
 DATA = SCRIPT.parents[1] / 'backend/crates/econ-graph-crawler/data'
+HISTORY = SCRIPT.parents[1] / 'scripts/audit-fixtures/fred-historical-1533.csv'
+REVISION = 'a' * 40
 
 
 class CountAuditTests(unittest.TestCase):
@@ -132,6 +135,138 @@ class CountAuditTests(unittest.TestCase):
             self.assertEqual(AUDIT.run(Path('/nonexistent'), DATA, output,
                                        'fake-private-key', 'test'), 2)
             self.assertNotIn(b'fake-private-key', (output / 'stderr.txt').read_bytes())
+
+
+class ExportAuditTests(unittest.TestCase):
+    def export(self, root, mutate=None, child_status=0, complete=True):
+        """Real on-disk exporter output, with process-only stand-in (no network)."""
+        def child(command, env, timeout):
+            self.assertEqual(command[1:], ['--exact', AUDIT.EXPORT_TEST, '--ignored', '--nocapture'])
+            self.assertEqual(set(env), {'PATH', 'LANG', 'RUST_LOG', 'CRAWLER_DATA_DIR',
+                                       'FRED_API_KEY', 'FRED_AUDIT_OUTPUT_DIR',
+                                       'FRED_AUDIT_HISTORICAL_CSV', 'FRED_AUDIT_REVISION'})
+            self.assertEqual(hashlib.sha256(Path(env['FRED_AUDIT_HISTORICAL_CSV']).read_bytes()).hexdigest(),
+                             AUDIT.HISTORY_SHA256)
+            directory = Path(env['FRED_AUDIT_OUTPUT_DIR'])
+            directory.mkdir()
+            raw = b'{ "count": 83, "data": ["public"] }\n'
+            normalized = b'{"count":83,"data":["public"]}'
+            (directory / 'release-53-0.response-text.json').write_bytes(raw)
+            (directory / 'release-53-0.normalized.json').write_bytes(normalized)
+            manifest = {'format': 1, 'revision': REVISION, 'complete': complete,
+                        'selection_complete': complete, 'retrieval_complete': complete,
+                        'witness_bindings_accepted': complete,
+                        'rules_sha256': hashlib.sha256(Path(env['CRAWLER_DATA_DIR'],
+                                                           'catalog_selection/fred.toml').read_bytes()).hexdigest(),
+                        'historical': {'sha256': AUDIT.HISTORY_SHA256},
+                        'page': {'raw_path': 'release-53-0.response-text.json',
+                                 'raw_sha256': hashlib.sha256(raw).hexdigest(),
+                                 'normalized_path': 'release-53-0.normalized.json',
+                                 'normalized_sha256': hashlib.sha256(normalized).hexdigest()}}
+            if mutate:
+                mutate(directory, manifest)
+            (directory / 'manifest.json').write_text(json.dumps(manifest))
+            return child_status, b'fake-private-key', b'api_key=another-secret', .01
+        output = root / 'out'
+        with patch.object(AUDIT, 'capture', side_effect=child):
+            status = AUDIT.run_exporter(Path('/fake-test'), DATA, output, 'fake-private-key',
+                                        REVISION, HISTORY)
+        return status, output, json.loads((output / 'runner-report.json').read_bytes())
+
+    def test_safe_immutable_files_hashes_complete_and_sanitized_logs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            status, output, report = self.export(Path(temporary))
+            self.assertEqual(status, 0)
+            self.assertTrue(report['complete'])
+            self.assertEqual(report['artifact_validation_issues'], [])
+            self.assertEqual((output / 'evidence/release-53-0.response-text.json').read_bytes(),
+                             b'{ "count": 83, "data": ["public"] }\n')
+            for name, digest in report['files_sha256'].items():
+                self.assertEqual(hashlib.sha256((output / 'evidence' / name).read_bytes()).hexdigest(), digest)
+            self.assertEqual((output / 'stdout.txt').read_bytes(), b'[REDACTED]')
+            self.assertEqual((output / 'stderr.txt').read_bytes(), b'api_key=[REDACTED]')
+
+    def test_encoded_secret_omitted_not_rewritten_and_manifest_withheld(self):
+        key = 'fake-private-key'
+        forms = [key, ''.join(f'\\u{ord(c):04x}' for c in key),
+                 ''.join(f'%{ord(c):02X}' for c in key),
+                 ''.join('\\\\u%04x' % ord(c) for c in key)]
+        for value in forms:
+            def mutate(directory, manifest):
+                unsafe = json.dumps({'error': value}).encode()
+                (directory / 'release-53-0.response-text.json').write_bytes(unsafe)
+                manifest['page']['raw_sha256'] = hashlib.sha256(unsafe).hexdigest()
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as temporary:
+                status, output, report = self.export(Path(temporary), mutate)
+                self.assertEqual(status, 2)
+                self.assertFalse(report['complete'])
+                self.assertIn('unsafe_content', report['artifact_validation_issues'])
+                self.assertFalse((output / 'evidence/manifest.json').exists())
+                self.assertFalse((output / 'evidence/release-53-0.response-text.json').exists())
+                self.assertTrue((output / 'evidence/release-53-0.normalized.json').exists())
+
+    def test_traversal_symlink_unexpected_missing_and_wrong_hash_rejected(self):
+        def traversal(directory, manifest):
+            manifest['page']['raw_path'] = '../outside.json'
+        def symlink(directory, manifest):
+            path = directory / 'release-53-0.response-text.json'
+            path.unlink()
+            path.symlink_to('/etc/passwd')
+        def unexpected(directory, manifest):
+            (directory / 'other.json').write_text('{}')
+        def missing(directory, manifest):
+            (directory / 'release-53-0.response-text.json').unlink()
+        def wrong_hash(directory, manifest):
+            manifest['page']['raw_sha256'] = '0' * 64
+        for mutate in (traversal, symlink, unexpected, missing, wrong_hash):
+            with self.subTest(case=mutate.__name__), tempfile.TemporaryDirectory() as temporary:
+                status, output, report = self.export(Path(temporary), mutate)
+                self.assertEqual(status, 2)
+                self.assertFalse(report['complete'])
+                self.assertTrue(report['artifact_validation_issues'])
+                self.assertFalse((output / 'evidence/manifest.json').exists())
+                self.assertFalse((output / 'evidence/other.json').exists())
+
+    def test_real_child_status_and_partial_completeness_never_green_wrapped(self):
+        for child_status, complete, expected in ((101, False, 101), (124, False, 124),
+                                                  (0, False, 2), (101, True, 101)):
+            with self.subTest(status=child_status, complete=complete), tempfile.TemporaryDirectory() as temporary:
+                status, output, report = self.export(Path(temporary), child_status=child_status,
+                                                      complete=complete)
+                self.assertEqual(status, expected)
+                self.assertFalse(report['complete'])
+                self.assertTrue((output / 'evidence/release-53-0.response-text.json').exists())
+                self.assertEqual((output / 'exit-status.txt').read_text(), f'{expected}\n')
+
+    def test_actual_process_group_timeout_retains_safe_checkpoint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / 'export-test'
+            # Execute a real local process. It writes partial evidence before
+            # blocking; the wrapper must kill it and still inspect those bytes.
+            binary.write_text(f'#!{sys.executable}\nimport json,os,time,pathlib\n'
+                              'p=pathlib.Path(os.environ["FRED_AUDIT_OUTPUT_DIR"]);p.mkdir()\n'
+                              '(p/"release-53-0.response-text.json").write_text("{broken but public")\n'
+                              'print(os.environ["FRED_API_KEY"],flush=True)\ntime.sleep(30)\n')
+            binary.chmod(0o700)
+            output = root / 'out'
+            self.assertEqual(AUDIT.run_exporter(binary, DATA, output, 'fake-private-key',
+                                               REVISION, HISTORY, 1), 124)
+            report = json.loads((output / 'runner-report.json').read_bytes())
+            self.assertFalse(report['complete'])
+            self.assertEqual((output / 'evidence/release-53-0.response-text.json').read_bytes(),
+                             b'{broken but public')
+            self.assertEqual((output / 'stdout.txt').read_bytes(), b'[REDACTED]\n')
+
+    def test_wrong_csv_or_revision_refuses_before_child(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(AUDIT, 'capture') as child:
+            root = Path(temporary)
+            invalid = root / 'invalid.csv'
+            invalid.write_text('wrong')
+            for index, (revision, history) in enumerate(((REVISION, invalid), ('bad', HISTORY))):
+                self.assertEqual(AUDIT.run_exporter(Path('/fake'), DATA, root / str(index),
+                                                   'fake-private-key', revision, history), 2)
+            child.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -558,6 +558,32 @@ impl HttpFetcher {
         decode(&target, &text)
     }
 
+    /// Temporary audit hook: same JSON request, limiter, retries and decoder as `get_json`.
+    /// Records response-text UTF-8 bytes, not HTTP wire bytes. Never hands credential
+    /// echoes to the recorder, including the encoded forms recognized by normal redaction.
+    #[cfg(test)]
+    pub(crate) async fn get_json_audited<T: DeserializeOwned>(
+        &self,
+        source: SourceId,
+        url: &str,
+        query: &[(&str, &str)],
+        record: impl FnOnce(&str) -> Result<(), CrawlError>,
+    ) -> Result<T, CrawlError> {
+        let target = Target::new(source, Method::GET, url, query, None, true)?;
+        let text = self.execute(&target).await?.body;
+        if target
+            .secrets
+            .iter()
+            .any(|secret| !audit_text_is_safe(&text, secret))
+        {
+            return Err(CrawlError::Parse(
+                "audit response omitted: credential echo".into(),
+            ));
+        }
+        record(&text)?;
+        decode(&target, &text)
+    }
+
     /// POST `body` as JSON to `url` and deserialize the JSON response.
     pub async fn post_json<B: Serialize + ?Sized, T: DeserializeOwned>(
         &self,
@@ -743,6 +769,67 @@ impl HttpFetcher {
         target.record_error(&err);
         err
     }
+}
+
+/// Final artifact boundary, also applied after JSON decoding/normalization.
+#[cfg(test)]
+pub(crate) fn audit_text_is_safe(text: &str, secret: &str) -> bool {
+    let secrets = [secret.to_owned()];
+    if scrub(text, &secrets) != text {
+        return false;
+    }
+    // Match only this credential, rather than decoding/re-encoding arbitrary public
+    // data. Each character may be literal, percent-encoded, or Unicode-escaped at
+    // any JSON nesting depth (one or more backslashes). Alternatives can mix within
+    // the same credential, including UTF-16 surrogate pairs and mixed hex case.
+    // This is the same targeted representation policy as the temporary Python runner.
+    if !secret.is_empty() {
+        let hex = |value: String| {
+            value
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphabetic() {
+                        format!("[{}{}]", c.to_ascii_lowercase(), c.to_ascii_uppercase())
+                    } else {
+                        c.to_string()
+                    }
+                })
+                .collect::<String>()
+        };
+        let mut pattern = String::new();
+        for c in secret.chars() {
+            let unicode = c
+                .encode_utf16(&mut [0; 2])
+                .iter()
+                .map(|unit| format!(r"\\+u{}", hex(format!("{unit:04x}"))))
+                .collect::<String>();
+            let percent = c
+                .encode_utf8(&mut [0; 4])
+                .as_bytes()
+                .iter()
+                .map(|byte| format!("%{}", hex(format!("{byte:02x}"))))
+                .collect::<String>();
+            pattern.push_str(&format!(
+                "(?:{}|{}|{})",
+                regex::escape(&c.to_string()),
+                unicode,
+                percent
+            ));
+        }
+        let Ok(pattern) = regex::Regex::new(&pattern) else {
+            return false;
+        };
+        if pattern.is_match(text) {
+            return false;
+        }
+    }
+    // Check before writing the raw text too: JSON unicode escapes may decode to a
+    // credential even when its literal/URL-encoded representation is absent.
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return true;
+    };
+    let normalized = serde_json::to_string(&value).expect("JSON values serialize");
+    scrub(&normalized, &secrets) == normalized
 }
 
 /// Deserializes a JSON body, mapping failure to `Parse` with a short, scrubbed body snippet.
