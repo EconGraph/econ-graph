@@ -505,6 +505,252 @@ fn error_kind(error: &CrawlError) -> &'static str {
     }
 }
 
+// Frozen draft scope: this header-only measurement must never silently follow a
+// later rule expansion. It makes no production selection or membership decision.
+const SCOPE_RULES_SHA256: &str = "825a4f835488b775a79dcd520eb6c4ad8a39bbc71e0ccdce8bca5fdcdc29f955";
+
+fn scope_groups(rules: &FredCatalogRules) -> Vec<Vec<usize>> {
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (index, rule) in rules.rules.iter().enumerate() {
+        if let Some(group) = groups.iter_mut().find(|group| {
+            let first = &rules.rules[group[0]];
+            (first.release_id, first.category_id) == (rule.release_id, rule.category_id)
+        }) {
+            group.push(index);
+        } else {
+            groups.push(vec![index]);
+        }
+    }
+    groups
+}
+
+fn scope_recorder(
+    directory: &Path,
+    secret: &str,
+    rules: &FredCatalogRules,
+    text: &str,
+    revision: &str,
+    realtime: &str,
+) -> Result<Arc<Recorder>, CrawlError> {
+    let groups = scope_groups(rules);
+    let recorder = Recorder::new(
+        directory,
+        secret,
+        rules,
+        text,
+        json!({}),
+        Vec::new(),
+        revision,
+    )?;
+    let catalogs: serde_json::Map<String, Value> = groups
+        .iter()
+        .map(|group| {
+            (
+                catalog_key(&rules.rules[group[0]]),
+                json!({"rule_indices":group,"status":"unvisited"}),
+            )
+        })
+        .collect();
+    recorder.update(|state| state.report = json!({
+        "format":1,"mode":"scope_counts","revision":revision,"rules_sha256":digest(text.as_bytes()),
+        "scope":"FIRST-PAGE projected scan scope only; not membership, selected IDs or vintage cost acceptance",
+        "complete":false,"counts_complete":false,"membership_complete":false,
+        "status":"partial_in_progress","catalog_realtime":realtime,
+        "expected_catalogs":groups.len(),"validated_catalogs":0,
+        "projected_catalog_rows":0,"projected_catalog_page_requests":0,
+        "production_scan_guard":rules.max_catalog_series,"production_selected_guard":rules.max_series,
+        "logical_request_limit":71,"http_attempt_limit":213,"requests_per_minute":30,
+        "timeout_seconds":1800,"catalogs":catalogs
+    }))?;
+    Ok(recorder)
+}
+
+async fn scope_headers(
+    adapter: &FredAdapter,
+    ctx: &CrawlCtx,
+    rules: &FredCatalogRules,
+    recorder: &Arc<Recorder>,
+    realtime: &str,
+) -> Result<bool, CrawlError> {
+    let groups = scope_groups(rules);
+    if groups.len() > 71 {
+        return Err(failed());
+    }
+    let mut all_valid = true;
+    for group in groups {
+        let rule = &rules.rules[group[0]];
+        let key = catalog_key(rule);
+        let (path, parameter, id) = if let Some(id) = rule.release_id {
+            ("/release/series", "release_id", id)
+        } else {
+            (
+                "/category/series",
+                "category_id",
+                rule.category_id.ok_or_else(failed)?,
+            )
+        };
+        let id = id.to_string();
+        let query = [
+            (parameter, id.as_str()),
+            ("api_key", adapter.api_key(ctx)?),
+            ("file_type", "json"),
+            ("limit", "1"),
+            ("offset", "0"),
+            ("order_by", "series_id"),
+            ("sort_order", "asc"),
+            ("realtime_start", realtime),
+            ("realtime_end", realtime),
+        ];
+        let result: Result<CatalogPage, CrawlError> = ctx
+            .http
+            .get_json_audited(SourceId::Fred, &adapter.url(path), &query, |text| {
+                let page = recorder.capture(&format!("{key}-0"), text)?;
+                recorder.update(|s| s.report["catalogs"][&key]["page"] = page)
+            })
+            .await
+            .map_err(classify_fred_error);
+        let page = match result {
+            Ok(page)
+                if page.offset == 0
+                    && page.limit == 1
+                    && page.seriess.len() == page.count.min(1)
+                    && page.seriess.iter().all(|row| {
+                        validate_catalog_id(&row.id).is_ok()
+                            && !row.metadata.title.trim().is_empty()
+                            && row
+                                .metadata
+                                .frequency
+                                .as_ref()
+                                .is_some_and(|f| !f.trim().is_empty())
+                    }) =>
+            {
+                page
+            }
+            result => {
+                all_valid = false;
+                let reason = match result {
+                    Err(ref error) => error_kind(error),
+                    _ => "invalid_header",
+                };
+                recorder.update(|s| {
+                    s.report["catalogs"][&key]["status"] = json!(reason);
+                    s.report["catalogs"][&key]["retrieved_at"] =
+                        json!(chrono::Utc::now().to_rfc3339());
+                })?;
+                continue;
+            }
+        };
+        // Checked arithmetic, not a volume guard: no rows beyond the first are
+        // fetched even when advertised counts exceed production's scan ceiling.
+        let (previous, pages) = {
+            let s = recorder.state.lock().map_err(|_| failed())?;
+            (
+                s.report["projected_catalog_rows"]
+                    .as_u64()
+                    .ok_or_else(failed)?,
+                s.report["projected_catalog_page_requests"]
+                    .as_u64()
+                    .ok_or_else(failed)?,
+            )
+        };
+        let count = u64::try_from(page.count).map_err(|_| failed())?;
+        let total = previous.checked_add(count).ok_or_else(failed)?;
+        let requests = count.div_ceil(1000).max(1);
+        let page_total = pages.checked_add(requests).ok_or_else(failed)?;
+        recorder.update(|s| {
+            s.report["catalogs"][&key]["status"] = json!("header_validated");
+            s.report["catalogs"][&key]["provider_count"] = json!(count);
+            s.report["catalogs"][&key]["production_would_refuse_empty"] = json!(count == 0);
+            s.report["catalogs"][&key]["projected_page_requests"] = json!(requests);
+            s.report["catalogs"][&key]["retrieved_at"] = json!(chrono::Utc::now().to_rfc3339());
+            s.report["projected_catalog_rows"] = json!(total);
+            s.report["projected_catalog_page_requests"] = json!(page_total);
+            s.report["validated_catalogs"] =
+                json!(s.report["validated_catalogs"].as_u64().unwrap_or(0) + 1);
+        })?;
+    }
+    Ok(all_valid)
+}
+
+#[tokio::test]
+#[ignore = "explicit authenticated first-page scope audit only"]
+async fn authenticated_catalog_scope_counts() {
+    async fn run() -> Result<(), CrawlError> {
+        let directory =
+            PathBuf::from(std::env::var_os("FRED_AUDIT_OUTPUT_DIR").ok_or_else(failed)?);
+        let revision = std::env::var("FRED_AUDIT_REVISION").map_err(|_| failed())?;
+        if !directory.is_absolute()
+            || revision.len() != 40
+            || !revision.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err(failed());
+        }
+        let secret = std::env::var("FRED_API_KEY").map_err(|_| failed())?;
+        if secret.trim().is_empty() {
+            return Err(failed());
+        }
+        let text =
+            std::fs::read_to_string(data_dir().join(CATALOG_RULES_FILE)).map_err(|_| failed())?;
+        let rules = FredCatalogRules::parse(&text)?;
+        if digest(text.as_bytes()) != SCOPE_RULES_SHA256
+            || rules.rules.len() != 83
+            || rules.include.len() != 30
+            || scope_groups(&rules).len() != 71
+            || rules.max_catalog_series != 20000
+            || rules.max_series != 500
+        {
+            return Err(failed());
+        }
+        let realtime = chrono::Utc::now().date_naive().to_string();
+        let recorder = scope_recorder(&directory, &secret, &rules, &text, &revision, &realtime)?;
+        let checker = crate::check_selection::Checker::live(
+            crate::http::HttpConfig::default(),
+            std::collections::HashMap::from([(
+                SourceId::Fred,
+                crate::policy::SourcePolicy::default_for(SourceId::Fred),
+            )]),
+            25,
+            crate::adapter::ApiKeys {
+                fred: Some(secret),
+                ..Default::default()
+            },
+            chrono::Utc::now().date_naive(),
+        )?;
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(1800),
+            scope_headers(
+                &FredAdapter::default(),
+                &checker.ctx,
+                &rules,
+                &recorder,
+                &realtime,
+            ),
+        )
+        .await;
+        let (complete, status) = match result {
+            Ok(Ok(true)) => (true, "all_headers_validated"),
+            Ok(Ok(false)) => (false, "header_errors"),
+            Ok(Err(_)) => (false, "scope_failed"),
+            Err(_) => (false, "timeout"),
+        };
+        recorder.update(|s| {
+            s.report["counts_complete"] = json!(complete);
+            s.report["status"] = json!(status);
+            s.report["finished_at"] = json!(chrono::Utc::now().to_rfc3339());
+            s.report["projected_rows_exceed_production_scan_guard"] =
+                json!(s.report["projected_catalog_rows"].as_u64().unwrap_or(0) > 20000);
+        })?;
+        if !complete {
+            return Err(failed());
+        }
+        Ok(())
+    }
+    assert!(
+        run().await.is_ok(),
+        "FRED scope counts incomplete; inspect safe evidence"
+    );
+}
+
 /// Runtime interface (none read by compilation/offline tests): FRED_AUDIT_OUTPUT_DIR,
 /// FRED_AUDIT_HISTORICAL_CSV, FRED_AUDIT_REVISION, CRAWLER_DATA_DIR, FRED_API_KEY.
 /// The runner must first copy the draft data and raise ONLY its scan guard to100000.
@@ -587,6 +833,109 @@ async fn authenticated_catalog_evidence() {
 mod tests {
     use super::*;
     use crate::testkit::{test_ctx, MockSource, Reply, Route, TEST_API_KEY};
+
+    #[tokio::test]
+    async fn scope_counts_requests_one_row_per_group_even_above_scan_guard() {
+        let mock = MockSource::start().await;
+        let directory = tempfile::tempdir().unwrap();
+        let text = "max_series=1\nmax_catalog_series=10\n[[rules]]\nrelease_id=53\n[[rules]]\nrelease_id=53\nid_prefix='Z'\n[[rules]]\nrelease_id=54";
+        let rules = FredCatalogRules::parse(text).unwrap();
+        for (id, count) in [(53, 100858), (54, 200000)] {
+            mock.mount_expect(
+                &Route::get("/release/series")
+                    .query("release_id", id.to_string())
+                    .query("limit", "1")
+                    .query("offset", "0")
+                    .query("realtime_start", "2026-11-05")
+                    .query("realtime_end", "2026-11-05")
+                    .query("order_by", "series_id")
+                    .query("sort_order", "asc"),
+                Reply::json(json!({"count":count,"offset":0,"limit":1,"seriess":[row("PUBLIC")]})),
+                1,
+            )
+            .await;
+        }
+        let recorder = scope_recorder(
+            directory.path(),
+            TEST_API_KEY,
+            &rules,
+            text,
+            "offline",
+            "2026-11-05",
+        )
+        .unwrap();
+        let adapter = FredAdapter {
+            base_url: mock.base_url(),
+            ..Default::default()
+        };
+        assert!(
+            scope_headers(&adapter, &test_ctx(), &rules, &recorder, "2026-11-05")
+                .await
+                .unwrap()
+        );
+        let report = manifest(directory.path());
+        assert_eq!(report["validated_catalogs"], 2);
+        assert_eq!(report["projected_catalog_rows"], 300858);
+        assert_eq!(report["projected_catalog_page_requests"], 301);
+        assert_eq!(
+            report["catalogs"]["release-53"]["rule_indices"],
+            json!([0, 1])
+        );
+        assert_eq!(report["membership_complete"], false);
+        assert_eq!(report["complete"], false);
+        assert_eq!(mock.received_requests().await.len(), 2);
+        assert_eq!(report["production_scan_guard"], 10);
+        assert_eq!(report["production_selected_guard"], 1);
+    }
+
+    #[tokio::test]
+    async fn scope_counts_invalid_header_is_not_zero_and_other_catalog_is_measured() {
+        let mock = MockSource::start().await;
+        let directory = tempfile::tempdir().unwrap();
+        let text = "max_series=1\nmax_catalog_series=10\n[[rules]]\nrelease_id=53\n[[rules]]\nrelease_id=54";
+        let rules = FredCatalogRules::parse(text).unwrap();
+        mock.mount_expect(
+            &Route::get("/release/series").query("release_id", "53"),
+            Reply::json(json!({"count":1000000,"offset":1,"limit":1,"seriess":[row("PUBLIC")]})),
+            1,
+        )
+        .await;
+        mock.mount_expect(
+            &Route::get("/release/series").query("release_id", "54"),
+            Reply::json(json!({"count":0,"offset":0,"limit":1,"seriess":[]})),
+            1,
+        )
+        .await;
+        let recorder = scope_recorder(
+            directory.path(),
+            TEST_API_KEY,
+            &rules,
+            text,
+            "offline",
+            "2026-11-05",
+        )
+        .unwrap();
+        let adapter = FredAdapter {
+            base_url: mock.base_url(),
+            ..Default::default()
+        };
+        assert!(
+            !scope_headers(&adapter, &test_ctx(), &rules, &recorder, "2026-11-05")
+                .await
+                .unwrap()
+        );
+        let report = manifest(directory.path());
+        assert_eq!(report["validated_catalogs"], 1);
+        assert_eq!(report["projected_catalog_rows"], 0);
+        assert_eq!(report["catalogs"]["release-53"]["status"], "invalid_header");
+        assert!(report["catalogs"]["release-53"]["provider_count"].is_null());
+        assert_eq!(
+            report["catalogs"]["release-54"]["production_would_refuse_empty"],
+            true
+        );
+        assert_eq!(report["projected_catalog_page_requests"], 1);
+        assert_eq!(mock.received_requests().await.len(), 2);
+    }
 
     fn rules_text() -> &'static str {
         "max_series=50\nmax_catalog_series=10000\ninclude=['EXTRA']\nexclude=['ADROP']\n# rule: first\n[[rules]]\nrelease_id=53\nid_prefix='A'\n# rule: second\n[[rules]]\nrelease_id=53\nid_pattern='A.*'"
