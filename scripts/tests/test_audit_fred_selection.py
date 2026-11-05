@@ -269,5 +269,93 @@ class ExportAuditTests(unittest.TestCase):
             child.assert_not_called()
 
 
+class ScopeCountsTests(unittest.TestCase):
+    def scope(self, root, mutation=None, process_status=0):
+        before = (DATA / 'catalog_selection/fred.toml').read_bytes()
+        def child(command, env, timeout):
+            self.assertEqual(command[1:], ['--exact', AUDIT.SCOPE_TEST, '--ignored', '--nocapture'])
+            self.assertNotIn('FRED_AUDIT_HISTORICAL_CSV', env)
+            self.assertEqual(Path(env['CRAWLER_DATA_DIR'], 'catalog_selection/fred.toml').read_bytes(), before)
+            directory = Path(env['FRED_AUDIT_OUTPUT_DIR'])
+            directory.mkdir()
+            catalogs = {}
+            rules = AUDIT.tomllib.loads(before.decode())['rules']
+            keys = dict.fromkeys(f'release-{rule["release_id"]}' for rule in rules)
+            for key in keys:
+                value = {'count': 100858, 'offset': 0, 'limit': 1,
+                         'seriess': [{'id': 'PUBLIC', 'title': 'Public', 'frequency': 'Quarterly'}]}
+                raw, normalized = json.dumps(value).encode(), json.dumps(value, sort_keys=True).encode()
+                raw_name, normalized_name = key + '-0.response-text.json', key + '-0.normalized.json'
+                (directory / raw_name).write_bytes(raw)
+                (directory / normalized_name).write_bytes(normalized)
+                catalogs[key] = {'status': 'header_validated', 'provider_count': 100858,
+                                 'projected_page_requests': 101,
+                                 'page': {'advertised_count': 100858, 'response_offset': 0,
+                                          'response_limit': 1, 'raw_path': raw_name,
+                                          'raw_sha256': hashlib.sha256(raw).hexdigest(),
+                                          'normalized_path': normalized_name,
+                                          'normalized_sha256': hashlib.sha256(normalized).hexdigest()}}
+            manifest = {'format': 1, 'mode': 'scope_counts', 'revision': REVISION,
+                        'rules_sha256': AUDIT.SCOPE_RULES_SHA256, 'complete': False,
+                        'membership_complete': False, 'counts_complete': True,
+                        'expected_catalogs': 71, 'validated_catalogs': 71,
+                        'production_scan_guard': 20000, 'production_selected_guard': 500,
+                        'catalogs': catalogs, 'projected_catalog_rows': 71 * 100858,
+                        'projected_catalog_page_requests': 71 * 101}
+            if mutation:
+                mutation(directory, manifest)
+            (directory / 'manifest.json').write_text(json.dumps(manifest))
+            return process_status, b'fake-private-key', b'', .01
+        with patch.object(AUDIT, 'capture', side_effect=child):
+            status = AUDIT.run_exporter(Path('/fake'), DATA, root / 'out', 'fake-private-key',
+                                        REVISION, None, scope_counts=True)
+        self.assertEqual((DATA / 'catalog_selection/fred.toml').read_bytes(), before)
+        report = json.loads((root / 'out/runner-report.json').read_bytes())
+        return status, report, root / 'out'
+
+    def test_all71_scope_counts_above_production_guard_succeed_without_membership_claim(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            status, report, output = self.scope(Path(temporary))
+            self.assertEqual(status, 0)
+            self.assertTrue(report['counts_complete'])
+            self.assertFalse(report['membership_complete'])
+            self.assertEqual(report['audit_catalog_guard'], 20000)
+            manifest = json.loads((output / 'evidence/manifest.json').read_bytes())
+            self.assertFalse(manifest['complete'])
+            self.assertEqual(manifest['projected_catalog_rows'], 7160918)
+            for name, digest in report['files_sha256'].items():
+                self.assertEqual(hashlib.sha256((output / 'evidence' / name).read_bytes()).hexdigest(), digest)
+
+    def test_missing_catalog_wrong_totals_wrong_page_and_wrong_identity_fail(self):
+        def missing(directory, manifest):
+            manifest['catalogs'].pop(next(iter(manifest['catalogs'])))
+        def total(directory, manifest):
+            manifest['projected_catalog_rows'] -= 1
+        def limit(directory, manifest):
+            next(iter(manifest['catalogs'].values()))['page']['response_limit'] = 1000
+        def identity(directory, manifest):
+            key = next(iter(manifest['catalogs']))
+            manifest['catalogs']['release-99999999'] = manifest['catalogs'].pop(key)
+        for mutation in (missing, total, limit, identity):
+            with self.subTest(case=mutation.__name__), tempfile.TemporaryDirectory() as temporary:
+                status, report, output = self.scope(Path(temporary), mutation)
+                self.assertEqual(status, 2)
+                self.assertFalse(report['counts_complete'])
+                self.assertFalse((output / 'evidence/manifest.json').exists())
+
+    def test_partial_header_error_keeps_honest_checkpoint_and_failure(self):
+        def partial(directory, manifest):
+            next(iter(manifest['catalogs'].values())).update(status='provider_or_pagination')
+            manifest.update(counts_complete=False, validated_catalogs=70,
+                            projected_catalog_rows=70 * 100858, projected_catalog_page_requests=70 * 101)
+        with tempfile.TemporaryDirectory() as temporary:
+            status, report, output = self.scope(Path(temporary), partial, 101)
+            self.assertEqual(status, 101)
+            self.assertFalse(report['counts_complete'])
+            self.assertTrue((output / 'evidence/manifest.json').exists())
+            self.assertEqual(report['artifact_validation_issues'], [])
+
+
+
 if __name__ == '__main__':
     unittest.main()
