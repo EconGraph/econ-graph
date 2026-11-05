@@ -1,0 +1,147 @@
+{
+  "format_version": 1,
+  "scope": "Dependency remediation proof; does not claim full Train4 or CNPG/PITR acceptance",
+  "audit_tool": {
+    "version": "0.22.2",
+    "official_release": "https://github.com/rustsec/rustsec/releases/tag/cargo-audit%2Fv0.22.2",
+    "release_asset": "cargo-audit-x86_64-unknown-linux-gnu-v0.22.2.tgz",
+    "verified_sha256": "ab28a1bdb54db4d5d8ad5981cf1f959410370b3d28250dbd35f6a44248620e39"
+  },
+  "advisory_database": {
+    "advisory-count": 1395,
+    "last-commit": null,
+    "last-updated": null
+  },
+  "cargo_lock_sha256": "2190f472f1dfaebc7020debb0ff5a7e175f8b267e44f6bd98cbab65767fc9de4",
+  "audit_result": {
+    "vulnerabilities": 0,
+    "unsound": 0,
+    "remaining_informational": [
+      {
+        "package": "backoff",
+        "version": "0.4.0",
+        "advisory": "RUSTSEC-2025-0012"
+      },
+      {
+        "package": "instant",
+        "version": "0.1.13",
+        "advisory": "RUSTSEC-2024-0384"
+      },
+      {
+        "package": "paste",
+        "version": "1.0.15",
+        "advisory": "RUSTSEC-2024-0436"
+      }
+    ],
+    "unchanged_existing_ignores": [
+      "RUSTSEC-2026-0258"
+    ]
+  },
+  "implementations": {
+    "legacy_zstd_api": "local pure re-export facade; no upstream implementation",
+    "zstd": "registry0.14.3",
+    "zstd_safe": "registry8.2.0",
+    "legacy_quick_xml_api": "local pure re-export facade for current OpenDAL API usage",
+    "quick_xml": "registry0.42.0",
+    "tokio": "registry1.54.1"
+  },
+  "source_and_dependency_guard": "passed;7 mutation/refusal tests",
+  "actual_codec_xml_doctests": "passed;2 tests",
+  "cargo_deny_licenses": "passed with existing policy plus separately reviewed crate-only libbz2-rs-sys bzip2 allowance",
+  "docker_contexts": {
+    "backend": "both facade manifests and source included",
+    "optimized_e2e": "both facade manifests and source included"
+  },
+  "real_consumer_roundtrips": [
+    {
+      "store": "versity",
+      "image": "versity/versitygw@sha256:89cad13cc981986ee284cbafea4613f9533ce6fd5f37a2c96c4c4fb8adb3a316",
+      "owned_cleanup": "passed",
+      "gates": {
+        "crawler_sql_catalog": {
+          "status": "passed",
+          "evidence": {
+            "canonical_columns": [
+              "id",
+              "series_id",
+              "date",
+              "revision_date",
+              "value",
+              "is_original_release",
+              "attributes"
+            ],
+            "requires_conditional_create": false,
+            "rows": 5,
+            "sha256": "08e8b7fce1a76ac0d14003ed6f5d4b87f23c9f1ec9a0ccb475b24d43315b32a7",
+            "sql_catalog_commit": true,
+            "status": "passed"
+          }
+        },
+        "independent_readers": {
+          "status": "passed",
+          "evidence": {
+            "rows": 5,
+            "sha256": "08e8b7fce1a76ac0d14003ed6f5d4b87f23c9f1ec9a0ccb475b24d43315b32a7",
+            "readers": [
+              "PyIceberg",
+              "DuckDB"
+            ]
+          }
+        },
+        "btrfs_restore": {
+          "status": "passed",
+          "evidence": {
+            "readonly": true,
+            "restored": true,
+            "table_reread_sha256": "08e8b7fce1a76ac0d14003ed6f5d4b87f23c9f1ec9a0ccb475b24d43315b32a7"
+          }
+        }
+      }
+    },
+    {
+      "store": "garage",
+      "image": "dxflrs/garage@sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5",
+      "owned_cleanup": "passed",
+      "gates": {
+        "crawler_sql_catalog": {
+          "status": "passed",
+          "evidence": {
+            "canonical_columns": [
+              "id",
+              "series_id",
+              "date",
+              "revision_date",
+              "value",
+              "is_original_release",
+              "attributes"
+            ],
+            "requires_conditional_create": false,
+            "rows": 5,
+            "sha256": "082fcb3d01ba9a5a57c4ab0131f46932231c29ed42a905ee5bd61b22d41fd6a0",
+            "sql_catalog_commit": true,
+            "status": "passed"
+          }
+        },
+        "independent_readers": {
+          "status": "passed",
+          "evidence": {
+            "rows": 5,
+            "sha256": "082fcb3d01ba9a5a57c4ab0131f46932231c29ed42a905ee5bd61b22d41fd6a0",
+            "readers": [
+              "PyIceberg",
+              "DuckDB"
+            ]
+          }
+        },
+        "btrfs_restore": {
+          "status": "passed",
+          "evidence": {
+            "readonly": true,
+            "restored": true,
+            "table_reread_sha256": "082fcb3d01ba9a5a57c4ab0131f46932231c29ed42a905ee5bd61b22d41fd6a0"
+          }
+        }
+      }
+    }
+  ]
+}

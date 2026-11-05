@@ -1,0 +1,14 @@
+[package]
+name = "thrift"
+version = "0.17.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Compatibility facade forwarding to patched thrift 0.24.0; contains no upstream implementation"
+
+[dependencies]
+thrift_patched = { package = "thrift", version = "=0.24.0", default-features = false }
+
+[features]
+default = ["server"]
+server = ["thrift_patched/server"]

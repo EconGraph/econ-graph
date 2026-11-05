@@ -1,0 +1,19 @@
+[package]
+name = "quick-xml"
+version = "0.39.4"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Compatibility facade forwarding to patched quick-xml 0.42.0; contains no upstream implementation"
+
+[dependencies]
+quick_xml_patched = { package = "quick-xml", version = "=0.42.0", default-features = false }
+
+[features]
+async-tokio = ["quick_xml_patched/async-tokio"]
+default = []
+encoding = ["quick_xml_patched/encoding"]
+escape-html = ["quick_xml_patched/escape-html"]
+overlapped-lists = ["quick_xml_patched/overlapped-lists"]
+serde-types = ["quick_xml_patched/serde-types"]
+serialize = ["quick_xml_patched/serialize"]

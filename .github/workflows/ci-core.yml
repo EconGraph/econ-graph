@@ -247,6 +247,16 @@ jobs:
         persist-credentials: false
         ref: ${{ github.event.inputs.branch || github.ref }}
 
+    # Restoring and rebuilding the shared Rust target can exhaust the runner's
+    # disk. This job never uses these preinstalled SDKs; finish removing them
+    # before cache extraction rather than racing it with background cleanup.
+    - name: Free runner disk before restoring build cache
+      run: |
+        df -h /
+        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/hostedtoolcache /usr/local/.ghcup \
+          /usr/share/swift /usr/local/share/powershell
+        df -h /
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       with:
@@ -1354,6 +1364,17 @@ jobs:
         CHECKPOINT: before the doctests
       run: *disk_checkpoint
 
+    - name: Exercise real Iceberg catalog and disposable smoke guards
+      if: ${{ !cancelled() }}
+      env:
+        DATA_DATABASE_URL: postgresql://postgres:password@127.0.0.1:5446/econ_graph_test
+      run: |
+        set -euo pipefail
+        cargo test --locked -p econ-graph-timeseries --test iceberg_contract --test smoke_safety -- --include-ignored --test-threads=1
+        cargo test --locked -p econ-graph-core --test observation_storage -- --include-ignored --test-threads=1
+        shellcheck ../scripts/train4/maintain-timeseries.sh
+      working-directory: backend
+
     # Report documentation failures even when the broader test step failed.
     - name: Run workspace doctests
       if: ${{ !cancelled() }}
@@ -1738,6 +1759,9 @@ jobs:
     - name: Run Rust security audit
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
+        python3 scripts/check_security_adapters.py
+        python3 -m unittest discover -s scripts -p test_security_adapters.py -v
+        cargo test --locked -p zstd@0.13.3 -p quick-xml@0.39.4 -p thrift@0.17.0 --doc
         cargo audit
       working-directory: backend
 

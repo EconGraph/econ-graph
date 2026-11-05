@@ -79,3 +79,8 @@ chart-api-service/
 
 # Admin frontend (not needed for main frontend E2E containers)
 admin-frontend/
+
+# Optimized E2E images COPY backend/, including workspace compatibility facades.
+!backend/compat/
+!backend/compat/**/Cargo.toml
+!backend/compat/**/src/*.rs
