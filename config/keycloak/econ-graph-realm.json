@@ -50,8 +50,7 @@
               "annotation:create",
               "annotation:comment",
               "chart:share",
-              "api:mcp",
-              "catalog.sec:read"
+              "api:mcp"
             ]
           },
           "realm": [

@@ -93,14 +93,14 @@ below become applicable only after those packages land.
 
 The API package must define the explicit `catalog.sec:read` capability and require
 it together with the `financial_components` build flag for company research reads.
-The source's exact catalog name is `SEC EDGAR`. Its fresh-realm configuration must
-grant SEC reads to signed-in users while leaving anonymous access ungranted.
-Existing realm imports must preserve live catalog grants deliberately rather than
-automatically expanding a live user's privileges.
+The source's exact catalog name is `SEC EDGAR`. The realm file must define the role
+and grant it to nobody, on a fresh realm as well as an existing one, so SEC data can
+be deployed while its licence review is open. Realm imports must preserve live catalog
+grants deliberately rather than automatically expanding a live user's privileges.
 
 After the dependent packages have landed, the SEC client role exists, and the full
 company-research acceptance gate has passed, an operator must explicitly grant
-`catalog.sec:read` to the intended existing realm role in Keycloak administration:
+`catalog.sec:read` to the intended realm role in Keycloak administration:
 open Realm roles → user → Associated roles, assign the `econ-graph-api` client
 role `catalog.sec:read`, and obtain a fresh access token. The existing
 `--make-public` helper grants anonymous access too, so it does not implement this

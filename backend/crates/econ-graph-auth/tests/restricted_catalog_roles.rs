@@ -15,6 +15,7 @@ const API_CLIENT: &str = "econ-graph-api";
 const RESTRICTED_BY_DEFAULT: &[Role] = &[
     Role::CatalogWorldTradeOrganizationRead,
     Role::CatalogBankOfCanadaRead,
+    Role::CatalogSecRead,
 ];
 
 fn realm() -> Value {
@@ -87,6 +88,22 @@ fn new_catalogs_are_restricted_by_default() {
             !anonymous.contains(role),
             "{role} must not be mapped to anonymous visitors"
         );
+    }
+}
+
+/// No realm role grants SEC reads on a fresh realm, directly or through a composite. An operator
+/// grants them once company research is accepted.
+#[test]
+fn no_realm_role_grants_sec_reads_by_default() {
+    let realm = realm();
+    let sec = Role::CatalogSecRead.as_str();
+    for role in realm["roles"]["realm"].as_array().expect("realm roles") {
+        let granted = role["composites"]["client"][API_CLIENT]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|name| name == sec);
+        assert!(!granted, "{} must not grant {sec}", role["name"]);
     }
 }
 

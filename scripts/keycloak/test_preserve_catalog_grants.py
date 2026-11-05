@@ -334,7 +334,7 @@ class CatalogPolicyTests(unittest.TestCase):
                      if e["client"] == "econgraph-anonymous")
         self.assertEqual(set(scope["roles"]), expected)
         self.assertEqual({r for r in self.realm_granted("user") if r.startswith("catalog.")},
-                         expected | {"catalog.sec:read"})
+                         expected)
         self.assertNotIn("catalog.sec:read", scope["roles"])
 
     def test_sec_signed_in_grant_is_explicit_and_live_policy_survives(self):
