@@ -66,6 +66,10 @@ export const DATA_OPERATIONS: ReadonlySet<string> = new Set([
  * the user's token. Unknown and unnamed operations are sent the same way.
  */
 export const APP_OPERATIONS: ReadonlySet<string> = new Set([
+  'CompanyNotes',
+  'CreateCompanyNote',
+  'UpdateCompanyNote',
+  'DeleteCompanyNote',
   'GetAnnotationsForSeries',
   'GetCommentsForAnnotation',
   'CreateAnnotation',
