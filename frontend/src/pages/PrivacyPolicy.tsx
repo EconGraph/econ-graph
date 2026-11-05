@@ -34,8 +34,8 @@ import {
   ExpandMore,
 } from '@mui/icons-material';
 
-const LAST_UPDATED = 'October 26, 2026';
-const REPOSITORY_URL = 'https://github.com/EconGraph/econ-graph';
+const LAST_UPDATED = 'November 5, 2026';
+const PRIVACY_CONTACT_EMAIL = 'support@econgraph.com';
 
 const PrivacyPolicy: React.FC = () => {
   const sections = [
@@ -387,12 +387,11 @@ const PrivacyPolicy: React.FC = () => {
             marginBottom: '16px',
           }}
         >
-          To ask about this policy, request a copy of your data or have your account deleted, open
-          an issue in the project repository at <Link href={REPOSITORY_URL}>{REPOSITORY_URL}</Link>.
-          For deletion, say that you want your EconGraph account and associated data removed. This
-          applies whether you signed in with Google or Facebook. Do not post passwords, access
-          tokens or other credentials. If your request involves personal details you would rather
-          not post publicly, say so in the issue and we will follow up privately.
+          To ask about this policy, request a copy of your data or have your account deleted, email{' '}
+          <Link href={'mailto:' + PRIVACY_CONTACT_EMAIL}>{PRIVACY_CONTACT_EMAIL}</Link>. For
+          deletion, say that you want your EconGraph account and associated data removed. This
+          applies regardless of your sign-in provider. Do not send passwords, access tokens or other
+          credentials.
         </Typography>
       </Paper>
 
