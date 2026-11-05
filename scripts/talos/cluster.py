@@ -143,8 +143,22 @@ def export_credentials(module, state, env, recipients):
             exclusive_write(destination, seal(plaintext, recipients))
 
 
+CGROUP_CONTROLLERS = Path("/sys/fs/cgroup/cgroup.controllers")
+
+
+def verify_cgroup_v2(controllers=CGROUP_CONTROLLERS):
+    # libvirt only treats swap_hard_limit as swap alone on cgroup v2.
+    try:
+        available = controllers.read_text().split()
+    except OSError:
+        raise Refused("host must use cgroup v2 for the control-plane swap limit") from None
+    if "memory" not in available:
+        raise Refused("host cgroup v2 has no memory controller for the control-plane swap limit")
+
+
 def verify_host(config, host_state):
     owned(host_state, config)
+    verify_cgroup_v2()
     if not Path("/dev/kvm").exists():
         raise Refused("/dev/kvm is absent; VM creation/fit tests are unavailable")
     if config.get("dhcp_reservations_confirmed") is not True:
@@ -257,7 +271,7 @@ def fit_gate(evidence, config):
         raise Refused("record nonnegative Talos-specific debugging hours")
     if effort >= 80:
         raise Refused("two engineering weeks spent on Talos-specific trouble: choose RKE2/Ubuntu and retain the platform layer")
-    for check in ("build", "rebuild", "talos_upgrade", "kubernetes_upgrade", "worker_loss", "pod_debug", "release_e2e_during_drain", "fresh_cluster_restore"):
+    for check in ("build", "rebuild", "talos_upgrade", "kubernetes_upgrade", "worker_loss", "pod_debug", "release_e2e_during_drain", "fresh_cluster_restore", "control_plane_swap_limit"):
         item = value.get("checks", {}).get(check, {})
         if item.get("result") != "passed" or not item.get("evidence") or not item.get("completed_at"):
             raise Refused(f"fit acceptance still lacks observed evidence: {check}")
@@ -272,7 +286,7 @@ def plan(args, config, state):
         show(["talosctl", "gen", "secrets", "--talos-version", TALOS_VERSION, "--output-file", "<anonymous-memory-file>"])
         show(["sops", "--encrypt", "<secrets-and-state-key-in-memory>", "to", str(state)])
     elif args.action in ("build", "rebuild"):
-        show(["verify", "host-owner", str(args.host_state_dir), "KVM", "btrfs-nodatacow", "DHCP-reservations"])
+        show(["verify", "host-owner", str(args.host_state_dir), "cgroup-v2", "KVM", "btrfs-nodatacow", "DHCP-reservations"])
         if args.action == "rebuild":
             show(["verify", "fit-only", "owned-domains-and-state", "explicit-disposable-acknowledgment"])
             show(["tofu", f"-chdir={module}", "destroy", "-input=false", "-auto-approve"])

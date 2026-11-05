@@ -43,6 +43,24 @@ Sparse allocation is not a capacity reservation: measure actual available
 memory, host/object-store headroom and filesystem space before authorizing a
 build. Live allocation, pressure and cleanup remain fit-test evidence.
 
+The host's own swap needs no Talos or Kubernetes configuration, and worker VM
+memory stays free to swap. Each control-plane VM is capped at 1 GiB of host swap
+through libvirt's `swap_hard_limit`, because etcd is sensitive to stalls. libvirt
+writes that value directly to `memory.swap.max`, so build and rebuild refuse a
+host without cgroup v2 and its memory controller. On cgroup v1 the value would
+limit memory plus swap instead. No VM sets `hard_limit` or locked memory.
+
+libvirt writes the limit to the VM's nested `libvirt` cgroup, so the scope's own
+`memory.swap.max` still reads `max`, and a clean `tofu plan` doesn't show the limit
+is active. Check a running VM with `virsh memtune`: `swap_hard_limit` should be
+1048576 KiB on control-plane VMs and unlimited on workers. The
+`control_plane_swap_limit` fit check records this.
+
+Changing a VM's libvirt settings stops and restarts that VM, and `build` would
+apply a change to all three control-plane VMs together, which can lose etcd
+quorum. There is no staged path for this yet, so don't change control-plane VM
+settings through `build` on a running cluster that has to stay up.
+
 Workers expose `/dev/vdb` as an XFS `UserVolumeConfig` named `postgres`, mounted
 at `/var/mnt/postgres` and shared into kubelet with propagation. Workers carry
 `econgraph.io/storage=postgres`; the platform lane's `econgraph-local` provisioner
@@ -209,8 +227,8 @@ not satisfy those release gates.
 
 Copy [fit-evidence.example.json](fit-evidence.example.json) into the operator's
 evidence area. Record actual build, destroy/rebuild, both upgrades, worker-loss,
-pod-debug, release-E2E-during-drain and fresh-cluster-restore artifacts with
-completion timestamps. The example intentionally records every result as
+pod-debug, release-E2E-during-drain, fresh-cluster-restore and
+control-plane-swap-limit artifacts with completion timestamps. The example intentionally records every result as
 pending. Accumulate Talos-specific debugging effort. At 80 engineering hours
 (about two work weeks), the gate refuses Talos acceptance and requires the
 RKE2-on-Ubuntu fallback decision. Keep Flux, manifests, Cilium and CNPG above the

@@ -46,10 +46,17 @@ resource "libvirt_domain" "node" {
   type        = "kvm"
   memory      = each.value.role == "controlplane" ? 8192 : 65536
   memory_unit = "MiB"
-  vcpu        = each.value.role == "controlplane" ? 4 : 16
-  running     = true
-  autostart   = true
-  cpu         = { mode = "host-passthrough" }
+  # etcd stalls badly on swapped pages, so the host may swap at most 1 GiB of a
+  # control-plane VM. Workers stay freely swappable. libvirt writes this straight
+  # to cgroup v2's memory.swap.max; no hard_limit, which could get the VM killed.
+  memory_tune = each.value.role == "controlplane" ? {
+    swap_hard_limit      = 1024
+    swap_hard_limit_unit = "MiB"
+  } : null
+  vcpu      = each.value.role == "controlplane" ? 4 : 16
+  running   = true
+  autostart = true
+  cpu       = { mode = "host-passthrough" }
   os = {
     type         = "hvm"
     type_arch    = "x86_64"

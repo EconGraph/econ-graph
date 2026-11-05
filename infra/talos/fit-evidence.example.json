@@ -46,6 +46,11 @@
       "result": "pending",
       "evidence": "",
       "completed_at": ""
+    },
+    "control_plane_swap_limit": {
+      "result": "pending",
+      "evidence": "",
+      "completed_at": ""
     }
   }
 }
