@@ -1,0 +1,89 @@
+rule_files:
+- crawler.rules.yml
+evaluation_interval: 1m
+tests:
+- name: Enabled freshness monitor with no successful check alerts
+  interval: 1m
+  input_series:
+  - series: kube_cronjob_spec_suspend{namespace="econ-graph",cronjob="sec-companyfacts-freshness"}
+    values: '0+0x50'
+  alert_rule_test:
+  - eval_time: 16m
+    alertname: SecCompanyfactsStale
+    exp_alerts:
+    - exp_labels:
+        namespace: econ-graph
+        cronjob: sec-companyfacts-freshness
+        severity: warning
+      exp_annotations:
+        summary: SEC companyfacts freshness checks are failing or missing
+        description: The enabled freshness check has not passed within 30 minutes. It requires a verified downloaded success within 24 hours and rejects running loads older than eight hours. Staged imports do not establish freshness. Inspect its Job logs and company_fact_load_runs.
+- name: Suspended monitor does not alert
+  interval: 1m
+  input_series:
+  - series: kube_cronjob_spec_suspend{namespace="econ-graph",cronjob="sec-companyfacts-freshness"}
+    values: '1+0x50'
+  alert_rule_test:
+  - eval_time: 45m
+    alertname: SecCompanyfactsStale
+    exp_alerts: []
+- name: Fresh passing checks do not alert
+  interval: 1m
+  input_series:
+  - series: kube_cronjob_spec_suspend{namespace="econ-graph",cronjob="sec-companyfacts-freshness"}
+    values: '0+0x50'
+  - series: kube_cronjob_status_last_successful_time{namespace="econ-graph",cronjob="sec-companyfacts-freshness"}
+    values: '0+60x50'
+  alert_rule_test:
+  - eval_time: 45m
+    alertname: SecCompanyfactsStale
+    exp_alerts: []
+- name: Failed recent ingestion alerts
+  interval: 1m
+  input_series:
+  - series: kube_job_status_failed{namespace="econ-graph",job_name="sec-companyfacts-ingest-123"}
+    values: '1+0x10'
+  - series: kube_job_created{namespace="econ-graph",job_name="sec-companyfacts-ingest-123"}
+    values: '0+0x10'
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: SecCompanyfactsLoadFailed
+    exp_alerts:
+    - exp_labels:
+        namespace: econ-graph
+        job_name: sec-companyfacts-ingest-123
+        severity: warning
+      exp_annotations:
+        summary: SEC companyfacts nightly ingestion failed
+        description: Inspect the Job and company_fact_load_runs. Rerun both archives together; completed companies are idempotent and historical revisions are retained.
+- name: A long-running job failing after its first hour still alerts
+  interval: 1m
+  input_series:
+  - series: kube_job_status_failed{namespace="econ-graph",job_name="sec-companyfacts-ingest-long"}
+    values: '0+0x89 1+0x10'
+  - series: kube_job_created{namespace="econ-graph",job_name="sec-companyfacts-ingest-long"}
+    values: '0+0x100'
+  alert_rule_test:
+  - eval_time: 90m
+    alertname: SecCompanyfactsLoadFailed
+    exp_alerts:
+    - exp_labels:
+        namespace: econ-graph
+        job_name: sec-companyfacts-ingest-long
+        severity: warning
+      exp_annotations:
+        summary: SEC companyfacts nightly ingestion failed
+        description: Inspect the Job and company_fact_load_runs. Rerun both archives together; completed companies are idempotent and historical revisions are retained.
+- name: A later scheduled success clears a retained failed-job alert
+  interval: 1m
+  input_series:
+  - series: kube_job_status_failed{namespace="econ-graph",job_name="sec-companyfacts-ingest-old"}
+    values: '1+0x100'
+  - series: kube_job_created{namespace="econ-graph",job_name="sec-companyfacts-ingest-old"}
+    values: '0+0x100'
+  - series: kube_cronjob_status_last_successful_time{namespace="econ-graph",cronjob="sec-companyfacts-ingest"}
+    values: '5400+0x100'
+  alert_rule_test:
+  - eval_time: 95m
+    alertname: SecCompanyfactsLoadFailed
+    exp_alerts: []

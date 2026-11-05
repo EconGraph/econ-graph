@@ -1255,6 +1255,12 @@ jobs:
         cargo test -p econ-graph-crawler --all-features -- --test-threads=1
         cargo test -p econ-graph-crawler-worker -- --test-threads=1
         cargo test -p econ-graph-sec-crawler --lib -- --test-threads=1
+        # Run the opt-in ingestion recovery test in its own disposable database. Requiring
+        # the exact result prevents absent database configuration or a renamed test going green.
+        ingest_test=companyfacts::tests::database_repeat_load_failed_run_and_recovery
+        cargo test -p econ-graph-sec-crawler --lib "$ingest_test" -- --exact --ignored --test-threads=1 | tee "$RUNNER_TEMP/companyfacts-recovery.log"
+        grep -Fq "test $ingest_test ... ok" "$RUNNER_TEMP/companyfacts-recovery.log"
+        grep -Fq 'test result: ok. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/companyfacts-recovery.log"
         # Keep this database regression opt-in locally, but require it against this job's Postgres.
         # --exact plus the result check prevents a renamed/missing test from silently passing.
         cargo test -p econ-graph-sec-crawler --lib storage::tests::storage_stats_handle_empty_mixed_and_large_totals -- --exact --ignored --test-threads=1 | tee /tmp/xbrl-storage-stats-test.log
