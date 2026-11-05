@@ -1,166 +1,75 @@
-name: Crawler Integration Test
+name: Temporary FRED Count-Only Audit
 
-# Manually triggered; does NOT run automatically. Enqueues one real series (`crawler enqueue`),
-# runs `crawler-worker` until that job finishes, and checks the job completed and its data points
-# were stored. Needs network access to the chosen source. API keys come only from the
-# FRED_API_KEY / BLS_API_KEY / BEA_API_KEY / CENSUS_API_KEY repository secrets;
-# FRED, BEA and Census need one.
+# TEMP audit branch only. Counts do not establish complete membership/witness coverage.
 on:
   workflow_dispatch:
-    inputs:
-      source:
-        description: 'Source id (FRED, BLS, WORLD_BANK, ...; see `crawler sources`)'
-        required: false
-        type: string
-        default: 'FRED'
-      series:
-        description: 'Series id at that source'
-        required: false
-        type: string
-        default: 'GDP'
 
-# Prevent concurrent runs to avoid database conflicts
+permissions:
+  contents: read
+
 concurrency:
-  group: crawler-integration-test
+  group: fred-count-only-audit
   cancel-in-progress: false
 
 jobs:
-  crawler-integration-test:
+  fred-count-only:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: read
-
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_USER: test_user
-          POSTGRES_DB: econ_graph_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-    env:
-      # diesel and psql read DATABASE_URL; the crawler CLI and worker read DATA_DATABASE_URL.
-      DATABASE_URL: postgres://test_user:test_password@localhost:5432/econ_graph_test
-      DATA_DATABASE_URL: postgres://test_user:test_password@localhost:5432/econ_graph_test
-
+    timeout-minutes: 90
     steps:
-    - name: Checkout code
+    - name: Checkout dispatched revision
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         persist-credentials: false
+        ref: ${{ github.sha }}
+
+    - name: Free runner disk before cache restoration
+      run: |
+        df -h /
+        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/hostedtoolcache /usr/local/.ghcup \
+          /usr/share/swift /usr/local/share/powershell
+        df -h /
 
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
 
-    - name: Cache Rust dependencies
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+    - name: Restore shared backend cache without saving
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          backend/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
+        workspaces: backend
+        shared-key: backend
+        save-if: false
 
-    - name: Install Diesel CLI
-      run: cargo install diesel_cli --no-default-features --features postgres
-      working-directory: backend
+    - name: Run offline audit-tool tests
+      run: python3 -m unittest discover -s scripts/tests -p 'test_audit_fred_selection.py' -v
 
-    - name: Run migrations
-      run: |
-        diesel migration run --migration-dir migrations/data
-        diesel migration run --migration-dir migrations/app
-      working-directory: backend
+    # No API key is injected during compilation or dependency resolution.
+    - name: Build crawler only
+      run: cargo build --locked --manifest-path backend/Cargo.toml -p econ-graph-crawler --bin crawler
 
-    - name: Build crawler CLI and worker
-      run: cargo build --release -p econ-graph-crawler --bin crawler -p econ-graph-crawler-worker --bin crawler-worker
-      working-directory: backend
-
-    - name: Crawl one series through the queue
+    - name: Run read-only COUNT-ONLY audit
+      id: audit
+      continue-on-error: true
       env:
         FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-        BLS_API_KEY: ${{ secrets.BLS_API_KEY }}
-        BEA_API_KEY: ${{ secrets.BEA_API_KEY }}
-        CENSUS_API_KEY: ${{ secrets.CENSUS_API_KEY }}
-        SOURCE: ${{ github.event.inputs.source }}
-        SERIES: ${{ github.event.inputs.series }}
       run: |
-        set -euo pipefail
-        # Rust str::trim uses Unicode White_Space, including nonbreaking spaces.
-        SERIES=$(python3 - <<'PY'
-        import os
-        whitespace = "\t\n\v\f\r \u0085\u00a0\u1680" + "".join(map(chr, range(0x2000, 0x200b))) + "\u2028\u2029\u202f\u205f\u3000"
-        print(os.environ["SERIES"].strip(whitespace), end="")
-        PY
-        )
-        if [[ -z "$SERIES" || "$SERIES" == *,* ]]; then
-          echo "::error::The integration test requires exactly one nonempty series id"
-          exit 1
-        fi
-        if [ "${SOURCE^^}" = "FRED" ] && [ -z "$FRED_API_KEY" ]; then
-          echo "::error::FRED needs an API key: set the FRED_API_KEY secret"
-          exit 1
-        fi
-        if [ "${SOURCE^^}" = "BEA" ] && [ -z "$BEA_API_KEY" ]; then
-          echo "::error::BEA needs an API key: set the BEA_API_KEY secret"
-          exit 1
-        fi
-        if [ "${SOURCE^^}" = "CENSUS" ] && [ -z "$CENSUS_API_KEY" ]; then
-          echo "::error::Census needs an API key: set the CENSUS_API_KEY secret"
-          exit 1
-        fi
-        CRAWLER=target/release/crawler
-        $CRAWLER sources
-        $CRAWLER enqueue --source "$SOURCE" --series "$SERIES"
+        python3 scripts/audit-fred-selection.py \
+          --binary backend/target/debug/crawler \
+          --data-dir backend/crates/econ-graph-crawler/data \
+          --output "$RUNNER_TEMP/fred-count-sanitized" \
+          --revision '${{ github.sha }}'
 
-        # One worker for this source only, without the refresh scheduler, so the queue holds
-        # just the job enqueued above.
-        CRAWLER_SOURCES="$SOURCE" CRAWLER_SCHEDULER=false CRAWLER_POLL_INTERVAL_SECS=1 \
-          target/release/crawler-worker > worker.log 2>&1 &
-        WORKER_PID=$!
-        trap 'kill "$WORKER_PID" 2>/dev/null || true; cat worker.log' EXIT
+    - name: Upload only sanitized count artifacts
+      if: ${{ always() && steps.audit.outcome != 'skipped' }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      with:
+        name: fred-count-only-${{ github.sha }}
+        path: ${{ runner.temp }}/fred-count-sanitized/
+        if-no-files-found: error
+        retention-days: 7
 
-        job_status() {
-          psql "$DATABASE_URL" -XAt -v ON_ERROR_STOP=1 -v source="$SOURCE" -v series="$SERIES" <<'SQL'
-        SELECT status FROM crawl_queue
-          WHERE kind = 'fetch_series' AND source = UPPER(:'source') AND series_id = :'series'
-          ORDER BY created_at DESC LIMIT 1;
-        SQL
-        }
-        status=""
-        for _ in $(seq 1 300); do
-          status=$(job_status)
-          case "$status" in completed|failed) break ;; esac
-          sleep 2
-        done
-        $CRAWLER status
-        if [ "$status" != "completed" ]; then
-          psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -v source="$SOURCE" -v series="$SERIES" <<'SQL'
-        SELECT status, retry_count, error_message FROM crawl_queue
-          WHERE source = UPPER(:'source') AND series_id = :'series';
-        SQL
-          echo "::error::Queue job for $SOURCE/$SERIES ended as '${status:-still pending}', not completed"
-          exit 1
-        fi
-
-        points=$(psql "$DATABASE_URL" -XAt -v ON_ERROR_STOP=1 -v series="$SERIES" <<'SQL'
-        SELECT COUNT(*) FROM data_points dp
-          JOIN economic_series es ON es.id = dp.series_id
-          WHERE es.external_id = :'series';
-        SQL
-        )
-        echo "Stored $points data points for $SOURCE/$SERIES"
-        if [ "$points" -eq 0 ]; then
-          echo "::error::The job completed but stored no data points"
-          exit 1
-        fi
-      working-directory: backend
+    - name: Preserve actual audit failure
+      if: ${{ always() && steps.audit.outcome != 'skipped' }}
+      run: |
+        status=$(cat "$RUNNER_TEMP/fred-count-sanitized/exit-status.txt")
+        case "$status" in ''|*[!0-9]*) exit 2 ;; esac
+        exit "$status"
