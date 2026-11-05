@@ -20,9 +20,8 @@ use econ_graph_auth::Role;
 use econ_graph_crawler::persist::data_source_template;
 use econ_graph_crawler::source::SourceId;
 
-/// Sources with no catalog role, and why. SEC filings are served by their own API, not the
-/// series catalog.
-const SOURCES_WITHOUT_A_CATALOG_ROLE: &[SourceId] = &[SourceId::Sec];
+/// Every source, including SEC company research, has an explicit catalog role.
+const SOURCES_WITHOUT_A_CATALOG_ROLE: &[SourceId] = &[];
 
 /// Catalog roles deliberately left out of the default `catalog-public` grant. The public set is
 /// read from the realm file; every other catalog role must be listed here, and nothing listed
@@ -43,6 +42,8 @@ const CATALOG_ROLES_NOT_PUBLIC: &[Role] = &[
     Role::CatalogSnbRead,
     Role::CatalogUnstatsRead,
     Role::CatalogIloRead,
+    // Company research requires sign-in; no default anonymous grant.
+    Role::CatalogSecRead,
 ];
 
 /// Catalog roles deliberately left out of the anonymous reader's scope mapping. Anonymous

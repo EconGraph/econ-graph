@@ -51,6 +51,104 @@ fn parse_series_cursor(after: Option<&str>) -> Result<i32> {
 
 #[Object]
 impl Query {
+    /// Search structured SEC companies (requires the SEC catalog grant).
+    async fn companies(
+        &self,
+        ctx: &Context<'_>,
+        search: Option<String>,
+        first: Option<i32>,
+        after: Option<String>,
+    ) -> Result<crate::graphql::company_research::CompanyResearchCompanyConnection> {
+        crate::graphql::company_research::companies(ctx, search, first, after).await
+    }
+    async fn company(
+        &self,
+        ctx: &Context<'_>,
+        cik: String,
+    ) -> Result<Option<crate::graphql::company_research::CompanyResearchCompany>> {
+        crate::graphql::company_research::company(ctx, cik).await
+    }
+    async fn company_facts(
+        &self,
+        ctx: &Context<'_>,
+        cik: String,
+        filter: Option<crate::graphql::company_research::CompanyFactFilterInput>,
+        first: Option<i32>,
+        after: Option<String>,
+    ) -> Result<crate::graphql::company_research::CompanyFactConnection> {
+        crate::graphql::company_research::company_facts(ctx, cik, filter, first, after).await
+    }
+    /// Normalized companyfacts statements; original filing layouts ship separately.
+    async fn financial_statement(
+        &self,
+        ctx: &Context<'_>,
+        cik: String,
+        kind: crate::graphql::company_research::CompanyStatementKind,
+        revision: Option<crate::graphql::company_research::CompanyRevisionInput>,
+        period_start: Option<chrono::NaiveDate>,
+        period_end: Option<chrono::NaiveDate>,
+        #[graphql(default)] instant_only: bool,
+        unclassified_first: Option<i32>,
+        unclassified_after: Option<String>,
+    ) -> Result<crate::graphql::company_research::CompanyResearchStatement> {
+        crate::graphql::company_research::financial_statement(
+            ctx,
+            cik,
+            kind,
+            revision,
+            period_start,
+            period_end,
+            instant_only,
+            unclassified_first,
+            unclassified_after,
+        )
+        .await
+    }
+    async fn company_ratios(
+        &self,
+        ctx: &Context<'_>,
+        cik: String,
+        period_start: Option<chrono::NaiveDate>,
+        period_end: chrono::NaiveDate,
+        revision: Option<crate::graphql::company_research::CompanyRevisionInput>,
+    ) -> Result<Vec<crate::graphql::company_research::CompanyFinancialRatio>> {
+        crate::graphql::company_research::company_ratios(
+            ctx,
+            cik,
+            period_start,
+            period_end,
+            revision,
+        )
+        .await
+    }
+    async fn company_peers(
+        &self,
+        ctx: &Context<'_>,
+        cik: String,
+        period_start: Option<chrono::NaiveDate>,
+        period_end: chrono::NaiveDate,
+        revision: Option<crate::graphql::company_research::CompanyRevisionInput>,
+        first: Option<i32>,
+    ) -> Result<Vec<crate::graphql::company_research::CompanyPeerComparison>> {
+        crate::graphql::company_research::company_peers(
+            ctx,
+            cik,
+            period_start,
+            period_end,
+            revision,
+            first,
+        )
+        .await
+    }
+    /// Validate a company note's target on the authoritative data plane.
+    async fn company_research_target_exists(
+        &self,
+        ctx: &Context<'_>,
+        anchor: String,
+    ) -> Result<bool> {
+        crate::graphql::company_research::company_research_target_exists(ctx, anchor).await
+    }
+
     /// Get a specific economic series by ID
     async fn series(&self, ctx: &Context<'_>, id: ID) -> Result<Option<EconomicSeriesType>> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
