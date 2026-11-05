@@ -43,6 +43,13 @@ Sparse allocation is not a capacity reservation: measure actual available
 memory, host/object-store headroom and filesystem space before authorizing a
 build. Live allocation, pressure and cleanup remain fit-test evidence.
 
+The host's own swap needs no Talos or Kubernetes configuration, and worker VM
+memory stays free to swap. Each control-plane VM is capped at 1 GiB of host swap
+through libvirt's `swap_hard_limit`, because etcd is sensitive to stalls. libvirt
+writes that value directly to `memory.swap.max`, so this relies on the host using
+cgroup v2. On cgroup v1 it would limit memory plus swap instead. No VM sets
+`hard_limit` or locked memory.
+
 Workers expose `/dev/vdb` as an XFS `UserVolumeConfig` named `postgres`, mounted
 at `/var/mnt/postgres` and shared into kubelet with propagation. Workers carry
 `econgraph.io/storage=postgres`; the platform lane's `econgraph-local` provisioner
