@@ -22,6 +22,14 @@
 
 set -euo pipefail
 
+# Resolve before lib.sh imports backup.env into this process, so assignments
+# derived from inherited values are evaluated once for root selection, as in the writer.
+# shellcheck source=scripts/backup/keycloak-root.sh
+source "$(dirname "$(readlink -f "$0")")/keycloak-root.sh"
+load_keycloak_backup_root || {
+    echo "could not read Keycloak backup root configuration" >&2
+    exit 1
+}
 # shellcheck source=scripts/backup/lib.sh
 source "$(dirname "$(readlink -f "$0")")/lib.sh"
 
@@ -77,8 +85,22 @@ case "${cmd}" in
         restic init
         ;;
     backup)
-        mapfile -t dirs < <(find "${BACKUP_ROOT}" -mindepth 2 -maxdepth 2 -name VERIFIED -printf '%h\n' | sort)
-        (( ${#dirs[@]} > 0 )) || die "no verified dump directories under ${BACKUP_ROOT}"
+        # Upgrade backups live under the deploy writer's root, which can
+        # differ from the nightly root on the mounted backup pool.
+        keycloak_root="$KEYCLOAK_BACKUP_ROOT_RESOLVED"
+        list_verified() {
+            find -H "${BACKUP_ROOT}" -mindepth 2 -maxdepth 2 -type f -name VERIFIED ! -path '*.partial/VERIFIED' ! -path '*.failed/VERIFIED' -printf '%h\n' || return
+            if python3 "$(dirname "$(readlink -f "$0")")/check-keycloak-root.py" \
+                "$keycloak_root" "$KEYCLOAK_BACKUP_ROOT_REQUIRED"; then
+                find -H "$keycloak_root" -mindepth 2 -maxdepth 2 -type f -name VERIFIED ! -path '*.partial/VERIFIED' ! -path '*.failed/VERIFIED' -printf '%h\n' || return
+            else
+                local status=$?
+                [[ "$status" == 3 ]] || return "$status"
+            fi
+        }
+        listing="$(list_verified)" || die "could not enumerate all configured backup roots"
+        [[ -n "$listing" ]] || die "no verified dump directories under ${BACKUP_ROOT}"
+        mapfile -t dirs < <(printf '%s\n' "$listing" | sort -u)
         log "restic backup of ${#dirs[@]} verified dump dir(s) to ${RESTIC_REPOSITORY}"
         restic backup --tag econgraph-dumps --host "$(hostname)" "${dirs[@]}"
         ;;

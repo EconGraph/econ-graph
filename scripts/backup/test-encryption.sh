@@ -283,7 +283,21 @@ if (unset BACKUP_AGE_RECIPIENT; export -f backup_seal_dir die; timeout 30 bash -
 fi
 [[ ! -e "$scratch/no-recipient" && ! -e "$scratch/no-recipient.partial" ]] || die 'wrote a bundle without a recipient'
 # Ciphertext that age wrote "successfully" but that does not decrypt.
-fake_age corrupt '"$real" "$@"; out="${*: -1}"; [[ "${*: -2:1}" == -o ]]; printf "\\xff" | dd of="$out" bs=1 seek=300 conv=notrunc status=none'
+fake_age corrupt "$(cat <<'CORRUPT'
+"$real" "$@"
+out="${*: -1}"
+[[ "${*: -2:1}" == -o ]]
+python3 -c 'import sys
+with open(sys.argv[1], "r+b") as ciphertext:
+    ciphertext.seek(300)
+    original = ciphertext.read(1)
+    if not original:
+        raise SystemExit("ciphertext too short for corruption fixture")
+    ciphertext.seek(300)
+    ciphertext.write(bytes([original[0] ^ 1]))
+' "$out"
+CORRUPT
+)"
 expect_unsealed corrupt 'does not decrypt'
 # Ciphertext encrypted only to the configured recipient (the published file
 # was not made by this run's encryption, or the check key was dropped).
@@ -569,7 +583,15 @@ copy_bundle unverified
 rm "$scratch/unverified/VERIFIED"
 expect_open_refused unverified 'not a verified encrypted bundle'
 copy_bundle tampered
-printf '\0' | dd of="$scratch/tampered/backup.tar.age" bs=1 seek=400 conv=notrunc status=none
+python3 -c 'import sys
+with open(sys.argv[1], "r+b") as ciphertext:
+    ciphertext.seek(400)
+    original = ciphertext.read(1)
+    if not original:
+        raise SystemExit("ciphertext too short for corruption fixture")
+    ciphertext.seek(400)
+    ciphertext.write(bytes([original[0] ^ 1]))
+' "$scratch/tampered/backup.tar.age"
 expect_open_refused tampered 'ciphertext checksum mismatch'
 copy_bundle bad-checksum
 printf 'not-a-checksum  backup.tar.age\n' > "$scratch/bad-checksum/SHA256SUMS"

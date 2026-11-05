@@ -257,7 +257,7 @@ case "$name" in
     backup-keycloak-db)
         if [ -n "${STUB_NO_KC_PATH:-}" ]; then exit 0; fi
         [ "${STUB_FAIL:-}" = "$name" ] ||
-            echo "backup-keycloak-db: verified dump in ${STUB_KC_ROOT:-/home/op/econgraph-backups/keycloak}/${stamp}" ;;
+            echo "backup-keycloak-db: verified encrypted bundle in ${STUB_KC_ROOT:-/home/op/econgraph-backups/keycloak}/${stamp}" ;;
     precheck-db-migration)
         # A step that makes the next steps' tee fail to write their step logs.
         if [ -n "${STUB_BREAK_LOG:-}" ]; then chmod 000 "$XDG_RUNTIME_DIR"/release-deploy.*; fi

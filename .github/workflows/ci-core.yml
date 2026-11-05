@@ -441,7 +441,10 @@ jobs:
 
     # The Keycloak database dump and restore around a Keycloak upgrade, against a stub kubectl.
     - name: Check the Keycloak database backup and restore scripts
-      run: scripts/deploy/test-keycloak-db-scripts.sh
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y age
+        scripts/deploy/test-keycloak-db-scripts.sh
 
     # deploy.sh stops before applying anything when Secret econ-graph-keycloak lacks
     # anonymous-client-secret, against a stub kubectl.

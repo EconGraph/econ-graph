@@ -5,7 +5,7 @@
 #
 #   1. backup   scripts/deploy/backup-postgres-now.sh (the nightly backup Job, now)
 #   2. load     scripts/deploy/load-release-images.sh --tag TAG
-#   3. keycloak scripts/deploy/backup-keycloak-db.sh (a verified dump of Keycloak's database)
+#   3. keycloak scripts/deploy/backup-keycloak-db.sh (a verified encrypted bundle of Keycloak's database)
 #   4. precheck scripts/deploy/precheck-db-migration.sh --stop-crawler
 #   5. deploy   scripts/deploy/deploy.sh, with PUBLIC_HOST and MAIN_HOST from deploy config
 #   6. verify   scripts/deploy/verify-release-images.sh --tag TAG
@@ -800,7 +800,7 @@ collect() {
             fi ;;
         keycloak)
             [ "$status" = 0 ] || return 0
-            KEYCLOAK_BACKUP="$(sed -n 's/^backup-keycloak-db: verified dump in \(.*\)$/\1/p' "$STEP_LOG" | tail -1)"
+            KEYCLOAK_BACKUP="$(sed -n 's/^backup-keycloak-db: verified encrypted bundle in \(.*\)$/\1/p' "$STEP_LOG" | tail -1)"
             if [ -n "$KEYCLOAK_BACKUP" ]; then
                 report "keycloak_backup=${KEYCLOAK_BACKUP}"
                 record keycloak_backup "$KEYCLOAK_BACKUP"
@@ -820,7 +820,7 @@ collect() {
 # Ctrl-C, SIGTERM and SIGHUP while a step runs: the step and the processes it
 # started (its children, found with pgrep -P; a process that detached itself
 # from them is not found) are sent SIGTERM once, so they can clean up (the load
-# writes its record, the Keycloak backup moves its directory aside). A second
+# writes its record, the Keycloak backup removes disposable plaintext). A second
 # signal only says the run is still stopping; a third, or STOP_TIMEOUT seconds
 # without the step stopping, sends SIGKILL, which can cut that cleanup short.
 # Once the run is explaining a failure, further signals are ignored. The run
@@ -1064,7 +1064,7 @@ for step in "${STEPS[@]}"; do
         stop "$step" "failed" "failed step=${step}" 1
     fi
     if [ "$collected" = 2 ]; then
-        say "${SCRIPT}: error: step ${step} succeeded but named no backup it took (no \"Backup OK\" or \"verified dump\" line); not going on without one"
+        say "${SCRIPT}: error: step ${step} succeeded but named no backup it took (no \"Backup OK\" or \"verified encrypted bundle\" line); not going on without one"
         STATE[$step]="FAILED (no backup named)"
         stop "$step" "failed" "failed step=${step}" 1
     elif [ "$collected" != 0 ]; then
