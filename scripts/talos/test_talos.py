@@ -251,7 +251,7 @@ class TalosTests(unittest.TestCase):
 
     def test_build_and_rebuild_verify_host_before_staging_the_module(self):
         for action in ("build", "rebuild"):
-            with self.subTest(action=action), patch.object(cluster, "execute_guard"), patch.object(cluster, "owned"), patch.object(cluster, "verify_host", side_effect=common.Refused("host refused")), patch.object(cluster, "stage_module", side_effect=AssertionError("module staged")):
+            with self.subTest(action=action), patch.object(cluster, "execute_guard"), patch.object(cluster, "owned"), patch.object(cluster, "external_path", side_effect=Path), patch.object(cluster, "verify_host", side_effect=common.Refused("host refused")), patch.object(cluster, "stage_module", side_effect=AssertionError("module staged")):
                 with self.assertRaisesRegex(common.Refused, "host refused"):
                     cluster.operate(self.args(action, execute=True, age=["public-recipient"], host_state_dir=self.directory), self.config, self.state)
 
