@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "companies": [
+    {"cik": "0000320193", "name": "Apple"},
+    {"cik": "0000789019", "name": "Microsoft"},
+    {"cik": "0001018724", "name": "Amazon"},
+    {"cik": "0001652044", "name": "Alphabet"},
+    {"cik": "0001326801", "name": "Meta Platforms"},
+    {"cik": "0001045810", "name": "NVIDIA"},
+    {"cik": "0001318605", "name": "Tesla"},
+    {"cik": "0001067983", "name": "Berkshire Hathaway"},
+    {"cik": "0000019617", "name": "JPMorgan Chase"},
+    {"cik": "0000070858", "name": "Bank of America"},
+    {"cik": "0001403161", "name": "Visa"},
+    {"cik": "0000731766", "name": "UnitedHealth Group"},
+    {"cik": "0000034088", "name": "Exxon Mobil"},
+    {"cik": "0000200406", "name": "Johnson & Johnson"},
+    {"cik": "0000104169", "name": "Walmart"},
+    {"cik": "0000080424", "name": "Procter & Gamble"},
+    {"cik": "0000021344", "name": "Coca-Cola"},
+    {"cik": "0000354950", "name": "Home Depot"},
+    {"cik": "0001744489", "name": "Walt Disney"},
+    {"cik": "0001065280", "name": "Netflix"}
+  ]
+}
