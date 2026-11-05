@@ -81,6 +81,10 @@ run "generate_current_talos_configuration" {
     error_message = "Every control-plane VM must cap its host swap at 1 GiB."
   }
   assert {
+    condition     = alltrue([for node in ["cp-1", "cp-2", "cp-3"] : libvirt_domain.node[node].memory_tune.hard_limit == null && libvirt_domain.node[node].memory_backing == null])
+    error_message = "Control-plane VMs must not set a hard memory limit, locked memory or hugepages."
+  }
+  assert {
     condition     = alltrue([for node in ["worker-1", "worker-2"] : libvirt_domain.node[node].memory_tune == null && libvirt_domain.node[node].memory_backing == null])
     error_message = "Worker VMs must stay free for the host to swap."
   }

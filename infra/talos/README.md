@@ -50,9 +50,16 @@ writes that value directly to `memory.swap.max`, so build and rebuild refuse a
 host without cgroup v2 and its memory controller. On cgroup v1 the value would
 limit memory plus swap instead. No VM sets `hard_limit` or locked memory.
 
-Changing a VM's libvirt settings on a running cluster can restart that VM, and
-`build` applies changes to every VM together. Change control-plane settings one
-VM at a time, checking etcd health between them, so the cluster keeps quorum.
+libvirt writes the limit to the VM's nested `libvirt` cgroup, so the scope's own
+`memory.swap.max` still reads `max`, and a clean `tofu plan` doesn't show the limit
+is active. Check a running VM with `virsh memtune`: `swap_hard_limit` should be
+1048576 KiB on control-plane VMs and unlimited on workers. The
+`control_plane_swap_limit` fit check records this.
+
+Changing a VM's libvirt settings stops and restarts that VM, and `build` would
+apply a change to all three control-plane VMs together, which can lose etcd
+quorum. There is no staged path for this yet, so don't change control-plane VM
+settings through `build` on a running cluster that has to stay up.
 
 Workers expose `/dev/vdb` as an XFS `UserVolumeConfig` named `postgres`, mounted
 at `/var/mnt/postgres` and shared into kubelet with propagation. Workers carry
@@ -220,8 +227,8 @@ not satisfy those release gates.
 
 Copy [fit-evidence.example.json](fit-evidence.example.json) into the operator's
 evidence area. Record actual build, destroy/rebuild, both upgrades, worker-loss,
-pod-debug, release-E2E-during-drain and fresh-cluster-restore artifacts with
-completion timestamps. The example intentionally records every result as
+pod-debug, release-E2E-during-drain, fresh-cluster-restore and
+control-plane-swap-limit artifacts with completion timestamps. The example intentionally records every result as
 pending. Accumulate Talos-specific debugging effort. At 80 engineering hours
 (about two work weeks), the gate refuses Talos acceptance and requires the
 RKE2-on-Ubuntu fallback decision. Keep Flux, manifests, Cilium and CNPG above the

@@ -249,6 +249,12 @@ class TalosTests(unittest.TestCase):
             with self.assertRaisesRegex(common.Refused, "no cgroup v2"):
                 cluster.verify_host(self.config, self.directory)
 
+    def test_build_and_rebuild_verify_host_before_staging_the_module(self):
+        for action in ("build", "rebuild"):
+            with self.subTest(action=action), patch.object(cluster, "execute_guard"), patch.object(cluster, "owned"), patch.object(cluster, "verify_host", side_effect=common.Refused("host refused")), patch.object(cluster, "stage_module", side_effect=AssertionError("module staged")):
+                with self.assertRaisesRegex(common.Refused, "host refused"):
+                    cluster.operate(self.args(action, execute=True, age=["public-recipient"], host_state_dir=self.directory), self.config, self.state)
+
     def test_owned_vm_with_foreign_attached_disk_is_refused(self):
         name = self.config["name"] + "-worker-1"
         owner = f"econgraph-talos owner={self.config['owner_id']} cluster={self.config['name']} role=worker"
@@ -425,7 +431,7 @@ class TalosTests(unittest.TestCase):
         self.assertEqual(set(names), {"node/" + self.config["name"] + "-" + name for name in self.config["nodes"]})
 
     def fit_evidence(self, hours=0):
-        checks = {name: {"result": "passed", "evidence": "retained-artifact", "completed_at": "2026-10-30T20:00:00Z"} for name in ("build", "rebuild", "talos_upgrade", "kubernetes_upgrade", "worker_loss", "pod_debug", "release_e2e_during_drain", "fresh_cluster_restore")}
+        checks = {name: {"result": "passed", "evidence": "retained-artifact", "completed_at": "2026-10-30T20:00:00Z"} for name in ("build", "rebuild", "talos_upgrade", "kubernetes_upgrade", "worker_loss", "pod_debug", "release_e2e_during_drain", "fresh_cluster_restore", "control_plane_swap_limit")}
         value = {"cluster": common.identity(self.config), "talos_debugging_hours": hours, "checks": checks}
         path = self.directory / "fit.json"
         path.write_text(json.dumps(value))
