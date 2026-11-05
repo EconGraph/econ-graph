@@ -16,6 +16,51 @@ DATA = SCRIPT.parents[1] / 'backend/crates/econ-graph-crawler/data'
 
 
 class CountAuditTests(unittest.TestCase):
+    def test_run_artifacts_mask_recoverable_escaped_credentials_preserving_json(self):
+        key = '0123456789abcdef0123456789abcdef'
+        full = ''.join(f'\\u{ord(char):04x}' for char in key)
+        mixed = ''.join(f'\\u{ord(char):04x}' if i % 2 else char
+                        for i, char in enumerate(key))
+        percent = ''.join(f'%{ord(char):02X}' if i % 2 else char
+                          for i, char in enumerate(key))
+        full_percent = ''.join(f'%{ord(char):02x}' for char in key)
+        # The first two payloads use JSON escapes, while the nested forms contain
+        # literal backslash-u spellings after the outer JSON is parsed.
+        forms = ['"' + full + '"', '"' + mixed + '"', json.dumps(full),
+                 json.dumps(full.replace('\\', '\\\\')), json.dumps(percent),
+                 json.dumps(full_percent)]
+        for encoded in forms:
+            with self.subTest(encoded=encoded), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                payload = ('{"error":' + encoded + ',"count":12345,'
+                           '"ratio":0.12345678901234567890123456789,'
+                           '"public":"snowman \\u2603; literal \\\\u0030"}').encode()
+                # Exercise run's entire artifact write path, for both streams.
+                with patch.object(AUDIT, 'capture', return_value=(1, payload, payload, .01)):
+                    self.assertEqual(AUDIT.run(Path('/fake-crawler'), DATA, root / 'out',
+                                               key, 'test-revision'), 1)
+                for name in ('stdout.json', 'stderr.txt'):
+                    artifact = (root / 'out' / name).read_bytes()
+                    parsed = json.loads(artifact)
+                    self.assertEqual(parsed['error'], '[REDACTED]')
+                    self.assertEqual(parsed['count'], 12345)
+                    self.assertEqual(parsed['public'], 'snowman ☃; literal \\u0030')
+                    self.assertIn(b'0.12345678901234567890123456789', artifact)
+                    self.assertIn(b'"public":"snowman \\u2603; literal \\\\u0030"', artifact)
+                    self.assertNotIn(key.encode(), artifact)
+
+    def test_json_escaped_query_name_is_masked_without_invalidating_json(self):
+        raw = b'{"error":"https://x/?api\\u005fkey=other-value&x=ok","count":83}'
+        parsed = json.loads(AUDIT.redact(raw, 'fake-secret'))
+        self.assertEqual(parsed, {'error': 'https://x/?api_key=[REDACTED]&x=ok', 'count': 83})
+
+    def test_plain_text_nested_and_percent_key_spellings_are_masked(self):
+        key = '0123456789abcdef0123456789abcdef'
+        encoded = ''.join('\\\\u%04X' % ord(char) if i % 2 else '%%%02x' % ord(char)
+                          for i, char in enumerate(key))
+        self.assertEqual(AUDIT.redact(('error: ' + encoded + ' public:42').encode(), key),
+                         b'error: [REDACTED] public:42')
+
     def test_redacts_literal_and_query_values_before_artifacts(self):
         secret = 'test-only-secret'
         raw = (f'literal {secret} https://x/?api_key=other-value&x=ok '
