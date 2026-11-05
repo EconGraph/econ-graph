@@ -281,10 +281,12 @@ Explicit grants to other groups or users still apply. To restrict just anonymous
 `catalog-public` from the anonymous service account and assign its permitted catalog roles
 individually instead. Use group/composite grants for signed-in exceptions as usual.
 
-The WTO and Bank of Canada catalogs are restricted by default:
-`catalog.world_trade_organization:read` (World Trade Organization) and
-`catalog.bank_of_canada:read` (Bank of Canada) are defined but are in neither `catalog-public`
-nor the anonymous client's scope, so only users or groups granted them can read those series.
+The WTO, Bank of Canada and SEC catalogs are restricted by default:
+`catalog.world_trade_organization:read` (World Trade Organization),
+`catalog.bank_of_canada:read` (Bank of Canada) and `catalog.sec:read` (SEC EDGAR) are defined
+but are in neither `catalog-public` nor the anonymous client's scope, so only users or groups
+granted them can read those series. SEC company research also needs the
+`financial_components` build flag.
 To open one up, grant its role to a user or group, or add it to `catalog-public` (and the
 anonymous scope) to make it public.
 `backend/crates/econ-graph-auth/tests/restricted_catalog_roles.rs` checks that the realm file

@@ -153,7 +153,8 @@ failure, staleness and recovery without disrupting production ingestion.
 
 Run `frontend/tests/e2e/train5/company-research.spec.ts` against the real candidate
 backend with the financial feature enabled, an isolated populated companyfacts
-database and authenticated browser storage state. The workflow must actually
+database and authenticated browser storage state. The realm file grants
+`catalog.sec:read` to nobody, so grant it to the test account first. The workflow must actually
 assert lookup/header, all three statements, period selection, a selected-line
 chart, attributed CSV values, ratios/compatible peers and note permissions.
 
