@@ -18,13 +18,50 @@ import time
 import tomllib
 
 
+def credential_pattern(key):
+    """Match only this credential, including mixed Unicode/percent representations.
+
+    Repeated backslashes cover nested JSON escaping without repeatedly decoding
+    arbitrary public content. The pattern has one bounded set of choices per key
+    character; it never interprets an entire response as an escape sequence.
+    """
+    def hex_case(value):
+        return ''.join(f'[{c.lower()}{c.upper()}]' if c.isalpha() else c for c in value)
+
+    parts = []
+    for char in key:
+        units = char.encode('utf-16-be')
+        escaped = ''.join(r'\\+u' + hex_case(units[i:i + 2].hex())
+                          for i in range(0, len(units), 2))
+        percent = ''.join('%' + hex_case(f'{byte:02x}') for byte in char.encode())
+        parts.append('(?:' + '|'.join((re.escape(char), escaped, percent)) + ')')
+    return re.compile(''.join(parts))
+
+
 def redact(data, key):
-    # Match normal and percent-encoded query names/separators, including empty values.
-    data = re.sub(rb'(?i)(api(?:_|%5f)key(?:=|%3d))[^&\s\x22\x27<>]*',
-                  rb'\1[REDACTED]', data)
-    if key:
-        data = data.replace(key.encode(), b'[REDACTED]')
-    return data
+    pattern = credential_pattern(key) if key else None
+
+    def mask(text):
+        if pattern:
+            text = pattern.sub('[REDACTED]', text)
+        return re.sub(r'(?i)(api(?:_|%5f)key(?:=|%3d))[^&\s\x22\x27<>]*',
+                      r'\1[REDACTED]', text)
+
+    text = data.decode('utf-8', errors='replace')
+    try:
+        # Validate structure, but do not round/re-serialize public numbers.
+        json.loads(text)
+    except (ValueError, RecursionError):
+        return mask(text).encode()
+
+    def string_token(match):
+        original = json.loads(match.group())
+        cleaned = mask(original)
+        return match.group() if cleaned == original else json.dumps(cleaned, ensure_ascii=True)
+
+    # Decode only JSON string tokens, including object keys. Nested escaped key
+    # spellings are then matched directly; all other tokens remain byte-identical.
+    return re.sub(r'"(?:[^"\\]|\\.)*"', string_token, text).encode()
 
 
 def child_environment(data_dir, key):
