@@ -58,6 +58,9 @@ Commercial and finance paper rates retain release 86 `RIFSPP` and discontinued
 titles containing `paper`, including weekly, annual and discontinued offering rates;
 the shared H.15 catalog is fetched once.
 These distinct IDs do not have their histories merged.
+Natural-gas release 342 and M2-related release 63 have separate whole-release rules for
+families 04 and 11. These restore Henry Hub daily/monthly and M2 less small time deposits
+through automatic catalog membership, with public witnesses pending authenticated validation.
 `expected_missing` explicitly exempts those known retired
 probes from the unexpected-missing warning, while keeping their lifecycle evidence. An
 ordinary included id that disappears still raises the warning. Existing stored series

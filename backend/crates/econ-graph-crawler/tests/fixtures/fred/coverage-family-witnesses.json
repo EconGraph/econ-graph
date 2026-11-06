@@ -709,6 +709,22 @@
       "families": [
         33
       ]
+    },
+    {
+      "key": "natural-gas-prices",
+      "index": 84,
+      "release_id": 342,
+      "families": [
+        4
+      ]
+    },
+    {
+      "key": "m2-related-series",
+      "index": 85,
+      "release_id": 63,
+      "families": [
+        11
+      ]
     }
   ],
   "families": [
@@ -831,7 +847,8 @@
         "expected-inflation",
         "sticky-flexible-cpi",
         "median-trimmed-cpi",
-        "interest-rate-spreads"
+        "interest-rate-spreads",
+        "natural-gas-prices"
       ],
       "headline_overrides": [],
       "positive_witnesses": [
@@ -851,10 +868,44 @@
           "matching_rule_keys": [
             "expected-inflation"
           ]
+        },
+        {
+          "series_id": "DHHNGSP",
+          "title": "Henry Hub Natural Gas Spot Price",
+          "frequency": "Daily",
+          "release_id": 342,
+          "provenance": {
+            "kind": "official_public_release_listing",
+            "url": "https://fred.stlouisfed.org/release?rid=342",
+            "series_url": "https://fred.stlouisfed.org/series/DHHNGSP",
+            "retrieved_on": "2026-11-06",
+            "fields": "Public release listing links this series ID and frequency; series page confirms title/frequency. No raw page archive or authenticated catalog inventory is claimed.",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "natural-gas-prices"
+          ]
+        },
+        {
+          "series_id": "MHHNGSP",
+          "title": "Henry Hub Natural Gas Spot Price",
+          "frequency": "Monthly",
+          "release_id": 342,
+          "provenance": {
+            "kind": "official_public_release_listing",
+            "url": "https://fred.stlouisfed.org/release?rid=342",
+            "series_url": "https://fred.stlouisfed.org/series/MHHNGSP",
+            "retrieved_on": "2026-11-06",
+            "fields": "Public release listing links this series ID and frequency; series page confirms title/frequency. No raw page archive or authenticated catalog inventory is claimed.",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "natural-gas-prices"
+          ]
         }
       ],
       "complete_family_membership_verified": false,
-      "remaining_gap": "Mixed family: predicate audit must account for every subfamily. Public PPI table counts are not complete release counts."
+      "remaining_gap": "Mixed family: predicate audit must account for every subfamily. Natural-gas release 342 public witnesses are not a complete API inventory; release 212 does not supply the Henry Hub products."
     },
     {
       "family": 5,
@@ -1329,7 +1380,8 @@
         "money-stock-reserves",
         "fed-balance-sheet",
         "money-velocity",
-        "real-money-stock"
+        "real-money-stock",
+        "m2-related-series"
       ],
       "headline_overrides": [],
       "positive_witnesses": [
@@ -1349,10 +1401,27 @@
           "matching_rule_keys": [
             "real-money-stock"
           ]
+        },
+        {
+          "series_id": "M2MSL",
+          "title": "M2 Less Small Time Deposits",
+          "frequency": "Monthly",
+          "release_id": 63,
+          "provenance": {
+            "kind": "official_public_release_listing",
+            "url": "https://fred.stlouisfed.org/release?rid=63",
+            "series_url": "https://fred.stlouisfed.org/series/M2MSL",
+            "retrieved_on": "2026-11-06",
+            "fields": "Public release listing links this series ID and frequency; series page confirms title/frequency. No raw page archive or authenticated catalog inventory is claimed.",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "m2-related-series"
+          ]
         }
       ],
       "complete_family_membership_verified": false,
-      "remaining_gap": "Use concept predicates rather than every Fed facility/history series. Full 20/21 selection counts unverified."
+      "remaining_gap": "H.6/H.4.1 concepts and release 63 M2-related products have separate catalog rules. New release 63 public witnesses are not authenticated membership/count evidence."
     },
     {
       "family": 12,

@@ -50,7 +50,7 @@ include = [
 expected_missing = ["WPU00000000", "CAPUTLG2211S1"]
 exclude = []
 
-# 84 candidate rules fit within the bounded 128-rule parser ceiling.
+# 86 candidate rules fit within the bounded 128-rule parser ceiling.
 
 # rule: national-accounts; families: 01,02,15,16
 # NIPA components, income/profits, trade and PCE detail; the GDP-title-only rule was insufficient.
@@ -502,3 +502,15 @@ frequencies = ["Monthly"]
 [[rules]]
 release_id = 10
 id_pattern = "CUUR(?:0[1-4]00|A[0-9]{3})SA0"
+
+# rule: natural-gas-prices; families: 04
+# Separate from release 212: preserve all published frequencies and future products in this energy-price release.
+# Public release listing establishes ownership/examples; current API membership and scan cost remain unverified.
+[[rules]]
+release_id = 342
+
+# rule: m2-related-series; families: 11
+# M2 less small time deposits and related measures, including discontinued histories; not H.6 release 21.
+# Select the economic release dynamically rather than adding historical IDs to the include list.
+[[rules]]
+release_id = 63
