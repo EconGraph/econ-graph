@@ -77,6 +77,10 @@ def main():
         for key in ['BACKEND_IMAGE', 'FRONTEND_IMAGE', 'CRAWLER_IMAGE']:
             if not re.fullmatch(r'[^\s]+@sha256:[0-9a-f]{64}', data.get(key, '')):
                 raise ValueError('reviewed feature image digest required: ' + key)
+        # The host disk exporter target (platform/observability/scrape-host.yaml); an empty
+        # substitution would fail the whole observability Kustomization.
+        if not re.fullmatch(r'\d{1,3}(\.\d{1,3}){3}:\d{1,5}', data.get('HOST_EXPORTER_TARGET', '')):
+            raise ValueError('HOST_EXPORTER_TARGET must be the host bridge IPv4 address and node_exporter port')
         # Keys are created separately from protected files. Never read/export their values.
         for secret in ['sops-age', 'platform-git-auth']:
             kube.run('get', 'secret', secret, '-n', 'flux-system', '-o', 'name')

@@ -4,6 +4,9 @@ resources:
 - monitors.yaml
 - backup-health.yaml
 - dashboard.yaml
+- rules-disk.yaml
+- scrape-host.yaml
+- dashboard-disk.yaml
 configMapGenerator:
 - name: cnpg-backup-health
   namespace: econ-graph

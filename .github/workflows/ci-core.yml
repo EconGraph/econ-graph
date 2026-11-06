@@ -801,6 +801,11 @@ jobs:
     - name: Check the backup and restore scripts against fake btrfs (no root)
       run: scripts/host/test-backup-scripts.sh
 
+    - name: Check the host disk check and its installer against stubs (no root)
+      run: |
+        shellcheck -x scripts/host/host-disk-check.sh scripts/host/install-host-disk-exporter.sh scripts/host/test-host-disk-check.sh
+        scripts/host/test-host-disk-check.sh
+
   chart-api-integration-tests:
     name: Chart API Integration Tests
     runs-on: ubuntu-latest
