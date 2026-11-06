@@ -17,7 +17,13 @@ The dashboard's cards use public BEA and BLS series instead. Admins read it as u
 
 Discovery reads bounded release and category catalogs selected by
 `backend/crates/econ-graph-crawler/data/catalog_selection/fred.toml`. Rules can constrain
-title, id prefix and frequency. All pages must agree on count and ordering before the
+title, id prefix and frequency. The first catalog request omits real-time dates so FRED
+chooses its documented default of today. Its response must identify a valid single-day
+real-time period; that provider date is sent on every later page and rule's catalog request
+in the walk. Every response must agree with it. Missing, malformed or changing real-time
+metadata fails discovery without substituting the client's UTC date or an earlier date.
+This pins release/category catalogs; include overrides still use separate current `/series`
+metadata requests. All pages must agree on count and ordering before the
 snapshot supplies absence evidence; failed, truncated or changing pages fail discovery.
 Separate scan and selected-series bounds stop unexpected expansion before observation
 jobs are enqueued. A small include/exclude list handles explicit exceptions.
