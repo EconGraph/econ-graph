@@ -309,6 +309,13 @@ class PlatformTests(unittest.TestCase):
                     self.assertEqual(run.call_args.args[0], ['kubectl', 'version', '--client', '-o', 'json'])
                     self.assertEqual(run.call_count, 1)
 
+    def test_etcd_is_deliberately_unmonitored(self):
+        # Re-enabling needs a reviewed loopback listen-metrics-urls in Talos.
+        values = yaml.safe_load((ROOT / 'platform/addons/monitoring/release.yaml').read_text())['spec']['values']
+        self.assertEqual(values['kubeEtcd'], {'enabled': False})
+        for path in (ROOT / 'infra/talos').rglob('*.tf'):
+            self.assertNotIn('listen-metrics-urls', path.read_text(), path)
+
     def test_cilium_talos_hostdns_contract(self):
         release = yaml.safe_load((ROOT / 'platform/addons/cilium/release.yaml').read_text())
         self.assertEqual(release['spec']['releaseName'], 'cilium')

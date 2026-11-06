@@ -166,6 +166,11 @@ def main():
             assert not alerts & {'KubeProxyDown', 'KubeSchedulerDown', 'KubeControllerManagerDown'}, 'unreachable Talos target alerts'
     alertmanager = next(d for d in chart_docs if d['kind'] == 'Alertmanager')
     assert alertmanager['spec'].get('secrets') == ['alertmanager-receivers'], 'Alertmanager must mount the receiver Secret'
+    # Talos etcd metrics need a full-access client certificate, so no etcd
+    # target or default etcd alert may render to fire against a missing scrape.
+    etcd = [d['kind'] + '/' + d['metadata']['name'] for d in chart_docs if 'etcd' in d['metadata']['name'] or
+            (d['kind'] == 'PrometheusRule' and 'etcd' in yaml.safe_dump(d.get('spec', {}).get('groups', [])).replace('etcd_request', ''))]
+    assert not etcd, 'etcd monitoring renders without a scrape path: ' + ', '.join(etcd)
     schemas = {}
     swagger = normalize(json.loads((args.cache / 'kubernetes-openapi.json').read_text()))
     swagger['definitions']['io.k8s.apimachinery.pkg.api.resource.Quantity']['type'] = ['string', 'number']
