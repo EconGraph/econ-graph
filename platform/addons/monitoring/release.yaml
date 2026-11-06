@@ -51,3 +51,7 @@ spec:
               resources:
                 requests:
                   storage: 10Gi
+    # Talos serves etcd metrics only on its mTLS client ports, and an etcd
+    # client certificate grants full etcd access, so etcd is not scraped.
+    kubeEtcd:
+      enabled: false

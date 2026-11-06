@@ -157,6 +157,11 @@ def main():
     for rule in rules:
         labels = rule['metadata'].get('labels', {})
         assert all(labels.get(k) == v for k, v in selector.get('matchLabels', {}).items()), 'Prometheus does not select platform rules'
+    # Talos etcd metrics need a full-access client certificate, so no etcd
+    # target or default etcd alert may render to fire against a missing scrape.
+    etcd = [d['kind'] + '/' + d['metadata']['name'] for d in chart_docs if 'etcd' in d['metadata']['name'] or
+            (d['kind'] == 'PrometheusRule' and 'etcd' in yaml.safe_dump(d.get('spec', {}).get('groups', [])).replace('etcd_request', ''))]
+    assert not etcd, 'etcd monitoring renders without a scrape path: ' + ', '.join(etcd)
     schemas = {}
     swagger = normalize(json.loads((args.cache / 'kubernetes-openapi.json').read_text()))
     swagger['definitions']['io.k8s.apimachinery.pkg.api.resource.Quantity']['type'] = ['string', 'number']
