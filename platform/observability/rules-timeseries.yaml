@@ -1,0 +1,45 @@
+# Timeseries storage alerts on the platform.
+#
+# The Iceberg maintenance preview CronJob (platform/optional/iceberg/maintenance.yaml) is
+# outside the default Flux DAG and committed suspended, so this stays quiet until it is
+# deployed and enabled. Each run is a single-pod Job (backoffLimit 0, 30-minute deadline), so
+# a failed pod or an exceeded deadline fails the run for good.
+#
+# Metrics, from kube-state-metrics (deployed by kube-prometheus-stack; the object's namespace
+# is kept): kube_job_status_failed{namespace,job_name}, kube_job_created{namespace,job_name}
+# and kube_cronjob_status_last_successful_time{namespace,cronjob}. The CronJob's Jobs are named
+# timeseries-maintenance-preview-<scheduled minute>.
+#
+# Flux substitutes ${VAR} from platform-settings in this Kustomization; the annotation below
+# keeps it away from the alert templates. Tests: tests/timeseries-maintenance.test.yaml, run by
+# check-rules.sh in CI.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: econgraph-timeseries
+  namespace: monitoring
+  labels:
+    release: monitoring
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  groups:
+  - name: timeseries.maintenance
+    rules:
+    # A failed run alerts while its Job is kept (failedJobsHistoryLimit, 1 by default) and
+    # no later run has succeeded; the next successful run clears it, as with
+    # SecCompanyfactsLoadFailed.
+    - alert: TimeseriesMaintenanceFailed
+      expr: |
+        (kube_job_status_failed{namespace="econ-graph", job_name=~"timeseries-maintenance-preview-.*"} > 0)
+        unless on(namespace, job_name)
+        (
+          kube_job_created{namespace="econ-graph", job_name=~"timeseries-maintenance-preview-.*"}
+          < on(namespace) group_left
+          kube_cronjob_status_last_successful_time{namespace="econ-graph", cronjob="timeseries-maintenance-preview"}
+        )
+      labels:
+        severity: warning
+      annotations:
+        summary: Iceberg maintenance run {{ $labels.job_name }} failed
+        description: 'The timeseries-maintenance-preview Job {{ $labels.job_name }} failed (a pod error or its 30-minute deadline) and no later run has succeeded. Check `kubectl -n econ-graph logs job/{{ $labels.job_name }}` and the iceberg-maintenance Secret; the preview never applies changes, so rerunning is safe.'

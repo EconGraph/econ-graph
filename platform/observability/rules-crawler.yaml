@@ -1,0 +1,427 @@
+# Crawler alerts on the platform: the kind-era k8s/monitoring/prometheus-rules-crawler.yaml
+# (kept for kind) ported to a PrometheusRule the kube-prometheus-stack Prometheus loads
+# (release: monitoring matches its ruleSelector). Metric meanings are documented there.
+#
+# Labels differ from kind. The PodMonitor econgraph-crawler (monitors.yaml) scrapes
+# crawler-worker's `metrics` port and adds namespace, pod, container, endpoint, instance and
+# job="monitoring/econgraph-crawler"; it maps no pod labels, so there is no app label. The kind
+# rules' kubernetes_namespace matchers are namespace here, and the `up{job="kubernetes-pods",
+# app="crawler-worker"}` target checks are `up{job="monitoring/econgraph-crawler"}`.
+# kube-state-metrics series (kube_deployment_*, kube_job_*, kube_cronjob_*) keep the object's
+# namespace (honorLabels), as on kind, so those matchers are unchanged.
+#
+# The platform runs one data plane (namespace econ-graph); the namespace matchers stay so a
+# future branch environment scraped by the same Prometheus cannot mute or trip these alerts.
+#
+# Flux substitutes ${VAR} from platform-settings in this Kustomization; the annotation below
+# keeps it away from the alert templates. Tests: tests/crawler-*.test.yaml and
+# tests/companyfacts.test.yaml, run by check-rules.sh in CI.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: econgraph-crawler
+  namespace: monitoring
+  labels:
+    release: monitoring
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  groups:
+  - name: crawler.worker
+    rules:
+    # kube-state-metrics (deployed by kube-prometheus-stack) provides these.
+    - alert: CrawlerWorkerDown
+      expr: kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"} < 1
+      for: 10m
+      labels:
+        severity: critical
+      annotations:
+        summary: crawler-worker has no available pod
+        description: The crawler-worker Deployment has had no available replica for 10 minutes; crawl_queue is not being drained.
+
+    - alert: CrawlerWorkerRestarting
+      expr: increase(kube_pod_container_status_restarts_total{namespace="econ-graph", container="crawler-worker"}[1h]) > 3
+      labels:
+        severity: warning
+      annotations:
+        summary: crawler-worker is restarting repeatedly
+        description: The crawler-worker container restarted {{ $value | humanize }} times in the last hour (check DATABASE_URL / logs).
+
+  - name: crawler.absent
+    rules:
+    # crawler_queue_items is refreshed every 30s regardless of traffic (econgraph_crawler_*
+    # counters only appear after the first upstream request), so its absence means the
+    # worker's /metrics is not being scraped.
+    - alert: CrawlerMetricsMissing
+      expr: absent(sum(crawler_queue_items{namespace="econ-graph"})) and on() (kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"} >= 1)
+      for: 1h
+      labels:
+        severity: info
+      annotations:
+        summary: crawler-worker metrics are not being scraped
+        description: crawler-worker is running but crawler_queue_items is absent; its /metrics endpoint (port 9102) is not scraped or the queue poller is failing, so the other crawler alerts cannot fire.
+
+  - name: crawler.mode
+    rules:
+    # Visibility for explicit static mode, even while idle/freshness alerts are suppressed.
+    # Require complete primary telemetry, matching the idle/freshness suppression below.
+    # A branch worker cannot change the primary's reported mode.
+    - alert: CrawlerSchedulerDisabled
+      expr: |
+        (max(crawler_scheduler_enabled{namespace="econ-graph"}) == 0)
+        and on() (count(up{job="monitoring/econgraph-crawler", namespace="econ-graph"}) > 0)
+        unless on()
+        (
+          (up{job="monitoring/econgraph-crawler", namespace="econ-graph"} == 0)
+          or on(job, instance)
+          (
+            up{job="monitoring/econgraph-crawler", namespace="econ-graph"}
+            unless on(job, instance) crawler_scheduler_enabled{namespace="econ-graph"}
+          )
+        )
+      labels:
+        severity: info
+      annotations:
+        summary: Primary crawler automatic scheduling is disabled
+        description: Primary crawler workers report CRAWLER_SCHEDULER=false. Queued jobs still drain, but automatic refresh is disabled; check that static mode is intentional.
+
+  - name: crawler.rules
+    interval: 30s
+    rules:
+    # Denominator filtered with `> 0` so idle periods give no result instead of dividing
+    # by zero (the previous clamp_max(..., 1) capped the denominator at 1 req/s, which
+    # inflated or hid the ratio).
+    - alert: CrawlerHighErrorRate
+      expr: sum(rate(econgraph_crawler_errors_total{namespace="econ-graph"}[5m])) / (sum(rate(econgraph_crawler_requests_total{namespace="econ-graph"}[5m])) > 0) > 0.05
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: High crawler error rate (>5%)
+        description: Crawler error rate is above 5% for 10 minutes.
+
+    - alert: CrawlerHighErrorRateBySource
+      expr: sum by (crawler_type) (rate(econgraph_crawler_errors_total{namespace="econ-graph"}[5m])) / (sum by (crawler_type) (rate(econgraph_crawler_requests_total{namespace="econ-graph"}[5m])) > 0) > 0.05
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: High crawler error rate (>5%) for source {{ $labels.crawler_type }}
+        description: Error rate is above 5% for 10 minutes for source {{ $labels.crawler_type }}.
+
+    - alert: CrawlerFrequentRateLimitHits
+      expr: sum(rate(econgraph_crawler_rate_limit_hits_total{namespace="econ-graph"}[15m])) > 0.5
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: Frequent 429 rate limit hits
+        description: Crawlers are frequently hitting upstream rate limits.
+
+    - alert: CrawlerFrequentRateLimitHitsBySource
+      expr: sum by (crawler_type) (rate(econgraph_crawler_rate_limit_hits_total{namespace="econ-graph"}[15m])) > 0.1
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: Frequent 429 rate limit hits for {{ $labels.crawler_type }}
+        description: Rate limit hits are frequent for source {{ $labels.crawler_type }}; its SourcePolicy rate may be too high (or more than one worker replica is running).
+
+    - alert: CrawlerHighTimeouts
+      expr: sum(rate(econgraph_crawler_timeouts_total{namespace="econ-graph"}[10m])) > 0.2
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: Elevated crawler timeouts
+        description: Timeout rate exceeds threshold.
+
+    - alert: CrawlerHighTimeoutsBySource
+      expr: sum by (crawler_type) (rate(econgraph_crawler_timeouts_total{namespace="econ-graph"}[10m])) > 0.05
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: Elevated crawler timeouts for {{ $labels.crawler_type }}
+        description: Timeout rate exceeds threshold for source {{ $labels.crawler_type }}.
+
+    - alert: CrawlerHighLatencyP95
+      expr: histogram_quantile(0.95, sum by (le) (rate(econgraph_crawler_request_duration_seconds_bucket{namespace="econ-graph"}[5m]))) > 5
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: High crawler p95 latency (>5s)
+        description: 95th percentile of request latency is above 5 seconds.
+
+    - alert: CrawlerHighLatencyP95BySource
+      expr: histogram_quantile(0.95, sum by (le, crawler_type) (rate(econgraph_crawler_request_duration_seconds_bucket{namespace="econ-graph"}[5m]))) > 5
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: High p95 latency (>5s) for {{ $labels.crawler_type }}
+        description: 95th percentile of request latency is above 5 seconds for source {{ $labels.crawler_type }}.
+
+    # The worker only makes requests when due jobs exist, so an empty queue also yields
+    # zero traffic; this is a warning, not critical. Per-source "no traffic" alerts were
+    # dropped: sources are crawled on their own schedules and an idle source is normal.
+    # Scope static-mode suppression to the primary data plane. Every discovered primary worker
+    # scrape target must report its mode; a missing/failed scrape or old image fails open.
+    # Branch workers cannot mute primary warnings or re-enable them on a static primary.
+    - alert: CrawlerNoTraffic
+      expr: |
+        (sum(rate(econgraph_crawler_requests_total{namespace="econ-graph"}[15m])) == 0)
+        unless on()
+        (
+          (max(crawler_scheduler_enabled{namespace="econ-graph"}) == 0)
+          and on() (count(up{job="monitoring/econgraph-crawler", namespace="econ-graph"}) > 0)
+          unless on()
+          (
+            (up{job="monitoring/econgraph-crawler", namespace="econ-graph"} == 0)
+            or on(job, instance)
+            (
+              up{job="monitoring/econgraph-crawler", namespace="econ-graph"}
+              unless on(job, instance) crawler_scheduler_enabled{namespace="econ-graph"}
+            )
+          )
+        )
+      for: 1h
+      labels:
+        severity: warning
+      annotations:
+        summary: No crawler traffic detected
+        description: The crawler has made no upstream requests for over an hour (queue empty, all sources paused, or worker stuck).
+
+  - name: crawler.queue
+    rules:
+    - alert: CrawlerQueueBacklog
+      expr: sum(crawler_queue_items{namespace="econ-graph", status=~"pending|retrying"}) > 1000
+      for: 1h
+      labels:
+        severity: warning
+      annotations:
+        summary: crawl_queue backlog above 1000 items
+        description: '{{ $value | humanize }} crawl_queue items have been pending/retrying for over an hour; the worker is not keeping up (sources paused, rate limits, or too little CRAWLER_CONCURRENCY).'
+
+    # Non-empty = something is pending, processing or retrying. The `or on() vector(0)` makes
+    # the alert fire even when crawler_jobs_total has no completed series yet (fresh worker).
+    # Due-in-the-future retries also count as non-empty, hence the 1h window plus `for`.
+    - alert: CrawlerNoCompletions
+      expr: |
+        (sum(crawler_queue_items{namespace="econ-graph"}) > 0)
+        and on()
+        ((sum(increase(crawler_jobs_total{namespace="econ-graph", outcome="completed"}[1h])) or on() vector(0)) == 0)
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: crawl_queue has work but no job completed in the last hour
+        description: crawl_queue holds {{ $value | humanize }} active items but crawler-worker completed no job in the last hour (all jobs failing/retrying, sources paused, or the worker is stuck).
+
+    - alert: CrawlerSourceFailing
+      expr: max by (source) (crawler_queue_failed_24h{namespace="econ-graph"}) > 50
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: Source {{ $labels.source }} has {{ $value | humanize }} failed jobs in 24h
+        description: More than 50 crawl_queue items for {{ $labels.source }} became failed in the last 24 hours; check crawl_queue.error_message for that source (bad ids, auth, or upstream format change).
+
+  # Units checks, recorded when a fetched series is stored (econ-graph-crawler src/units.rs):
+  # the units text is parsed and compared with the units the source's structured fields
+  # state. A mismatch means the stored text and the values may describe different scales,
+  # currencies or index bases. The counters are process-local and start at 0 for each pod;
+  # `increase` over 1d keeps the alert firing for a day after a mismatch, which is longer
+  # than a crawl cycle, so a repeat keeps it up.
+  - name: crawler.units
+    rules:
+    - alert: CrawlerUnitsMismatch
+      expr: sum by (source) (increase(crawler_units_mismatch_total{namespace="econ-graph"}[1d])) > 0
+      labels:
+        severity: warning
+      annotations:
+        summary: '{{ $labels.source }} units text disagrees with its structured units'
+        description: In the last day about {{ $value | printf "%.0f" }} {{ $labels.source }} stored series fetches had a units text that parses but disagrees with the units the source's structured fields state (kind, currency, scale or index base). The structured units were stored. The crawler-worker log has one error line per series ("units text disagrees with the source's structured units") with the series id, the text and both units. A persist that rolls back and is retried counts and logs again, so the count is at least the number of mismatching fetches.
+
+  - name: crawler.discovery
+    rules:
+    - alert: CrawlerCatalogGuardRejected
+      expr: sum by (source, reason) (increase(crawler_catalog_guard_rejections_total[1h])) > 0
+      for: 1m
+      labels:
+        severity: warning
+      annotations:
+        summary: '{{ $labels.source }} catalog rejected by {{ $labels.reason }} guard'
+        description: A catalog exceeded its configured selection limit or disappearance threshold. The worker retained stored histories; inspect its catalog warning and upstream completeness before changing selection rules or retrying. For mass_disappearance, review and accept a correct snapshot with `crawler accept-guarded-catalog` (crawler coverage runbook).
+
+    # A guarded snapshot waits for operator review until accepted or replaced. The one-off
+    # guard rejection alert clears after an hour; this one stays while the review is pending.
+    - alert: CrawlerCatalogGuardedSnapshotPending
+      expr: max by (source) (crawler_catalog_guarded_snapshot_pending{namespace="econ-graph"}) > 0
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: '{{ $labels.source }} has a guarded catalog snapshot waiting for review'
+        description: A {{ $labels.source }} catalog lost more than 20% of the last accepted catalog and was not applied. Review it with `crawler accept-guarded-catalog --source {{ $labels.source }}` and accept it only if the upstream change is real (crawler coverage runbook).
+
+    - alert: CrawlerSeriesPublicationChanged
+      expr: sum by (source, status) (increase(crawler_series_lifecycle_transitions_total{status=~"discontinued|missing_from_catalog|retired|superseded|restricted"}[1h])) > 0
+      for: 1m
+      labels:
+        severity: info
+      annotations:
+        summary: '{{ $labels.source }} series publication changed to {{ $labels.status }}'
+        description: Retained series changed publication status. Review lifecycle counts on Data Sources and candidate successors; histories are never merged automatically.
+
+    # The gauge only changes when a discovery runs, so it stays above 0 until the curated list
+    # is fixed and the source is discovered again. Skipped entries keep their stored series.
+    # The gauge is process-local: a worker restart drops the series until the next discovery,
+    # up to the 7-day discovery interval later, and the new pod reports under a new pod label.
+    # `last_over_time` over an 8-day subquery of the per-source max keeps the last reported
+    # value through that gap, so the alert keeps firing, and a discovery reporting 0 clears it.
+    - alert: CrawlerCuratedEntriesMissing
+      expr: last_over_time((max by (source) (crawler_curated_missing{namespace="econ-graph"}))[8d:5m]) > 0
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: '{{ $value | humanize }} curated {{ $labels.source }} entries are missing upstream'
+        description: The last {{ $labels.source }} discovery skipped curated entries the source no longer lists (renamed or dropped upstream). The worker log's discovery warning for {{ $labels.source }} names them; review the selection rules and explicit overrides in data/catalog_selection/.
+
+    # A selection rule that matches nothing (a renamed table or release, a retitled family)
+    # selects no series while the other rules keep discovery succeeding, so the rule's
+    # series would age out silently. Same process-local gauge handling as above. Editing a
+    # rule changes its label, and the old label's last zero would linger for 8 days, so
+    # alert only while a worker still reports the rule as configured.
+    - alert: CrawlerCatalogRuleMatchesNothing
+      expr: |
+        last_over_time((min by (source, rule) (crawler_catalog_rule_matches{namespace="econ-graph"}))[8d:5m]) == 0
+        and on (source, rule)
+        max by (source, rule) (max_over_time(crawler_catalog_rule_configured{namespace="econ-graph"}[15m]))
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: '{{ $labels.source }} selection rule {{ $labels.rule }} matches nothing upstream'
+        description: The last {{ $labels.source }} discovery found no catalog entries for selection rule {{ $labels.rule }} (position:catalog in data/catalog_selection/). Its previously selected series may be counted as absent; check whether upstream renamed the table or release and update the rule.
+
+    # Tracked series that upstream still lists but the rules no longer select (for example a
+    # FRED series retitled out of a title rule). They stay published and scheduled.
+    - alert: CrawlerCatalogSeriesUnselected
+      expr: last_over_time((max by (source) (crawler_catalog_unselected_series{namespace="econ-graph"}))[8d:5m]) > 0
+      for: 15m
+      labels:
+        severity: info
+      annotations:
+        summary: '{{ $value | humanize }} tracked {{ $labels.source }} series no longer match the selection rules'
+        description: The last complete {{ $labels.source }} catalog still lists these series upstream, so they keep their publication state and are still fetched. The worker log's catalog warning counts them; review whether the rules in data/catalog_selection/ should follow the upstream change.
+
+    # Enabled sources the worker discovers in chunks only: the worker drops the gauge of a
+    # source that stops opting in, is disabled or is switched to single-job discovery
+    # (CRAWLER_SINGLE_JOB_DISCOVERY_SOURCES), which clears the alert. Discovery is
+    # scheduled every 7 days, so a source with no complete run for twice that has missed at
+    # least one: runs keep failing (a chunk failed for good) or never finish. The gauge is
+    # polled from discovery_runs, so it survives worker restarts; a source that never
+    # completed a run ages from its oldest retained run.
+    - alert: CrawlerDiscoveryRunOverdue
+      expr: time() - max by (source) (crawler_discovery_last_complete_run_timestamp_seconds{namespace="econ-graph"}) > 2 * 7 * 86400
+      for: 1h
+      labels:
+        severity: warning
+      annotations:
+        summary: No complete {{ $labels.source }} catalog discovery in over 14 days
+        description: '{{ $labels.source }} discovers its catalog in chunks and has had no complete discovery run for more than twice its 7-day discovery interval. `crawler status` shows its newest run; discovery_runs.error_message and the failed discover_chunk or finalize_discovery rows in crawl_queue say why it stopped.'
+
+  # Coverage (at least 95% of each source's series have data), freshness (scheduled refresh
+  # keeps series current), and crawl failures.
+  # `max by (source)` drops the pod, instance and other scrape labels the PodMonitor adds.
+  - name: crawler.coverage
+    rules:
+    # A source with nothing discovered reports 0, so it alerts too. The long `for` lets a fresh
+    # deployment finish its first discovery and backfill before this fires. Catalog ids that
+    # discovery found but nobody enqueued keep coverage low, so this can fire for them;
+    # `crawler coverage` shows it.
+    - alert: CrawlerCoverageLow
+      expr: max by (source) (crawler_coverage_ratio{namespace="econ-graph"}) < 0.95
+      for: 6h
+      labels:
+        severity: warning
+      annotations:
+        summary: Coverage for {{ $labels.source }} is {{ $value | humanizePercentage }} (target 95%)
+        description: Fewer than 95% of the series discovered for {{ $labels.source }} have data. Run `crawler coverage` for the numbers and check crawl_queue.error_message for that source.
+
+    # A series is refreshed every 1 to 30 days by frequency (scheduler.rs); overdue means its last
+    # successful crawl is older than twice that. The scheduler retries a failed series only after
+    # twice its interval, so one failed refresh is enough to make it overdue until a retry succeeds;
+    # a series that always fails keeps it firing until it is fixed or deactivated (runbook).
+    # Suppress primary freshness only with complete, explicitly disabled scheduler modes.
+    - alert: CrawlerSourceNotRefreshed
+      expr: |
+        (max by (source) (crawler_coverage_series_overdue{namespace="econ-graph"}) > 0)
+        unless on()
+        (
+          (max(crawler_scheduler_enabled{namespace="econ-graph"}) == 0)
+          and on() (count(up{job="monitoring/econgraph-crawler", namespace="econ-graph"}) > 0)
+          unless on()
+          (
+            (up{job="monitoring/econgraph-crawler", namespace="econ-graph"} == 0)
+            or on(job, instance)
+            (
+              up{job="monitoring/econgraph-crawler", namespace="econ-graph"}
+              unless on(job, instance) crawler_scheduler_enabled{namespace="econ-graph"}
+            )
+          )
+        )
+      for: 30m
+      labels:
+        severity: warning
+      annotations:
+        summary: '{{ $value | humanize }} {{ $labels.source }} series not refreshed within twice their interval'
+        description: '{{ $labels.source }} has series whose last successful crawl is older than twice their refresh interval (scheduler disabled or behind, source paused, or refreshes failing). `crawler coverage` shows the oldest successful crawl.'
+
+    # Fires for an hour after any crawl_queue job of the source fails for good (retries
+    # exhausted, or a non-retryable error such as an unknown series id).
+    - alert: CrawlerCrawlFailed
+      expr: time() - max by (source) (crawler_last_failure_timestamp_seconds{namespace="econ-graph"}) < 3600
+      labels:
+        severity: warning
+      annotations:
+        summary: A {{ $labels.source }} crawl job failed in the last hour
+        description: A crawl_queue job for {{ $labels.source }} ended in status failed. Find it with `SELECT series_id, kind, error_message FROM crawl_queue WHERE source = '{{ $labels.source }}' AND status = 'failed' ORDER BY COALESCE(finished_at, updated_at) DESC LIMIT 20`.
+
+    # The gauges keep their last values when the coverage query fails, so staleness is alerted on
+    # through the refresh time (0 until the first successful refresh). 900s assumes
+    # CRAWLER_COVERAGE_METRICS_INTERVAL_SECS stays at its 300s default (well under 15 minutes).
+    - alert: CrawlerCoverageStale
+      expr: |
+        (
+          (time() - max(crawler_coverage_last_refresh_timestamp_seconds{namespace="econ-graph"}) > 900)
+          or on() absent(sum(crawler_coverage_last_refresh_timestamp_seconds{namespace="econ-graph"}))
+        )
+        and on() (kube_deployment_status_replicas_available{namespace="econ-graph", deployment="crawler-worker"} >= 1)
+      for: 30m
+      labels:
+        severity: warning
+      annotations:
+        summary: crawler-worker coverage metrics are stale
+        description: crawler-worker is running but has not refreshed the crawler_coverage_* gauges for over 15 minutes (the coverage query is failing, see the worker log for "updating coverage gauges failed", or /metrics is not scraped), so the coverage and freshness alerts see old numbers.
+
+  - name: crawler.companyfacts
+    rules:
+    - alert: SecCompanyfactsLoadFailed
+      expr: (kube_job_status_failed{namespace="econ-graph", job_name=~"sec-companyfacts-ingest-.*"} > 0) unless on(namespace,job_name) (kube_job_created{namespace="econ-graph", job_name=~"sec-companyfacts-ingest-.*"} < on(namespace) group_left kube_cronjob_status_last_successful_time{namespace="econ-graph", cronjob="sec-companyfacts-ingest"})
+      labels:
+        severity: warning
+      annotations:
+        summary: SEC companyfacts nightly ingestion failed
+        description: Inspect the Job and company_fact_load_runs. Rerun both archives together; completed companies are idempotent and historical revisions are retained.
+    - alert: SecCompanyfactsStale
+      expr: (kube_cronjob_spec_suspend{namespace="econ-graph", cronjob="sec-companyfacts-freshness"} == 0) unless on(namespace,cronjob) (kube_cronjob_status_last_successful_time{namespace="econ-graph", cronjob="sec-companyfacts-freshness"} > time() - 1800)
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: SEC companyfacts freshness checks are failing or missing
+        description: The enabled freshness check has not passed within 30 minutes. It requires a verified downloaded success within 24 hours and rejects running loads older than eight hours. Staged imports do not establish freshness. Inspect its Job logs and company_fact_load_runs.

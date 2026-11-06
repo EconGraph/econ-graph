@@ -78,6 +78,8 @@ Current validation is structural plus offline guard tests. **Real Talos boot, CN
 
 Prometheus/Grafana retain local persistent metrics; OTel's DaemonSet reads container stdout/stderr through the filelog preset and forwards logs to host-backed Loki. Loki database-backup deletion is disabled; no external logs endpoint is exposed. OTLP metrics are received; distributed trace persistence is not configured because this stack has no trace backend. Add an approved trace backend before claiming end-to-end tracing.
 
+Disk and capacity alerts cover the worker data volumes, each database's volume budget and, through a host node_exporter scraped by the `econgraph-host` ScrapeConfig (`HOST_EXPORTER_TARGET`), the host libvirt pool, object store, root and swap; see `docs/deployment/HOST_DISK_MONITORING.md`.
+
 ### Alert delivery
 
 Alertmanager routes every alert to Slack except two: the chart's always-firing `Watchdog` goes to a healthchecks.io webhook, and `InfoInhibitor` goes to the `null` receiver. Alerts are grouped by namespace, alertname and severity, wait 30s before the first message, and repeat every 4h while firing; resolutions are posted too. The chart's critical > warning > info inhibit rules are kept. Both URLs are read at send time from files in the SOPS Secret `monitoring/alertmanager-receivers`, which the operator mounts at `/etc/alertmanager/secrets/alertmanager-receivers/` (`api_url_file`, `url_file`); no URL is written in Git. Reconcile refuses to proceed without that Secret and both keys.
