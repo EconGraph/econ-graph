@@ -1,0 +1,72 @@
+rule_files:
+- econgraph-platform.yml
+
+evaluation_interval: 1m
+
+tests:
+# One CNPG instance stops being ready; the alert fires after 2 minutes for that pod only.
+# Other pods in the namespace are not PostgreSQL instances.
+- interval: 1m
+  input_series:
+  - series: kube_pod_status_ready{job="kube-state-metrics", namespace="econ-graph", pod="econgraph-app-1", condition="true"}
+    values: 1 0x10
+  - series: kube_pod_status_ready{job="kube-state-metrics", namespace="econ-graph", pod="econgraph-data-2", condition="true"}
+    values: 1x10
+  - series: kube_pod_status_ready{job="kube-state-metrics", namespace="econ-graph", pod="crawler-worker-abc", condition="true"}
+    values: 0x10
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: EconGraphPostgresInstanceNotReady
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: EconGraphPostgresInstanceNotReady
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        job: kube-state-metrics
+        namespace: econ-graph
+        pod: econgraph-app-1
+        condition: "true"
+      exp_annotations:
+        summary: A PostgreSQL instance is not ready; inspect failover and archive status
+
+# The backup health CronJob never succeeded (series absent): fires after 10 minutes.
+- interval: 1m
+  input_series:
+  - series: kube_cronjob_status_last_successful_time{job="kube-state-metrics", namespace="econ-graph", cronjob="other"}
+    values: 0x15
+  alert_rule_test:
+  - eval_time: 9m
+    alertname: EconGraphBackupHealthCheckStale
+    exp_alerts: []
+  - eval_time: 11m
+    alertname: EconGraphBackupHealthCheckStale
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        namespace: econ-graph
+        cronjob: cnpg-backup-health
+      exp_annotations:
+        summary: CNPG backup health checks have not succeeded recently; inspect retained
+          backups and WAL
+
+# Last success at t=0 (Unix 0): fresh until 15 minutes, then stale for 10 more before firing.
+- interval: 1m
+  input_series:
+  - series: kube_cronjob_status_last_successful_time{job="kube-state-metrics", namespace="econ-graph", cronjob="cnpg-backup-health"}
+    values: 0x40
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: EconGraphBackupHealthCheckStale
+    exp_alerts: []
+  - eval_time: 27m
+    alertname: EconGraphBackupHealthCheckStale
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        job: kube-state-metrics
+        namespace: econ-graph
+        cronjob: cnpg-backup-health
+      exp_annotations:
+        summary: CNPG backup health checks have not succeeded recently; inspect retained
+          backups and WAL

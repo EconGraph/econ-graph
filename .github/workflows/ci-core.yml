@@ -304,6 +304,9 @@ jobs:
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         k8s/monitoring/check-prometheus-rules.sh
 
+    - name: Check platform PrometheusRules and run their tests
+      run: platform/observability/check-rules.sh
+
   postgres-backup-scripts:
     name: PostgreSQL Backup Scripts
     runs-on: ubuntu-latest
