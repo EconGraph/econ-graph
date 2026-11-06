@@ -157,8 +157,17 @@ def main():
     for rule in rules:
         labels = rule['metadata'].get('labels', {})
         assert all(labels.get(k) == v for k, v in selector.get('matchLabels', {}).items()), 'Prometheus does not select platform rules'
+    # Talos has no kube-proxy and binds controller-manager/scheduler to localhost: no false outages.
+    for d in chart_docs:
+        if d['kind'] in ['Service', 'ServiceMonitor']:
+            assert not re.search(r'kube-(proxy|scheduler|controller-manager)', d['metadata']['name']), 'unreachable Talos target scraped: ' + d['metadata']['name']
+        if d['kind'] == 'PrometheusRule':
+            alerts = {r.get('alert') for g in d['spec']['groups'] for r in g['rules']}
+            assert not alerts & {'KubeProxyDown', 'KubeSchedulerDown', 'KubeControllerManagerDown'}, 'unreachable Talos target alerts'
+    alertmanager = next(d for d in chart_docs if d['kind'] == 'Alertmanager')
+    assert alertmanager['spec'].get('secrets') == ['alertmanager-receivers'], 'Alertmanager must mount the receiver Secret'
     schemas = {}
-    swagger = normalize(json.loads((args.cache / 'kubernetes-openapi.json').read_text()))
+    swagger =normalize(json.loads((args.cache / 'kubernetes-openapi.json').read_text()))
     swagger['definitions']['io.k8s.apimachinery.pkg.api.resource.Quantity']['type'] = ['string', 'number']
     for name, schema in swagger['definitions'].items():
         for gvk in schema.get('x-kubernetes-group-version-kind', []):

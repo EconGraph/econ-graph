@@ -29,6 +29,7 @@ def module(name, path):
 
 health = module('health', ROOT / 'platform/observability/backup-health.py')
 drill = module('drill', HERE / 'cnpg-drill.py')
+bootstrap = module('bootstrap', HERE / 'bootstrap.py')
 
 
 class PlatformTests(unittest.TestCase):
@@ -316,6 +317,55 @@ class PlatformTests(unittest.TestCase):
         self.assertTrue(release['spec']['values']['bpf']['hostLegacyRouting'])
         self.assertFalse(release['spec']['values']['gatewayAPI']['enabled'])
         self.assertTrue(release['spec']['values']['kubeProxyReplacement'])
+
+    def test_alert_receivers_come_only_from_the_encrypted_secret(self):
+        values = yaml.safe_load((ROOT / 'platform/addons/monitoring/release.yaml').read_text())['spec']['values']
+        self.assertEqual(values['alertmanager']['alertmanagerSpec']['secrets'], ['alertmanager-receivers'])
+        config = values['alertmanager']['config']
+        mount = '/etc/alertmanager/secrets/alertmanager-receivers/'
+        receivers = {r['name']: r for r in config['receivers']}
+        self.assertEqual(set(receivers), {'null', 'slack', 'healthchecks'})
+        self.assertEqual([c['api_url_file'] for c in receivers['slack']['slack_configs']], [mount + 'slack-webhook-url'])
+        self.assertTrue(all(c['send_resolved'] and 'api_url' not in c for c in receivers['slack']['slack_configs']))
+        # A resolved Watchdog means Prometheus stopped; it must never ping the dead-man's switch.
+        self.assertEqual(receivers['healthchecks']['webhook_configs'], [{'url_file': mount + 'watchdog-url', 'send_resolved': False, 'max_alerts': 1}])
+        route = config['route']
+        self.assertEqual(route['receiver'], 'slack')
+        routes = {tuple(r['matchers']): r for r in route['routes']}
+        self.assertEqual(routes[('alertname = "Watchdog"',)]['receiver'], 'healthchecks')
+        self.assertLessEqual(int(routes[('alertname = "Watchdog"',)]['repeat_interval'].rstrip('m')), 2)
+        self.assertEqual(routes[('alertname = "InfoInhibitor"',)]['receiver'], 'null')
+        self.assertEqual(len(config['inhibit_rules']), 4)
+        # Flux postBuild substitution would rewrite dollar expressions in Go templates.
+        self.assertNotIn('$', yaml.safe_dump(config))
+        for path in (ROOT / 'platform').rglob('*.yaml'):
+            if not path.name.endswith('.sops.yaml'):
+                for host in ['hooks.slack.com', 'hc-ping.com', 'healthchecks.io/ping']:
+                    self.assertNotIn(host, path.read_text(), path)
+
+    def test_talos_absent_control_plane_scrapes_are_disabled(self):
+        values = yaml.safe_load((ROOT / 'platform/addons/monitoring/release.yaml').read_text())['spec']['values']
+        for component in ['kubeProxy', 'kubeControllerManager', 'kubeScheduler']:
+            self.assertIs(values[component]['enabled'], False, component)
+
+    def test_reconcile_requires_encrypted_alert_receivers(self):
+        def secret(namespace, name, keys):
+            return {'kind': 'Secret', 'sops': {'age': []}, 'metadata': {'namespace': namespace, 'name': name},
+                    'stringData': {k: 'ENC[AES256_GCM,data:test]' for k in keys}}
+        complete = [secret(namespace, name, bootstrap.REQUIRED_KEYS.get((namespace, name), ['key']))
+                    for namespace, name in sorted(bootstrap.REQUIRED_SECRETS)]
+        bootstrap.check_encrypted_inputs(complete)
+        self.assertIn(('monitoring', 'alertmanager-receivers'), bootstrap.REQUIRED_SECRETS)
+        without = [d for d in complete if d['metadata']['name'] != 'alertmanager-receivers']
+        with self.assertRaises(ValueError):
+            bootstrap.check_encrypted_inputs(without)
+        partial = without + [secret('monitoring', 'alertmanager-receivers', ['slack-webhook-url'])]
+        with self.assertRaises(ValueError):
+            bootstrap.check_encrypted_inputs(partial)
+        plaintext = copy.deepcopy(complete)
+        next(d for d in plaintext if d['metadata']['name'] == 'alertmanager-receivers')['stringData']['watchdog-url'] = 'https://example.invalid'
+        with self.assertRaises(ValueError):
+            bootstrap.check_encrypted_inputs(plaintext)
 
     def test_pin_checks_and_no_automatic_backup_delete(self):
         for path in (ROOT / 'platform').rglob('*.yaml'):

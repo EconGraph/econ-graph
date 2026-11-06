@@ -51,3 +51,83 @@ spec:
               resources:
                 requests:
                   storage: 10Gi
+    # Receiver URLs live only in the SOPS Secret monitoring/alertmanager-receivers,
+    # mounted by the operator at /etc/alertmanager/secrets/alertmanager-receivers/.
+    # Avoid dollar signs in templates: Flux postBuild substitution reads this file.
+    alertmanager:
+      alertmanagerSpec:
+        secrets:
+        - alertmanager-receivers
+      config:
+        global:
+          resolve_timeout: 5m
+        inhibit_rules:
+        - source_matchers:
+          - severity = critical
+          target_matchers:
+          - severity =~ warning|info
+          equal:
+          - namespace
+          - alertname
+        - source_matchers:
+          - severity = warning
+          target_matchers:
+          - severity = info
+          equal:
+          - namespace
+          - alertname
+        - source_matchers:
+          - alertname = InfoInhibitor
+          target_matchers:
+          - severity = info
+          equal:
+          - namespace
+        - target_matchers:
+          - alertname = InfoInhibitor
+        route:
+          receiver: slack
+          group_by:
+          - namespace
+          - alertname
+          - severity
+          group_wait: 30s
+          group_interval: 5m
+          repeat_interval: 4h
+          routes:
+          # Always-firing Watchdog pings healthchecks.io every 1-2 minutes; the
+          # check (period 5m, grace 5m) pages through Slack when pings stop.
+          - receiver: healthchecks
+            matchers:
+            - alertname = "Watchdog"
+            group_wait: 0s
+            group_interval: 1m
+            repeat_interval: 1m
+          - receiver: 'null'
+            matchers:
+            - alertname = "InfoInhibitor"
+        receivers:
+        - name: 'null'
+        - name: slack
+          slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/alertmanager-receivers/slack-webhook-url
+            send_resolved: true
+            title: '[{{ .Status | toUpper }}] {{ .CommonLabels.severity }}: {{ .CommonLabels.alertname }}'
+            text: |-
+              {{ range .Alerts }}*{{ .Labels.alertname }}* ({{ .Labels.severity }}) in `{{ or .Labels.namespace "cluster" }}`
+              {{ or .Annotations.summary .Annotations.description }}{{ if .Annotations.runbook_url }} <{{ .Annotations.runbook_url }}|runbook>{{ end }}
+              {{ end }}
+        - name: healthchecks
+          webhook_configs:
+          # A resolved Watchdog means Prometheus stopped evaluating; never ping success for it.
+          - url_file: /etc/alertmanager/secrets/alertmanager-receivers/watchdog-url
+            send_resolved: false
+            max_alerts: 1
+    # Talos runs no kube-proxy (Cilium replaces it) and binds the controller
+    # manager and scheduler to localhost, so their scrapes and alerts would only
+    # ever report false outages.
+    kubeProxy:
+      enabled: false
+    kubeControllerManager:
+      enabled: false
+    kubeScheduler:
+      enabled: false
