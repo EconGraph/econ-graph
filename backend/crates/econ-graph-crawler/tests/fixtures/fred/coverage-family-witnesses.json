@@ -1,0 +1,2540 @@
+{
+  "format": 1,
+  "status": "DRAFT: representative metadata and structural boundaries; NOT complete API coverage or accepted operational bounds",
+  "legacy_reference": "PR #722 head 4c51c29c20b47113b4574aad6ae44b01beef021f",
+  "rule_key_convention": "TOML comment before [[rules]], not an additional parser field",
+  "rule_inventory": [
+    {
+      "key": "national-accounts",
+      "index": 0,
+      "release_id": 53,
+      "families": [
+        1,
+        2,
+        15,
+        16
+      ]
+    },
+    {
+      "key": "personal-income-outlays",
+      "index": 1,
+      "release_id": 54,
+      "families": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "key": "potential-output-unemployment",
+      "index": 2,
+      "release_id": 99,
+      "families": [
+        1,
+        5
+      ]
+    },
+    {
+      "key": "trimmed-pce",
+      "index": 3,
+      "release_id": 323,
+      "families": [
+        2
+      ]
+    },
+    {
+      "key": "national-cpi",
+      "index": 4,
+      "release_id": 10,
+      "families": [
+        3,
+        4
+      ]
+    },
+    {
+      "key": "ppi-headlines",
+      "index": 5,
+      "release_id": 46,
+      "families": [
+        3,
+        4
+      ]
+    },
+    {
+      "key": "ppi-demand",
+      "index": 6,
+      "release_id": 46,
+      "families": [
+        4
+      ]
+    },
+    {
+      "key": "ppi-commodity-sectors",
+      "index": 7,
+      "release_id": 46,
+      "families": [
+        4
+      ]
+    },
+    {
+      "key": "ppi-industry-sectors",
+      "index": 8,
+      "release_id": 46,
+      "families": [
+        4
+      ]
+    },
+    {
+      "key": "import-export-price-aggregates",
+      "index": 9,
+      "release_id": 188,
+      "families": [
+        4
+      ]
+    },
+    {
+      "key": "energy-spot-prices",
+      "index": 10,
+      "release_id": 212,
+      "families": [
+        4
+      ]
+    },
+    {
+      "key": "retail-fuel-prices",
+      "index": 11,
+      "release_id": 183,
+      "families": [
+        4
+      ]
+    },
+    {
+      "key": "national-average-prices",
+      "index": 12,
+      "release_id": 454,
+      "families": [
+        4
+      ]
+    },
+    {
+      "key": "expected-inflation",
+      "index": 13,
+      "release_id": 500,
+      "families": [
+        4
+      ]
+    },
+    {
+      "key": "sticky-flexible-cpi",
+      "index": 14,
+      "release_id": 313,
+      "families": [
+        4
+      ]
+    },
+    {
+      "key": "median-trimmed-cpi",
+      "index": 15,
+      "release_id": 315,
+      "families": [
+        4
+      ]
+    },
+    {
+      "key": "national-employment",
+      "index": 16,
+      "release_id": 50,
+      "families": [
+        5,
+        6
+      ]
+    },
+    {
+      "key": "unemployment-claims",
+      "index": 17,
+      "release_id": 180,
+      "families": [
+        5,
+        6
+      ]
+    },
+    {
+      "key": "jolts",
+      "index": 18,
+      "release_id": 192,
+      "families": [
+        5,
+        6
+      ]
+    },
+    {
+      "key": "productivity-costs",
+      "index": 19,
+      "release_id": 47,
+      "families": [
+        6
+      ]
+    },
+    {
+      "key": "employment-cost-index",
+      "index": 20,
+      "release_id": 11,
+      "families": [
+        6
+      ]
+    },
+    {
+      "key": "weekly-earnings",
+      "index": 21,
+      "release_id": 332,
+      "families": [
+        6
+      ]
+    },
+    {
+      "key": "wage-growth",
+      "index": 22,
+      "release_id": 637,
+      "families": [
+        6
+      ]
+    },
+    {
+      "key": "selected-interest-rates",
+      "index": 23,
+      "release_id": 18,
+      "families": [
+        7,
+        8
+      ]
+    },
+    {
+      "key": "interest-rate-spreads",
+      "index": 24,
+      "release_id": 304,
+      "families": [
+        3,
+        4,
+        7,
+        8
+      ]
+    },
+    {
+      "key": "policy-target-range",
+      "index": 25,
+      "release_id": 101,
+      "families": [
+        7
+      ]
+    },
+    {
+      "key": "effective-federal-funds",
+      "index": 26,
+      "release_id": 378,
+      "families": [
+        7,
+        8
+      ]
+    },
+    {
+      "key": "commercial-paper",
+      "index": 27,
+      "release_id": 86,
+      "families": [
+        8
+      ]
+    },
+    {
+      "key": "commercial-paper-h15",
+      "index": 28,
+      "release_id": 18,
+      "families": [
+        8
+      ]
+    },
+    {
+      "key": "sofr",
+      "index": 29,
+      "release_id": 445,
+      "families": [
+        8
+      ]
+    },
+    {
+      "key": "sofr-averages-index",
+      "index": 30,
+      "release_id": 483,
+      "families": [
+        8
+      ]
+    },
+    {
+      "key": "overnight-bank-funding",
+      "index": 31,
+      "release_id": 375,
+      "families": [
+        8
+      ]
+    },
+    {
+      "key": "reserve-balance-interest",
+      "index": 32,
+      "release_id": 185,
+      "families": [
+        8
+      ]
+    },
+    {
+      "key": "temporary-open-market",
+      "index": 33,
+      "release_id": 379,
+      "families": [
+        8
+      ]
+    },
+    {
+      "key": "money-stock-reserves",
+      "index": 34,
+      "release_id": 21,
+      "families": [
+        10,
+        11
+      ]
+    },
+    {
+      "key": "fed-balance-sheet",
+      "index": 35,
+      "release_id": 20,
+      "families": [
+        10,
+        11
+      ]
+    },
+    {
+      "key": "money-velocity",
+      "index": 36,
+      "release_id": 193,
+      "families": [
+        10,
+        11
+      ]
+    },
+    {
+      "key": "real-money-stock",
+      "index": 37,
+      "release_id": 301,
+      "families": [
+        11
+      ]
+    },
+    {
+      "key": "lending-standards",
+      "index": 38,
+      "release_id": 191,
+      "families": [
+        12
+      ]
+    },
+    {
+      "key": "delinquencies-chargeoffs",
+      "index": 39,
+      "release_id": 231,
+      "families": [
+        12
+      ]
+    },
+    {
+      "key": "consumer-credit",
+      "index": 40,
+      "release_id": 14,
+      "families": [
+        8,
+        12
+      ]
+    },
+    {
+      "key": "all-commercial-bank-credit",
+      "index": 41,
+      "release_id": 22,
+      "families": [
+        12
+      ]
+    },
+    {
+      "key": "household-debt-service",
+      "index": 42,
+      "release_id": 89,
+      "families": [
+        12
+      ]
+    },
+    {
+      "key": "financial-account-concepts",
+      "index": 43,
+      "release_id": 52,
+      "families": [
+        12
+      ]
+    },
+    {
+      "key": "residential-construction",
+      "index": 44,
+      "release_id": 27,
+      "families": [
+        13,
+        14
+      ]
+    },
+    {
+      "key": "new-residential-sales",
+      "index": 45,
+      "release_id": 97,
+      "families": [
+        13,
+        14
+      ]
+    },
+    {
+      "key": "vacancy-homeownership",
+      "index": 46,
+      "release_id": 296,
+      "families": [
+        13,
+        14
+      ]
+    },
+    {
+      "key": "construction-spending",
+      "index": 47,
+      "release_id": 229,
+      "families": [
+        14
+      ]
+    },
+    {
+      "key": "national-house-prices",
+      "index": 48,
+      "release_id": 171,
+      "families": [
+        13,
+        14
+      ]
+    },
+    {
+      "key": "international-trade",
+      "index": 49,
+      "release_id": 51,
+      "families": [
+        15,
+        16
+      ]
+    },
+    {
+      "key": "international-transactions",
+      "index": 50,
+      "release_id": 49,
+      "families": [
+        15,
+        16
+      ]
+    },
+    {
+      "key": "daily-exchange-rates",
+      "index": 51,
+      "release_id": 17,
+      "families": [
+        16
+      ]
+    },
+    {
+      "key": "daily-nominal-dollar",
+      "index": 52,
+      "release_id": 17,
+      "families": [
+        16
+      ]
+    },
+    {
+      "key": "monthly-exchange-rates",
+      "index": 53,
+      "release_id": 15,
+      "families": [
+        16
+      ]
+    },
+    {
+      "key": "monthly-nominal-dollar",
+      "index": 54,
+      "release_id": 15,
+      "families": [
+        16
+      ]
+    },
+    {
+      "key": "real-dollar",
+      "index": 55,
+      "release_id": 245,
+      "families": [
+        16
+      ]
+    },
+    {
+      "key": "wdi-major-country-gdp",
+      "index": 56,
+      "release_id": 234,
+      "families": [
+        16
+      ]
+    },
+    {
+      "key": "wdi-real-gdp-per-capita",
+      "index": 57,
+      "release_id": 234,
+      "families": [
+        16
+      ]
+    },
+    {
+      "key": "wdi-inflation",
+      "index": 58,
+      "release_id": 234,
+      "families": [
+        16
+      ]
+    },
+    {
+      "key": "treasury-debt-holdings",
+      "index": 59,
+      "release_id": 80,
+      "families": [
+        17,
+        18
+      ]
+    },
+    {
+      "key": "debt-fiscal-gdp-ratios",
+      "index": 60,
+      "release_id": 263,
+      "families": [
+        17,
+        18
+      ]
+    },
+    {
+      "key": "annual-fiscal-budget",
+      "index": 61,
+      "release_id": 81,
+      "families": [
+        17,
+        18
+      ]
+    },
+    {
+      "key": "monthly-treasury",
+      "index": 62,
+      "release_id": 363,
+      "families": [
+        18
+      ]
+    },
+    {
+      "key": "industrial-production-capacity",
+      "index": 63,
+      "release_id": 13,
+      "families": [
+        19,
+        20
+      ]
+    },
+    {
+      "key": "manufacturers-orders-inventories",
+      "index": 64,
+      "release_id": 95,
+      "families": [
+        19,
+        20
+      ]
+    },
+    {
+      "key": "manufacturing-trade-sales",
+      "index": 65,
+      "release_id": 25,
+      "families": [
+        19,
+        20
+      ]
+    },
+    {
+      "key": "advance-retail",
+      "index": 66,
+      "release_id": 9,
+      "families": [
+        19,
+        20
+      ]
+    },
+    {
+      "key": "retail-sector-detail",
+      "index": 67,
+      "release_id": 436,
+      "families": [
+        19,
+        20
+      ]
+    },
+    {
+      "key": "real-retail",
+      "index": 68,
+      "release_id": 92,
+      "families": [
+        20
+      ]
+    },
+    {
+      "key": "retail-ecommerce",
+      "index": 69,
+      "release_id": 179,
+      "families": [
+        20
+      ]
+    },
+    {
+      "key": "motor-vehicles",
+      "index": 70,
+      "release_id": 93,
+      "families": [
+        20
+      ]
+    },
+    {
+      "key": "transportation-services",
+      "index": 71,
+      "release_id": 349,
+      "families": [
+        20
+      ]
+    },
+    {
+      "key": "state-unemployment-sa",
+      "index": 72,
+      "release_id": 112,
+      "families": [
+        22
+      ]
+    },
+    {
+      "key": "state-unemployment-nsa",
+      "index": 73,
+      "release_id": 112,
+      "families": [
+        23
+      ]
+    },
+    {
+      "key": "state-participation-sa",
+      "index": 74,
+      "release_id": 446,
+      "families": [
+        24
+      ]
+    },
+    {
+      "key": "state-nonfarm-employment",
+      "index": 75,
+      "release_id": 112,
+      "families": [
+        25
+      ]
+    },
+    {
+      "key": "state-manufacturing-employment",
+      "index": 76,
+      "release_id": 112,
+      "families": [
+        26
+      ]
+    },
+    {
+      "key": "state-real-gdp",
+      "index": 77,
+      "release_id": 140,
+      "families": [
+        27
+      ]
+    },
+    {
+      "key": "state-per-capita-income",
+      "index": 78,
+      "release_id": 110,
+      "families": [
+        28
+      ]
+    },
+    {
+      "key": "state-real-household-income",
+      "index": 79,
+      "release_id": 249,
+      "families": [
+        29
+      ]
+    },
+    {
+      "key": "state-population",
+      "index": 80,
+      "release_id": 118,
+      "families": [
+        30
+      ]
+    },
+    {
+      "key": "state-all-transactions-hpi",
+      "index": 81,
+      "release_id": 171,
+      "families": [
+        31
+      ]
+    },
+    {
+      "key": "state-building-permits",
+      "index": 82,
+      "release_id": 148,
+      "families": [
+        32
+      ]
+    },
+    {
+      "key": "regional-all-items-cpi",
+      "index": 83,
+      "release_id": 10,
+      "families": [
+        33
+      ]
+    },
+    {
+      "key": "natural-gas-prices",
+      "index": 84,
+      "release_id": 342,
+      "families": [
+        4
+      ]
+    },
+    {
+      "key": "m2-related-series",
+      "index": 85,
+      "release_id": 63,
+      "families": [
+        11
+      ]
+    }
+  ],
+  "families": [
+    {
+      "family": 1,
+      "name": "GDP and national accounts",
+      "historical_id_count": 22,
+      "rule_keys": [
+        "national-accounts",
+        "personal-income-outlays",
+        "potential-output-unemployment"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "GDPPOT",
+          "title": "Real Potential Gross Domestic Product",
+          "frequency": "Quarterly",
+          "release_id": 99,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/GDPPOT",
+            "retrieved_on": "2026-11-03",
+            "sha256": "5ce3c440fd63aaab01b7b22b1d723eb937022a790483d5fa8ae67a1f6364410f",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "potential-output-unemployment"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "National accounts spans releases; the previous GDP-only title filter omitted components. Exact selected bounds await API inventory."
+    },
+    {
+      "family": 2,
+      "name": "NIPA and PCE detail: GDP components, income, profits, PCE by type and prices",
+      "historical_id_count": 119,
+      "rule_keys": [
+        "national-accounts",
+        "personal-income-outlays",
+        "trimmed-pce"
+      ],
+      "headline_overrides": [
+        "GDPNOW",
+        "STLENI"
+      ],
+      "positive_witnesses": [
+        {
+          "series_id": "DPCERL1Q225SBEA",
+          "title": "Real Personal Consumption Expenditures",
+          "frequency": "Quarterly",
+          "release_id": 53,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/DPCERL1Q225SBEA",
+            "retrieved_on": "2026-11-03",
+            "sha256": "d5a3ead6d038c01a1bef4407ec3b7faf145880beb964148b1d08c21b83148dca",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "national-accounts"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "GDPNow and news index are small headline exceptions; not evidence that all broad national-account predicates have been validated."
+    },
+    {
+      "family": 3,
+      "name": "Prices: CPI, PCE, PPI",
+      "historical_id_count": 16,
+      "rule_keys": [
+        "personal-income-outlays",
+        "national-cpi",
+        "ppi-headlines",
+        "interest-rate-spreads"
+      ],
+      "headline_overrides": [
+        "CPIAUCSL"
+      ],
+      "positive_witnesses": [
+        {
+          "series_id": "T10YIE",
+          "title": "10-Year Breakeven Inflation Rate",
+          "frequency": "Daily",
+          "release_id": 304,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/T10YIE",
+            "retrieved_on": "2026-11-03",
+            "sha256": "b9119142050a2c30277b1807bbb488204ad9c38f284fbc609b8a1d8f15319fdc",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "interest-rate-spreads"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Do not discover every detailed PPI or geographic CPI by a blanket release rule."
+    },
+    {
+      "family": 4,
+      "name": "Price detail: CPI components, expectations, PPI, trade, energy, average prices",
+      "historical_id_count": 108,
+      "rule_keys": [
+        "national-cpi",
+        "ppi-headlines",
+        "ppi-demand",
+        "ppi-commodity-sectors",
+        "ppi-industry-sectors",
+        "import-export-price-aggregates",
+        "energy-spot-prices",
+        "retail-fuel-prices",
+        "national-average-prices",
+        "expected-inflation",
+        "sticky-flexible-cpi",
+        "median-trimmed-cpi",
+        "interest-rate-spreads",
+        "natural-gas-prices"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "EXPINF1YR",
+          "title": "1-Year Expected Inflation",
+          "frequency": "Monthly",
+          "release_id": 500,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/EXPINF1YR",
+            "retrieved_on": "2026-11-03",
+            "sha256": "9c08c81ae99133a3a9693315311855fb0e6f7d8d0345f62d2c6838e5b861b240",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "expected-inflation"
+          ]
+        },
+        {
+          "series_id": "DHHNGSP",
+          "title": "Henry Hub Natural Gas Spot Price",
+          "frequency": "Daily",
+          "release_id": 342,
+          "provenance": {
+            "kind": "official_public_release_listing",
+            "url": "https://fred.stlouisfed.org/release?rid=342",
+            "series_url": "https://fred.stlouisfed.org/series/DHHNGSP",
+            "retrieved_on": "2026-11-06",
+            "fields": "Public release listing links this series ID and frequency; series page confirms title/frequency. No raw page archive or authenticated catalog inventory is claimed.",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "natural-gas-prices"
+          ]
+        },
+        {
+          "series_id": "MHHNGSP",
+          "title": "Henry Hub Natural Gas Spot Price",
+          "frequency": "Monthly",
+          "release_id": 342,
+          "provenance": {
+            "kind": "official_public_release_listing",
+            "url": "https://fred.stlouisfed.org/release?rid=342",
+            "series_url": "https://fred.stlouisfed.org/series/MHHNGSP",
+            "retrieved_on": "2026-11-06",
+            "fields": "Public release listing links this series ID and frequency; series page confirms title/frequency. No raw page archive or authenticated catalog inventory is claimed.",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "natural-gas-prices"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Mixed family: predicate audit must account for every subfamily. Natural-gas release 342 public witnesses are not a complete API inventory; release 212 does not supply the Henry Hub products."
+    },
+    {
+      "family": 5,
+      "name": "Employment and labor",
+      "historical_id_count": 25,
+      "rule_keys": [
+        "potential-output-unemployment",
+        "national-employment",
+        "unemployment-claims",
+        "jolts"
+      ],
+      "headline_overrides": [
+        "UNRATE",
+        "PAYEMS"
+      ],
+      "positive_witnesses": [
+        {
+          "series_id": "ICSA",
+          "title": "Initial Claims",
+          "frequency": "Weekly, Ending Saturday",
+          "release_id": 180,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/ICSA",
+            "retrieved_on": "2026-11-03",
+            "sha256": "0ba40eb0bf50bbfb784de0399327029a05f6ecbd9c3a0196b2e4d7cb0111e314",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "unemployment-claims"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Keep national household/establishment scope distinct from state payroll release 112."
+    },
+    {
+      "family": 6,
+      "name": "Employment detail: industries, earnings, demographics, JOLTS, productivity",
+      "historical_id_count": 191,
+      "rule_keys": [
+        "national-employment",
+        "unemployment-claims",
+        "jolts",
+        "productivity-costs",
+        "employment-cost-index",
+        "weekly-earnings",
+        "wage-growth"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "ECIWAG",
+          "title": "Employment Cost Index: Wages and Salaries: Private Industry Workers",
+          "frequency": "Quarterly",
+          "release_id": 11,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/ECIWAG",
+            "retrieved_on": "2026-11-03",
+            "sha256": "ae8b947cd4ee5b2b571bcb70e8b027995a683d242cc66230cd67b562d485575e",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "employment-cost-index"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "A CES-only or LNS-only predicate is incomplete: historical aliases and multiple releases exist."
+    },
+    {
+      "family": 7,
+      "name": "Interest rates, monetary policy, Treasury yields",
+      "historical_id_count": 23,
+      "rule_keys": [
+        "selected-interest-rates",
+        "interest-rate-spreads",
+        "policy-target-range",
+        "effective-federal-funds"
+      ],
+      "headline_overrides": [
+        "FEDFUNDS",
+        "DGS10"
+      ],
+      "positive_witnesses": [
+        {
+          "series_id": "EFFR",
+          "title": "Effective Federal Funds Rate",
+          "frequency": "Daily",
+          "release_id": 378,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/EFFR",
+            "retrieved_on": "2026-11-03",
+            "sha256": "34d7e79c6d1da2ca3a1f31570299e05d1bc0e5ad1baf5fbc6c96f124ce30db2e",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "effective-federal-funds"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Frequency coverage must include daily and monthly series; targets are a distinct release."
+    },
+    {
+      "family": 8,
+      "name": "Rates and spreads detail: Treasury, TIPS, bills, paper, money markets, loans",
+      "historical_id_count": 77,
+      "rule_keys": [
+        "selected-interest-rates",
+        "interest-rate-spreads",
+        "effective-federal-funds",
+        "commercial-paper",
+        "commercial-paper-h15",
+        "sofr",
+        "sofr-averages-index",
+        "overnight-bank-funding",
+        "reserve-balance-interest",
+        "temporary-open-market",
+        "consumer-credit"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "SOFR",
+          "title": "Secured Overnight Financing Rate",
+          "frequency": "Daily",
+          "release_id": 445,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/SOFR",
+            "retrieved_on": "2026-11-03",
+            "sha256": "0ce2ffb1853b42d18b7aa38a7beac05524b2a6d686a826d9ca7dc1cd39098af2",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "sofr"
+          ]
+        },
+        {
+          "series_id": "RIFSPPFAAD90NB",
+          "title": "90-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "release_id": 86,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/RIFSPPFAAD90NB",
+            "retrieved_on": "2026-11-05",
+            "fields": "Official series title; Frequency field; Release field. Canonical release 86 also links this series from its public listing.",
+            "api_inventory_verified": false,
+            "note": "Official public metadata cross-checked against this complete authenticated catalog page. The global audit stopped at its scan guard; complete global membership and vintage equivalence are not claimed.",
+            "public_html_hash_available": false,
+            "api_catalog_membership_verified": true,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 86,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 202,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:23.304861110+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-86-0.response-text.json",
+              "raw_sha256": "d1b03ae95532c1892888552885ee74e2552c80a1f09990266bd576aa1cb8db0a",
+              "normalized_path": "evidence/release-86-0.normalized.json",
+              "normalized_sha256": "5ddbf1b612afb5a457121090868036acc32fb6df2a30167d21ae86078286101d",
+              "global_inventory_complete": false
+            }
+          },
+          "matching_rule_keys": [
+            "commercial-paper"
+          ]
+        },
+        {
+          "series_id": "DCPF3M",
+          "title": "90-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "release_id": 18,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/DCPF3M",
+            "retrieved_on": "2026-11-05",
+            "fields": "Official series title; Frequency field; Release field naming H.15 Selected Interest Rates.",
+            "api_inventory_verified": false,
+            "note": "Official public metadata cross-checked against this complete authenticated catalog page. The global audit stopped at its scan guard; complete global membership and vintage equivalence are not claimed.",
+            "public_html_hash_available": false,
+            "api_catalog_membership_verified": true,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 18,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 270,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:15.566421697+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-18-0.response-text.json",
+              "raw_sha256": "e7cc95d3ce97a8d6bf2a604ea349b8d9d89a1e8cc8354f62bae0eb71c1a0b48e",
+              "normalized_path": "evidence/release-18-0.normalized.json",
+              "normalized_sha256": "b54947a7765872850f4423500af665df16cf6537fbe4771b2bc657f6dcbeb8c4",
+              "global_inventory_complete": false
+            }
+          },
+          "matching_rule_keys": [
+            "commercial-paper-h15"
+          ]
+        },
+        {
+          "series_id": "WCPF3M",
+          "title": "90-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Weekly, Ending Friday",
+          "release_id": 18,
+          "provenance": {
+            "kind": "authenticated_api_catalog_page",
+            "public_series_url": "https://fred.stlouisfed.org/series/WCPF3M",
+            "retrieved_on": "2026-11-05",
+            "fields": "seriess id, title and frequency from the complete, validated release-18 catalog page.",
+            "api_catalog_membership_verified": true,
+            "api_inventory_verified": false,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 18,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 270,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:15.566421697+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-18-0.response-text.json",
+              "raw_sha256": "e7cc95d3ce97a8d6bf2a604ea349b8d9d89a1e8cc8354f62bae0eb71c1a0b48e",
+              "normalized_path": "evidence/release-18-0.normalized.json",
+              "normalized_sha256": "b54947a7765872850f4423500af665df16cf6537fbe4771b2bc657f6dcbeb8c4",
+              "global_inventory_complete": false
+            },
+            "note": "This complete physical catalog is verified at its pinned date; the global inventory remains incomplete. Discontinued metadata is retained as lifecycle evidence."
+          },
+          "matching_rule_keys": [
+            "commercial-paper-h15"
+          ]
+        },
+        {
+          "series_id": "RIFSPPFAAD90NA",
+          "title": "90-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Annual",
+          "release_id": 18,
+          "provenance": {
+            "kind": "authenticated_api_catalog_page",
+            "public_series_url": "https://fred.stlouisfed.org/series/RIFSPPFAAD90NA",
+            "retrieved_on": "2026-11-05",
+            "fields": "seriess id, title and frequency from the complete, validated release-18 catalog page.",
+            "api_catalog_membership_verified": true,
+            "api_inventory_verified": false,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 18,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 270,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:15.566421697+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-18-0.response-text.json",
+              "raw_sha256": "e7cc95d3ce97a8d6bf2a604ea349b8d9d89a1e8cc8354f62bae0eb71c1a0b48e",
+              "normalized_path": "evidence/release-18-0.normalized.json",
+              "normalized_sha256": "b54947a7765872850f4423500af665df16cf6537fbe4771b2bc657f6dcbeb8c4",
+              "global_inventory_complete": false
+            },
+            "note": "This complete physical catalog is verified at its pinned date; the global inventory remains incomplete. Discontinued metadata is retained as lifecycle evidence."
+          },
+          "matching_rule_keys": [
+            "commercial-paper-h15"
+          ]
+        },
+        {
+          "series_id": "DCP30",
+          "title": "1-Month Commercial Paper Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "release_id": 18,
+          "provenance": {
+            "kind": "authenticated_api_catalog_page",
+            "public_series_url": "https://fred.stlouisfed.org/series/DCP30",
+            "retrieved_on": "2026-11-05",
+            "fields": "seriess id, title and frequency from the complete, validated release-18 catalog page.",
+            "api_catalog_membership_verified": true,
+            "api_inventory_verified": false,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 18,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 270,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:15.566421697+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-18-0.response-text.json",
+              "raw_sha256": "e7cc95d3ce97a8d6bf2a604ea349b8d9d89a1e8cc8354f62bae0eb71c1a0b48e",
+              "normalized_path": "evidence/release-18-0.normalized.json",
+              "normalized_sha256": "b54947a7765872850f4423500af665df16cf6537fbe4771b2bc657f6dcbeb8c4",
+              "global_inventory_complete": false
+            },
+            "note": "This complete physical catalog is verified at its pinned date; the global inventory remains incomplete. Discontinued metadata is retained as lifecycle evidence."
+          },
+          "matching_rule_keys": [
+            "commercial-paper-h15"
+          ]
+        },
+        {
+          "series_id": "H0RIFSPPFM01NB",
+          "title": "1-Month Finance Paper Placed Directly: Average Offering Rate Quoted on Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "release_id": 86,
+          "provenance": {
+            "kind": "authenticated_api_catalog_page",
+            "public_series_url": "https://fred.stlouisfed.org/series/H0RIFSPPFM01NB",
+            "retrieved_on": "2026-11-05",
+            "fields": "seriess id, title and frequency from the complete, validated release-86 catalog page.",
+            "api_catalog_membership_verified": true,
+            "api_inventory_verified": false,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 86,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 202,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:23.304861110+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-86-0.response-text.json",
+              "raw_sha256": "d1b03ae95532c1892888552885ee74e2552c80a1f09990266bd576aa1cb8db0a",
+              "normalized_path": "evidence/release-86-0.normalized.json",
+              "normalized_sha256": "5ddbf1b612afb5a457121090868036acc32fb6df2a30167d21ae86078286101d",
+              "global_inventory_complete": false
+            },
+            "note": "This complete physical catalog is verified at its pinned date; the global inventory remains incomplete. Discontinued metadata is retained as lifecycle evidence."
+          },
+          "matching_rule_keys": [
+            "commercial-paper"
+          ]
+        },
+        {
+          "series_id": "H15H0RIFSPPFM01NB",
+          "title": "1-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "release_id": 18,
+          "provenance": {
+            "kind": "authenticated_api_catalog_page",
+            "public_series_url": "https://fred.stlouisfed.org/series/H15H0RIFSPPFM01NB",
+            "retrieved_on": "2026-11-05",
+            "fields": "seriess id, title and frequency from the complete, validated release-18 catalog page.",
+            "api_catalog_membership_verified": true,
+            "api_inventory_verified": false,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 18,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 270,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:15.566421697+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-18-0.response-text.json",
+              "raw_sha256": "e7cc95d3ce97a8d6bf2a604ea349b8d9d89a1e8cc8354f62bae0eb71c1a0b48e",
+              "normalized_path": "evidence/release-18-0.normalized.json",
+              "normalized_sha256": "b54947a7765872850f4423500af665df16cf6537fbe4771b2bc657f6dcbeb8c4",
+              "global_inventory_complete": false
+            },
+            "note": "This complete physical catalog is verified at its pinned date; the global inventory remains incomplete. Discontinued metadata is retained as lifecycle evidence."
+          },
+          "matching_rule_keys": [
+            "commercial-paper-h15"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Commercial and finance paper rates include modern and discontinued discount/offering products in releases 86 and 18. Their distinct IDs and histories are retained. Complete global inventory, alias accounting and operating bounds remain pending; SOFR averages also require release 483."
+    },
+    {
+      "family": 9,
+      "name": "Financial conditions and activity indexes",
+      "historical_id_count": 16,
+      "rule_keys": [],
+      "headline_overrides": [
+        "STLFSI4",
+        "NFCI",
+        "ANFCI",
+        "NFCIRISK",
+        "NFCICREDIT",
+        "NFCILEVERAGE",
+        "NFCINONFINLEVERAGE",
+        "KCFSI",
+        "CFNAI",
+        "CFNAIMA3",
+        "CFNAIDIFF",
+        "WEI",
+        "RECPROUSM156N",
+        "SAHMREALTIME",
+        "SAHMCURRENT",
+        "JHGDPBRINDX"
+      ],
+      "positive_witnesses": [
+        {
+          "series_id": "STLFSI4",
+          "title": "St. Louis Fed Financial Stress Index",
+          "frequency": "Weekly, Ending Friday",
+          "release_id": 187,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/STLFSI4",
+            "retrieved_on": "2026-11-03",
+            "sha256": "2a914708350aacae1218f255075875e9eeb6a6a99dd6511cc95ef9b5db6cfbb3",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": []
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "These small headline exceptions can remain bounded overrides if selecting all eight catalogs exceeds the rule budget; they must not stand in for primary discovery families."
+    },
+    {
+      "family": 10,
+      "name": "Money supply and Federal Reserve balance sheet",
+      "historical_id_count": 6,
+      "rule_keys": [
+        "money-stock-reserves",
+        "fed-balance-sheet",
+        "money-velocity"
+      ],
+      "headline_overrides": [
+        "M2SL"
+      ],
+      "positive_witnesses": [
+        {
+          "series_id": "M2V",
+          "title": "Velocity of M2 Money Stock",
+          "frequency": "Quarterly",
+          "release_id": 193,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/M2V",
+            "retrieved_on": "2026-11-03",
+            "sha256": "1883067d59ae3e459e5bea69ef2778b5daa96f16176f24349799090a07f8ef55",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "money-velocity"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "WALCL and monetary aggregates have distinct releases."
+    },
+    {
+      "family": 11,
+      "name": "Money and Federal Reserve balance sheet detail",
+      "historical_id_count": 19,
+      "rule_keys": [
+        "money-stock-reserves",
+        "fed-balance-sheet",
+        "money-velocity",
+        "real-money-stock",
+        "m2-related-series"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "M2REAL",
+          "title": "Real M2 Money Stock",
+          "frequency": "Monthly",
+          "release_id": 301,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/M2REAL",
+            "retrieved_on": "2026-11-03",
+            "sha256": "961fdb238f2cc2f02f12b4079729ce3159266f46b77fe922c028dcc3ce62d43c",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "real-money-stock"
+          ]
+        },
+        {
+          "series_id": "M2MSL",
+          "title": "M2 Less Small Time Deposits",
+          "frequency": "Monthly",
+          "release_id": 63,
+          "provenance": {
+            "kind": "official_public_release_listing",
+            "url": "https://fred.stlouisfed.org/release?rid=63",
+            "series_url": "https://fred.stlouisfed.org/series/M2MSL",
+            "retrieved_on": "2026-11-06",
+            "fields": "Public release listing links this series ID and frequency; series page confirms title/frequency. No raw page archive or authenticated catalog inventory is claimed.",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "m2-related-series"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "H.6/H.4.1 concepts and release 63 M2-related products have separate catalog rules. New release 63 public witnesses are not authenticated membership/count evidence."
+    },
+    {
+      "family": 12,
+      "name": "Credit: lending standards, delinquencies, bank and household credit",
+      "historical_id_count": 51,
+      "rule_keys": [
+        "lending-standards",
+        "delinquencies-chargeoffs",
+        "consumer-credit",
+        "all-commercial-bank-credit",
+        "household-debt-service",
+        "financial-account-concepts"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "TNWBSHNO",
+          "title": "Households and Nonprofit Organizations; Net Worth, Level",
+          "frequency": "Quarterly, End of Period",
+          "release_id": 52,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/TNWBSHNO",
+            "retrieved_on": "2026-11-03",
+            "sha256": "6b193d409699657122edd684147caca247007ff861e409b4dea966f8bb583698",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "financial-account-concepts"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Restrict H.8 to All Commercial Banks when that is intended; Z.1 whole-release membership is not justified."
+    },
+    {
+      "family": 13,
+      "name": "Housing",
+      "historical_id_count": 8,
+      "rule_keys": [
+        "residential-construction",
+        "new-residential-sales",
+        "vacancy-homeownership",
+        "national-house-prices"
+      ],
+      "headline_overrides": [
+        "HOUST"
+      ],
+      "positive_witnesses": [
+        {
+          "series_id": "RRVRUSQ156N",
+          "title": "Rental Vacancy Rate in the United States",
+          "frequency": "Quarterly",
+          "release_id": 296,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/RRVRUSQ156N",
+            "retrieved_on": "2026-11-03",
+            "sha256": "8d6fa0b29066d24d8aef8906c53ae03929536567db1a0ffd8a1cdb01102953f2",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "vacancy-homeownership"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Do not substitute category 97 (Housing) for release 97 (New Residential Sales)."
+    },
+    {
+      "family": 14,
+      "name": "Housing detail: starts, permits, sales, prices, vacancy, construction spending",
+      "historical_id_count": 53,
+      "rule_keys": [
+        "residential-construction",
+        "new-residential-sales",
+        "vacancy-homeownership",
+        "construction-spending",
+        "national-house-prices"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "NHFSEPCS",
+          "title": "New Houses for Sale by Stage of Construction, Completed",
+          "frequency": "Monthly",
+          "release_id": 97,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/NHFSEPCS",
+            "retrieved_on": "2026-11-03",
+            "sha256": "1ad5bd7ff3a59d05b594ebc8a07102c1922360100a5e04eafe0d323ae3ffe1bf",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "new-residential-sales"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Housing category 97 and house-price category 32261 mix many unrelated or restricted series; narrower releases/leaf categories are preferable."
+    },
+    {
+      "family": 15,
+      "name": "Trade and balance of payments",
+      "historical_id_count": 6,
+      "rule_keys": [
+        "national-accounts",
+        "international-trade",
+        "international-transactions"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "IEABC",
+          "title": "Balance on current account",
+          "frequency": "Quarterly",
+          "release_id": 49,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/IEABC",
+            "retrieved_on": "2026-11-03",
+            "sha256": "7bb3b56a3b9726464c006403fdf3a7f85e9215e52c3ff7f69332c54c2a7552cd",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "international-transactions"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Current account is not a release-51-only family."
+    },
+    {
+      "family": 16,
+      "name": "International headline: exchange rates, dollar, trade partners, World Bank GDP",
+      "historical_id_count": 123,
+      "rule_keys": [
+        "national-accounts",
+        "international-trade",
+        "international-transactions",
+        "daily-exchange-rates",
+        "daily-nominal-dollar",
+        "monthly-exchange-rates",
+        "monthly-nominal-dollar",
+        "real-dollar",
+        "wdi-major-country-gdp",
+        "wdi-real-gdp-per-capita",
+        "wdi-inflation"
+      ],
+      "headline_overrides": [
+        "NYGDPMKTPCDWLD"
+      ],
+      "positive_witnesses": [
+        {
+          "series_id": "MKTGDPCNA646NWDB",
+          "title": "Gross Domestic Product for China",
+          "frequency": "Annual",
+          "release_id": 234,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/MKTGDPCNA646NWDB",
+            "retrieved_on": "2026-11-03",
+            "sha256": "0d4ab0ccee01ec3029599d4dcdf9308e21dcd40c15f5a240e5f1dd56e205f24d",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "wdi-major-country-gdp"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "WDI geography needs an explicit country/aggregate policy. Whole WDI release would overselect indicators. Exact API counts are pending."
+    },
+    {
+      "family": 17,
+      "name": "Debt and fiscal",
+      "historical_id_count": 5,
+      "rule_keys": [
+        "treasury-debt-holdings",
+        "debt-fiscal-gdp-ratios",
+        "annual-fiscal-budget"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "GFDEBTN",
+          "title": "Federal Debt: Total Public Debt",
+          "frequency": "Quarterly, End of Period",
+          "release_id": 80,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/GFDEBTN",
+            "retrieved_on": "2026-11-03",
+            "sha256": "c8f4e75fb80a17f5d7c6c1647a377a83f74ed0eee8c300652cd492c4d633e00b",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "treasury-debt-holdings"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Debt ratios and Treasury levels are not the same release."
+    },
+    {
+      "family": 18,
+      "name": "Fiscal detail",
+      "historical_id_count": 10,
+      "rule_keys": [
+        "treasury-debt-holdings",
+        "debt-fiscal-gdp-ratios",
+        "annual-fiscal-budget",
+        "monthly-treasury"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "MTSDS133FMS",
+          "title": "Federal Surplus or Deficit [-]",
+          "frequency": "Monthly",
+          "release_id": 363,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/MTSDS133FMS",
+            "retrieved_on": "2026-11-03",
+            "sha256": "51325f07cda1735439efee07885b218609b8ee7163805bbba213c7af68a39d5e",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "monthly-treasury"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Maintain monthly/annual distinctions and verify individual debt-ratio aliases."
+    },
+    {
+      "family": 19,
+      "name": "Industrial production and manufacturing",
+      "historical_id_count": 8,
+      "rule_keys": [
+        "industrial-production-capacity",
+        "manufacturers-orders-inventories",
+        "manufacturing-trade-sales",
+        "advance-retail",
+        "retail-sector-detail"
+      ],
+      "headline_overrides": [
+        "INDPRO"
+      ],
+      "positive_witnesses": [
+        {
+          "series_id": "DGORDER",
+          "title": "Manufacturers' New Orders: Durable Goods",
+          "frequency": "Monthly",
+          "release_id": 95,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/DGORDER",
+            "retrieved_on": "2026-11-03",
+            "sha256": "065db420916ef4ce4d998f26529dc0ac1735d1c8723d0f15385b0fd3d00cc65a",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "manufacturers-orders-inventories"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Industrial production alone does not cover orders/inventories/retail."
+    },
+    {
+      "family": 20,
+      "name": "Production, orders, inventories, sales and vehicles",
+      "historical_id_count": 72,
+      "rule_keys": [
+        "industrial-production-capacity",
+        "manufacturers-orders-inventories",
+        "manufacturing-trade-sales",
+        "advance-retail",
+        "retail-sector-detail",
+        "real-retail",
+        "retail-ecommerce",
+        "motor-vehicles",
+        "transportation-services"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "TOTALSA",
+          "title": "Total Vehicle Sales",
+          "frequency": "Monthly",
+          "release_id": 93,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/TOTALSA",
+            "retrieved_on": "2026-11-03",
+            "sha256": "db1b73819232a1ac3b02fbe761481b0a702d0520f2dd9c31e59ef6a183944952",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "motor-vehicles"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Need explicit coverage of every subfamily, with measured API union/scan budgets. Source 349 also includes broad geography not yet audited."
+    },
+    {
+      "family": 21,
+      "name": "Business cycle",
+      "historical_id_count": 1,
+      "rule_keys": [],
+      "headline_overrides": [
+        "USREC"
+      ],
+      "positive_witnesses": [
+        {
+          "series_id": "USREC",
+          "title": "NBER based Recession Indicators for the United States from the Period following the Peak through the Trough",
+          "frequency": "Monthly",
+          "release_id": 242,
+          "provenance": {
+            "kind": "existing_repository_metadata_fixture",
+            "path": "backend/crates/econ-graph-crawler/tests/fixtures/fred/series_usrec.json",
+            "note": "Existing metadata; release 242 is proposed ownership, not a newly API-verified fact.",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": []
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Existing USREC is already implemented and fixture-tested; do not select all international recession indicators."
+    },
+    {
+      "family": 22,
+      "name": "Regional headline: state unemployment rate (seasonally adjusted), one per state and DC",
+      "historical_id_count": 51,
+      "rule_keys": [
+        "state-unemployment-sa"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "CAUR",
+          "title": "Unemployment Rate in California",
+          "frequency": "Monthly",
+          "release_id": 112,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/CAUR",
+            "retrieved_on": "2026-11-03",
+            "sha256": "df69bbdda3fd07316b2cd3f8b1d074d9ac36afe17ca37e8d95d01c51709273b8",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "state-unemployment-sa"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Needs id_pattern or equivalent state-only leaf scopes. Do not select all unemployment titles from release 112."
+    },
+    {
+      "family": 23,
+      "name": "Regional: unemployment rate, not seasonally adjusted, by state and DC",
+      "historical_id_count": 51,
+      "rule_keys": [
+        "state-unemployment-nsa"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "CAURN",
+          "title": "Unemployment Rate in California",
+          "frequency": "Monthly",
+          "release_id": 112,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/CAURN",
+            "retrieved_on": "2026-11-03",
+            "sha256": "535a0ee80ccbc98a537730d1c076ef67b8cd813ce3bf0fa741c99259e19af06c",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "state-unemployment-nsa"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Separate NSA from SA; exclude Puerto Rico, territories, counties and metros."
+    },
+    {
+      "family": 24,
+      "name": "Regional: labor force participation rate, by state and DC",
+      "historical_id_count": 51,
+      "rule_keys": [
+        "state-participation-sa"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "LBSSA06",
+          "title": "Labor Force Participation Rate for California",
+          "frequency": "Monthly",
+          "release_id": 446,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/LBSSA06",
+            "retrieved_on": "2026-11-03",
+            "sha256": "8485ac06b11850f758b31bd536a3f2c083004cb97b25d8a54ac6b66ea40a42f8",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "state-participation-sa"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Complete browsable release inventory contains 102 IDs, 51 SA and 51 NSA; proposed SA rule has 51 observed members."
+    },
+    {
+      "family": 25,
+      "name": "Regional: all employees, total nonfarm, by state and DC",
+      "historical_id_count": 51,
+      "rule_keys": [
+        "state-nonfarm-employment"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "CANA",
+          "title": "All Employees: Total Nonfarm in California",
+          "frequency": "Monthly",
+          "release_id": 112,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/CANA",
+            "retrieved_on": "2026-11-03",
+            "sha256": "4c252a5c686efb0a2176f484d997dcc23c05c4fc225f470a032ff535874e8c94",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "state-nonfarm-employment"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "CANA ownership verified as release 112. Release 308 annual state series are not a faithful replacement."
+    },
+    {
+      "family": 26,
+      "name": "Regional: all employees, manufacturing, by state and DC",
+      "historical_id_count": 49,
+      "rule_keys": [
+        "state-manufacturing-employment"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "CAMFG",
+          "title": "All Employees: Manufacturing in California",
+          "frequency": "Monthly",
+          "release_id": 112,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/CAMFG",
+            "retrieved_on": "2026-11-03",
+            "sha256": "f2e2f373f90e292bc9a454f47da52d09e450ca6b1c4bb89f1334e7d1eff95f13",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "state-manufacturing-employment"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "CAMFG ownership verified as release 112. Original list has 49 state entries; do not manufacture the missing two or assume a current upstream count."
+    },
+    {
+      "family": 27,
+      "name": "Regional: real GDP (quarterly), by state and DC",
+      "historical_id_count": 51,
+      "rule_keys": [
+        "state-real-gdp"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "CARQGSP",
+          "title": "Real Gross Domestic Product: All Industry Total in California",
+          "frequency": "Quarterly",
+          "release_id": 140,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/CARQGSP",
+            "retrieved_on": "2026-11-03",
+            "sha256": "419c3866695f488cbacd7f4ad8398187b6f718db9f12f0796329ee72a338cc65",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "state-real-gdp"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Full release is large and includes industry-detail/BEA-region series. Public last-page 30 is not completeness evidence."
+    },
+    {
+      "family": 28,
+      "name": "Regional: per capita personal income (annual), by state and DC",
+      "historical_id_count": 51,
+      "rule_keys": [
+        "state-per-capita-income"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "CAPCPI",
+          "title": "Per Capita Personal Income in California",
+          "frequency": "Annual",
+          "release_id": 110,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/CAPCPI",
+            "retrieved_on": "2026-11-03",
+            "sha256": "829a930343a615e4a542dea71beaa4e148f52f45ba770f639f3399526ac0c042",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "state-per-capita-income"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Official annual state table has 51 rows. Whole release also contains quarterly, total income and BEA regions."
+    },
+    {
+      "family": 29,
+      "name": "Regional: real median household income (annual), by state and DC",
+      "historical_id_count": 51,
+      "rule_keys": [
+        "state-real-household-income"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "MEHOINUSCAA672N",
+          "title": "Real Median Household Income in California",
+          "frequency": "Annual",
+          "release_id": 249,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/MEHOINUSCAA672N",
+            "retrieved_on": "2026-11-03",
+            "sha256": "a089b0c6e4d9cbe28a7fe02cba9fdda72f784aca0d73d422345272bdca220b6d",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "state-real-household-income"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Series MEHOINUSCAA672N release ownership verified. Exclude national, nominal, racial/demographic and other geographic variants."
+    },
+    {
+      "family": 30,
+      "name": "Regional: resident population (annual), by state and DC",
+      "historical_id_count": 51,
+      "rule_keys": [
+        "state-population"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "CAPOP",
+          "title": "Resident Population in California",
+          "frequency": "Annual",
+          "release_id": 118,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/CAPOP",
+            "retrieved_on": "2026-11-03",
+            "sha256": "fd33e90a9c0bea2ec630109490bc62f62b024ce239f0a383e10864133ed03d19",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "state-population"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Complete browsable release contains 73 IDs, so a whole-release rule is broader than 51 state/DC population series."
+    },
+    {
+      "family": 31,
+      "name": "Regional: FHFA all-transactions house price index (quarterly), by state and DC",
+      "historical_id_count": 51,
+      "rule_keys": [
+        "state-all-transactions-hpi"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "CASTHPI",
+          "title": "All-Transactions House Price Index for California",
+          "frequency": "Quarterly",
+          "release_id": 171,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/CASTHPI",
+            "retrieved_on": "2026-11-03",
+            "sha256": "a3931f59eedf64aff40aa6dffad48cc55d2af84d7596a1bb2521c3a6704658df",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "state-all-transactions-hpi"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "FHFA release includes national, metro, county and purchase-only products. Title contains All-Transactions is insufficient by itself."
+    },
+    {
+      "family": 32,
+      "name": "Regional: new private housing units authorized by building permits, by state and DC",
+      "historical_id_count": 51,
+      "rule_keys": [
+        "state-building-permits"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "CABPPRIVSA",
+          "title": "New Private Housing Units Authorized by Building Permits for California",
+          "frequency": "Monthly",
+          "release_id": 148,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/CABPPRIVSA",
+            "retrieved_on": "2026-11-03",
+            "sha256": "b5ea40be39980f7d2baecedf7f9b70d1068658088eb55f0d561df12dc2ebb786",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "state-building-permits"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Whole release includes counties, metros and building-type variants. CABPPRIVSA ownership verified."
+    },
+    {
+      "family": 33,
+      "name": "Regional: CPI (all items, NSA) for census regions and metro areas",
+      "historical_id_count": 15,
+      "rule_keys": [
+        "regional-all-items-cpi"
+      ],
+      "headline_overrides": [],
+      "positive_witnesses": [
+        {
+          "series_id": "CUUR0100SA0",
+          "title": "Consumer Price Index for All Urban Consumers: All Items in Northeast",
+          "frequency": "Monthly",
+          "release_id": 10,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/CUUR0100SA0",
+            "retrieved_on": "2026-11-03",
+            "sha256": "c1f3af389bf375804dcf05242f407b2fc6b713b64456514b6f3b96518b6b1ee8",
+            "fields": "og:title; series-meta-value-frequency (whitespace normalized); More Series from release link",
+            "api_inventory_verified": false
+          },
+          "matching_rule_keys": [
+            "regional-all-items-cpi"
+          ]
+        }
+      ],
+      "complete_family_membership_verified": false,
+      "remaining_gap": "Pattern is a candidate, not proven complete: cross-check all 15 original area witnesses, current area codes and frequencies. Add explicit geographic scope instead of all regional CPI components."
+    }
+  ],
+  "negative_identifier_witnesses": [
+    {
+      "rule_key": "state-unemployment-sa",
+      "series_id": "PRUR",
+      "expected_match": false,
+      "provenance": {
+        "kind": "synthetic_identifier_boundary",
+        "note": "Illustrative product/geography shape; not a claim of current upstream existence or metadata."
+      }
+    },
+    {
+      "rule_key": "state-unemployment-sa",
+      "series_id": "SMU06310800000000001",
+      "expected_match": false,
+      "provenance": {
+        "kind": "synthetic_identifier_boundary",
+        "note": "Illustrative product/geography shape; not a claim of current upstream existence or metadata."
+      }
+    },
+    {
+      "rule_key": "state-nonfarm-employment",
+      "series_id": "SMU06310800000000001",
+      "expected_match": false,
+      "provenance": {
+        "kind": "synthetic_identifier_boundary",
+        "note": "Illustrative product/geography shape; not a claim of current upstream existence or metadata."
+      }
+    },
+    {
+      "rule_key": "state-manufacturing-employment",
+      "series_id": "CAMFGN",
+      "expected_match": false,
+      "provenance": {
+        "kind": "synthetic_identifier_boundary",
+        "note": "Illustrative product/geography shape; not a claim of current upstream existence or metadata."
+      }
+    },
+    {
+      "rule_key": "state-real-gdp",
+      "series_id": "CAACCOMDRQGSP",
+      "expected_match": false,
+      "provenance": {
+        "kind": "synthetic_identifier_boundary",
+        "note": "Illustrative product/geography shape; not a claim of current upstream existence or metadata."
+      }
+    },
+    {
+      "rule_key": "state-real-gdp",
+      "series_id": "CARGSP",
+      "expected_match": false,
+      "provenance": {
+        "kind": "synthetic_identifier_boundary",
+        "note": "Illustrative product/geography shape; not a claim of current upstream existence or metadata."
+      }
+    },
+    {
+      "rule_key": "state-per-capita-income",
+      "series_id": "CAPCPIQ",
+      "expected_match": false,
+      "provenance": {
+        "kind": "synthetic_identifier_boundary",
+        "note": "Illustrative product/geography shape; not a claim of current upstream existence or metadata."
+      }
+    },
+    {
+      "rule_key": "state-real-household-income",
+      "series_id": "MEHOINUSA672N",
+      "expected_match": false,
+      "provenance": {
+        "kind": "synthetic_identifier_boundary",
+        "note": "Illustrative product/geography shape; not a claim of current upstream existence or metadata."
+      }
+    },
+    {
+      "rule_key": "state-population",
+      "series_id": "PRPOP",
+      "expected_match": false,
+      "provenance": {
+        "kind": "synthetic_identifier_boundary",
+        "note": "Illustrative product/geography shape; not a claim of current upstream existence or metadata."
+      }
+    },
+    {
+      "rule_key": "state-all-transactions-hpi",
+      "series_id": "ATNHPIUS41860Q",
+      "expected_match": false,
+      "provenance": {
+        "kind": "synthetic_identifier_boundary",
+        "note": "Illustrative product/geography shape; not a claim of current upstream existence or metadata."
+      }
+    },
+    {
+      "rule_key": "state-building-permits",
+      "series_id": "BPPRIV006037",
+      "expected_match": false,
+      "provenance": {
+        "kind": "synthetic_identifier_boundary",
+        "note": "Illustrative product/geography shape; not a claim of current upstream existence or metadata."
+      }
+    },
+    {
+      "rule_key": "regional-all-items-cpi",
+      "series_id": "CUSR0000SA0",
+      "expected_match": false,
+      "provenance": {
+        "kind": "synthetic_identifier_boundary",
+        "note": "Illustrative product/geography shape; not a claim of current upstream existence or metadata."
+      }
+    },
+    {
+      "rule_key": "regional-all-items-cpi",
+      "series_id": "CUURA101SEHA",
+      "expected_match": false,
+      "provenance": {
+        "kind": "synthetic_identifier_boundary",
+        "note": "Illustrative product/geography shape; not a claim of current upstream existence or metadata."
+      }
+    }
+  ],
+  "public_listing_evidence": {
+    "provenance": "Official public FRED website pages retrieved 2026-11-03; completed browsable listings are not pinned API snapshots. Last-page 30 is never completeness evidence.",
+    "complete_browsable_counts": [
+      {
+        "release_id": 14,
+        "observed_count": 159,
+        "url": "https://fred.stlouisfed.org/release?rid=14",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 15,
+        "observed_count": 31,
+        "url": "https://fred.stlouisfed.org/release?rid=15",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 17,
+        "observed_count": 33,
+        "url": "https://fred.stlouisfed.org/release?rid=17",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 27,
+        "observed_count": 121,
+        "url": "https://fred.stlouisfed.org/release?rid=27",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 51,
+        "observed_count": 565,
+        "url": "https://fred.stlouisfed.org/release?rid=51",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 54,
+        "observed_count": 144,
+        "url": "https://fred.stlouisfed.org/release?rid=54",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 80,
+        "observed_count": 12,
+        "url": "https://fred.stlouisfed.org/release?rid=80",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 81,
+        "observed_count": 5,
+        "url": "https://fred.stlouisfed.org/release?rid=81",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 92,
+        "observed_count": 2,
+        "url": "https://fred.stlouisfed.org/release?rid=92",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 93,
+        "observed_count": 33,
+        "url": "https://fred.stlouisfed.org/release?rid=93",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 97,
+        "observed_count": 386,
+        "url": "https://fred.stlouisfed.org/release?rid=97",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 99,
+        "observed_count": 4,
+        "url": "https://fred.stlouisfed.org/release?rid=99",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 101,
+        "observed_count": 4,
+        "url": "https://fred.stlouisfed.org/release?rid=101",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 118,
+        "observed_count": 73,
+        "url": "https://fred.stlouisfed.org/release?rid=118",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 179,
+        "observed_count": 4,
+        "url": "https://fred.stlouisfed.org/release?rid=179",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 180,
+        "observed_count": 9,
+        "url": "https://fred.stlouisfed.org/release?rid=180",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 185,
+        "observed_count": 7,
+        "url": "https://fred.stlouisfed.org/release?rid=185",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 187,
+        "observed_count": 4,
+        "url": "https://fred.stlouisfed.org/release?rid=187",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 191,
+        "observed_count": 639,
+        "url": "https://fred.stlouisfed.org/release?rid=191",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 192,
+        "observed_count": 540,
+        "url": "https://fred.stlouisfed.org/release?rid=192",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 193,
+        "observed_count": 3,
+        "url": "https://fred.stlouisfed.org/release?rid=193",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 198,
+        "observed_count": 1,
+        "url": "https://fred.stlouisfed.org/release?rid=198",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 212,
+        "observed_count": 44,
+        "url": "https://fred.stlouisfed.org/release?rid=212",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 219,
+        "observed_count": 7,
+        "url": "https://fred.stlouisfed.org/release?rid=219",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 221,
+        "observed_count": 6,
+        "url": "https://fred.stlouisfed.org/release?rid=221",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 245,
+        "observed_count": 6,
+        "url": "https://fred.stlouisfed.org/release?rid=245",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 261,
+        "observed_count": 1,
+        "url": "https://fred.stlouisfed.org/release?rid=261",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 281,
+        "observed_count": 10,
+        "url": "https://fred.stlouisfed.org/release?rid=281",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 301,
+        "observed_count": 4,
+        "url": "https://fred.stlouisfed.org/release?rid=301",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 304,
+        "observed_count": 36,
+        "url": "https://fred.stlouisfed.org/release?rid=304",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 323,
+        "observed_count": 3,
+        "url": "https://fred.stlouisfed.org/release?rid=323",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 363,
+        "observed_count": 6,
+        "url": "https://fred.stlouisfed.org/release?rid=363",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 373,
+        "observed_count": 2,
+        "url": "https://fred.stlouisfed.org/release?rid=373",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 375,
+        "observed_count": 6,
+        "url": "https://fred.stlouisfed.org/release?rid=375",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 378,
+        "observed_count": 9,
+        "url": "https://fred.stlouisfed.org/release?rid=378",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 379,
+        "observed_count": 31,
+        "url": "https://fred.stlouisfed.org/release?rid=379",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 386,
+        "observed_count": 47,
+        "url": "https://fred.stlouisfed.org/release?rid=386",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 400,
+        "observed_count": 1,
+        "url": "https://fred.stlouisfed.org/release?rid=400",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 445,
+        "observed_count": 6,
+        "url": "https://fred.stlouisfed.org/release?rid=445",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 446,
+        "observed_count": 102,
+        "url": "https://fred.stlouisfed.org/release?rid=446",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 456,
+        "observed_count": 2,
+        "url": "https://fred.stlouisfed.org/release?rid=456",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 465,
+        "observed_count": 1,
+        "url": "https://fred.stlouisfed.org/release?rid=465",
+        "api_inventory_verified": false
+      },
+      {
+        "release_id": 500,
+        "observed_count": 35,
+        "url": "https://fred.stlouisfed.org/release?rid=500",
+        "api_inventory_verified": false
+      }
+    ],
+    "small_housing_leaves": [
+      {
+        "category_id": 32300,
+        "observed_count": 8,
+        "url": "https://fred.stlouisfed.org/categories/32300"
+      },
+      {
+        "category_id": 32301,
+        "observed_count": 8,
+        "url": "https://fred.stlouisfed.org/categories/32301"
+      },
+      {
+        "category_id": 32302,
+        "observed_count": 26,
+        "url": "https://fred.stlouisfed.org/categories/32302"
+      },
+      {
+        "category_id": 32303,
+        "observed_count": 8,
+        "url": "https://fred.stlouisfed.org/categories/32303"
+      },
+      {
+        "category_id": 32304,
+        "observed_count": 26,
+        "url": "https://fred.stlouisfed.org/categories/32304"
+      }
+    ],
+    "leaf_scope_limitation": "These small leaves cover national housing stage products, not proven coverage of every original census-region construction example. No verified common WDI leaf covers all proposed indicators."
+  }
+}
