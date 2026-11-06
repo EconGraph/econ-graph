@@ -1,0 +1,63 @@
+rule_files:
+- econgraph-timeseries.yml
+
+evaluation_interval: 1m
+
+tests:
+# A run fails and none has ever succeeded: the alert names the failed Job. A failed Job of
+# another CronJob, or in another namespace, does not count.
+- interval: 1m
+  input_series:
+  - series: kube_job_status_failed{job="kube-state-metrics", namespace="econ-graph", job_name="timeseries-maintenance-preview-29000000"}
+    values: 0 1x10
+  - series: kube_job_created{job="kube-state-metrics", namespace="econ-graph", job_name="timeseries-maintenance-preview-29000000"}
+    values: 1000x10
+  - series: kube_job_status_failed{job="kube-state-metrics", namespace="econ-graph", job_name="sec-companyfacts-ingest-29000000"}
+    values: 1x10
+  - series: kube_job_status_failed{job="kube-state-metrics", namespace="econ-graph-br-test", job_name="timeseries-maintenance-preview-29000001"}
+    values: 1x10
+  alert_rule_test:
+  - eval_time: 0m
+    alertname: TimeseriesMaintenanceFailed
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: TimeseriesMaintenanceFailed
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        job: kube-state-metrics
+        namespace: econ-graph
+        job_name: timeseries-maintenance-preview-29000000
+      exp_annotations:
+        summary: Iceberg maintenance run timeseries-maintenance-preview-29000000 failed
+        description: 'The timeseries-maintenance-preview Job timeseries-maintenance-preview-29000000 failed (a pod error or its 30-minute deadline) and no later run has succeeded. Check `kubectl -n econ-graph logs job/timeseries-maintenance-preview-29000000` and the iceberg-maintenance Secret; the preview never applies changes, so rerunning is safe.'
+
+# A kept failed Job from before the latest success is history, not an outage; a run that fails
+# after that success alerts again.
+- interval: 1m
+  input_series:
+  - series: kube_job_status_failed{job="kube-state-metrics", namespace="econ-graph", job_name="timeseries-maintenance-preview-1"}
+    values: 1x10
+  - series: kube_job_created{job="kube-state-metrics", namespace="econ-graph", job_name="timeseries-maintenance-preview-1"}
+    values: 1000x10
+  - series: kube_cronjob_status_last_successful_time{job="kube-state-metrics", namespace="econ-graph", cronjob="timeseries-maintenance-preview"}
+    values: 2000x10
+  - series: kube_job_status_failed{job="kube-state-metrics", namespace="econ-graph", job_name="timeseries-maintenance-preview-3"}
+    values: _x5 1x5
+  - series: kube_job_created{job="kube-state-metrics", namespace="econ-graph", job_name="timeseries-maintenance-preview-3"}
+    values: _x5 3000x5
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: TimeseriesMaintenanceFailed
+    exp_alerts: []
+  - eval_time: 7m
+    alertname: TimeseriesMaintenanceFailed
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        job: kube-state-metrics
+        namespace: econ-graph
+        job_name: timeseries-maintenance-preview-3
+      exp_annotations:
+        summary: Iceberg maintenance run timeseries-maintenance-preview-3 failed
+        description: 'The timeseries-maintenance-preview Job timeseries-maintenance-preview-3 failed (a pod error or its 30-minute deadline) and no later run has succeeded. Check `kubectl -n econ-graph logs job/timeseries-maintenance-preview-3` and the iceberg-maintenance Secret; the preview never applies changes, so rerunning is safe.'
