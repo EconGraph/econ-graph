@@ -14,5 +14,14 @@
       "url": "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl",
       "sha256": "8b8f088da2dab964f853b38464033b1be15ede2839eca751482357c45abdd05a"
     }
+  },
+  "amtool": {
+    "version": "0.34.2",
+    "alertmanager_image": "quay.io/prometheus/alertmanager:v0.34.2",
+    "linux_amd64": {
+      "url": "https://github.com/prometheus/alertmanager/releases/download/v0.34.2/alertmanager-0.34.2.linux-amd64.tar.gz",
+      "sha256": "17ee14acd0f6ba6e25a436ff223d9c17ddd5cf484f543ad12f0932eaa89ba186",
+      "archive_member": "alertmanager-0.34.2.linux-amd64/amtool"
+    }
   }
 }
