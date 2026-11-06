@@ -36,10 +36,24 @@ spec:
         enabled: true
         storageClassName: econgraph-local
         size: 5Gi
+      # Dashboards in platform/observability reference uid prometheus (chart default
+      # grafana.sidecar.datasources.uid) and uid loki (below).
+      additionalDataSources:
+      - name: Loki
+        uid: loki
+        type: loki
+        access: proxy
+        url: http://loki.monitoring.svc.cluster.local:3100
+        isDefault: false
+        editable: false
+        jsonData:
+          maxLines: 1000
     prometheus:
       prometheusSpec:
         replicas: 2
         retention: 30d
+        # Size-based retention fires before the 10Gi volume fills (TSDB + WAL overhead).
+        retentionSize: 8GB
         serviceMonitorSelectorNilUsesHelmValues: false
         podMonitorSelectorNilUsesHelmValues: false
         storageSpec:

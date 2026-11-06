@@ -1,0 +1,165 @@
+{
+  "uid": "econgraph-crawler-overview",
+  "title": "Crawler Overview",
+  "description": "HTTP-level econgraph_crawler_* metrics from the crawler worker (PodMonitor monitoring/econgraph-crawler). source is the upstream URL host; crawler_type is the lowercase source id.",
+  "tags": ["econgraph", "crawler"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "crawler_type",
+        "label": "Crawler type",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "query": {"query": "label_values(econgraph_crawler_requests_total{job=\"monitoring/econgraph-crawler\"}, crawler_type)", "refId": "crawler_type"},
+        "definition": "label_values(econgraph_crawler_requests_total{job=\"monitoring/econgraph-crawler\"}, crawler_type)",
+        "refresh": 2,
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {"selected": true, "text": ["All"], "value": ["$__all"]},
+        "sort": 1
+      },
+      {
+        "name": "source",
+        "label": "Source host",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "query": {"query": "label_values(econgraph_crawler_requests_total{job=\"monitoring/econgraph-crawler\",crawler_type=~\"$crawler_type\"}, source)", "refId": "source"},
+        "definition": "label_values(econgraph_crawler_requests_total{job=\"monitoring/econgraph-crawler\",crawler_type=~\"$crawler_type\"}, source)",
+        "refresh": 2,
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {"selected": true, "text": ["All"], "value": ["$__all"]},
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Requests (rate)",
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum(rate(econgraph_crawler_requests_total{job=\"monitoring/econgraph-crawler\",crawler_type=~\"$crawler_type\",source=~\"$source\"}[5m]))",
+          "legendFormat": "requests/s"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Error Rate",
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum(rate(econgraph_crawler_errors_total{job=\"monitoring/econgraph-crawler\",crawler_type=~\"$crawler_type\",source=~\"$source\"}[5m]))",
+          "legendFormat": "errors/s"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Rate Limit Hits",
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum(rate(econgraph_crawler_rate_limit_hits_total{job=\"monitoring/econgraph-crawler\",crawler_type=~\"$crawler_type\",source=~\"$source\"}[15m]))",
+          "legendFormat": "429/s"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Request Duration (p95)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(econgraph_crawler_request_duration_seconds_bucket{job=\"monitoring/econgraph-crawler\",crawler_type=~\"$crawler_type\",source=~\"$source\"}[5m])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Requests by Source",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum by (source) (rate(econgraph_crawler_requests_total{job=\"monitoring/econgraph-crawler\",crawler_type=~\"$crawler_type\",source=~\"$source\"}[5m]))",
+          "legendFormat": "{{source}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Retries & Timeouts",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum by (source) (rate(econgraph_crawler_retries_total{job=\"monitoring/econgraph-crawler\",crawler_type=~\"$crawler_type\",source=~\"$source\"}[15m]))",
+          "legendFormat": "retries: {{source}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum by (source) (rate(econgraph_crawler_timeouts_total{job=\"monitoring/econgraph-crawler\",crawler_type=~\"$crawler_type\",source=~\"$source\"}[15m]))",
+          "legendFormat": "timeouts: {{source}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Bytes Downloaded (rate)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "Bps"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum by (source) (rate(econgraph_crawler_bytes_downloaded_total{job=\"monitoring/econgraph-crawler\",crawler_type=~\"$crawler_type\",source=~\"$source\"}[5m]))",
+          "legendFormat": "{{source}}"
+        }
+      ]
+    }
+  ]
+}

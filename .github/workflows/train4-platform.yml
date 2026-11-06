@@ -44,5 +44,7 @@ jobs:
           echo "$RUNNER_TEMP/train4-python/bin" >> "$GITHUB_PATH"
       - name: Exercise bootstrap and recovery ownership guards
         run: python3 scripts/platform/test_platform.py
+      - name: Check platform Grafana dashboards
+        run: python3 scripts/platform/test_dashboards.py
       - name: Validate actual pinned charts and platform resources
         run: python3 scripts/platform/validate.py --fetch --helm helm --kubectl kubectl --cache "$RUNNER_TEMP/train4-platform-assets"
