@@ -202,3 +202,23 @@ patches:
         rollingUpdate:
           maxUnavailable: 1
           maxSurge: 0
+- target:
+    kind: Deployment
+    name: keycloak
+  patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: keycloak
+    spec:
+      template:
+        spec:
+          containers:
+          - name: keycloak
+            env:
+            # Serves /idp/metrics on the management port (9000, named
+            # "management"), scraped by PodMonitor econgraph-keycloak
+            # (platform/observability/monitors-edge.yaml) through
+            # NetworkPolicy metrics-keycloak.
+            - name: KC_METRICS_ENABLED
+              value: "true"

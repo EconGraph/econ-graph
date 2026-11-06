@@ -1,0 +1,89 @@
+# Edge scraping: every public request passes the Envoy Gateway data plane,
+# so its stats are the only place user-facing 5xx and latency are measured.
+# Alerts on these series are in rules-edge.yaml.
+#
+# Envoy Gateway v1.9 (platform/addons/envoy/release.yaml) gives each proxy
+# container the port "metrics" (19001) serving /stats/prometheus, and labels
+# proxy pods app.kubernetes.io/name=envoy, app.kubernetes.io/component=proxy
+# and gateway.envoyproxy.io/owning-gateway-name. envoy-gateway-system has no
+# NetworkPolicy, so Prometheus in monitoring reaches it without one.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: econgraph-envoy-proxy
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+    - envoy-gateway-system
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: envoy
+      app.kubernetes.io/component: proxy
+      gateway.envoyproxy.io/owning-gateway-name: econ-graph-gateway
+  podMetricsEndpoints:
+  - port: metrics
+    path: /stats/prometheus
+    interval: 30s
+---
+# The Envoy Gateway controller (xDS translation, status updates). The chart's
+# Service envoy-gateway exposes port "metrics" (19001) serving /metrics.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: econgraph-envoy-gateway
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+    - envoy-gateway-system
+  selector:
+    matchLabels:
+      control-plane: envoy-gateway
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+---
+# Keycloak serves metrics on its management port (container port "management",
+# 9000) under KC_HTTP_RELATIVE_PATH, like its /idp/health probes. KC_METRICS_ENABLED
+# is set in platform/application/kustomization.yaml; NetworkPolicy
+# metrics-keycloak admits the monitoring namespace on 9000.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: econgraph-keycloak
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+    - econ-graph
+  selector:
+    matchLabels:
+      app: keycloak
+  podMetricsEndpoints:
+  - port: management
+    path: /idp/metrics
+    interval: 30s
+---
+# cloudflared tunnel connector (k8s/manifests/cloudflared.yaml: pod label
+# app=cloudflared, container cloudflared, port "metrics" 2000). Not deployed on
+# the platform until ECO-864, so this selects nothing today; it exists so the
+# tunnel connection alert has cloudflared_tunnel_ha_connections once it is.
+# NetworkPolicy metrics-cloudflared admits the monitoring namespace on 2000.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: econgraph-cloudflared
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+    - econ-graph
+  selector:
+    matchLabels:
+      app: cloudflared
+  podMetricsEndpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
