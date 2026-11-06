@@ -167,7 +167,7 @@ def main():
     alertmanager = next(d for d in chart_docs if d['kind'] == 'Alertmanager')
     assert alertmanager['spec'].get('secrets') == ['alertmanager-receivers'], 'Alertmanager must mount the receiver Secret'
     schemas = {}
-    swagger =normalize(json.loads((args.cache / 'kubernetes-openapi.json').read_text()))
+    swagger = normalize(json.loads((args.cache / 'kubernetes-openapi.json').read_text()))
     swagger['definitions']['io.k8s.apimachinery.pkg.api.resource.Quantity']['type'] = ['string', 'number']
     for name, schema in swagger['definitions'].items():
         for gvk in schema.get('x-kubernetes-group-version-kind', []):
