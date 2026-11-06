@@ -23,7 +23,13 @@ identifiers can grow without listing every member or also selecting metro/county
 Patterns are limited to 256 bytes and compiled once with bounded compilation/cache size;
 they are ANDed with the other predicates. Rules sharing a release or category reuse one
 complete catalog walk. The scan budget counts that catalog's rows once, while each rule
-keeps its own match count. All pages must agree on count and ordering before the
+keeps its own match count. The first catalog request omits real-time dates so FRED chooses
+its documented default of today. Its response must identify a valid single-day real-time
+period; that provider date is then sent on every remaining page and physical catalog in
+the walk. Every response must agree with it. Missing, malformed or changing real-time
+metadata fails discovery, without substituting the client's UTC date or an earlier date.
+This pins the release/category snapshot; include overrides still use their separate
+current `/series` metadata requests. All pages must agree on count and ordering before the
 snapshot supplies absence evidence; failed, truncated or changing pages fail discovery.
 Separate scan and selected-series bounds stop unexpected expansion before observation
 jobs are enqueued. A small include/exclude list handles explicit exceptions.

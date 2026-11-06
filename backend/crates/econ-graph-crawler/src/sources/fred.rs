@@ -795,13 +795,15 @@ impl FredAdapter {
                 groups.push(vec![index]);
             }
         }
-        // Pin the realtime date for every page of this catalog walk. Count/order validation
-        // below also refuses common forms of a catalog changing during pagination.
-        let realtime = chrono::Utc::now().date_naive().to_string();
+        // Let FRED choose its documented default date on the first page, then pin the
+        // validated response date across this whole walk. The client's UTC day need not
+        // be a date the provider currently accepts. Pagination checks below additionally
+        // refuse common forms of a catalog changing while it is being read.
+        let mut realtime = None;
         for group in groups {
             let rule = &rules.rules[group[0]];
             let rows = self
-                .catalog_rows(ctx, api_key, rule, rules, &realtime, scanned)
+                .catalog_rows(ctx, api_key, rule, rules, &mut realtime, scanned)
                 .await?;
             scanned += rows.len();
             for &index in &group {
@@ -856,7 +858,7 @@ impl FredAdapter {
         api_key: &str,
         rule: &FredCatalogRule,
         limits: &FredCatalogRules,
-        realtime: &str,
+        realtime: &mut Option<String>,
         already_scanned: usize,
     ) -> Result<Vec<CatalogSeries>, CrawlError> {
         let (path, parameter, catalog_id) = if let Some(id) = rule.release_id {
@@ -875,7 +877,7 @@ impl FredAdapter {
         let mut last_id: Option<String> = None;
         loop {
             let offset = rows.len().to_string();
-            let query = [
+            let mut query = vec![
                 (parameter, catalog_id.as_str()),
                 ("api_key", api_key),
                 ("file_type", "json"),
@@ -883,14 +885,29 @@ impl FredAdapter {
                 ("offset", offset.as_str()),
                 ("order_by", "series_id"),
                 ("sort_order", "asc"),
-                ("realtime_start", realtime),
-                ("realtime_end", realtime),
             ];
+            if let Some(realtime) = realtime.as_deref() {
+                query.extend([("realtime_start", realtime), ("realtime_end", realtime)]);
+            }
             let page: CatalogPage = ctx
                 .http
                 .get_json(SourceId::Fred, &self.url(path), &query)
                 .await
                 .map_err(classify_fred_error)?;
+            let response_realtime = page.realtime_start.clone();
+            if response_realtime.len() != 10
+                || NaiveDate::parse_from_str(&response_realtime, "%Y-%m-%d")
+                    .ok()
+                    .is_none_or(|date| date.to_string() != response_realtime)
+                || page.realtime_end != response_realtime
+                || realtime
+                    .as_ref()
+                    .is_some_and(|pinned| pinned != &response_realtime)
+            {
+                return Err(CrawlError::Transient(format!(
+                    "FRED {parameter}={catalog_id}: invalid or changing catalog realtime date"
+                )));
+            }
             if page.count.saturating_add(already_scanned) > limits.max_catalog_series {
                 return Err(catalog_volume_error(
                     "catalog rows",
@@ -930,6 +947,9 @@ impl FredAdapter {
                 }
                 last_id = Some(row.id.clone());
                 rows.push(row);
+            }
+            if realtime.is_none() {
+                *realtime = Some(response_realtime);
             }
             if rows.len() == page.count {
                 break;
@@ -1637,6 +1657,8 @@ struct SeriesResponse {
 
 #[derive(Debug, Deserialize)]
 struct CatalogPage {
+    realtime_start: String,
+    realtime_end: String,
     count: usize,
     offset: usize,
     limit: usize,
@@ -1726,8 +1748,18 @@ mod tests {
     }
 
     fn catalog_page(count: usize, offset: usize, rows: Vec<serde_json::Value>) -> Reply {
+        catalog_page_at(count, offset, rows, "2026-11-05")
+    }
+
+    fn catalog_page_at(
+        count: usize,
+        offset: usize,
+        rows: Vec<serde_json::Value>,
+        realtime: &str,
+    ) -> Reply {
         Reply::json_str(
             serde_json::json!({
+                "realtime_start":realtime,"realtime_end":realtime,
                 "count":count,"offset":offset,"limit":CATALOG_PAGE_SIZE,"seriess":rows
             })
             .to_string(),
@@ -2725,6 +2757,189 @@ mod tests {
             assert!(error.to_string().contains(expected), "{error}");
             assert!(adapter.catalog_scope().is_none());
             assert_eq!(mock.received_requests().await.len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn catalog_uses_provider_day_then_pins_every_page_and_physical_catalog() {
+        // Frozen counterexample to choosing the client's UTC day (2026-11-06 in the
+        // observed failure): the provider's default response instead says 2026-11-05.
+        const PROVIDER_DAY: &str = "2026-11-05";
+        for category_first in [false, true] {
+            let mock = MockSource::start().await;
+            let (first_path, first_parameter, first_id, next_path, next_parameter, next_id) =
+                if category_first {
+                    (
+                        "/category/series",
+                        "category_id",
+                        "125",
+                        "/release/series",
+                        "release_id",
+                        "53",
+                    )
+                } else {
+                    (
+                        "/release/series",
+                        "release_id",
+                        "53",
+                        "/category/series",
+                        "category_id",
+                        "125",
+                    )
+                };
+            mock.mount_expect(
+                &Route::get(first_path)
+                    .query(first_parameter, first_id)
+                    .query("offset", "0"),
+                catalog_page_at(
+                    1001,
+                    0,
+                    (0..CATALOG_PAGE_SIZE)
+                        .map(|i| catalog_row(&format!("A{i:04}"), "Gross Domestic Product"))
+                        .collect(),
+                    PROVIDER_DAY,
+                ),
+                1,
+            )
+            .await;
+            mock.mount_expect(
+                &Route::get(first_path)
+                    .query(first_parameter, first_id)
+                    .query("offset", "1000")
+                    .query("realtime_start", PROVIDER_DAY)
+                    .query("realtime_end", PROVIDER_DAY),
+                catalog_page_at(
+                    1001,
+                    1000,
+                    vec![catalog_row("A1000", "Gross Domestic Product")],
+                    PROVIDER_DAY,
+                ),
+                1,
+            )
+            .await;
+            mock.mount_expect(
+                &Route::get(next_path)
+                    .query(next_parameter, next_id)
+                    .query("offset", "0")
+                    .query("realtime_start", PROVIDER_DAY)
+                    .query("realtime_end", PROVIDER_DAY),
+                catalog_page_at(
+                    1,
+                    0,
+                    vec![catalog_row("Z", "Gross Domestic Product")],
+                    PROVIDER_DAY,
+                ),
+                1,
+            )
+            .await;
+            let rules = FredCatalogRules::parse(&format!(
+                "max_series=2000\nmax_catalog_series=1002\n[[rules]]\n{first_parameter}={first_id}\n\
+                 [[rules]]\n{next_parameter}={next_id}"
+            )).unwrap();
+            let adapter = FredAdapter::new(mock.base_url());
+            let found = adapter.discover_catalog(&test_ctx(), &rules).await.unwrap();
+            assert_eq!(found.len(), 1002);
+            let requests = mock.received_requests().await;
+            assert_eq!(
+                requests.len(),
+                3,
+                "the first catalog page also establishes the date; no probe"
+            );
+            let first_query = query_of(&requests[0]);
+            assert_eq!(param(&first_query, "realtime_start"), None);
+            assert_eq!(param(&first_query, "realtime_end"), None);
+            for request in &requests[1..] {
+                let query = query_of(request);
+                assert_eq!(param(&query, "realtime_start"), Some(PROVIDER_DAY));
+                assert_eq!(param(&query, "realtime_end"), Some(PROVIDER_DAY));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn catalog_rejects_invalid_or_changing_provider_day_without_publishing() {
+        for scenario in [
+            "missing_start",
+            "missing_end",
+            "malformed_start",
+            "malformed_end",
+            "unpadded_date",
+            "date_range",
+            "later_page",
+            "later_catalog",
+        ] {
+            let mock = MockSource::start().await;
+            let later_page = scenario == "later_page";
+            let later_catalog = scenario == "later_catalog";
+            if later_page || later_catalog {
+                mock.mount_expect(
+                    &Route::get("/release/series").query("offset", "0"),
+                    catalog_page(
+                        if later_page { 1001 } else { 1 },
+                        0,
+                        (0..if later_page { CATALOG_PAGE_SIZE } else { 1 })
+                            .map(|i| catalog_row(&format!("A{i:04}"), "Gross Domestic Product"))
+                            .collect(),
+                    ),
+                    1,
+                )
+                .await;
+            }
+            let mut body = serde_json::json!({
+                "realtime_start":"2026-11-05", "realtime_end":"2026-11-05",
+                "count":if later_page { 1001 } else { 1 },
+                "offset":if later_page { 1000 } else { 0 }, "limit":CATALOG_PAGE_SIZE,
+                "seriess":[catalog_row(if later_page { "A1000" } else { "Z" }, "Gross Domestic Product")]
+            });
+            match scenario {
+                "missing_start" => {
+                    body.as_object_mut().unwrap().remove("realtime_start");
+                }
+                "missing_end" => {
+                    body.as_object_mut().unwrap().remove("realtime_end");
+                }
+                "malformed_start" => body["realtime_start"] = serde_json::json!("2026-02-30"),
+                "malformed_end" => body["realtime_end"] = serde_json::json!("not-a-date"),
+                "unpadded_date" => {
+                    body["realtime_start"] = serde_json::json!("2026-1-5");
+                    body["realtime_end"] = serde_json::json!("2026-1-5");
+                }
+                "date_range" => body["realtime_end"] = serde_json::json!("2026-11-06"),
+                "later_page" | "later_catalog" => {
+                    body["realtime_start"] = serde_json::json!("2026-11-06");
+                    body["realtime_end"] = serde_json::json!("2026-11-06");
+                }
+                _ => unreachable!(),
+            }
+            mock.mount_expect(
+                &Route::get(if later_catalog {
+                    "/category/series"
+                } else {
+                    "/release/series"
+                })
+                .query("offset", if later_page { "1000" } else { "0" }),
+                Reply::json(body),
+                1,
+            )
+            .await;
+            let rules = FredCatalogRules::parse(
+                "max_series=2000\nmax_catalog_series=2000\n[[rules]]\nrelease_id=53\n\
+                 [[rules]]\ncategory_id=125",
+            )
+            .unwrap();
+            let adapter = FredAdapter::new(mock.base_url());
+            assert!(
+                adapter.discover_catalog(&test_ctx(), &rules).await.is_err(),
+                "{scenario}"
+            );
+            assert!(
+                adapter.catalog_scope().is_none(),
+                "{scenario} must not publish a partial snapshot"
+            );
+            assert_eq!(
+                mock.received_requests().await.len(),
+                if later_page || later_catalog { 2 } else { 1 }
+            );
         }
     }
 
@@ -3814,6 +4029,7 @@ frequencies = ["Quarterly", "Annual"]
                     include_str!("../../tests/fixtures/fred/series_gdp.json")
                 ).unwrap();
                 Reply::json_str(serde_json::json!({
+                    "realtime_start":"2026-11-05", "realtime_end":"2026-11-05",
                     "count":1, "offset":0, "limit":1000, "seriess":metadata["seriess"]
                 }).to_string())
             },
