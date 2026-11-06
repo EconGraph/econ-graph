@@ -34,8 +34,8 @@ import {
   ExpandMore,
 } from '@mui/icons-material';
 
-const LAST_UPDATED = 'October 26, 2026';
-const REPOSITORY_URL = 'https://github.com/EconGraph/econ-graph';
+const LAST_UPDATED = 'November 5, 2026';
+const PRIVACY_CONTACT_EMAIL = 'privacy@econgraph.com';
 
 const PrivacyPolicy: React.FC = () => {
   const sections = [
@@ -51,7 +51,8 @@ const PrivacyPolicy: React.FC = () => {
             }}
           >
             You can browse every chart and every public annotation on EconGraph without an account.
-            We store information about you only when you sign in.
+            When you sign in, we store the account information and content described below. If you
+            email us, we receive the information in your message.
           </Typography>
 
           <Typography variant='h6' component='h3' gutterBottom>
@@ -244,8 +245,7 @@ const PrivacyPolicy: React.FC = () => {
               marginBottom: '16px',
             }}
           >
-            We do not sell or share personal information. The parties involved in running the site
-            are:
+            We do not sell personal information. Services involved in running the site include:
           </Typography>
           <List dense>
             <ListItem>
@@ -258,6 +258,12 @@ const PrivacyPolicy: React.FC = () => {
               <ListItemText
                 primary='Our hosting provider'
                 secondary='Runs the servers and database that store the data described above'
+              />
+            </ListItem>
+            <ListItem>
+              <ListItemText
+                primary='Google Groups'
+                secondary='The privacy contact address uses Google Groups to forward email to our monitored mailbox'
               />
             </ListItem>
             <ListItem>
@@ -351,7 +357,7 @@ const PrivacyPolicy: React.FC = () => {
           EconGraph is an open-source economic data explorer. Browsing needs no account. If you sign
           in through a configured provider, we keep your basic profile and the annotations and
           comments you write. Annotations are private unless you make them public. We use no
-          trackers and share no personal information with third parties.
+          trackers. Sign-in, hosting, font and privacy-email services are described below.
         </Typography>
       </Paper>
 
@@ -387,12 +393,11 @@ const PrivacyPolicy: React.FC = () => {
             marginBottom: '16px',
           }}
         >
-          To ask about this policy, request a copy of your data or have your account deleted, open
-          an issue in the project repository at <Link href={REPOSITORY_URL}>{REPOSITORY_URL}</Link>.
-          For deletion, say that you want your EconGraph account and associated data removed. This
-          applies whether you signed in with Google or Facebook. Do not post passwords, access
-          tokens or other credentials. If your request involves personal details you would rather
-          not post publicly, say so in the issue and we will follow up privately.
+          To ask about this policy, request a copy of your data or have your account deleted, email{' '}
+          <Link href={'mailto:' + PRIVACY_CONTACT_EMAIL}>{PRIVACY_CONTACT_EMAIL}</Link>. For
+          deletion, say that you want your EconGraph account and associated data removed. This
+          applies regardless of your sign-in provider. Do not send passwords, access tokens or other
+          credentials.
         </Typography>
       </Paper>
 
