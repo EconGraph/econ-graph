@@ -15,5 +15,28 @@ configMapGenerator:
   namespace: econ-graph
   files:
   - backup-health.py
+# Grafana sidecar dashboards. The JSON uses Grafana $variables, so Flux substitution stays off.
+# Datasource uids: prometheus (chart default) and loki (grafana.additionalDataSources in
+# addons/monitoring/release.yaml); scripts/platform/test_dashboards.py checks both.
+- name: econgraph-crawler-dashboards
+  namespace: monitoring
+  files:
+  - dashboards/crawler-overview.json
+  - dashboards/crawler-politeness.json
+  - dashboards/sec-edgar-crawler.json
+  options:
+    labels:
+      grafana_dashboard: '1'
+    annotations:
+      kustomize.toolkit.fluxcd.io/substitute: disabled
+- name: econgraph-logs-dashboard
+  namespace: monitoring
+  files:
+  - dashboards/logging-dashboard.json
+  options:
+    labels:
+      grafana_dashboard: '1'
+    annotations:
+      kustomize.toolkit.fluxcd.io/substitute: disabled
 generatorOptions:
   disableNameSuffixHash: true

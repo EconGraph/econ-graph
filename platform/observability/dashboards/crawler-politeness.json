@@ -1,0 +1,104 @@
+{
+  "uid": "econgraph-crawler-politeness",
+  "title": "Crawler Politeness",
+  "description": "How hard the crawler worker (PodMonitor monitoring/econgraph-crawler) is pushing each upstream host and how hosts push back. source is the upstream URL host.",
+  "tags": ["econgraph", "crawler"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "source",
+        "label": "Source host",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "query": {"query": "label_values(econgraph_crawler_requests_total{job=\"monitoring/econgraph-crawler\"}, source)", "refId": "source"},
+        "definition": "label_values(econgraph_crawler_requests_total{job=\"monitoring/econgraph-crawler\"}, source)",
+        "refresh": 2,
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {"selected": true, "text": ["All"], "value": ["$__all"]},
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Request Rate by Host",
+      "description": "Replaces the legacy Request Delays panel: econgraph_crawler_request_delays_seconds is not emitted by the crawler.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum by (source) (rate(econgraph_crawler_requests_total{job=\"monitoring/econgraph-crawler\",source=~\"$source\"}[10m]))",
+          "legendFormat": "{{source}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Rate Limit Hits",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum by (source) (rate(econgraph_crawler_rate_limit_hits_total{job=\"monitoring/econgraph-crawler\",source=~\"$source\"}[15m]))",
+          "legendFormat": "{{source}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Responses by Status",
+      "description": "status is the HTTP status code, or timeout / error for transport failures.",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum by (status) (rate(econgraph_crawler_requests_total{job=\"monitoring/econgraph-crawler\",source=~\"$source\"}[10m]))",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Retries & Timeouts",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum by (source) (rate(econgraph_crawler_retries_total{job=\"monitoring/econgraph-crawler\",source=~\"$source\"}[15m]))",
+          "legendFormat": "retries: {{source}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum by (source) (rate(econgraph_crawler_timeouts_total{job=\"monitoring/econgraph-crawler\",source=~\"$source\"}[15m]))",
+          "legendFormat": "timeouts: {{source}}"
+        }
+      ]
+    }
+  ]
+}
