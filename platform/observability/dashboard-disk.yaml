@@ -1,0 +1,1477 @@
+# Grafana dashboard "EconGraph disk and capacity" (docs/deployment/HOST_DISK_MONITORING.md).
+# Provisioned by the chart's Grafana sidecar (label grafana_dashboard). Flux substitution is
+# disabled because the dashboard uses Grafana {{legend}} and PromQL $1.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: econgraph-disk-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: '1'
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  econgraph-disk.json: |
+    {
+      "uid": "econgraph-disk",
+      "title": "EconGraph disk and capacity",
+      "tags": [
+        "econgraph",
+        "disk"
+      ],
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "5m",
+      "time": {
+        "from": "now-7d",
+        "to": "now"
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Database volumes (CNPG: app 10Gi, data 100Gi, Keycloak 10Gi)",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Data + WAL as % of volume request",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 1,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "custom": {
+                "thresholdsStyle": {
+                  "mode": "line"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "100 * (sum by (pod) (cnpg_pg_database_size_bytes{namespace=\"econ-graph\"}) + on (pod) sum by (pod) (cnpg_collector_pg_wal{namespace=\"econ-graph\",value=\"size\"})) / on (pod) max by (pod) (label_replace(kube_persistentvolumeclaim_resource_requests_storage_bytes{namespace=\"econ-graph\"}, \"pod\", \"$1\", \"persistentvolumeclaim\", \"(.+)\"))",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "description": "local-path volumes share each worker's /var/mnt/postgres and do not enforce the request; this is the per-database budget (alert EconGraphPostgresVolumeOverRequest at 80%)."
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "Database and WAL size",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 1,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (pod) (cnpg_pg_database_size_bytes{namespace=\"econ-graph\"})",
+              "legendFormat": "{{pod}} databases",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (pod) (cnpg_collector_pg_wal{namespace=\"econ-graph\",value=\"size\"})",
+              "legendFormat": "{{pod}} WAL",
+              "refId": "B"
+            }
+          ],
+          "description": "WAL growing while databases do not usually means archiving to the object store has stalled."
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "Growth per day",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 1,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "deriv(sum by (pod) (cnpg_pg_database_size_bytes{namespace=\"econ-graph\"})[6h:5m]) * 86400",
+              "legendFormat": "{{pod}} databases",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "deriv(sum by (pod) (cnpg_collector_pg_wal{namespace=\"econ-graph\",value=\"size\"})[6h:5m]) * 86400",
+              "legendFormat": "{{pod}} WAL",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "row",
+          "title": "Prometheus (10Gi, 30d) and Loki (10Gi) volumes",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 9,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Prometheus TSDB size",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 10,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (pod) (prometheus_tsdb_storage_blocks_bytes)",
+              "legendFormat": "{{pod}} blocks",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (pod) (prometheus_tsdb_wal_storage_size_bytes)",
+              "legendFormat": "{{pod}} WAL",
+              "refId": "B"
+            }
+          ],
+          "description": "Against the 10Gi request; the volume itself is the shared worker data filesystem."
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Prometheus TSDB growth per day",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 10,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "deriv(sum by (pod) (prometheus_tsdb_storage_blocks_bytes + prometheus_tsdb_wal_storage_size_bytes)[6h:5m]) * 86400",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "PVC filesystem used % (kubelet)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 10,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "custom": {
+                "thresholdsStyle": {
+                  "mode": "line"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "100 * (1 - kubelet_volume_stats_available_bytes{job=\"kubelet\",metrics_path=\"/metrics\"} / kubelet_volume_stats_capacity_bytes{job=\"kubelet\",metrics_path=\"/metrics\"})",
+              "legendFormat": "{{namespace}}/{{persistentvolumeclaim}}",
+              "refId": "A"
+            }
+          ],
+          "description": "What KubePersistentVolumeFillingUp sees. On econgraph-local every PVC on a worker reports that worker's whole /var/mnt/postgres filesystem."
+        },
+        {
+          "id": 9,
+          "type": "row",
+          "title": "Node filesystems (Talos /var and worker /var/mnt/postgres)",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 18,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Used %",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 19,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "custom": {
+                "thresholdsStyle": {
+                  "mode": "line"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "100 * (1 - node_filesystem_avail_bytes{job=\"node-exporter\",mountpoint=~\"/var|/var/mnt/.+\"} / node_filesystem_size_bytes{job=\"node-exporter\",mountpoint=~\"/var|/var/mnt/.+\"})",
+              "legendFormat": "{{instance}} {{mountpoint}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "type": "timeseries",
+          "title": "Free",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 19,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "node_filesystem_avail_bytes{job=\"node-exporter\",mountpoint=~\"/var|/var/mnt/.+\"}",
+              "legendFormat": "{{instance}} {{mountpoint}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Days until full at the last day's rate",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 19,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "d"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "node_filesystem_avail_bytes{job=\"node-exporter\",mountpoint=~\"/var|/var/mnt/.+\"} / -(deriv(node_filesystem_avail_bytes{job=\"node-exporter\",mountpoint=~\"/var|/var/mnt/.+\"}[24h]) < 0) / 86400",
+              "legendFormat": "{{instance}} {{mountpoint}}",
+              "refId": "A"
+            }
+          ],
+          "description": "Only filesystems that are shrinking are shown."
+        },
+        {
+          "id": 13,
+          "type": "row",
+          "title": "Host libvirt pool (thin qcow2 VM disks)",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 27,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "Pool filesystem used %",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 28,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "custom": {
+                "thresholdsStyle": {
+                  "mode": "line"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "100 * (1 - econgraph_host_filesystem_avail_bytes{job=\"econgraph-host\",role=\"libvirt_pool\"} / econgraph_host_filesystem_size_bytes{job=\"econgraph-host\",role=\"libvirt_pool\"})",
+              "legendFormat": "{{pool}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 15,
+          "type": "timeseries",
+          "title": "Virtual vs allocated vs filesystem size",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 28,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "econgraph_libvirt_pool_volumes_capacity_bytes{job=\"econgraph-host\"}",
+              "legendFormat": "{{pool}} volumes virtual",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "econgraph_libvirt_pool_volumes_allocation_bytes{job=\"econgraph-host\"}",
+              "legendFormat": "{{pool}} volumes allocated",
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "econgraph_host_filesystem_size_bytes{job=\"econgraph-host\",role=\"libvirt_pool\"}",
+              "legendFormat": "{{pool}} filesystem size",
+              "refId": "C"
+            }
+          ],
+          "description": "Thin disks can grow to their virtual size; the fit gate checks only at VM creation."
+        },
+        {
+          "id": 16,
+          "type": "timeseries",
+          "title": "Overcommit headroom (free minus possible growth)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 28,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 0
+                  }
+                ]
+              },
+              "custom": {
+                "thresholdsStyle": {
+                  "mode": "line"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "econgraph_host_filesystem_avail_bytes{job=\"econgraph-host\",role=\"libvirt_pool\"} - on (job, instance, pool) (econgraph_libvirt_pool_volumes_capacity_bytes{job=\"econgraph-host\"} - econgraph_libvirt_pool_volumes_allocation_bytes{job=\"econgraph-host\"})",
+              "legendFormat": "{{pool}}",
+              "refId": "A"
+            }
+          ],
+          "description": "Below zero: the VMs can fill the pool (alert EconGraphLibvirtPoolOvercommitted)."
+        },
+        {
+          "id": 17,
+          "type": "timeseries",
+          "title": "Overcommit ratio (virtual / filesystem size)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 36,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "econgraph_libvirt_pool_volumes_capacity_bytes{job=\"econgraph-host\"} / on (job, instance, pool) econgraph_host_filesystem_size_bytes{job=\"econgraph-host\",role=\"libvirt_pool\"}",
+              "legendFormat": "{{pool}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 18,
+          "type": "timeseries",
+          "title": "Allocation growth per day",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 36,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "deriv(econgraph_libvirt_pool_volumes_allocation_bytes{job=\"econgraph-host\"}[6h]) * 86400",
+              "legendFormat": "{{pool}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 19,
+          "type": "row",
+          "title": "Host object store (backups, WAL, logs, Iceberg; only grows)",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 44,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 20,
+          "type": "timeseries",
+          "title": "Used %",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 45,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "custom": {
+                "thresholdsStyle": {
+                  "mode": "line"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "100 * (1 - econgraph_host_filesystem_avail_bytes{job=\"econgraph-host\",role=\"objectstore\"} / econgraph_host_filesystem_size_bytes{job=\"econgraph-host\",role=\"objectstore\"})",
+              "legendFormat": "{{mountpoint}} ({{device}})",
+              "refId": "A"
+            }
+          ],
+          "description": "btrfs free space is an estimate; see the btrfs allocation panel below for data/metadata."
+        },
+        {
+          "id": 21,
+          "type": "timeseries",
+          "title": "Used growth per day",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 45,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "-deriv(econgraph_host_filesystem_avail_bytes{job=\"econgraph-host\",role=\"objectstore\"}[24h]) * 86400",
+              "legendFormat": "{{mountpoint}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 22,
+          "type": "timeseries",
+          "title": "Days until full at the last day's rate",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 45,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "d"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "econgraph_host_filesystem_avail_bytes{job=\"econgraph-host\",role=\"objectstore\"} / -(deriv(econgraph_host_filesystem_avail_bytes{job=\"econgraph-host\",role=\"objectstore\"}[24h]) < 0) / 86400",
+              "legendFormat": "{{mountpoint}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 23,
+          "type": "row",
+          "title": "Host root, swap and exporter health",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 53,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 24,
+          "type": "timeseries",
+          "title": "Host root used %",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 54,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "custom": {
+                "thresholdsStyle": {
+                  "mode": "line"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "100 * (1 - econgraph_host_filesystem_avail_bytes{job=\"econgraph-host\",role=\"host_root\"} / econgraph_host_filesystem_size_bytes{job=\"econgraph-host\",role=\"host_root\"})",
+              "legendFormat": "{{mountpoint}} ({{device}})",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 25,
+          "type": "timeseries",
+          "title": "Host swap",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 54,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "node_memory_SwapTotal_bytes{job=\"econgraph-host\"} - node_memory_SwapFree_bytes{job=\"econgraph-host\"}",
+              "legendFormat": "used",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "node_memory_SwapTotal_bytes{job=\"econgraph-host\"}",
+              "legendFormat": "total",
+              "refId": "B"
+            }
+          ],
+          "description": "Worker VM memory may swap by design; control-plane VMs are capped at 1 GiB each."
+        },
+        {
+          "id": 26,
+          "type": "timeseries",
+          "title": "Host swap in/out",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 54,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "rate(node_vmstat_pswpin{job=\"econgraph-host\"}[5m])",
+              "legendFormat": "pages in/s",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "rate(node_vmstat_pswpout{job=\"econgraph-host\"}[5m])",
+              "legendFormat": "pages out/s",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 27,
+          "type": "timeseries",
+          "title": "All host filesystems (node_exporter)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 62,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 80
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "custom": {
+                "thresholdsStyle": {
+                  "mode": "line"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "100 * (1 - node_filesystem_avail_bytes{job=\"econgraph-host\",fstype!~\"tmpfs|ramfs\"} / node_filesystem_size_bytes{job=\"econgraph-host\",fstype!~\"tmpfs|ramfs\"})",
+              "legendFormat": "{{mountpoint}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 28,
+          "type": "timeseries",
+          "title": "btrfs allocation by block group",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 8,
+            "y": 62,
+            "w": 8,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (uuid, block_group_type) (node_btrfs_used_bytes{job=\"econgraph-host\"})",
+              "legendFormat": "{{uuid}} {{block_group_type}} used",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (uuid, block_group_type) (node_btrfs_size_bytes{job=\"econgraph-host\"})",
+              "legendFormat": "{{uuid}} {{block_group_type}} allocated",
+              "refId": "B"
+            }
+          ],
+          "description": "btrfs can run out of metadata space while df still shows free data space."
+        },
+        {
+          "id": 29,
+          "type": "stat",
+          "title": "Host check health",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 16,
+            "y": 62,
+            "w": 4,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "up{job=\"econgraph-host\"} or on () vector(0)",
+              "legendFormat": "exporter up",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 30,
+          "type": "stat",
+          "title": "Disk check age",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 20,
+            "y": 62,
+            "w": 4,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "time() - econgraph_host_disk_check_timestamp_seconds{job=\"econgraph-host\"}",
+              "legendFormat": "seconds",
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }

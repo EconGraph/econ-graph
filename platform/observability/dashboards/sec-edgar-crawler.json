@@ -1,0 +1,128 @@
+{
+  "uid": "econgraph-sec-edgar-crawler",
+  "title": "SEC EDGAR Crawler",
+  "description": "SEC work in the crawler worker (PodMonitor monitoring/econgraph-crawler): crawl_queue jobs for source SEC and HTTP metrics for crawler_type sec. The legacy econgraph_sec_* filing and XBRL metrics are not emitted, so those panels were replaced.",
+  "tags": ["econgraph", "crawler", "sec"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {"from": "now-24h", "to": "now"},
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "SEC Jobs by Kind and Outcome",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum by (kind, outcome) (rate(crawler_jobs_total{job=\"monitoring/econgraph-crawler\",source=\"SEC\"}[10m]))",
+          "legendFormat": "{{kind}} {{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "SEC Queue by Status",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "max by (status) (crawler_queue_items{job=\"monitoring/econgraph-crawler\",source=\"SEC\"})",
+          "legendFormat": "{{status}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "max(crawler_queue_failed_24h{job=\"monitoring/econgraph-crawler\",source=\"SEC\"})",
+          "legendFormat": "failed (24h)"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "SEC Request Duration (p95)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "histogram_quantile(0.95, sum by (le, source) (rate(econgraph_crawler_request_duration_seconds_bucket{job=\"monitoring/econgraph-crawler\",crawler_type=\"sec\"}[10m])))",
+          "legendFormat": "p95 {{source}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "SEC Responses by Status",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum by (status) (rate(econgraph_crawler_requests_total{job=\"monitoring/econgraph-crawler\",crawler_type=\"sec\"}[10m]))",
+          "legendFormat": "{{status}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum(rate(econgraph_crawler_rate_limit_hits_total{job=\"monitoring/econgraph-crawler\",crawler_type=\"sec\"}[10m]))",
+          "legendFormat": "rate limited"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "SEC Bytes Downloaded (rate)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "Bps"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "sum by (source) (rate(econgraph_crawler_bytes_downloaded_total{job=\"monitoring/econgraph-crawler\",crawler_type=\"sec\"}[10m]))",
+          "legendFormat": "{{source}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Since Last SEC Success / Failure",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "time() - max(crawler_last_success_timestamp_seconds{job=\"monitoring/econgraph-crawler\",source=\"SEC\"})",
+          "legendFormat": "since success"
+        },
+        {
+          "refId": "B",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "expr": "time() - max(crawler_last_failure_timestamp_seconds{job=\"monitoring/econgraph-crawler\",source=\"SEC\"})",
+          "legendFormat": "since failure"
+        }
+      ]
+    }
+  ]
+}
