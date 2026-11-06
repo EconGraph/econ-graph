@@ -369,3 +369,17 @@ tests:
   - eval_time: 30m
     alertname: CrawlerHighLatencyP95BySource
     exp_alerts: []
+- name: Branch discovery counters cannot trigger primary discovery alerts.
+  interval: 1m
+  input_series:
+  - series: crawler_catalog_guard_rejections_total{namespace="econ-graph-br-test", pod="b1", source="FRED", reason="mass_disappearance"}
+    values: 0x5 1x120
+  - series: crawler_series_lifecycle_transitions_total{namespace="econ-graph-br-test", pod="b1", source="FRED", status="retired"}
+    values: 0x5 1x120
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: CrawlerCatalogGuardRejected
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: CrawlerSeriesPublicationChanged
+    exp_alerts: []

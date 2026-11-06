@@ -247,7 +247,7 @@ spec:
   - name: crawler.discovery
     rules:
     - alert: CrawlerCatalogGuardRejected
-      expr: sum by (source, reason) (increase(crawler_catalog_guard_rejections_total[1h])) > 0
+      expr: sum by (source, reason) (increase(crawler_catalog_guard_rejections_total{namespace="econ-graph"}[1h])) > 0
       for: 1m
       labels:
         severity: warning
@@ -267,7 +267,7 @@ spec:
         description: A {{ $labels.source }} catalog lost more than 20% of the last accepted catalog and was not applied. Review it with `crawler accept-guarded-catalog --source {{ $labels.source }}` and accept it only if the upstream change is real (crawler coverage runbook).
 
     - alert: CrawlerSeriesPublicationChanged
-      expr: sum by (source, status) (increase(crawler_series_lifecycle_transitions_total{status=~"discontinued|missing_from_catalog|retired|superseded|restricted"}[1h])) > 0
+      expr: sum by (source, status) (increase(crawler_series_lifecycle_transitions_total{namespace="econ-graph", status=~"discontinued|missing_from_catalog|retired|superseded|restricted"}[1h])) > 0
       for: 1m
       labels:
         severity: info

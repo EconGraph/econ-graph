@@ -5,7 +5,7 @@ evaluation_interval: 1m
 tests:
 - interval: 1m
   input_series:
-  - series: crawler_catalog_guard_rejections_total{source="BEA",reason="volume"}
+  - series: crawler_catalog_guard_rejections_total{namespace="econ-graph",pod="w1",source="BEA",reason="volume"}
     values: 0x5 1x120
   alert_rule_test:
   - eval_time: 5m
@@ -30,7 +30,7 @@ tests:
     exp_alerts: []
 - interval: 1m
   input_series:
-  - series: crawler_catalog_guard_rejections_total{source="FRED",reason="mass_disappearance"}
+  - series: crawler_catalog_guard_rejections_total{namespace="econ-graph",pod="w1",source="FRED",reason="mass_disappearance"}
     values: 0x5 1x120
   alert_rule_test:
   - eval_time: 5m
@@ -55,7 +55,7 @@ tests:
     exp_alerts: []
 - interval: 1m
   input_series:
-  - series: crawler_series_lifecycle_transitions_total{source="FRED",status="retired"}
+  - series: crawler_series_lifecycle_transitions_total{namespace="econ-graph",pod="w1",source="FRED",status="retired"}
     values: 0x5 1x120
   alert_rule_test:
   - eval_time: 5m
@@ -78,7 +78,7 @@ tests:
     exp_alerts: []
 - interval: 1m
   input_series:
-  - series: crawler_series_lifecycle_transitions_total{source="FRED",status="active"}
+  - series: crawler_series_lifecycle_transitions_total{namespace="econ-graph",pod="w1",source="FRED",status="active"}
     values: 0+1x20
   alert_rule_test:
   - eval_time: 10m
