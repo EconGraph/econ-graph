@@ -1109,13 +1109,13 @@ mod tests {
             .collect::<Vec<_>>();
         mock.mount_expect(
             &Route::get("/release/series").query("offset", "0"),
-            Reply::json(json!({"count":100001,"offset":0,"limit":1000,"seriess":first})),
+            Reply::json(json!({"realtime_start":"2026-11-05","realtime_end":"2026-11-05","count":100001,"offset":0,"limit":1000,"seriess":first})),
             2,
         )
         .await;
         mock.mount_expect(
             &Route::get("/release/series").query("offset", "1000"),
-            Reply::json(json!({"count":100001,"offset":1001,"limit":1000,"seriess":[]})),
+            Reply::json(json!({"realtime_start":"2026-11-05","realtime_end":"2026-11-05","count":100001,"offset":1001,"limit":1000,"seriess":[]})),
             1,
         )
         .await;
@@ -1125,12 +1125,12 @@ mod tests {
         };
         let rule = &original.rules[0];
         let guarded = adapter
-            .catalog_rows(&test_ctx(), TEST_API_KEY, rule, &original, "2026-11-06", 0)
+            .catalog_rows(&test_ctx(), TEST_API_KEY, rule, &original, &mut None, 0)
             .await
             .unwrap_err();
         assert!(is_catalog_volume_guard(&guarded));
         let incomplete = adapter
-            .catalog_rows(&test_ctx(), TEST_API_KEY, rule, &effective, "2026-11-06", 0)
+            .catalog_rows(&test_ctx(), TEST_API_KEY, rule, &effective, &mut None, 0)
             .await
             .unwrap_err();
         assert!(!is_catalog_volume_guard(&incomplete));
@@ -1156,7 +1156,7 @@ mod tests {
                     .query("realtime_end", "2026-11-05")
                     .query("order_by", "series_id")
                     .query("sort_order", "asc"),
-                Reply::json(json!({"count":count,"offset":0,"limit":1,"seriess":[row("PUBLIC")]})),
+                Reply::json(json!({"realtime_start":"2026-11-05","realtime_end":"2026-11-05","count":count,"offset":0,"limit":1,"seriess":[row("PUBLIC")]})),
                 1,
             )
             .await;
@@ -1202,13 +1202,13 @@ mod tests {
         let rules = FredCatalogRules::parse(text).unwrap();
         mock.mount_expect(
             &Route::get("/release/series").query("release_id", "53"),
-            Reply::json(json!({"count":1000000,"offset":1,"limit":1,"seriess":[row("PUBLIC")]})),
+            Reply::json(json!({"realtime_start":"2026-11-05","realtime_end":"2026-11-05","count":1000000,"offset":1,"limit":1,"seriess":[row("PUBLIC")]})),
             1,
         )
         .await;
         mock.mount_expect(
             &Route::get("/release/series").query("release_id", "54"),
-            Reply::json(json!({"count":0,"offset":0,"limit":1,"seriess":[]})),
+            Reply::json(json!({"realtime_start":"2026-11-05","realtime_end":"2026-11-05","count":0,"offset":0,"limit":1,"seriess":[]})),
             1,
         )
         .await;
@@ -1251,7 +1251,7 @@ mod tests {
     }
     fn page(count: usize, offset: usize, rows: Vec<Value>) -> Reply {
         Reply::json_str(
-            json!({"count":count,"offset":offset,"limit":1000,"seriess":rows}).to_string(),
+            json!({"realtime_start":"2026-11-05","realtime_end":"2026-11-05","count":count,"offset":offset,"limit":1000,"seriess":rows}).to_string(),
         )
     }
     fn setup(dir: &Path, text: &str) -> (FredAdapter, FredCatalogRules, Arc<Recorder>) {
@@ -1302,6 +1302,16 @@ mod tests {
         let before = manifest(dir.path());
         assert_eq!(before["complete"], false);
         assert_eq!(before["selection_complete"], true);
+        assert_eq!(before["catalog_realtime"], "2026-11-05");
+        let requests = mock.received_requests().await;
+        let catalog_request = requests
+            .iter()
+            .find(|request| request.url.path() == "/release/series")
+            .unwrap();
+        assert!(!catalog_request
+            .url
+            .query_pairs()
+            .any(|(name, _)| name == "realtime_start" || name == "realtime_end"));
         rec.finish(None).unwrap();
         let report = manifest(dir.path());
         assert_eq!(report["complete"], true);
