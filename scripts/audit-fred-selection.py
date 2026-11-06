@@ -21,14 +21,14 @@ import tomllib
 HISTORY_SHA256 = '006745a4e19f2faca561cbc8ca8ae295365aa2afbb637a7bec32f5a2a22343a8'
 EXPORT_TEST = 'sources::fred::audit::authenticated_catalog_evidence'
 SCOPE_TEST = 'sources::fred::audit::authenticated_catalog_scope_counts'
-SCOPE_RULES_SHA256 = 'c9364a95a019170c7dac9133691387f46db921b66e8d1b5923d1d97dc488885a'
-FIXTURE_SHA256 = '0b723859ecb703c75158d59013b561b241a037cdac9a1647cbbb6c639e0f3dd7'
+SCOPE_RULES_SHA256 = 'f8a8db496f3f652f6f6b8db226c803bbb3e31ff0bc9cabedc86cec6bbb032aab'
+FIXTURE_SHA256 = 'a888df4c9aa2baace1522679c2d82ebb08f32c2b5d207e2f6cf2614c578889b3'
 FULL_BOUNDS = {'production_config_scan_guard': 20000, 'production_config_selected_guard': 500,
                'production_parser_scan_ceiling': 100000, 'production_parser_selected_ceiling': 10000,
                'test_only_scan_ceiling': 200000, 'test_only_selected_count_uncapped': True,
-               'conservative_catalog_page_ceiling': 270, 'include_lookup_ceiling': 30,
-               'ownership_lookup_ceiling': 2, 'conservative_logical_request_ceiling': 302,
-               'conservative_http_attempt_ceiling': 906, 'timeout_seconds': 1800,
+               'conservative_catalog_page_ceiling': 272, 'include_lookup_ceiling': 30,
+               'ownership_lookup_ceiling': 2, 'conservative_logical_request_ceiling': 304,
+               'conservative_http_attempt_ceiling': 912, 'timeout_seconds': 1800,
                'wrapper_timeout_seconds': 1830, 'requests_per_minute': 30}
 EXPORT_FILE = re.compile(r'(?:manifest\.json|(?:(?:release|category)-[0-9]+-[0-9]+|'
                          r'(?:series|ownership)-[0-9a-f]{64})\.(?:response-text|normalized)\.json)')
@@ -89,7 +89,7 @@ def copy_config(source, scratch):
     original = (source / 'catalog_selection/fred.toml').read_bytes()
     config = tomllib.loads(original.decode())
     if (config['max_catalog_series'], config['max_series'], len(config['rules']),
-            len(config['include'])) != (20000, 500, 84, 30):
+            len(config['include'])) != (20000, 500, 86, 30):
         raise ValueError('Reviewed configuration shape changed; audit needs review')
     if hashlib.sha256(original).hexdigest() != SCOPE_RULES_SHA256:
         raise ValueError('Frozen audit configuration changed')
@@ -131,7 +131,7 @@ def run(binary, data_dir, output, key, revision, timeout=1800):
             artifacts.update({'original-fred.toml': original, 'audit-fred.toml': copied})
             provenance.update(original_config_sha256=hashlib.sha256(original).hexdigest(),
                               audit_config_sha256=hashlib.sha256(copied).hexdigest(),
-                              rules=84, includes=30)
+                              rules=86, includes=30)
             command = [str(binary.resolve()), 'check-selection', '--source', 'FRED',
                        '--json', '--count-uncapped', '--rate-percent', '25']
             provenance['command'] = command
@@ -234,8 +234,8 @@ def collect_evidence(directory, output, key, revision, config_hash, scope_counts
             catalogs = manifest.get('catalogs')
             if (config_hash != SCOPE_RULES_SHA256 or manifest.get('mode') != 'scope_counts'
                     or manifest.get('complete') is not False or manifest.get('membership_complete') is not False
-                    or manifest.get('expected_catalogs') != 71 or not isinstance(catalogs, dict)
-                    or len(catalogs) != 71 or set(catalogs) != scope_catalogs
+                    or manifest.get('expected_catalogs') != 73 or not isinstance(catalogs, dict)
+                    or len(catalogs) != 73 or set(catalogs) != scope_catalogs
                     or manifest.get('production_scan_guard') != 20000
                     or manifest.get('production_selected_guard') != 500):
                 raise ValueError('invalid scope contract')
@@ -257,7 +257,7 @@ def collect_evidence(directory, output, key, revision, config_hash, scope_counts
                     or manifest.get('projected_catalog_rows') != rows
                     or manifest.get('projected_catalog_page_requests') != pages):
                 raise ValueError('invalid scope totals')
-            complete = manifest.get('counts_complete') is True and validated == 71
+            complete = manifest.get('counts_complete') is True and validated == 73
         else:
             original = manifest.get('original_scope_fingerprint')
             effective = manifest.get('effective_audit_scope_fingerprint')
@@ -267,7 +267,7 @@ def collect_evidence(directory, output, key, revision, config_hash, scope_counts
             if (config_hash != SCOPE_RULES_SHA256 or manifest.get('mode') != 'full_inventory'
                     or manifest.get('fixture_sha256') != FIXTURE_SHA256
                     or manifest.get('bounds') != FULL_BOUNDS
-                    or manifest.get('expected_positive_witnesses') != 40
+                    or manifest.get('expected_positive_witnesses') != 43
                     or not isinstance(original, str) or not isinstance(effective, str)
                     or not re.fullmatch('fred-catalog-v1:[0-9a-f]{64}', original)
                     or not re.fullmatch('fred-catalog-v1:[0-9a-f]{64}', effective)
@@ -278,7 +278,7 @@ def collect_evidence(directory, output, key, revision, config_hash, scope_counts
                 raise ValueError('invalid full inventory boundary')
             if manifest.get('witness_bindings_accepted') is True:
                 positives = manifest.get('positive_witnesses')
-                if (not isinstance(positives, list) or len(positives) != 40
+                if (not isinstance(positives, list) or len(positives) != 43
                         or not all(witness.get('verified') is True for witness in positives)):
                     raise ValueError('incomplete positive witnesses')
             complete = all(manifest.get(field) is True for field in
@@ -329,7 +329,7 @@ def run_exporter(binary, data_dir, output, key, revision, historical_csv, timeou
                 rules = tomllib.loads(copied.decode())['rules']
                 scope_catalogs = {f'release-{rule["release_id"]}' if 'release_id' in rule
                                   else f'category-{rule["category_id"]}' for rule in rules}
-                if len(scope_catalogs) != 71:
+                if len(scope_catalogs) != 73:
                     raise ValueError('frozen catalog count changed')
             report.update(original_config_sha256=hashlib.sha256(original).hexdigest(),
                           audit_config_sha256=config_hash)

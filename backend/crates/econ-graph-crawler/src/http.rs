@@ -328,7 +328,7 @@ impl Target {
         let mut failures = sink
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        // Full inventory permits at most906 HTTP attempts. Keep even diagnostic
+        // Full inventory permits at most912 HTTP attempts. Keep even diagnostic
         // storage bounded if a future test accidentally uses this outside it.
         if failures.len() < 1024 {
             failures.push(AuditHttpFailure {

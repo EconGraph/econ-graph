@@ -519,9 +519,9 @@ fn record_execution_diagnostics(
     })
 }
 
-// Frozen final 84-rule draft scope: this header-only measurement must never silently follow a
+// Frozen final 86-rule draft scope: this header-only measurement must never silently follow a
 // later rule expansion. It makes no production selection or membership decision.
-const SCOPE_RULES_SHA256: &str = "c9364a95a019170c7dac9133691387f46db921b66e8d1b5923d1d97dc488885a";
+const SCOPE_RULES_SHA256: &str = "f8a8db496f3f652f6f6b8db226c803bbb3e31ff0bc9cabedc86cec6bbb032aab";
 
 fn scope_groups(rules: &FredCatalogRules) -> Vec<Vec<usize>> {
     let mut groups: Vec<Vec<usize>> = Vec::new();
@@ -573,7 +573,7 @@ fn scope_recorder(
         "expected_catalogs":groups.len(),"validated_catalogs":0,
         "projected_catalog_rows":0,"projected_catalog_page_requests":0,
         "production_scan_guard":rules.max_catalog_series,"production_selected_guard":rules.max_series,
-        "logical_request_limit":71,"http_attempt_limit":213,"requests_per_minute":30,
+        "logical_request_limit":73,"http_attempt_limit":219,"requests_per_minute":30,
         "timeout_seconds":1800,"catalogs":catalogs
     }))?;
     Ok(recorder)
@@ -587,7 +587,7 @@ async fn scope_headers(
     realtime: &str,
 ) -> Result<bool, CrawlError> {
     let groups = scope_groups(rules);
-    if groups.len() > 71 {
+    if groups.len() > 73 {
         return Err(failed());
     }
     let mut all_valid = true;
@@ -707,9 +707,9 @@ async fn authenticated_catalog_scope_counts() {
             std::fs::read_to_string(data_dir().join(CATALOG_RULES_FILE)).map_err(|_| failed())?;
         let rules = FredCatalogRules::parse(&text)?;
         if digest(text.as_bytes()) != SCOPE_RULES_SHA256
-            || rules.rules.len() != 84
+            || rules.rules.len() != 86
             || rules.include.len() != 30
-            || scope_groups(&rules).len() != 71
+            || scope_groups(&rules).len() != 73
             || rules.max_catalog_series != 20000
             || rules.max_series != 500
         {
@@ -781,13 +781,13 @@ fn full_inventory_rules(
         .sum::<usize>();
     if digest(text.as_bytes()) != SCOPE_RULES_SHA256
         || digest(FIXTURE.as_bytes())
-            != "0b723859ecb703c75158d59013b561b241a037cdac9a1647cbbb6c639e0f3dd7"
-        || original.rules.len() != 84
+            != "a888df4c9aa2baace1522679c2d82ebb08f32c2b5d207e2f6cf2614c578889b3"
+        || original.rules.len() != 86
         || original.include.len() != 30
-        || scope_groups(&original).len() != 71
+        || scope_groups(&original).len() != 73
         || original.max_series != 500
         || original.max_catalog_series != 20000
-        || positives != 40
+        || positives != 43
         || fixture["families"].as_array().map_or(0, Vec::len) != 33
         || fixture["negative_identifier_witnesses"]
             .as_array()
@@ -815,27 +815,28 @@ fn full_inventory_manifest(
         s.report["audit_execution_fingerprint"] = json!(format!("fred-audit-run-v1:{}", digest(
             canonical(json!({"selection_scope":effective.fingerprint(),"scan_ceiling":200000,"count_uncapped":true}))
                 .to_string().as_bytes())));
-        s.report["expected_positive_witnesses"] = json!(40);
+        s.report["expected_positive_witnesses"] = json!(43);
         s.report["production_budget_accepted"] = json!(false);
         s.report["bounds"] = json!({
             "production_config_scan_guard":20000,"production_config_selected_guard":500,
             "production_parser_scan_ceiling":100000,"production_parser_selected_ceiling":10000,
             "test_only_scan_ceiling":200000,"test_only_selected_count_uncapped":true,
-            "conservative_catalog_page_ceiling":270,"include_lookup_ceiling":30,"ownership_lookup_ceiling":2,
-            "conservative_logical_request_ceiling":302,"conservative_http_attempt_ceiling":906,
+            "conservative_catalog_page_ceiling":272,"include_lookup_ceiling":30,"ownership_lookup_ceiling":2,
+            "conservative_logical_request_ceiling":304,"conservative_http_attempt_ceiling":912,
             "timeout_seconds":1800,"wrapper_timeout_seconds":1830,"requests_per_minute":30
         });
-        // Old authenticated evidence remains bound to its own 83-rule revision.
-        // The final84 rules share physical catalogs; this is topology reuse,
-        // never a claim that the old run evaluated the new predicates/witnesses.
+        // The prior full inventory covers only the old 71-catalog subset.
+        // The added release 342/63 catalogs have no measured counts here;
+        // neither this baseline nor its selected IDs establish current membership.
         s.report["dated_scope_baseline"] = json!({
-            "revision":"68b69191bef12408daf719112d1deec5ea1619af",
-            "rules_sha256":"825a4f835488b775a79dcd520eb6c4ad8a39bbc71e0ccdce8bca5fdcdc29f955",
-            "rules":83,"physical_catalogs":71,"catalog_realtime":"2026-11-05",
-            "projected_catalog_rows":149899,"projected_catalog_pages":204,
-            "projected_logical_requests_including_max_overrides":236,
-            "kind":"dated_physical_scope_estimate_not_current_membership_evidence",
-            "final84_rule_api_membership_verified_by_baseline":false
+            "revision":"52c3e8c80030c7b44b0752cd05c41b442b62444a",
+            "rules_sha256":"c9364a95a019170c7dac9133691387f46db921b66e8d1b5923d1d97dc488885a",
+            "rules":84,"physical_catalogs":71,"catalog_realtime":"2026-11-05",
+            "measured_catalog_rows":149899,"measured_catalog_pages":204,"selected_series":29731,
+            "current_physical_catalogs":73,"previous_catalogs_are_subset":true,
+            "new_catalogs":["release-342","release-63"],"new_catalog_counts_verified":false,
+            "kind":"dated_previous_subset_inventory_not_current_membership_evidence",
+            "current86_rule_api_membership_verified_by_baseline":false
         });
     })
 }
@@ -1030,7 +1031,7 @@ mod tests {
     }
 
     #[test]
-    fn full_inventory_override_is_test_only_and_preserves_production_guards_and_all40_witnesses() {
+    fn full_inventory_override_is_test_only_and_preserves_production_guards_and_all43_witnesses() {
         let text = include_str!("../../../data/catalog_selection/fred.toml");
         let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
         let (original, effective) = full_inventory_rules(text, &fixture).unwrap();
@@ -1064,15 +1065,15 @@ mod tests {
         .unwrap();
         full_inventory_manifest(&recorder, &original, &effective).unwrap();
         let report = manifest(directory.path());
-        assert_eq!(report["expected_positive_witnesses"], 40);
+        assert_eq!(report["expected_positive_witnesses"], 43);
         assert_eq!(report["bounds"]["production_config_scan_guard"], 20000);
         assert_eq!(report["bounds"]["production_parser_scan_ceiling"], 100000);
         assert_eq!(report["bounds"]["test_only_scan_ceiling"], 200000);
         assert_eq!(
             report["bounds"]["conservative_logical_request_ceiling"],
-            302
+            304
         );
-        assert_eq!(report["bounds"]["conservative_http_attempt_ceiling"], 906);
+        assert_eq!(report["bounds"]["conservative_http_attempt_ceiling"], 912);
         assert_eq!(
             report["original_scope_fingerprint"],
             report["effective_audit_scope_fingerprint"]
@@ -1081,16 +1082,25 @@ mod tests {
             report["scope_fingerprint"],
             report["original_scope_fingerprint"]
         );
-        assert_eq!(report["dated_scope_baseline"]["rules"], 83);
+        assert_eq!(report["dated_scope_baseline"]["rules"], 84);
+        assert_eq!(report["dated_scope_baseline"]["physical_catalogs"], 71);
         assert_eq!(
-            report["dated_scope_baseline"]["final84_rule_api_membership_verified_by_baseline"],
+            report["dated_scope_baseline"]["current_physical_catalogs"],
+            73
+        );
+        assert_eq!(
+            report["dated_scope_baseline"]["new_catalog_counts_verified"],
+            false
+        );
+        assert_eq!(
+            report["dated_scope_baseline"]["current86_rule_api_membership_verified_by_baseline"],
             false
         );
         assert_eq!(report["complete"], false);
         assert_eq!(report["production_budget_accepted"], false);
         assert!(!recorder.finish(Some("offline_partial")).unwrap());
         let partial = manifest(directory.path());
-        assert_eq!(partial["positive_witnesses"].as_array().unwrap().len(), 40);
+        assert_eq!(partial["positive_witnesses"].as_array().unwrap().len(), 43);
         assert!(partial["positive_witnesses"]
             .as_array()
             .unwrap()
@@ -1512,7 +1522,7 @@ mod tests {
         .unwrap();
         rec.finish(Some("offline_only")).unwrap();
         let report = manifest(dir.path());
-        assert_eq!(report["positive_witnesses"].as_array().unwrap().len(), 40);
+        assert_eq!(report["positive_witnesses"].as_array().unwrap().len(), 43);
         let negatives = report["synthetic_boundaries"].as_array().unwrap();
         assert_eq!(negatives.len(), 13);
         assert!(negatives.iter().all(|n| n["predicate_rejected"] == true

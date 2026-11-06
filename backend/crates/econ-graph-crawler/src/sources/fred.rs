@@ -2093,7 +2093,7 @@ mod tests {
     #[test]
     fn commercial_paper_full_title_preserves_all_rate_frequencies_and_history() {
         let (rules, fixture, keys) = coverage_proposal();
-        assert_eq!(rules.rules.len(), 84);
+        assert_eq!(rules.rules.len(), 86);
         assert_eq!(
             rules
                 .rules
@@ -2101,7 +2101,7 @@ mod tests {
                 .map(|r| (r.release_id, r.category_id))
                 .collect::<BTreeSet<_>>()
                 .len(),
-            71
+            73
         );
         assert_eq!(fixture["families"].as_array().unwrap().len(), 33);
         assert_eq!(
@@ -2111,7 +2111,7 @@ mod tests {
                 .iter()
                 .map(|f| f["positive_witnesses"].as_array().unwrap().len())
                 .sum::<usize>(),
-            40
+            43
         );
         assert_eq!((rules.max_series, rules.max_catalog_series), (500, 20000));
         let matching = |release, row: &CatalogSeries| {
@@ -2216,6 +2216,105 @@ mod tests {
             &row("FIN14AAAMT", "Commercial Paper Issue Volume", "Daily")
         )
         .is_empty());
+    }
+
+    #[tokio::test]
+    async fn gas_and_m2_releases_discover_new_products_and_agree_with_chunks() {
+        let (proposal, fixture, keys) = coverage_proposal();
+        let indexes = ["natural-gas-prices", "m2-related-series"]
+            .map(|key| keys.iter().position(|candidate| candidate == key).unwrap());
+        let blocks = include_str!("../../data/catalog_selection/fred.toml")
+            .split("[[rules]]")
+            .skip(1)
+            .collect::<Vec<_>>();
+        let mut text = "max_series=8\nmax_catalog_series=8\n".to_owned();
+        for (index, release) in indexes.into_iter().zip([342, 63]) {
+            let rule = &proposal.rules[index];
+            assert_eq!(rule.release_id, Some(release));
+            assert!(rule.category_id.is_none());
+            assert!(rule.title_contains.is_none());
+            assert!(rule.id_prefix.is_none());
+            assert!(rule.id_pattern.is_none());
+            assert!(rule.frequencies.is_empty());
+            text.push_str("\n[[rules]]\n");
+            text.push_str(blocks[index]);
+        }
+        for id in ["DHHNGSP", "MHHNGSP", "M2MSL"] {
+            assert!(!proposal.include.iter().any(|included| included == id));
+            assert!(!proposal
+                .expected_missing
+                .iter()
+                .any(|missing| missing == id));
+            let witness = fixture["families"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|family| family["positive_witnesses"].as_array().unwrap())
+                .find(|witness| witness["series_id"] == id)
+                .unwrap();
+            assert_eq!(witness["provenance"]["api_inventory_verified"], false);
+            assert_eq!(
+                witness["provenance"]["kind"],
+                "official_public_release_listing"
+            );
+        }
+        let row = |id: &str, title: &str, frequency: &str| serde_json::json!({"id":id,"title":title,"frequency":frequency});
+        // Provider-shaped fixtures: future products prove that membership is dynamic.
+        // Companion rows follow public listings; these are not authenticated API pages.
+        let gas = vec![
+            row("DHHNGSP", "Henry Hub Natural Gas Spot Price", "Daily"),
+            row("FUTURE_GAS", "A future gas-price product", "Annual"),
+            row("MHHNGSP", "Henry Hub Natural Gas Spot Price", "Monthly"),
+            row("WHHNGSP", "Henry Hub Natural Gas Spot Price", "Weekly"),
+        ];
+        let m2 = vec![
+            row("FUTURE_M2", "A future M2-related product", "Biweekly"),
+            row("M2MNS", "M2 Less Small Time Deposits", "Monthly"),
+            row("M2MOWN", "M2 Minus Own Rate (DISCONTINUED)", "Monthly"),
+            row("M2MSL", "M2 Less Small Time Deposits", "Monthly"),
+        ];
+        let mock = MockSource::start().await;
+        for (release, rows) in [(342, gas), (63, m2)] {
+            mock.mount_expect(
+                &Route::get("/release/series").query("release_id", release.to_string()),
+                catalog_page(rows.len(), 0, rows),
+                2,
+            )
+            .await;
+        }
+        let rules = FredCatalogRules::parse(&text).unwrap();
+        let adapter = FredAdapter::new(mock.base_url()).with_catalog_rules_text(&text);
+        let selected = adapter.select_catalog(&test_ctx(), &rules).await.unwrap();
+        assert_eq!(selected.scanned, 8);
+        assert_eq!(selected.rule_matches, [4, 4]);
+        assert_eq!(
+            selected
+                .found
+                .iter()
+                .map(|series| series.external_id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "DHHNGSP",
+                "FUTURE_GAS",
+                "FUTURE_M2",
+                "M2MNS",
+                "M2MOWN",
+                "M2MSL",
+                "MHHNGSP",
+                "WHHNGSP"
+            ]
+        );
+        assert_eq!(adapter.catalog_lifecycle().discontinued_ids, ["M2MOWN"]);
+        let Enumeration::Units { units, .. } =
+            adapter.enumerate_discovery(&test_ctx()).await.unwrap()
+        else {
+            panic!("FRED must enumerate individual series");
+        };
+        let chunk = adapter.discover_units(&test_ctx(), &units).await.unwrap();
+        assert_eq!(chunk.found, selected.found);
+        assert_eq!(chunk.lifecycle.discontinued_ids, ["M2MOWN"]);
+        assert_eq!(mock.received_requests().await.len(), 4);
+        mock.server().verify().await;
     }
 
     #[tokio::test]
@@ -2546,6 +2645,7 @@ mod tests {
                     witness["provenance"]["kind"].as_str(),
                     Some(
                         "official_public_series_page"
+                            | "official_public_release_listing"
                             | "existing_repository_metadata_fixture"
                             | "authenticated_api_catalog_page"
                     )

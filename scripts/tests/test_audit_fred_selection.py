@@ -161,8 +161,8 @@ class ExportAuditTests(unittest.TestCase):
                                                            'catalog_selection/fred.toml').read_bytes()).hexdigest(),
                         'historical': {'sha256': AUDIT.HISTORY_SHA256},
                         'mode': 'full_inventory', 'fixture_sha256': AUDIT.FIXTURE_SHA256,
-                        'bounds': AUDIT.FULL_BOUNDS.copy(), 'expected_positive_witnesses': 40,
-                        'positive_witnesses': [{'verified': True} for _ in range(40)],
+                        'bounds': AUDIT.FULL_BOUNDS.copy(), 'expected_positive_witnesses': 43,
+                        'positive_witnesses': [{'verified': True} for _ in range(43)],
                         'scope_fingerprint': 'fred-catalog-v1:' + 'a' * 64,
                         'original_scope_fingerprint': 'fred-catalog-v1:' + 'a' * 64,
                         'effective_audit_scope_fingerprint': 'fred-catalog-v1:' + 'a' * 64,
@@ -239,11 +239,11 @@ class ExportAuditTests(unittest.TestCase):
                 self.assertFalse((output / 'evidence/manifest.json').exists())
                 self.assertFalse((output / 'evidence/other.json').exists())
 
-    def test_full_inventory_requires_all40_and_separate_test_only_override(self):
+    def test_full_inventory_requires_all43_and_separate_test_only_override(self):
         def missing_witness(directory, manifest):
             manifest['positive_witnesses'].pop()
         def unverified(directory, manifest):
-            manifest['positive_witnesses'][39]['verified'] = False
+            manifest['positive_witnesses'][42]['verified'] = False
         def wrong_override(directory, manifest):
             manifest['bounds']['test_only_scan_ceiling'] = 200001
         def production_change(directory, manifest):
@@ -332,10 +332,10 @@ class ScopeCountsTests(unittest.TestCase):
             manifest = {'format': 1, 'mode': 'scope_counts', 'revision': REVISION,
                         'rules_sha256': AUDIT.SCOPE_RULES_SHA256, 'complete': False,
                         'membership_complete': False, 'counts_complete': True,
-                        'expected_catalogs': 71, 'validated_catalogs': 71,
+                        'expected_catalogs': 73, 'validated_catalogs': 73,
                         'production_scan_guard': 20000, 'production_selected_guard': 500,
-                        'catalogs': catalogs, 'projected_catalog_rows': 71 * 100858,
-                        'projected_catalog_page_requests': 71 * 101}
+                        'catalogs': catalogs, 'projected_catalog_rows': 73 * 100858,
+                        'projected_catalog_page_requests': 73 * 101}
             if mutation:
                 mutation(directory, manifest)
             (directory / 'manifest.json').write_text(json.dumps(manifest))
@@ -347,7 +347,7 @@ class ScopeCountsTests(unittest.TestCase):
         report = json.loads((root / 'out/runner-report.json').read_bytes())
         return status, report, root / 'out'
 
-    def test_all71_scope_counts_above_production_guard_succeed_without_membership_claim(self):
+    def test_all73_scope_counts_above_production_guard_succeed_without_membership_claim(self):
         with tempfile.TemporaryDirectory() as temporary:
             status, report, output = self.scope(Path(temporary))
             self.assertEqual(status, 0)
@@ -356,7 +356,7 @@ class ScopeCountsTests(unittest.TestCase):
             self.assertEqual(report['audit_catalog_guard'], 20000)
             manifest = json.loads((output / 'evidence/manifest.json').read_bytes())
             self.assertFalse(manifest['complete'])
-            self.assertEqual(manifest['projected_catalog_rows'], 7160918)
+            self.assertEqual(manifest['projected_catalog_rows'], 7362634)
             for name, digest in report['files_sha256'].items():
                 self.assertEqual(hashlib.sha256((output / 'evidence' / name).read_bytes()).hexdigest(), digest)
 
@@ -380,8 +380,8 @@ class ScopeCountsTests(unittest.TestCase):
     def test_partial_header_error_keeps_honest_checkpoint_and_failure(self):
         def partial(directory, manifest):
             next(iter(manifest['catalogs'].values())).update(status='provider_or_pagination')
-            manifest.update(counts_complete=False, validated_catalogs=70,
-                            projected_catalog_rows=70 * 100858, projected_catalog_page_requests=70 * 101)
+            manifest.update(counts_complete=False, validated_catalogs=72,
+                            projected_catalog_rows=72 * 100858, projected_catalog_page_requests=72 * 101)
         with tempfile.TemporaryDirectory() as temporary:
             status, report, output = self.scope(Path(temporary), partial, 101)
             self.assertEqual(status, 101)
