@@ -76,6 +76,7 @@ async fn mount_fred_titled(mock: &MockSource, gdp: &[String], suffix: &str) {
         &Route::get("/release/series").query("release_id", "53"),
         Reply::json_str(
             serde_json::json!({
+                "realtime_start": "2026-11-05", "realtime_end": "2026-11-05",
                 "count": rows.len(), "offset": 0, "limit": CATALOG_PAGE_SIZE, "seriess": rows
             })
             .to_string(),
