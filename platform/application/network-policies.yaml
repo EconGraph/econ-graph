@@ -692,3 +692,24 @@ spec:
       protocol: TCP
     - port: 57800
       protocol: TCP
+---
+# cloudflared (ECO-864) is not deployed on the platform yet; this admits the
+# PodMonitor econgraph-cloudflared to its metrics port once it is.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metrics-cloudflared
+spec:
+  podSelector:
+    matchLabels:
+      app: cloudflared
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - port: 2000
+      protocol: TCP

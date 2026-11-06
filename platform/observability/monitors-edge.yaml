@@ -65,3 +65,25 @@ spec:
   - port: management
     path: /idp/metrics
     interval: 30s
+---
+# cloudflared tunnel connector (k8s/manifests/cloudflared.yaml: pod label
+# app=cloudflared, container cloudflared, port "metrics" 2000). Not deployed on
+# the platform until ECO-864, so this selects nothing today; it exists so the
+# tunnel connection alert has cloudflared_tunnel_ha_connections once it is.
+# NetworkPolicy metrics-cloudflared admits the monitoring namespace on 2000.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: econgraph-cloudflared
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+    - econ-graph
+  selector:
+    matchLabels:
+      app: cloudflared
+  podMetricsEndpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
