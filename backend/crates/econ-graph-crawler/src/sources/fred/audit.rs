@@ -505,6 +505,20 @@ fn error_kind(error: &CrawlError) -> &'static str {
     }
 }
 
+fn record_execution_diagnostics(
+    recorder: &Arc<Recorder>,
+    http: &crate::http::HttpFetcher,
+    error: Option<&CrawlError>,
+) -> Result<(), CrawlError> {
+    let failures = http.take_audit_failures();
+    recorder.update(|s| {
+        s.report["http_failures"] = json!(failures);
+        s.report["selection_error_category"] = json!(error.map(CrawlError::kind));
+        s.report["http_diagnostic_policy"] =
+            json!("numeric_status_and_static_identifiers_only_no_urls_values_or_provider_text");
+    })
+}
+
 // Frozen final 84-rule draft scope: this header-only measurement must never silently follow a
 // later rule expansion. It makes no production selection or membership decision.
 const SCOPE_RULES_SHA256: &str = "c9364a95a019170c7dac9133691387f46db921b66e8d1b5923d1d97dc488885a";
@@ -733,6 +747,7 @@ async fn authenticated_catalog_scope_counts() {
             Ok(Err(_)) => (false, "scope_failed"),
             Err(_) => (false, "timeout"),
         };
+        record_execution_diagnostics(&recorder, &checker.ctx.http, None)?;
         recorder.update(|s| {
             s.report["counts_complete"] = json!(complete);
             s.report["status"] = json!(status);
@@ -889,6 +904,14 @@ async fn authenticated_catalog_evidence() {
             Ok(Err(error)) => Some(error_kind(error)),
             Err(_) => Some("timeout"),
         };
+        record_execution_diagnostics(
+            &recorder,
+            &checker.ctx.http,
+            match &result {
+                Ok(Err(error)) => Some(error),
+                _ => None,
+            },
+        )?;
         if !recorder.finish(reason)? {
             return Err(failed());
         }
@@ -904,6 +927,107 @@ async fn authenticated_catalog_evidence() {
 mod tests {
     use super::*;
     use crate::testkit::{test_ctx, MockSource, Reply, Route, TEST_API_KEY};
+
+    #[tokio::test]
+    async fn audit_http_diagnostics_keep_numeric_status_and_static_parameter_enums_only() {
+        for (status, category, message, parameter) in [
+            (
+                400,
+                "permanent",
+                "Bad Request. The value for variable realtime_end is invalid. DO_NOT_PERSIST",
+                Some("realtime_end"),
+            ),
+            (403, "auth", "DO_NOT_PERSIST access refused", None),
+            (
+                400,
+                "permanent",
+                "Bad Request. Variable unknown_private_field is invalid. DO_NOT_PERSIST",
+                None,
+            ),
+        ] {
+            let mock = MockSource::start().await;
+            mock.mount_expect(
+                &Route::get("/release/series"),
+                Reply::json(json!({"error_code":status,"error_message":message}))
+                    .with_status(status),
+                1,
+            )
+            .await;
+            let directory = tempfile::tempdir().unwrap();
+            let (mut adapter, rules, recorder) = setup(directory.path(), rules_text());
+            adapter.base_url = mock.base_url();
+            let ctx = test_ctx();
+            let error = adapter.select_catalog(&ctx, &rules).await.unwrap_err();
+            record_execution_diagnostics(&recorder, &ctx.http, Some(&error)).unwrap();
+            assert!(!recorder.finish(Some(error_kind(&error))).unwrap());
+            let report = manifest(directory.path());
+            let failures = report["http_failures"].as_array().unwrap();
+            assert_eq!(failures.len(), 1);
+            assert_eq!(failures[0]["http_status"], status);
+            assert_eq!(failures[0]["error_category"], category);
+            assert_eq!(failures[0]["endpoint"], "release_series");
+            assert_eq!(failures[0]["provider_named_parameter"], json!(parameter));
+            assert_eq!(report["selection_error_category"], category);
+            assert!(failures[0]["request_parameter_names"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("api_key")));
+            let bytes = std::fs::read(directory.path().join("manifest.json")).unwrap();
+            let text = String::from_utf8(bytes).unwrap();
+            assert!(!text.contains(TEST_API_KEY));
+            assert!(!text.contains("DO_NOT_PERSIST"));
+            assert!(!text.contains("http://"));
+            assert!(!text.contains("unknown_private_field"));
+            assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+            assert_eq!(mock.received_requests().await.len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn audit_http_diagnostics_omit_encoded_credential_error_bodies_before_any_artifact() {
+        let unicode = TEST_API_KEY
+            .chars()
+            .map(|c| format!("\\u{:04x}", c as u32))
+            .collect::<String>();
+        let percent = TEST_API_KEY
+            .bytes()
+            .map(|b| format!("%{b:02X}"))
+            .collect::<String>();
+        for status in [400, 403] {
+            for spelling in [
+                TEST_API_KEY.to_owned(),
+                unicode.clone(),
+                percent.clone(),
+                unicode.replace('\\', "\\\\"),
+            ] {
+                let mock = MockSource::start().await;
+                mock.mount_expect(&Route::get("/release/series"),
+                    Reply::json(json!({"error_code":status,"error_message":format!("DO_NOT_PERSIST {spelling}")}))
+                        .with_status(status),1).await;
+                let directory = tempfile::tempdir().unwrap();
+                let (mut adapter, rules, recorder) = setup(directory.path(), rules_text());
+                adapter.base_url = mock.base_url();
+                let ctx = test_ctx();
+                let error = adapter.select_catalog(&ctx, &rules).await.unwrap_err();
+                record_execution_diagnostics(&recorder, &ctx.http, Some(&error)).unwrap();
+                assert!(!recorder.finish(Some(error_kind(&error))).unwrap());
+                let report = manifest(directory.path());
+                assert_eq!(report["http_failures"][0]["http_status"], status);
+                assert_eq!(
+                    report["http_failures"][0]["reason"],
+                    "credential_echo_body_omitted"
+                );
+                assert!(report["http_failures"][0]["provider_named_parameter"].is_null());
+                assert_eq!(report["complete"], false);
+                let text = std::fs::read_to_string(directory.path().join("manifest.json")).unwrap();
+                assert!(crate::http::audit_text_is_safe(&text, TEST_API_KEY));
+                assert!(!text.contains("DO_NOT_PERSIST"));
+                assert!(!text.contains(&spelling));
+                assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+                assert_eq!(mock.received_requests().await.len(), 1);
+            }
+        }
+    }
 
     #[test]
     fn full_inventory_override_is_test_only_and_preserves_production_guards_and_all40_witnesses() {

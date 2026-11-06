@@ -155,7 +155,37 @@ pub enum ConditionalText {
 #[derive(Clone, Debug)]
 pub struct HttpFetcher {
     inner: Arc<Inner>,
+    #[cfg(test)]
+    audit_failures: Arc<std::sync::Mutex<Vec<AuditHttpFailure>>>,
 }
+
+/// Opt-in audit evidence: only numeric status and static enum strings. Never a
+/// provider message, query value, URL, key, response body or reqwest error.
+#[cfg(test)]
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct AuditHttpFailure {
+    pub http_status: Option<u16>,
+    pub error_category: &'static str,
+    pub endpoint: &'static str,
+    pub request_parameter_names: Vec<&'static str>,
+    pub provider_named_parameter: Option<&'static str>,
+    pub reason: &'static str,
+}
+
+#[cfg(test)]
+const AUDIT_PARAMETER_NAMES: &[&str] = &[
+    "release_id",
+    "category_id",
+    "series_id",
+    "file_type",
+    "limit",
+    "offset",
+    "order_by",
+    "sort_order",
+    "realtime_start",
+    "realtime_end",
+    "api_key",
+];
 
 #[derive(Debug)]
 struct Inner {
@@ -168,6 +198,8 @@ struct Inner {
 
 /// One logical request, prepared once and replayed for each attempt.
 struct Target {
+    #[cfg(test)]
+    audit_failures: Option<Arc<std::sync::Mutex<Vec<AuditHttpFailure>>>>,
     source: SourceId,
     method: Method,
     url: Url,
@@ -209,6 +241,8 @@ impl Target {
         let mut secrets = secrets_of(&url);
         secrets.extend(body.as_deref().map(body_secrets).unwrap_or_default());
         Ok(Self {
+            #[cfg(test)]
+            audit_failures: None,
             source,
             method,
             redacted: redact_url(&url),
@@ -233,6 +267,79 @@ impl Target {
 
     fn record_error(&self, err: &CrawlError) {
         CRAWLER_METRICS.record_error(&self.crawler_type, &self.host, err.kind());
+    }
+
+    #[cfg(test)]
+    fn audit_failure(
+        &self,
+        status: Option<u16>,
+        category: &'static str,
+        body: Option<&str>,
+        static_reason: Option<&'static str>,
+    ) {
+        let Some(sink) = &self.audit_failures else {
+            return;
+        };
+        let endpoint = match self.url.path() {
+            "/fred/release/series" | "/release/series" => "release_series",
+            "/fred/category/series" | "/category/series" => "category_series",
+            "/fred/series" | "/series" => "series_metadata",
+            "/fred/series/release" | "/series/release" => "series_release_ownership",
+            _ => "unknown",
+        };
+        let unsafe_body = body.is_some_and(|text| {
+            self.secrets
+                .iter()
+                .any(|secret| !audit_text_is_safe(text, secret))
+        });
+        let parameter = if unsafe_body {
+            None
+        } else {
+            body.and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+                .and_then(|value| value["error_message"].as_str().map(str::to_ascii_lowercase))
+                .and_then(|message| {
+                    AUDIT_PARAMETER_NAMES.iter().copied().find(|name| {
+                        // FRED documents "Variable api_key" / "value for variable api_key".
+                        // Export only a known identifier, never the surrounding wording/value.
+                        let needle = format!("variable {name}");
+                        message.find(&needle).is_some_and(|position| {
+                            message[position + needle.len()..]
+                                .chars()
+                                .next()
+                                .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '_')
+                        })
+                    })
+                })
+        };
+        let reason = if unsafe_body {
+            "credential_echo_body_omitted"
+        } else if let Some(reason) = static_reason {
+            reason
+        } else if parameter.is_some() {
+            "provider_named_parameter"
+        } else {
+            "unknown"
+        };
+        let request_parameter_names = AUDIT_PARAMETER_NAMES
+            .iter()
+            .copied()
+            .filter(|expected| self.url.query_pairs().any(|(name, _)| name == *expected))
+            .collect();
+        let mut failures = sink
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Full inventory permits at most906 HTTP attempts. Keep even diagnostic
+        // storage bounded if a future test accidentally uses this outside it.
+        if failures.len() < 1024 {
+            failures.push(AuditHttpFailure {
+                http_status: status,
+                error_category: category,
+                endpoint,
+                request_parameter_names,
+                provider_named_parameter: parameter,
+                reason,
+            });
+        }
     }
 }
 
@@ -262,6 +369,8 @@ impl HttpFetcher {
             .collect();
         let limiter = SourceRateLimiter::new(&policies)?;
         Ok(Self {
+            #[cfg(test)]
+            audit_failures: Arc::new(std::sync::Mutex::new(Vec::new())),
             inner: Arc::new(Inner {
                 client,
                 config,
@@ -569,19 +678,47 @@ impl HttpFetcher {
         query: &[(&str, &str)],
         record: impl FnOnce(&str) -> Result<(), CrawlError>,
     ) -> Result<T, CrawlError> {
-        let target = Target::new(source, Method::GET, url, query, None, true)?;
-        let text = self.execute(&target).await?.body;
+        let mut target = Target::new(source, Method::GET, url, query, None, true)?;
+        target.audit_failures = Some(Arc::clone(&self.audit_failures));
+        let response = self.execute(&target).await?;
+        let status = response.status.as_u16();
+        let text = response.body;
         if target
             .secrets
             .iter()
             .any(|secret| !audit_text_is_safe(&text, secret))
         {
+            target.audit_failure(
+                Some(status),
+                "parse",
+                None,
+                Some("credential_echo_body_omitted"),
+            );
             return Err(CrawlError::Parse(
                 "audit response omitted: credential echo".into(),
             ));
         }
         record(&text)?;
-        decode(&target, &text)
+        let result = decode(&target, &text);
+        if let Err(ref error) = result {
+            target.audit_failure(
+                Some(status),
+                error.kind(),
+                None,
+                Some("response_decode_failed"),
+            );
+        }
+        result
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_audit_failures(&self) -> Vec<AuditHttpFailure> {
+        std::mem::take(
+            &mut *self
+                .audit_failures
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
 
     /// POST `body` as JSON to `url` and deserialize the JSON response.
@@ -702,6 +839,8 @@ impl HttpFetcher {
                 format!("{}: {}", target.context(), snippet(&body, &target.secrets))
             };
             let err = CrawlError::from_status(status, retry_after, context);
+            #[cfg(test)]
+            target.audit_failure(Some(status.as_u16()), err.kind(), Some(&body), None);
             self.record_request(target, status.as_str(), start);
             if status == StatusCode::TOO_MANY_REQUESTS
                 || matches!(err, CrawlError::RateLimited { .. })
@@ -767,6 +906,17 @@ impl HttpFetcher {
             CRAWLER_METRICS.record_timeout(&target.crawler_type, &target.host);
         }
         target.record_error(&err);
+        #[cfg(test)]
+        target.audit_failure(
+            None,
+            err.kind(),
+            None,
+            Some(if is_timeout {
+                "transport_timeout"
+            } else {
+                "transport_error"
+            }),
+        );
         err
     }
 }
