@@ -85,6 +85,7 @@ repos:
       - id: end-of-file-fixer
         exclude: '^(.*\.md|.*\.txt|.*\.mp4|.*\.aiff|.*\.wav)$'
       - id: check-yaml
+        args: [--allow-multiple-documents]  # Kubernetes manifests hold several documents
       - id: check-json
         exclude: '^(frontend|admin-frontend)/package.*\.json$|^admin-frontend/.*\.json$'  # package.json can have comments, admin-frontend has issues
       - id: check-toml

@@ -27,6 +27,10 @@ spec:
         namespace: flux-system
       reconcileStrategy: ChartVersion
   values:
+    # Cilium replaces kube-proxy (addons/cilium kubeProxyReplacement), so there is no
+    # kube-proxy to scrape and the chart's KubeProxyDown alert would always fire.
+    kubeProxy:
+      enabled: false
     grafana:
       admin:
         existingSecret: grafana-admin
