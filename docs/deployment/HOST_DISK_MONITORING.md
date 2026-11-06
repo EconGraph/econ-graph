@@ -83,8 +83,10 @@ created. `econgraph_libvirt_pool_volumes_capacity_bytes` minus
 `econgraph_libvirt_pool_volumes_allocation_bytes` is how much the disks can still
 grow. When that is more than the pool filesystem's free space,
 `EconGraphLibvirtPoolOvercommitted` fires: if the guests fill their disks, libvirt
-pauses the VMs. Pools that share one filesystem are each compared with the same
-free space, so check the dashboard's headroom panel for the total.
+pauses the VMs. The alert and dashboard headroom are calculated per pool. Pools
+that share a filesystem are each compared with the same free space; their
+potential growth is not combined. Sum that growth manually when assessing shared
+filesystem headroom. Filesystem free-space alerts still cover actual usage.
 
 ### btrfs free space
 
