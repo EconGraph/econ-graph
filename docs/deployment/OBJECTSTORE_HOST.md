@@ -132,6 +132,12 @@ continues the other snapshots and pool copies, and publishes fresh status. It ne
 the empty underlying object-store mount point as successful coverage. Restore/cutover still
 requires the separate SQL catalog/object consistency and CNPG recovery gates.
 
+## Disk space
+
+The object store only grows. The host disk check reports its filesystem to
+Prometheus and alerts at 80% used or a predicted fill within 7 days; see
+[host disk monitoring](HOST_DISK_MONITORING.md).
+
 ## Local verification
 
 ```sh

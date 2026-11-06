@@ -1,0 +1,180 @@
+# Disk and capacity alerts (docs/deployment/HOST_DISK_MONITORING.md).
+#
+# Host series come from the host's node_exporter (job econgraph-host, see
+# scrape-host.yaml) and its textfile disk check
+# (scripts/host/host-disk-check.sh). Cluster series come from the chart's
+# node-exporter DaemonSet, CNPG and kube-state-metrics. The chart's own
+# KubePersistentVolumeFillingUp and NodeFilesystem* alerts stay on; these add
+# the host, earlier thresholds, and a per-database budget that the shared
+# local-path volume cannot enforce.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: econgraph-disk
+  namespace: monitoring
+  labels:
+    release: monitoring
+  annotations:
+    # PromQL label_replace uses $1 and templates use $labels.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  groups:
+  - name: econgraph-disk-host
+    rules:
+    - alert: EconGraphHostExporterDown
+      expr: up{job="econgraph-host"} == 0 or absent(up{job="econgraph-host"})
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: Prometheus cannot scrape the host's node_exporter, so host disk, object store
+          and libvirt pool space are unwatched
+        description: Check econgraph-node-exporter.service on the host, its listen address
+          (HOST_EXPORTER_TARGET) and the host firewall.
+    - alert: EconGraphHostDiskCheckStale
+      expr: |-
+        (time() - econgraph_host_disk_check_timestamp_seconds{job="econgraph-host"} > 600)
+        or
+        (up{job="econgraph-host"} == 1 unless on (job, instance) econgraph_host_disk_check_timestamp_seconds{job="econgraph-host"})
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: The host disk check has not written fresh results for 10 minutes
+        description: Check econgraph-host-disk-check.timer and journalctl -u econgraph-host-disk-check
+          on the host.
+    - alert: EconGraphHostDiskPathMissing
+      expr: econgraph_host_filesystem_present{job="econgraph-host"} == 0
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: 'The host disk check cannot measure {{ $labels.role }} {{ $labels.path }}{{ $labels.pool
+          }}'
+        description: The path is not mounted, df failed, or virsh failed for the pool; its space
+          is unwatched.
+    - alert: EconGraphLibvirtPoolsNotReported
+      expr: |-
+        econgraph_libvirt_up{job="econgraph-host"} == 0
+        or
+        (econgraph_libvirt_up{job="econgraph-host"} == 1
+          unless on (job, instance) econgraph_host_filesystem_present{job="econgraph-host",role="libvirt_pool"})
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: The host disk check reports no libvirt storage pool
+        description: virsh -c qemu:///system pool-list failed or listed no active pool, so VM
+          disk space is unwatched.
+    - alert: EconGraphHostFilesystemAlmostFull
+      expr: |-
+        (1 - econgraph_host_filesystem_avail_bytes{job="econgraph-host"}
+          / econgraph_host_filesystem_size_bytes{job="econgraph-host"}) * 100 > 80
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: 'Host {{ $labels.role }} filesystem {{ $labels.mountpoint }}{{ $labels.pool }} is
+          {{ printf "%.0f" $value }}% used'
+        description: Everything runs on this one host; a full libvirt pool pauses the VMs and a
+          full object store stops backups, WAL archiving and logs.
+    - alert: EconGraphHostFilesystemAlmostFull
+      expr: |-
+        (1 - econgraph_host_filesystem_avail_bytes{job="econgraph-host"}
+          / econgraph_host_filesystem_size_bytes{job="econgraph-host"}) * 100 > 90
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: 'Host {{ $labels.role }} filesystem {{ $labels.mountpoint }}{{ $labels.pool }} is
+          {{ printf "%.0f" $value }}% used'
+        description: Everything runs on this one host; a full libvirt pool pauses the VMs and a
+          full object store stops backups, WAL archiving and logs.
+    - alert: EconGraphHostFilesystemFillingUp
+      expr: |-
+        predict_linear(econgraph_host_filesystem_avail_bytes{job="econgraph-host"}[24h], 7 * 86400) < 0
+        and
+        econgraph_host_filesystem_size_bytes{job="econgraph-host"} > 0
+      for: 1h
+      labels:
+        severity: warning
+      annotations:
+        summary: 'Host {{ $labels.role }} filesystem {{ $labels.mountpoint }}{{ $labels.pool }} will
+          be full within 7 days at the last day''s rate'
+    - alert: EconGraphLibvirtPoolOvercommitted
+      expr: |-
+        (econgraph_libvirt_pool_volumes_capacity_bytes{job="econgraph-host"}
+          - econgraph_libvirt_pool_volumes_allocation_bytes{job="econgraph-host"})
+        > on (job, instance, pool)
+        econgraph_host_filesystem_avail_bytes{job="econgraph-host",role="libvirt_pool"}
+      for: 1h
+      labels:
+        severity: warning
+      annotations:
+        summary: 'libvirt pool {{ $labels.pool }}: its thin VM disks can still grow by {{ $value
+          | humanize1024 }}B, more than the pool filesystem has free'
+        description: VM disks are thin qcow2 files and the fit gate checks space only when a VM is
+          created. If guests fill their disks the pool runs out and libvirt pauses the VMs. Free
+          host space or shrink planned growth.
+    - alert: EconGraphHostSwapAlmostFull
+      expr: |-
+        (1 - node_memory_SwapFree_bytes{job="econgraph-host"} / node_memory_SwapTotal_bytes{job="econgraph-host"}) * 100 > 80
+        and
+        node_memory_SwapTotal_bytes{job="econgraph-host"} > 0
+      for: 30m
+      labels:
+        severity: warning
+      annotations:
+        summary: 'Host swap is {{ printf "%.0f" $value }}% used'
+        description: Worker VM memory may swap by design; when swap runs out the host kernel starts
+          killing processes, which may be VMs.
+  - name: econgraph-disk-cluster
+    rules:
+    - alert: EconGraphNodeVolumeAlmostFull
+      expr: |-
+        (1 - node_filesystem_avail_bytes{job="node-exporter",mountpoint=~"/var|/var/mnt/.+"}
+          / node_filesystem_size_bytes{job="node-exporter",mountpoint=~"/var|/var/mnt/.+"}) * 100 > 80
+        and
+        node_filesystem_readonly{job="node-exporter",mountpoint=~"/var|/var/mnt/.+"} == 0
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: 'Node {{ $labels.instance }} {{ $labels.mountpoint }} is {{ printf "%.0f" $value
+          }}% used'
+        description: On workers /var/mnt/postgres holds every econgraph-local volume (PostgreSQL
+          and WAL, Prometheus, Loki, Grafana); local-path volumes share it and their requested
+          sizes are not enforced. /var is the Talos ephemeral partition (images, logs, etcd).
+    - alert: EconGraphNodeVolumeFillingUp
+      expr: |-
+        predict_linear(node_filesystem_avail_bytes{job="node-exporter",mountpoint=~"/var|/var/mnt/.+"}[24h], 7 * 86400) < 0
+        and
+        node_filesystem_readonly{job="node-exporter",mountpoint=~"/var|/var/mnt/.+"} == 0
+      for: 1h
+      labels:
+        severity: warning
+      annotations:
+        summary: 'Node {{ $labels.instance }} {{ $labels.mountpoint }} will be full within 7 days
+          at the last day''s rate'
+    - alert: EconGraphPostgresVolumeOverRequest
+      expr: |-
+        (
+          sum by (namespace, pod) (cnpg_pg_database_size_bytes{namespace="econ-graph"})
+          + on (namespace, pod)
+          sum by (namespace, pod) (cnpg_collector_pg_wal{namespace="econ-graph",value="size"})
+        )
+        / on (namespace, pod)
+        max by (namespace, pod) (
+          label_replace(kube_persistentvolumeclaim_resource_requests_storage_bytes{namespace="econ-graph"},
+            "pod", "$1", "persistentvolumeclaim", "(.+)")
+        )
+        * 100 > 80
+      for: 30m
+      labels:
+        severity: warning
+      annotations:
+        summary: 'PostgreSQL {{ $labels.pod }} data and WAL use {{ printf "%.0f" $value }}% of its
+          volume request'
+        description: The econgraph-local volumes share one filesystem per worker and do not enforce
+          the requested size, so this is the only per-database budget check. Growing WAL usually
+          means archiving to the object store has stalled.
