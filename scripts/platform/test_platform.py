@@ -342,11 +342,16 @@ class PlatformTests(unittest.TestCase):
         self.assertEqual(routes[('alertname = "Watchdog"',)]['receiver'], 'healthchecks')
         self.assertLessEqual(int(routes[('alertname = "Watchdog"',)]['repeat_interval'].rstrip('m')), 2)
         self.assertEqual(routes[('alertname = "InfoInhibitor"',)]['receiver'], 'null')
-        self.assertEqual(len(config['inhibit_rules']), 4)
+        self.assertEqual(len(config['inhibit_rules']), 5)
+        # A failing Slack integration must silence Watchdog so the dead-man's switch alarms.
+        self.assertIn({'source_matchers': ['alertname =~ "AlertmanagerFailedToSendAlerts|AlertmanagerClusterFailedToSendAlerts"', 'integration = "slack"'],
+                       'target_matchers': ['alertname = "Watchdog"']}, config['inhibit_rules'])
+        self.assertIn('.Alerts.Firing', receivers['slack']['slack_configs'][0]['text'])
         # Flux postBuild substitution would rewrite dollar expressions in Go templates.
         self.assertNotIn('$', yaml.safe_dump(config))
-        for path in (ROOT / 'platform').rglob('*.yaml'):
-            if not path.name.endswith('.sops.yaml'):
+        roots = ['platform', 'infra', 'k8s', 'scripts', 'ci', 'docs', '.github']
+        for path in [p for r in roots for p in (ROOT / r).rglob('*') if p.is_file() and p.suffix in {'.yaml', '.yml', '.json', '.md', '.py', '.sh', '.tf'}]:
+            if not path.name.endswith('.sops.yaml') and path.resolve() != Path(__file__).resolve():
                 for host in ['hooks.slack.com', 'hc-ping.com', 'healthchecks.io/ping']:
                     self.assertNotIn(host, path.read_text(), path)
 

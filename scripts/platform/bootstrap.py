@@ -18,6 +18,7 @@ REQUIRED_KEYS = {('monitoring', 'alertmanager-receivers'): {'slack-webhook-url',
 
 
 def check_encrypted_inputs(secret_docs):
+    """Raise ValueError unless every required deployment Secret is SOPS-encrypted and has its required keys."""
     actual = set()
     for document in secret_docs:
         if document.get('kind') != 'Secret' or not document.get('sops'):
