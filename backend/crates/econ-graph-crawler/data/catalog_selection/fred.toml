@@ -50,7 +50,7 @@ include = [
 expected_missing = ["WPU00000000", "CAPUTLG2211S1"]
 exclude = []
 
-# 83 candidate rules fit within the bounded 128-rule parser ceiling.
+# 84 candidate rules fit within the bounded 128-rule parser ceiling.
 
 # rule: national-accounts; families: 01,02,15,16
 # NIPA components, income/profits, trade and PCE detail; the GDP-title-only rule was insufficient.
@@ -189,9 +189,17 @@ release_id = 378
 id_pattern = "EFFR[A-Z0-9]*"
 
 # rule: commercial-paper; families: 08
+# Modern and discontinued commercial/finance paper rates; excludes volume/outstanding.
 [[rules]]
 release_id = 86
-id_pattern = "(?:DCPF|DCPN|CPF|CPN)[A-Z0-9]+"
+id_pattern = "(?:H0)?RIFSPP[A-Z0-9]+"
+
+# rule: commercial-paper-h15; families: 08
+# H.15 commercial and finance paper rates, including discontinued offering rates.
+# Titles admit provider ID changes; shared release 18 is still walked once.
+[[rules]]
+release_id = 18
+title_contains = "paper"
 
 # rule: sofr; families: 08
 [[rules]]

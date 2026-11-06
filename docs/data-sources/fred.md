@@ -47,6 +47,11 @@ NBER recession indicator (`USREC`) and probes for two previously curated retired
 It remains a draft: its inherited 500-series/20,000-row limits deliberately block acceptance
 until complete API membership and crawl costs establish suitable operating bounds.
 Fixture matches do not establish that the proposed scope can run within those limits.
+Commercial and finance paper rates retain release 86 `RIFSPP` and discontinued
+`H0RIFSPP` IDs plus release 18 H.15 products through separate predicates. H.15 selects
+titles containing `paper`, including weekly, annual and discontinued offering rates;
+the shared H.15 catalog is fetched once.
+These distinct IDs do not have their histories merged.
 `expected_missing` explicitly exempts those known retired
 probes from the unexpected-missing warning, while keeping their lifecycle evidence. An
 ordinary included id that disappears still raises the warning. Existing stored series

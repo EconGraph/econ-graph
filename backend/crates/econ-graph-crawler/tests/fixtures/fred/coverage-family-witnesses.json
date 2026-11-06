@@ -245,8 +245,16 @@
       ]
     },
     {
-      "key": "sofr",
+      "key": "commercial-paper-h15",
       "index": 28,
+      "release_id": 18,
+      "families": [
+        8
+      ]
+    },
+    {
+      "key": "sofr",
+      "index": 29,
       "release_id": 445,
       "families": [
         8
@@ -254,7 +262,7 @@
     },
     {
       "key": "sofr-averages-index",
-      "index": 29,
+      "index": 30,
       "release_id": 483,
       "families": [
         8
@@ -262,7 +270,7 @@
     },
     {
       "key": "overnight-bank-funding",
-      "index": 30,
+      "index": 31,
       "release_id": 375,
       "families": [
         8
@@ -270,7 +278,7 @@
     },
     {
       "key": "reserve-balance-interest",
-      "index": 31,
+      "index": 32,
       "release_id": 185,
       "families": [
         8
@@ -278,7 +286,7 @@
     },
     {
       "key": "temporary-open-market",
-      "index": 32,
+      "index": 33,
       "release_id": 379,
       "families": [
         8
@@ -286,7 +294,7 @@
     },
     {
       "key": "money-stock-reserves",
-      "index": 33,
+      "index": 34,
       "release_id": 21,
       "families": [
         10,
@@ -295,7 +303,7 @@
     },
     {
       "key": "fed-balance-sheet",
-      "index": 34,
+      "index": 35,
       "release_id": 20,
       "families": [
         10,
@@ -304,7 +312,7 @@
     },
     {
       "key": "money-velocity",
-      "index": 35,
+      "index": 36,
       "release_id": 193,
       "families": [
         10,
@@ -313,7 +321,7 @@
     },
     {
       "key": "real-money-stock",
-      "index": 36,
+      "index": 37,
       "release_id": 301,
       "families": [
         11
@@ -321,7 +329,7 @@
     },
     {
       "key": "lending-standards",
-      "index": 37,
+      "index": 38,
       "release_id": 191,
       "families": [
         12
@@ -329,7 +337,7 @@
     },
     {
       "key": "delinquencies-chargeoffs",
-      "index": 38,
+      "index": 39,
       "release_id": 231,
       "families": [
         12
@@ -337,7 +345,7 @@
     },
     {
       "key": "consumer-credit",
-      "index": 39,
+      "index": 40,
       "release_id": 14,
       "families": [
         8,
@@ -346,7 +354,7 @@
     },
     {
       "key": "all-commercial-bank-credit",
-      "index": 40,
+      "index": 41,
       "release_id": 22,
       "families": [
         12
@@ -354,7 +362,7 @@
     },
     {
       "key": "household-debt-service",
-      "index": 41,
+      "index": 42,
       "release_id": 89,
       "families": [
         12
@@ -362,7 +370,7 @@
     },
     {
       "key": "financial-account-concepts",
-      "index": 42,
+      "index": 43,
       "release_id": 52,
       "families": [
         12
@@ -370,7 +378,7 @@
     },
     {
       "key": "residential-construction",
-      "index": 43,
+      "index": 44,
       "release_id": 27,
       "families": [
         13,
@@ -379,7 +387,7 @@
     },
     {
       "key": "new-residential-sales",
-      "index": 44,
+      "index": 45,
       "release_id": 97,
       "families": [
         13,
@@ -388,7 +396,7 @@
     },
     {
       "key": "vacancy-homeownership",
-      "index": 45,
+      "index": 46,
       "release_id": 296,
       "families": [
         13,
@@ -397,7 +405,7 @@
     },
     {
       "key": "construction-spending",
-      "index": 46,
+      "index": 47,
       "release_id": 229,
       "families": [
         14
@@ -405,7 +413,7 @@
     },
     {
       "key": "national-house-prices",
-      "index": 47,
+      "index": 48,
       "release_id": 171,
       "families": [
         13,
@@ -414,7 +422,7 @@
     },
     {
       "key": "international-trade",
-      "index": 48,
+      "index": 49,
       "release_id": 51,
       "families": [
         15,
@@ -423,7 +431,7 @@
     },
     {
       "key": "international-transactions",
-      "index": 49,
+      "index": 50,
       "release_id": 49,
       "families": [
         15,
@@ -432,14 +440,6 @@
     },
     {
       "key": "daily-exchange-rates",
-      "index": 50,
-      "release_id": 17,
-      "families": [
-        16
-      ]
-    },
-    {
-      "key": "daily-nominal-dollar",
       "index": 51,
       "release_id": 17,
       "families": [
@@ -447,15 +447,15 @@
       ]
     },
     {
-      "key": "monthly-exchange-rates",
+      "key": "daily-nominal-dollar",
       "index": 52,
-      "release_id": 15,
+      "release_id": 17,
       "families": [
         16
       ]
     },
     {
-      "key": "monthly-nominal-dollar",
+      "key": "monthly-exchange-rates",
       "index": 53,
       "release_id": 15,
       "families": [
@@ -463,8 +463,16 @@
       ]
     },
     {
-      "key": "real-dollar",
+      "key": "monthly-nominal-dollar",
       "index": 54,
+      "release_id": 15,
+      "families": [
+        16
+      ]
+    },
+    {
+      "key": "real-dollar",
+      "index": 55,
       "release_id": 245,
       "families": [
         16
@@ -472,14 +480,6 @@
     },
     {
       "key": "wdi-major-country-gdp",
-      "index": 55,
-      "release_id": 234,
-      "families": [
-        16
-      ]
-    },
-    {
-      "key": "wdi-real-gdp-per-capita",
       "index": 56,
       "release_id": 234,
       "families": [
@@ -487,7 +487,7 @@
       ]
     },
     {
-      "key": "wdi-inflation",
+      "key": "wdi-real-gdp-per-capita",
       "index": 57,
       "release_id": 234,
       "families": [
@@ -495,8 +495,16 @@
       ]
     },
     {
-      "key": "treasury-debt-holdings",
+      "key": "wdi-inflation",
       "index": 58,
+      "release_id": 234,
+      "families": [
+        16
+      ]
+    },
+    {
+      "key": "treasury-debt-holdings",
+      "index": 59,
       "release_id": 80,
       "families": [
         17,
@@ -505,7 +513,7 @@
     },
     {
       "key": "debt-fiscal-gdp-ratios",
-      "index": 59,
+      "index": 60,
       "release_id": 263,
       "families": [
         17,
@@ -514,7 +522,7 @@
     },
     {
       "key": "annual-fiscal-budget",
-      "index": 60,
+      "index": 61,
       "release_id": 81,
       "families": [
         17,
@@ -523,7 +531,7 @@
     },
     {
       "key": "monthly-treasury",
-      "index": 61,
+      "index": 62,
       "release_id": 363,
       "families": [
         18
@@ -531,7 +539,7 @@
     },
     {
       "key": "industrial-production-capacity",
-      "index": 62,
+      "index": 63,
       "release_id": 13,
       "families": [
         19,
@@ -540,7 +548,7 @@
     },
     {
       "key": "manufacturers-orders-inventories",
-      "index": 63,
+      "index": 64,
       "release_id": 95,
       "families": [
         19,
@@ -549,7 +557,7 @@
     },
     {
       "key": "manufacturing-trade-sales",
-      "index": 64,
+      "index": 65,
       "release_id": 25,
       "families": [
         19,
@@ -558,7 +566,7 @@
     },
     {
       "key": "advance-retail",
-      "index": 65,
+      "index": 66,
       "release_id": 9,
       "families": [
         19,
@@ -567,7 +575,7 @@
     },
     {
       "key": "retail-sector-detail",
-      "index": 66,
+      "index": 67,
       "release_id": 436,
       "families": [
         19,
@@ -576,7 +584,7 @@
     },
     {
       "key": "real-retail",
-      "index": 67,
+      "index": 68,
       "release_id": 92,
       "families": [
         20
@@ -584,7 +592,7 @@
     },
     {
       "key": "retail-ecommerce",
-      "index": 68,
+      "index": 69,
       "release_id": 179,
       "families": [
         20
@@ -592,7 +600,7 @@
     },
     {
       "key": "motor-vehicles",
-      "index": 69,
+      "index": 70,
       "release_id": 93,
       "families": [
         20
@@ -600,7 +608,7 @@
     },
     {
       "key": "transportation-services",
-      "index": 70,
+      "index": 71,
       "release_id": 349,
       "families": [
         20
@@ -608,7 +616,7 @@
     },
     {
       "key": "state-unemployment-sa",
-      "index": 71,
+      "index": 72,
       "release_id": 112,
       "families": [
         22
@@ -616,7 +624,7 @@
     },
     {
       "key": "state-unemployment-nsa",
-      "index": 72,
+      "index": 73,
       "release_id": 112,
       "families": [
         23
@@ -624,7 +632,7 @@
     },
     {
       "key": "state-participation-sa",
-      "index": 73,
+      "index": 74,
       "release_id": 446,
       "families": [
         24
@@ -632,7 +640,7 @@
     },
     {
       "key": "state-nonfarm-employment",
-      "index": 74,
+      "index": 75,
       "release_id": 112,
       "families": [
         25
@@ -640,7 +648,7 @@
     },
     {
       "key": "state-manufacturing-employment",
-      "index": 75,
+      "index": 76,
       "release_id": 112,
       "families": [
         26
@@ -648,7 +656,7 @@
     },
     {
       "key": "state-real-gdp",
-      "index": 76,
+      "index": 77,
       "release_id": 140,
       "families": [
         27
@@ -656,7 +664,7 @@
     },
     {
       "key": "state-per-capita-income",
-      "index": 77,
+      "index": 78,
       "release_id": 110,
       "families": [
         28
@@ -664,7 +672,7 @@
     },
     {
       "key": "state-real-household-income",
-      "index": 78,
+      "index": 79,
       "release_id": 249,
       "families": [
         29
@@ -672,7 +680,7 @@
     },
     {
       "key": "state-population",
-      "index": 79,
+      "index": 80,
       "release_id": 118,
       "families": [
         30
@@ -680,7 +688,7 @@
     },
     {
       "key": "state-all-transactions-hpi",
-      "index": 80,
+      "index": 81,
       "release_id": 171,
       "families": [
         31
@@ -688,7 +696,7 @@
     },
     {
       "key": "state-building-permits",
-      "index": 81,
+      "index": 82,
       "release_id": 148,
       "families": [
         32
@@ -696,7 +704,7 @@
     },
     {
       "key": "regional-all-items-cpi",
-      "index": 82,
+      "index": 83,
       "release_id": 10,
       "families": [
         33
@@ -965,6 +973,7 @@
         "interest-rate-spreads",
         "effective-federal-funds",
         "commercial-paper",
+        "commercial-paper-h15",
         "sofr",
         "sofr-averages-index",
         "overnight-bank-funding",
@@ -990,10 +999,250 @@
           "matching_rule_keys": [
             "sofr"
           ]
+        },
+        {
+          "series_id": "RIFSPPFAAD90NB",
+          "title": "90-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "release_id": 86,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/RIFSPPFAAD90NB",
+            "retrieved_on": "2026-11-05",
+            "fields": "Official series title; Frequency field; Release field. Canonical release 86 also links this series from its public listing.",
+            "api_inventory_verified": false,
+            "note": "Official public metadata cross-checked against this complete authenticated catalog page. The global audit stopped at its scan guard; complete global membership and vintage equivalence are not claimed.",
+            "public_html_hash_available": false,
+            "api_catalog_membership_verified": true,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 86,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 202,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:23.304861110+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-86-0.response-text.json",
+              "raw_sha256": "d1b03ae95532c1892888552885ee74e2552c80a1f09990266bd576aa1cb8db0a",
+              "normalized_path": "evidence/release-86-0.normalized.json",
+              "normalized_sha256": "5ddbf1b612afb5a457121090868036acc32fb6df2a30167d21ae86078286101d",
+              "global_inventory_complete": false
+            }
+          },
+          "matching_rule_keys": [
+            "commercial-paper"
+          ]
+        },
+        {
+          "series_id": "DCPF3M",
+          "title": "90-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "release_id": 18,
+          "provenance": {
+            "kind": "official_public_series_page",
+            "url": "https://fred.stlouisfed.org/series/DCPF3M",
+            "retrieved_on": "2026-11-05",
+            "fields": "Official series title; Frequency field; Release field naming H.15 Selected Interest Rates.",
+            "api_inventory_verified": false,
+            "note": "Official public metadata cross-checked against this complete authenticated catalog page. The global audit stopped at its scan guard; complete global membership and vintage equivalence are not claimed.",
+            "public_html_hash_available": false,
+            "api_catalog_membership_verified": true,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 18,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 270,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:15.566421697+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-18-0.response-text.json",
+              "raw_sha256": "e7cc95d3ce97a8d6bf2a604ea349b8d9d89a1e8cc8354f62bae0eb71c1a0b48e",
+              "normalized_path": "evidence/release-18-0.normalized.json",
+              "normalized_sha256": "b54947a7765872850f4423500af665df16cf6537fbe4771b2bc657f6dcbeb8c4",
+              "global_inventory_complete": false
+            }
+          },
+          "matching_rule_keys": [
+            "commercial-paper-h15"
+          ]
+        },
+        {
+          "series_id": "WCPF3M",
+          "title": "90-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Weekly, Ending Friday",
+          "release_id": 18,
+          "provenance": {
+            "kind": "authenticated_api_catalog_page",
+            "public_series_url": "https://fred.stlouisfed.org/series/WCPF3M",
+            "retrieved_on": "2026-11-05",
+            "fields": "seriess id, title and frequency from the complete, validated release-18 catalog page.",
+            "api_catalog_membership_verified": true,
+            "api_inventory_verified": false,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 18,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 270,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:15.566421697+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-18-0.response-text.json",
+              "raw_sha256": "e7cc95d3ce97a8d6bf2a604ea349b8d9d89a1e8cc8354f62bae0eb71c1a0b48e",
+              "normalized_path": "evidence/release-18-0.normalized.json",
+              "normalized_sha256": "b54947a7765872850f4423500af665df16cf6537fbe4771b2bc657f6dcbeb8c4",
+              "global_inventory_complete": false
+            },
+            "note": "This complete physical catalog is verified at its pinned date; the global inventory remains incomplete. Discontinued metadata is retained as lifecycle evidence."
+          },
+          "matching_rule_keys": [
+            "commercial-paper-h15"
+          ]
+        },
+        {
+          "series_id": "RIFSPPFAAD90NA",
+          "title": "90-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Annual",
+          "release_id": 18,
+          "provenance": {
+            "kind": "authenticated_api_catalog_page",
+            "public_series_url": "https://fred.stlouisfed.org/series/RIFSPPFAAD90NA",
+            "retrieved_on": "2026-11-05",
+            "fields": "seriess id, title and frequency from the complete, validated release-18 catalog page.",
+            "api_catalog_membership_verified": true,
+            "api_inventory_verified": false,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 18,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 270,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:15.566421697+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-18-0.response-text.json",
+              "raw_sha256": "e7cc95d3ce97a8d6bf2a604ea349b8d9d89a1e8cc8354f62bae0eb71c1a0b48e",
+              "normalized_path": "evidence/release-18-0.normalized.json",
+              "normalized_sha256": "b54947a7765872850f4423500af665df16cf6537fbe4771b2bc657f6dcbeb8c4",
+              "global_inventory_complete": false
+            },
+            "note": "This complete physical catalog is verified at its pinned date; the global inventory remains incomplete. Discontinued metadata is retained as lifecycle evidence."
+          },
+          "matching_rule_keys": [
+            "commercial-paper-h15"
+          ]
+        },
+        {
+          "series_id": "DCP30",
+          "title": "1-Month Commercial Paper Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "release_id": 18,
+          "provenance": {
+            "kind": "authenticated_api_catalog_page",
+            "public_series_url": "https://fred.stlouisfed.org/series/DCP30",
+            "retrieved_on": "2026-11-05",
+            "fields": "seriess id, title and frequency from the complete, validated release-18 catalog page.",
+            "api_catalog_membership_verified": true,
+            "api_inventory_verified": false,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 18,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 270,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:15.566421697+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-18-0.response-text.json",
+              "raw_sha256": "e7cc95d3ce97a8d6bf2a604ea349b8d9d89a1e8cc8354f62bae0eb71c1a0b48e",
+              "normalized_path": "evidence/release-18-0.normalized.json",
+              "normalized_sha256": "b54947a7765872850f4423500af665df16cf6537fbe4771b2bc657f6dcbeb8c4",
+              "global_inventory_complete": false
+            },
+            "note": "This complete physical catalog is verified at its pinned date; the global inventory remains incomplete. Discontinued metadata is retained as lifecycle evidence."
+          },
+          "matching_rule_keys": [
+            "commercial-paper-h15"
+          ]
+        },
+        {
+          "series_id": "H0RIFSPPFM01NB",
+          "title": "1-Month Finance Paper Placed Directly: Average Offering Rate Quoted on Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "release_id": 86,
+          "provenance": {
+            "kind": "authenticated_api_catalog_page",
+            "public_series_url": "https://fred.stlouisfed.org/series/H0RIFSPPFM01NB",
+            "retrieved_on": "2026-11-05",
+            "fields": "seriess id, title and frequency from the complete, validated release-86 catalog page.",
+            "api_catalog_membership_verified": true,
+            "api_inventory_verified": false,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 86,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 202,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:23.304861110+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-86-0.response-text.json",
+              "raw_sha256": "d1b03ae95532c1892888552885ee74e2552c80a1f09990266bd576aa1cb8db0a",
+              "normalized_path": "evidence/release-86-0.normalized.json",
+              "normalized_sha256": "5ddbf1b612afb5a457121090868036acc32fb6df2a30167d21ae86078286101d",
+              "global_inventory_complete": false
+            },
+            "note": "This complete physical catalog is verified at its pinned date; the global inventory remains incomplete. Discontinued metadata is retained as lifecycle evidence."
+          },
+          "matching_rule_keys": [
+            "commercial-paper"
+          ]
+        },
+        {
+          "series_id": "H15H0RIFSPPFM01NB",
+          "title": "1-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "release_id": 18,
+          "provenance": {
+            "kind": "authenticated_api_catalog_page",
+            "public_series_url": "https://fred.stlouisfed.org/series/H15H0RIFSPPFM01NB",
+            "retrieved_on": "2026-11-05",
+            "fields": "seriess id, title and frequency from the complete, validated release-18 catalog page.",
+            "api_catalog_membership_verified": true,
+            "api_inventory_verified": false,
+            "authenticated_catalog_evidence": {
+              "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+              "catalog_kind": "release",
+              "release_id": 18,
+              "catalog_realtime": "2026-11-05",
+              "catalog_complete": true,
+              "catalog_count": 270,
+              "page_offset": 0,
+              "retrieved_at": "2026-11-05T16:44:15.566421697+00:00",
+              "raw_representation": "response_text_utf8_not_http_wire",
+              "raw_path": "evidence/release-18-0.response-text.json",
+              "raw_sha256": "e7cc95d3ce97a8d6bf2a604ea349b8d9d89a1e8cc8354f62bae0eb71c1a0b48e",
+              "normalized_path": "evidence/release-18-0.normalized.json",
+              "normalized_sha256": "b54947a7765872850f4423500af665df16cf6537fbe4771b2bc657f6dcbeb8c4",
+              "global_inventory_complete": false
+            },
+            "note": "This complete physical catalog is verified at its pinned date; the global inventory remains incomplete. Discontinued metadata is retained as lifecycle evidence."
+          },
+          "matching_rule_keys": [
+            "commercial-paper-h15"
+          ]
         }
       ],
       "complete_family_membership_verified": false,
-      "remaining_gap": "Daily SOFR release 445 does not by itself cover SOFR averages 483. Small series-level rate exceptions may use bounded overrides."
+      "remaining_gap": "Commercial and finance paper rates include modern and discontinued discount/offering products in releases 86 and 18. Their distinct IDs and histories are retained. Complete global inventory, alias accounting and operating bounds remain pending; SOFR averages also require release 483."
     },
     {
       "family": 9,

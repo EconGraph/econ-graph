@@ -1972,6 +1972,374 @@ mod tests {
     }
 
     #[test]
+    fn commercial_paper_full_title_preserves_all_rate_frequencies_and_history() {
+        let (rules, fixture, keys) = coverage_proposal();
+        assert_eq!(rules.rules.len(), 84);
+        assert_eq!(
+            rules
+                .rules
+                .iter()
+                .map(|r| (r.release_id, r.category_id))
+                .collect::<BTreeSet<_>>()
+                .len(),
+            71
+        );
+        assert_eq!(fixture["families"].as_array().unwrap().len(), 33);
+        assert_eq!(
+            fixture["families"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| f["positive_witnesses"].as_array().unwrap().len())
+                .sum::<usize>(),
+            40
+        );
+        assert_eq!((rules.max_series, rules.max_catalog_series), (500, 20000));
+        let matching = |release, row: &CatalogSeries| {
+            rules
+                .rules
+                .iter()
+                .zip(&keys)
+                .filter(|(rule, _)| rule.release_id == Some(release) && rule.matches(row))
+                .map(|(_, key)| key.as_str())
+                .collect::<Vec<_>>()
+        };
+        let row = |id: &str, title: &str, frequency: &str| {
+            serde_json::from_value::<CatalogSeries>(serde_json::json!({
+                "id":id,"title":title,"frequency":frequency
+            }))
+            .unwrap()
+        };
+        // Complete historical H.15 CP subset, with its actual frequency classes.
+        // The configuration uses titles, not this list of identifiers.
+        for id in [
+            "DCPF1M", "DCPF2M", "DCPF3M", "DCPN30", "DCPN2M", "DCPN3M", "CPF3M", "CPN3M", "CPF1M",
+        ] {
+            let metadata = row(
+                id,
+                "Commercial Paper Rate",
+                if id.starts_with('D') {
+                    "Daily"
+                } else {
+                    "Monthly"
+                },
+            );
+            assert_eq!(
+                matching(18, &metadata),
+                ["commercial-paper-h15"],
+                "H.15 counterpart lost: {id}"
+            );
+            assert!(
+                matching(86, &metadata).is_empty(),
+                "wrong catalog binding for {id}"
+            );
+        }
+        let family = fixture["families"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["family"] == 8)
+            .unwrap();
+        for id in ["WCPF3M", "RIFSPPFAAD90NA", "DCP30", "H15H0RIFSPPFM01NB"] {
+            let witness = family["positive_witnesses"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|w| w["series_id"] == id)
+                .unwrap();
+            assert_eq!(
+                matching(18, &coverage_row(witness)),
+                ["commercial-paper-h15"]
+            );
+        }
+        assert_eq!(
+            matching(86, &row("RIFSPPFAAD90NB", "Canonical rate", "Daily")),
+            ["commercial-paper"]
+        );
+        assert_eq!(
+            matching(
+                304,
+                &row("CPFF", "Commercial Paper Minus Federal Funds Rate", "Daily")
+            ),
+            ["interest-rate-spreads"]
+        );
+        // Synthetic provider-shaped growth cases: no upstream-existence claim.
+        assert_eq!(
+            matching(
+                18,
+                &row(
+                    "FUTURE_PROVIDER_ID",
+                    "New FiNaNcE PaPeR benchmark",
+                    "Weekly, Ending Friday"
+                )
+            ),
+            ["commercial-paper-h15"]
+        );
+        assert_eq!(
+            matching(86, &row("H0RIFSPPNEW99", "Future discount rate", "Daily")),
+            ["commercial-paper"]
+        );
+        assert_eq!(
+            matching(
+                18,
+                &row("DGS10", "Treasury Constant Maturity Rate", "Daily")
+            ),
+            ["selected-interest-rates"]
+        );
+        assert!(matching(18, &row("DCPF999", "Unrelated lending rate", "Daily")).is_empty());
+        assert!(matching(
+            86,
+            &row("COMPOUT", "Commercial Paper Outstanding", "Weekly")
+        )
+        .is_empty());
+        assert!(matching(
+            86,
+            &row("FIN14AAAMT", "Commercial Paper Issue Volume", "Daily")
+        )
+        .is_empty());
+    }
+
+    #[tokio::test]
+    async fn commercial_paper_full_title_shares_one_h15_walk_and_agrees_with_chunks() {
+        let (_, fixture, keys) = coverage_proposal();
+        let indexes = [
+            "selected-interest-rates",
+            "commercial-paper",
+            "commercial-paper-h15",
+        ]
+        .map(|key| keys.iter().position(|candidate| candidate == key).unwrap());
+        // Reuse the actual configured predicates; only fixture catalogs/bounds differ.
+        let mut text = "max_series=16\nmax_catalog_series=19\n".to_owned();
+        let blocks = include_str!("../../data/catalog_selection/fred.toml")
+            .split("[[rules]]")
+            .skip(1)
+            .collect::<Vec<_>>();
+        for index in indexes {
+            text.push_str("\n[[rules]]\n");
+            text.push_str(blocks[index]);
+        }
+        let fixture_rules = FredCatalogRules::parse(&text).unwrap();
+        let mock = MockSource::start().await;
+        let mut h15 = [
+            "DCPF1M", "DCPF2M", "DCPF3M", "DCPN30", "DCPN2M", "DCPN3M", "CPF3M", "CPN3M", "CPF1M",
+        ]
+        .into_iter()
+        .map(|id| {
+            serde_json::json!({"id":id,"title":"Synthetic Commercial Paper Rate",
+                "frequency":if id.starts_with('D') {"Daily"}else{"Monthly"},"units":"Percent"})
+        })
+        .collect::<Vec<_>>();
+        let family = fixture["families"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["family"] == 8)
+            .unwrap();
+        for id in ["WCPF3M", "RIFSPPFAAD90NA", "DCP30"] {
+            let witness = family["positive_witnesses"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|w| w["series_id"] == id)
+                .unwrap();
+            h15.push(serde_json::json!({"id":id,"title":witness["title"],"frequency":witness["frequency"],"units":"Percent"}));
+        }
+        for (id, title, frequency) in [
+            (
+                "FUTURE_PROVIDER_ID",
+                "New cOmMeRcIaL pApEr benchmark",
+                "Weekly, Ending Friday",
+            ),
+            ("DGS10", "Treasury Constant Maturity Rate", "Daily"),
+            ("H15OTHER", "Unrelated lending rate", "Daily"),
+        ] {
+            h15.push(
+                serde_json::json!({"id":id,"title":title,"frequency":frequency,"units":"Percent"}),
+            );
+        }
+        let mut canonical = ["RIFSPPFAAD90NB", "RIFSPPNEW99", "COMPOUT", "FIN14AAAMT"]
+            .into_iter()
+            .map(|id| catalog_row(id, "Synthetic catalog metadata"))
+            .collect::<Vec<_>>();
+        for rows in [&mut h15, &mut canonical] {
+            rows.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+        }
+        mock.mount_expect(
+            &Route::get("/release/series").query("release_id", "18"),
+            catalog_page(15, 0, h15),
+            2,
+        )
+        .await;
+        mock.mount_expect(
+            &Route::get("/release/series").query("release_id", "86"),
+            catalog_page(4, 0, canonical),
+            2,
+        )
+        .await;
+        let adapter = FredAdapter::new(mock.base_url()).with_catalog_rules_text(&text);
+        let selected = adapter
+            .select_catalog(&test_ctx(), &fixture_rules)
+            .await
+            .unwrap();
+        assert_eq!(selected.scanned, 19); // Counting H.15 per predicate would exceed this bound.
+        assert_eq!(selected.rule_matches, [1, 2, 13]);
+        assert_eq!(selected.found.len(), 16);
+        assert!(selected.found.iter().any(|r| r.external_id == "DCPF3M"));
+        assert!(selected
+            .found
+            .iter()
+            .any(|r| r.external_id == "RIFSPPFAAD90NB"));
+        assert_eq!(adapter.catalog_lifecycle().discontinued_ids, ["DCP30"]);
+        assert_eq!(mock.received_requests().await.len(), 2);
+        let Enumeration::Units { units, .. } =
+            adapter.enumerate_discovery(&test_ctx()).await.unwrap()
+        else {
+            panic!("FRED must enumerate individual series");
+        };
+        let chunk = adapter.discover_units(&test_ctx(), &units).await.unwrap();
+        assert_eq!(chunk.found, selected.found);
+        assert_eq!(chunk.lifecycle.discontinued_ids, ["DCP30"]);
+        assert_eq!(mock.received_requests().await.len(), 4);
+        assert_eq!(
+            adapter.chunked_discovery().unwrap().catalog_scope,
+            adapter.catalog_scope()
+        );
+    }
+
+    #[tokio::test]
+    async fn paper_rate_projection_selects_all_rates_once_and_preserves_histories() {
+        let projection: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/fred/paper-rate-catalog-projection.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            projection["representation"],
+            "complete_catalog_field_projection_not_raw_api_page"
+        );
+        assert_eq!(projection["global_inventory_complete"], false);
+        let (proposal, _, keys) = coverage_proposal();
+        let indexes = [
+            "selected-interest-rates",
+            "commercial-paper",
+            "commercial-paper-h15",
+        ]
+        .map(|key| keys.iter().position(|candidate| candidate == key).unwrap());
+        let blocks = include_str!("../../data/catalog_selection/fred.toml")
+            .split("[[rules]]")
+            .skip(1)
+            .collect::<Vec<_>>();
+        let mut text = "max_series=500\nmax_catalog_series=472\n".to_owned();
+        for index in indexes {
+            text.push_str("\n[[rules]]\n");
+            text.push_str(blocks[index]);
+        }
+        let rules = FredCatalogRules::parse(&text).unwrap();
+        let mock = MockSource::start().await;
+        let mut paper_sets = Vec::new();
+        let mut expected = BTreeSet::new();
+        let mut discontinued = BTreeSet::new();
+        let mut nonrates = BTreeSet::new();
+        let mut generic_count = 0;
+        for catalog in projection["catalogs"].as_array().unwrap() {
+            let release = catalog["release_id"].as_u64().unwrap() as u32;
+            assert_eq!(catalog["complete"], true);
+            let rows = catalog["rows"].as_array().unwrap();
+            assert_eq!(rows.len(), if release == 18 { 270 } else { 202 });
+            assert_eq!(catalog["count"].as_u64().unwrap() as usize, rows.len());
+            let mut paper = BTreeSet::new();
+            for value in rows {
+                assert_eq!(value.as_object().unwrap().len(), 4);
+                let row: CatalogSeries = serde_json::from_value(value.clone()).unwrap();
+                // Independent expected membership from observed units/title, not the ID regex.
+                let rate_units = matches!(
+                    value["units"].as_str().unwrap(),
+                    "Percent" | "Percent per Annum"
+                );
+                let is_paper = rate_units
+                    && (release == 86 || row.metadata.title.to_lowercase().contains("paper"));
+                if is_paper {
+                    paper.insert(row.id.clone());
+                }
+                if release == 86 && !rate_units {
+                    nonrates.insert(row.id.clone());
+                }
+                let generic = release == 18 && proposal.rules[indexes[0]].matches(&row);
+                if generic {
+                    generic_count += 1;
+                }
+                if is_paper || generic {
+                    expected.insert(row.id.clone());
+                    if row.metadata.title.contains("DISCONTINUED") {
+                        discontinued.insert(row.id.clone());
+                    }
+                }
+            }
+            assert_eq!(paper.len(), if release == 18 { 57 } else { 36 });
+            paper_sets.push(paper);
+            mock.mount_expect(
+                &Route::get("/release/series").query("release_id", release.to_string()),
+                catalog_page(rows.len(), 0, rows.clone()),
+                2,
+            )
+            .await;
+        }
+        assert!(paper_sets[0].is_disjoint(&paper_sets[1]));
+        assert_eq!(paper_sets.iter().map(BTreeSet::len).sum::<usize>(), 93);
+        assert_eq!(nonrates.len(), 166);
+        let paper_discontinued = paper_sets
+            .iter()
+            .flatten()
+            .filter(|id| discontinued.contains(*id))
+            .count();
+        assert_eq!(paper_discontinued, 45);
+        let adapter = FredAdapter::new(mock.base_url()).with_catalog_rules_text(&text);
+        let selected = adapter.select_catalog(&test_ctx(), &rules).await.unwrap();
+        assert_eq!(selected.scanned, 472); // Shared release 18 is counted and walked once.
+        assert_eq!(selected.rule_matches, [generic_count, 36, 57]);
+        let actual = selected
+            .found
+            .iter()
+            .map(|r| r.external_id.clone())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(actual, expected);
+        assert!(actual.is_disjoint(&nonrates));
+        for id in [
+            "DCPF3M",
+            "RIFSPPFAAD90NB",
+            "H0RIFSPPFM01NB",
+            "H15H0RIFSPPFM01NB",
+        ] {
+            assert!(actual.contains(id), "distinct paper history lost: {id}");
+        }
+        assert_eq!(
+            adapter
+                .catalog_lifecycle()
+                .discontinued_ids
+                .into_iter()
+                .collect::<BTreeSet<_>>(),
+            discontinued
+        );
+        assert_eq!(mock.received_requests().await.len(), 2);
+        let Enumeration::Units { units, .. } =
+            adapter.enumerate_discovery(&test_ctx()).await.unwrap()
+        else {
+            panic!("FRED must enumerate individual series");
+        };
+        let chunk = adapter.discover_units(&test_ctx(), &units).await.unwrap();
+        assert_eq!(chunk.found, selected.found);
+        assert_eq!(
+            chunk
+                .lifecycle
+                .discontinued_ids
+                .into_iter()
+                .collect::<BTreeSet<_>>(),
+            discontinued
+        );
+        assert_eq!(mock.received_requests().await.len(), 4);
+        mock.server().verify().await;
+    }
+
+    #[test]
     fn proposed_coverage_matches_each_family_witness_with_its_actual_catalog() {
         let (rules, fixture, keys) = coverage_proposal();
         assert_eq!(fixture["format"], 1);
@@ -2057,7 +2425,11 @@ mod tests {
                 );
                 assert!(matches!(
                     witness["provenance"]["kind"].as_str(),
-                    Some("official_public_series_page" | "existing_repository_metadata_fixture")
+                    Some(
+                        "official_public_series_page"
+                            | "existing_repository_metadata_fixture"
+                            | "authenticated_api_catalog_page"
+                    )
                 ));
             }
         }
