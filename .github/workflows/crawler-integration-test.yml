@@ -1,20 +1,21 @@
-name: Temporary FRED Full Inventory Audit
+name: Temporary FRED History Count Profile
 
-# TEMP audit branch only. Evidence still requires independent membership/budget review.
+# TEMP branch only. Samples are never full-fetch or operating-budget acceptance.
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Shared across branches with full inventory: never use the key quota concurrently.
 concurrency:
   group: fred-count-only-audit
   cancel-in-progress: false
 
 jobs:
-  fred-evidence:
+  fred-count-profile:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
     - name: Checkout dispatched revision
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -22,71 +23,44 @@ jobs:
         persist-credentials: false
         ref: ${{ github.sha }}
 
-    - name: Free runner disk before cache restoration
-      run: |
-        df -h /
-        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/hostedtoolcache /usr/local/.ghcup \
-          /usr/share/swift /usr/local/share/powershell
-        df -h /
+    - name: Run offline profile tests without credentials
+      run: python3 -m unittest discover -s scripts/tests -p 'test_profile_fred_history_counts.py' -v
 
-    - name: Setup Rust
-      uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
-
-    - name: Restore shared backend cache without saving
-      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-      with:
-        workspaces: backend
-        shared-key: backend
-        save-if: false
-
-    - name: Run offline audit-tool tests
-      run: python3 -m unittest discover -s scripts/tests -p 'test_audit_fred_selection.py' -v
-
-    # No API key is injected during compilation or dependency resolution.
-    - name: Compile ignored exporter test without credentials
-      run: |
-        cargo test --locked --manifest-path backend/Cargo.toml -p econ-graph-crawler --lib \
-          --no-run --message-format=json > "$RUNNER_TEMP/fred-build.json"
-        python3 - <<'PYTHON'
-        import json, os
-        from pathlib import Path
-        messages = Path(os.environ['RUNNER_TEMP'], 'fred-build.json').read_text().splitlines()
-        binaries = [m['executable'] for m in map(json.loads, messages)
-                    if m.get('reason') == 'compiler-artifact' and m.get('executable')
-                    and m.get('target', {}).get('name') == 'econ_graph_crawler'
-                    and m.get('profile', {}).get('test') is True
-                    and 'lib' in m.get('target', {}).get('kind', [])]
-        if len(binaries) != 1:
-            raise SystemExit('Expected exactly one crawler lib test executable')
-        Path(os.environ['RUNNER_TEMP'], 'fred-test-binary.txt').write_text(binaries[0])
-        PYTHON
-
-    - name: Run exact ignored full inventory test with in-memory audit ceiling
-      id: audit
+    - name: Run bounded sequential count-only sample
+      id: profile
       continue-on-error: true
       env:
         FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
       run: |
-        python3 scripts/audit-fred-selection.py \
-          --mode exporter \
-          --binary "$(cat "$RUNNER_TEMP/fred-test-binary.txt")" \
-          --historical-csv scripts/audit-fixtures/fred-historical-1533.csv \
-          --data-dir backend/crates/econ-graph-crawler/data \
-          --output "$RUNNER_TEMP/fred-full-inventory-safe" \
-          --revision '${{ github.sha }}'
+        set +e
+        timeout --signal=TERM --kill-after=5s 930s \
+          env -i PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 FRED_API_KEY="$FRED_API_KEY" \
+          python3 scripts/profile-fred-history-counts.py \
+          --output "$RUNNER_TEMP/fred-history-count-safe" --revision '${{ github.sha }}'
+        status=$?
+        mkdir -p "$RUNNER_TEMP/fred-history-count-safe"
+        printf '%s\n' "$status" > "$RUNNER_TEMP/fred-history-count-safe/exit-status.txt"
+        if [ -f "$RUNNER_TEMP/fred-history-count-safe/profile.json" ]; then
+          sha256sum "$RUNNER_TEMP/fred-history-count-safe/profile.json" | cut -d ' ' -f 1 \
+            > "$RUNNER_TEMP/fred-history-count-safe/profile.sha256"
+        fi
+        exit "$status"
 
-    - name: Upload verified immutable evidence and sanitized logs
-      if: ${{ always() && steps.audit.outcome != 'skipped' }}
+    - name: Upload only safe count profile and actual exit status
+      if: ${{ always() && steps.profile.outcome != 'skipped' }}
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
-        name: fred-full-inventory-${{ github.sha }}
-        path: ${{ runner.temp }}/fred-full-inventory-safe/
+        name: fred-history-count-${{ github.sha }}
+        path: |
+          ${{ runner.temp }}/fred-history-count-safe/profile.json
+          ${{ runner.temp }}/fred-history-count-safe/profile.sha256
+          ${{ runner.temp }}/fred-history-count-safe/exit-status.txt
         if-no-files-found: error
         retention-days: 7
 
-    - name: Preserve actual audit failure
-      if: ${{ always() && steps.audit.outcome != 'skipped' }}
+    - name: Preserve actual profile failure
+      if: ${{ always() && steps.profile.outcome != 'skipped' }}
       run: |
-        status=$(cat "$RUNNER_TEMP/fred-full-inventory-safe/exit-status.txt")
+        status=$(cat "$RUNNER_TEMP/fred-history-count-safe/exit-status.txt")
         case "$status" in ''|*[!0-9]*) exit 2 ;; esac
         exit "$status"
