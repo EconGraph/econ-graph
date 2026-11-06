@@ -1,4 +1,4 @@
-name: Temporary FRED First-Page Scope Counts
+name: Temporary FRED Full Inventory Audit
 
 # TEMP audit branch only. Evidence still requires independent membership/budget review.
 on:
@@ -61,31 +61,32 @@ jobs:
         Path(os.environ['RUNNER_TEMP'], 'fred-test-binary.txt').write_text(binaries[0])
         PYTHON
 
-    - name: Run exact ignored first-page scope-counts test
+    - name: Run exact ignored full inventory test with in-memory audit ceiling
       id: audit
       continue-on-error: true
       env:
         FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
       run: |
         python3 scripts/audit-fred-selection.py \
-          --mode scope-counts \
+          --mode exporter \
           --binary "$(cat "$RUNNER_TEMP/fred-test-binary.txt")" \
+          --historical-csv scripts/audit-fixtures/fred-historical-1533.csv \
           --data-dir backend/crates/econ-graph-crawler/data \
-          --output "$RUNNER_TEMP/fred-scope-safe" \
+          --output "$RUNNER_TEMP/fred-full-inventory-safe" \
           --revision '${{ github.sha }}'
 
     - name: Upload verified immutable evidence and sanitized logs
       if: ${{ always() && steps.audit.outcome != 'skipped' }}
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
-        name: fred-scope-counts-${{ github.sha }}
-        path: ${{ runner.temp }}/fred-scope-safe/
+        name: fred-full-inventory-${{ github.sha }}
+        path: ${{ runner.temp }}/fred-full-inventory-safe/
         if-no-files-found: error
         retention-days: 7
 
     - name: Preserve actual audit failure
       if: ${{ always() && steps.audit.outcome != 'skipped' }}
       run: |
-        status=$(cat "$RUNNER_TEMP/fred-scope-safe/exit-status.txt")
+        status=$(cat "$RUNNER_TEMP/fred-full-inventory-safe/exit-status.txt")
         case "$status" in ''|*[!0-9]*) exit 2 ;; esac
         exit "$status"

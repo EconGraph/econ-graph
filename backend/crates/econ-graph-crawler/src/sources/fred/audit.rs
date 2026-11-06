@@ -505,9 +505,9 @@ fn error_kind(error: &CrawlError) -> &'static str {
     }
 }
 
-// Frozen draft scope: this header-only measurement must never silently follow a
+// Frozen final 84-rule draft scope: this header-only measurement must never silently follow a
 // later rule expansion. It makes no production selection or membership decision.
-const SCOPE_RULES_SHA256: &str = "825a4f835488b775a79dcd520eb6c4ad8a39bbc71e0ccdce8bca5fdcdc29f955";
+const SCOPE_RULES_SHA256: &str = "c9364a95a019170c7dac9133691387f46db921b66e8d1b5923d1d97dc488885a";
 
 fn scope_groups(rules: &FredCatalogRules) -> Vec<Vec<usize>> {
     let mut groups: Vec<Vec<usize>> = Vec::new();
@@ -693,7 +693,7 @@ async fn authenticated_catalog_scope_counts() {
             std::fs::read_to_string(data_dir().join(CATALOG_RULES_FILE)).map_err(|_| failed())?;
         let rules = FredCatalogRules::parse(&text)?;
         if digest(text.as_bytes()) != SCOPE_RULES_SHA256
-            || rules.rules.len() != 83
+            || rules.rules.len() != 84
             || rules.include.len() != 30
             || scope_groups(&rules).len() != 71
             || rules.max_catalog_series != 20000
@@ -751,9 +751,84 @@ async fn authenticated_catalog_scope_counts() {
     );
 }
 
+// This helper is in the cfg(test) module, not the production parser or selector.
+// Parsing always happens before the explicit in-memory measurement override.
+fn full_inventory_rules(
+    text: &str,
+    fixture: &Value,
+) -> Result<(FredCatalogRules, FredCatalogRules), CrawlError> {
+    let original = FredCatalogRules::parse(text)?;
+    let positives = fixture["families"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|family| family["positive_witnesses"].as_array().map_or(0, Vec::len))
+        .sum::<usize>();
+    if digest(text.as_bytes()) != SCOPE_RULES_SHA256
+        || digest(FIXTURE.as_bytes())
+            != "0b723859ecb703c75158d59013b561b241a037cdac9a1647cbbb6c639e0f3dd7"
+        || original.rules.len() != 84
+        || original.include.len() != 30
+        || scope_groups(&original).len() != 71
+        || original.max_series != 500
+        || original.max_catalog_series != 20000
+        || positives != 40
+        || fixture["families"].as_array().map_or(0, Vec::len) != 33
+        || fixture["negative_identifier_witnesses"]
+            .as_array()
+            .map_or(0, Vec::len)
+            != 13
+    {
+        return Err(failed());
+    }
+    let mut audit = original.uncapped();
+    audit.max_catalog_series = 200000;
+    Ok((original, audit))
+}
+
+fn full_inventory_manifest(
+    recorder: &Arc<Recorder>,
+    original: &FredCatalogRules,
+    effective: &FredCatalogRules,
+) -> Result<(), CrawlError> {
+    recorder.update(|s| {
+        s.report["mode"] = json!("full_inventory");
+        s.report["scope"] = json!("Configured catalog membership evidence only; no observation/vintage cost or production budget acceptance");
+        s.report["original_scope_fingerprint"] = json!(original.fingerprint());
+        s.report["effective_audit_scope_fingerprint"] = json!(effective.fingerprint());
+        s.report["selection_fingerprint_excludes_operational_guards"] = json!(true);
+        s.report["audit_execution_fingerprint"] = json!(format!("fred-audit-run-v1:{}", digest(
+            canonical(json!({"selection_scope":effective.fingerprint(),"scan_ceiling":200000,"count_uncapped":true}))
+                .to_string().as_bytes())));
+        s.report["expected_positive_witnesses"] = json!(40);
+        s.report["production_budget_accepted"] = json!(false);
+        s.report["bounds"] = json!({
+            "production_config_scan_guard":20000,"production_config_selected_guard":500,
+            "production_parser_scan_ceiling":100000,"production_parser_selected_ceiling":10000,
+            "test_only_scan_ceiling":200000,"test_only_selected_count_uncapped":true,
+            "conservative_catalog_page_ceiling":270,"include_lookup_ceiling":30,"ownership_lookup_ceiling":2,
+            "conservative_logical_request_ceiling":302,"conservative_http_attempt_ceiling":906,
+            "timeout_seconds":1800,"wrapper_timeout_seconds":1830,"requests_per_minute":30
+        });
+        // Old authenticated evidence remains bound to its own 83-rule revision.
+        // The final84 rules share physical catalogs; this is topology reuse,
+        // never a claim that the old run evaluated the new predicates/witnesses.
+        s.report["dated_scope_baseline"] = json!({
+            "revision":"68b69191bef12408daf719112d1deec5ea1619af",
+            "rules_sha256":"825a4f835488b775a79dcd520eb6c4ad8a39bbc71e0ccdce8bca5fdcdc29f955",
+            "rules":83,"physical_catalogs":71,"catalog_realtime":"2026-11-05",
+            "projected_catalog_rows":149899,"projected_catalog_pages":204,
+            "projected_logical_requests_including_max_overrides":236,
+            "kind":"dated_physical_scope_estimate_not_current_membership_evidence",
+            "final84_rule_api_membership_verified_by_baseline":false
+        });
+    })
+}
+
 /// Runtime interface (none read by compilation/offline tests): FRED_AUDIT_OUTPUT_DIR,
 /// FRED_AUDIT_HISTORICAL_CSV, FRED_AUDIT_REVISION, CRAWLER_DATA_DIR, FRED_API_KEY.
-/// The runner must first copy the draft data and raise ONLY its scan guard to100000.
+/// The runner copies the original 20k/500 config unchanged. Only this ignored
+/// test applies the explicit authorized 200k scan override in memory.
 #[tokio::test]
 #[ignore = "explicit authenticated audit only; never part of ordinary test execution"]
 async fn authenticated_catalog_evidence() {
@@ -773,11 +848,8 @@ async fn authenticated_catalog_evidence() {
         }
         let text =
             std::fs::read_to_string(data_dir().join(CATALOG_RULES_FILE)).map_err(|_| failed())?;
-        let rules = FredCatalogRules::parse(&text)?;
-        if rules.max_catalog_series != 100000 {
-            return Err(failed());
-        }
         let fixture: Value = serde_json::from_str(FIXTURE).map_err(|_| failed())?;
+        let (rules, audit_rules) = full_inventory_rules(&text, &fixture)?;
         let historical = history(&std::fs::read(historical).map_err(|_| failed())?)?;
         let recorder = Recorder::new(
             Path::new(&output),
@@ -788,6 +860,7 @@ async fn authenticated_catalog_evidence() {
             historical,
             &revision,
         )?;
+        full_inventory_manifest(&recorder, &rules, &audit_rules)?;
         let keys = crate::adapter::ApiKeys {
             fred: Some(secret),
             ..Default::default()
@@ -807,9 +880,7 @@ async fn authenticated_catalog_evidence() {
             ..FredAdapter::default()
         };
         let result = tokio::time::timeout(std::time::Duration::from_secs(1800), async {
-            adapter
-                .select_catalog(&checker.ctx, &rules.uncapped())
-                .await?;
+            adapter.select_catalog(&checker.ctx, &audit_rules).await?;
             recorder.ownership(&adapter, &checker.ctx).await
         })
         .await;
@@ -833,6 +904,117 @@ async fn authenticated_catalog_evidence() {
 mod tests {
     use super::*;
     use crate::testkit::{test_ctx, MockSource, Reply, Route, TEST_API_KEY};
+
+    #[test]
+    fn full_inventory_override_is_test_only_and_preserves_production_guards_and_all40_witnesses() {
+        let text = include_str!("../../../data/catalog_selection/fred.toml");
+        let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+        let (original, effective) = full_inventory_rules(text, &fixture).unwrap();
+        assert_eq!(original.max_catalog_series, 20000);
+        assert_eq!(original.max_series, 500);
+        assert_eq!(effective.max_catalog_series, 200000);
+        assert_eq!(effective.max_series, usize::MAX);
+        assert_eq!(
+            serde_json::to_value(&original.rules).unwrap(),
+            serde_json::to_value(&effective.rules).unwrap()
+        );
+        assert!(FredCatalogRules::parse(
+            &text.replace("max_catalog_series = 20000", "max_catalog_series = 200000")
+        )
+        .is_err());
+        assert!(
+            FredCatalogRules::parse(&text.replace("max_series = 500", "max_series = 10001"))
+                .is_err()
+        );
+        assert_eq!(digest(text.as_bytes()), SCOPE_RULES_SHA256);
+        let directory = tempfile::tempdir().unwrap();
+        let recorder = Recorder::new(
+            directory.path(),
+            TEST_API_KEY,
+            &original,
+            text,
+            fixture,
+            Vec::new(),
+            "offline",
+        )
+        .unwrap();
+        full_inventory_manifest(&recorder, &original, &effective).unwrap();
+        let report = manifest(directory.path());
+        assert_eq!(report["expected_positive_witnesses"], 40);
+        assert_eq!(report["bounds"]["production_config_scan_guard"], 20000);
+        assert_eq!(report["bounds"]["production_parser_scan_ceiling"], 100000);
+        assert_eq!(report["bounds"]["test_only_scan_ceiling"], 200000);
+        assert_eq!(
+            report["bounds"]["conservative_logical_request_ceiling"],
+            302
+        );
+        assert_eq!(report["bounds"]["conservative_http_attempt_ceiling"], 906);
+        assert_eq!(
+            report["original_scope_fingerprint"],
+            report["effective_audit_scope_fingerprint"]
+        );
+        assert_eq!(
+            report["scope_fingerprint"],
+            report["original_scope_fingerprint"]
+        );
+        assert_eq!(report["dated_scope_baseline"]["rules"], 83);
+        assert_eq!(
+            report["dated_scope_baseline"]["final84_rule_api_membership_verified_by_baseline"],
+            false
+        );
+        assert_eq!(report["complete"], false);
+        assert_eq!(report["production_budget_accepted"], false);
+        assert!(!recorder.finish(Some("offline_partial")).unwrap());
+        let partial = manifest(directory.path());
+        assert_eq!(partial["positive_witnesses"].as_array().unwrap().len(), 40);
+        assert!(partial["positive_witnesses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|w| w["verified"] == false));
+    }
+
+    #[tokio::test]
+    async fn full_inventory_in_memory_ceiling_crosses_parser_limit_but_retains_page_validation() {
+        let mock = MockSource::start().await;
+        let text = include_str!("../../../data/catalog_selection/fred.toml");
+        let (original, effective) =
+            full_inventory_rules(text, &serde_json::from_str(FIXTURE).unwrap()).unwrap();
+        let first = (0..1000)
+            .map(|i| row(&format!("A{i:04}")))
+            .collect::<Vec<_>>();
+        mock.mount_expect(
+            &Route::get("/release/series").query("offset", "0"),
+            Reply::json(json!({"count":100001,"offset":0,"limit":1000,"seriess":first})),
+            2,
+        )
+        .await;
+        mock.mount_expect(
+            &Route::get("/release/series").query("offset", "1000"),
+            Reply::json(json!({"count":100001,"offset":1001,"limit":1000,"seriess":[]})),
+            1,
+        )
+        .await;
+        let adapter = FredAdapter {
+            base_url: mock.base_url(),
+            ..Default::default()
+        };
+        let rule = &original.rules[0];
+        let guarded = adapter
+            .catalog_rows(&test_ctx(), TEST_API_KEY, rule, &original, "2026-11-06", 0)
+            .await
+            .unwrap_err();
+        assert!(is_catalog_volume_guard(&guarded));
+        let incomplete = adapter
+            .catalog_rows(&test_ctx(), TEST_API_KEY, rule, &effective, "2026-11-06", 0)
+            .await
+            .unwrap_err();
+        assert!(!is_catalog_volume_guard(&incomplete));
+        assert!(matches!(incomplete, CrawlError::Transient(_)));
+        assert_eq!(mock.received_requests().await.len(), 3);
+        assert_eq!(original.max_catalog_series, 20000);
+        assert_eq!(original.max_series, 500);
+    }
 
     #[tokio::test]
     async fn scope_counts_requests_one_row_per_group_even_above_scan_guard() {
@@ -1196,7 +1378,7 @@ mod tests {
         .unwrap();
         rec.finish(Some("offline_only")).unwrap();
         let report = manifest(dir.path());
-        assert_eq!(report["positive_witnesses"].as_array().unwrap().len(), 33);
+        assert_eq!(report["positive_witnesses"].as_array().unwrap().len(), 40);
         let negatives = report["synthetic_boundaries"].as_array().unwrap();
         assert_eq!(negatives.len(), 13);
         assert!(negatives.iter().all(|n| n["predicate_rejected"] == true

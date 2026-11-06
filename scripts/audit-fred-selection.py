@@ -21,7 +21,15 @@ import tomllib
 HISTORY_SHA256 = '006745a4e19f2faca561cbc8ca8ae295365aa2afbb637a7bec32f5a2a22343a8'
 EXPORT_TEST = 'sources::fred::audit::authenticated_catalog_evidence'
 SCOPE_TEST = 'sources::fred::audit::authenticated_catalog_scope_counts'
-SCOPE_RULES_SHA256 = '825a4f835488b775a79dcd520eb6c4ad8a39bbc71e0ccdce8bca5fdcdc29f955'
+SCOPE_RULES_SHA256 = 'c9364a95a019170c7dac9133691387f46db921b66e8d1b5923d1d97dc488885a'
+FIXTURE_SHA256 = '0b723859ecb703c75158d59013b561b241a037cdac9a1647cbbb6c639e0f3dd7'
+FULL_BOUNDS = {'production_config_scan_guard': 20000, 'production_config_selected_guard': 500,
+               'production_parser_scan_ceiling': 100000, 'production_parser_selected_ceiling': 10000,
+               'test_only_scan_ceiling': 200000, 'test_only_selected_count_uncapped': True,
+               'conservative_catalog_page_ceiling': 270, 'include_lookup_ceiling': 30,
+               'ownership_lookup_ceiling': 2, 'conservative_logical_request_ceiling': 302,
+               'conservative_http_attempt_ceiling': 906, 'timeout_seconds': 1800,
+               'wrapper_timeout_seconds': 1830, 'requests_per_minute': 30}
 EXPORT_FILE = re.compile(r'(?:manifest\.json|(?:(?:release|category)-[0-9]+-[0-9]+|'
                          r'(?:series|ownership)-[0-9a-f]{64})\.(?:response-text|normalized)\.json)')
 
@@ -77,23 +85,17 @@ def child_environment(data_dir, key):
             'CRAWLER_DATA_DIR': str(data_dir), 'FRED_API_KEY': key}
 
 
-def copy_config(source, scratch, raise_scan=True):
+def copy_config(source, scratch):
     original = (source / 'catalog_selection/fred.toml').read_bytes()
     config = tomllib.loads(original.decode())
     if (config['max_catalog_series'], config['max_series'], len(config['rules']),
-            len(config['include'])) != (20000, 500, 83, 30):
+            len(config['include'])) != (20000, 500, 84, 30):
         raise ValueError('Reviewed configuration shape changed; audit needs review')
+    if hashlib.sha256(original).hexdigest() != SCOPE_RULES_SHA256:
+        raise ValueError('Frozen audit configuration changed')
     shutil.copytree(source, scratch)
-    if not raise_scan:
-        if hashlib.sha256(original).hexdigest() != SCOPE_RULES_SHA256:
-            raise ValueError('Frozen scope configuration changed')
-        return original, original
-    copied, count = re.subn(rb'(?m)^max_catalog_series = 20000$',
-                            b'max_catalog_series = 100000', original)
-    if count != 1:
-        raise ValueError('Expected exactly one catalog bound')
-    (scratch / 'catalog_selection/fred.toml').write_bytes(copied)
-    return original, copied
+    # Audit overrides exist solely in the ignored Rust test's in-memory clone.
+    return original, original
 
 
 def capture(command, env, timeout):
@@ -117,7 +119,7 @@ def run(binary, data_dir, output, key, revision, timeout=1800):
     output.mkdir(parents=True, exist_ok=False)
     provenance = {'scope': 'COUNT-ONLY; not complete membership/witness evidence',
                   'revision': revision, 'original_catalog_guard': 20000,
-                  'audit_catalog_guard': 100000, 'selected_guard': 500,
+                  'audit_catalog_guard': 20000, 'selected_guard': 500,
                   'count_uncapped': True, 'rate_percent': 25, 'timeout_seconds': timeout,
                   'membership_witness_complete': False}
     artifacts = {}
@@ -129,7 +131,7 @@ def run(binary, data_dir, output, key, revision, timeout=1800):
             artifacts.update({'original-fred.toml': original, 'audit-fred.toml': copied})
             provenance.update(original_config_sha256=hashlib.sha256(original).hexdigest(),
                               audit_config_sha256=hashlib.sha256(copied).hexdigest(),
-                              rules=83, includes=30)
+                              rules=84, includes=30)
             command = [str(binary.resolve()), 'check-selection', '--source', 'FRED',
                        '--json', '--count-uncapped', '--rate-percent', '25']
             provenance['command'] = command
@@ -257,6 +259,28 @@ def collect_evidence(directory, output, key, revision, config_hash, scope_counts
                 raise ValueError('invalid scope totals')
             complete = manifest.get('counts_complete') is True and validated == 71
         else:
+            original = manifest.get('original_scope_fingerprint')
+            effective = manifest.get('effective_audit_scope_fingerprint')
+            execution_fingerprint = 'fred-audit-run-v1:' + hashlib.sha256(json.dumps(
+                {'selection_scope': effective, 'scan_ceiling': 200000, 'count_uncapped': True},
+                sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+            if (config_hash != SCOPE_RULES_SHA256 or manifest.get('mode') != 'full_inventory'
+                    or manifest.get('fixture_sha256') != FIXTURE_SHA256
+                    or manifest.get('bounds') != FULL_BOUNDS
+                    or manifest.get('expected_positive_witnesses') != 40
+                    or not isinstance(original, str) or not isinstance(effective, str)
+                    or not re.fullmatch('fred-catalog-v1:[0-9a-f]{64}', original)
+                    or not re.fullmatch('fred-catalog-v1:[0-9a-f]{64}', effective)
+                    or original != effective or manifest.get('scope_fingerprint') != original
+                    or manifest.get('selection_fingerprint_excludes_operational_guards') is not True
+                    or manifest.get('audit_execution_fingerprint') != execution_fingerprint
+                    or manifest.get('production_budget_accepted') is not False):
+                raise ValueError('invalid full inventory boundary')
+            if manifest.get('witness_bindings_accepted') is True:
+                positives = manifest.get('positive_witnesses')
+                if (not isinstance(positives, list) or len(positives) != 40
+                        or not all(witness.get('verified') is True for witness in positives)):
+                    raise ValueError('incomplete positive witnesses')
             complete = all(manifest.get(field) is True for field in
                            ('complete', 'selection_complete', 'retrieval_complete', 'witness_bindings_accepted'))
     except (ValueError, TypeError, AttributeError, RecursionError):
@@ -278,11 +302,15 @@ def run_exporter(binary, data_dir, output, key, revision, historical_csv, timeou
     status, stdout, stderr, elapsed = 2, b'', b'', 0
     report = {'scope': 'Authenticated catalog evidence; acceptance requires review',
               'revision': revision, 'complete': False, 'artifact_validation_issues': [],
-              'original_catalog_guard': 20000, 'audit_catalog_guard': 100000,
+              'original_catalog_guard': 20000, 'audit_catalog_guard': 200000,
               'selected_guard': 500, 'rate_percent': 25, 'timeout_seconds': timeout}
+    report.update(mode='full_inventory', production_parser_scan_ceiling=100000,
+                  production_parser_selected_ceiling=10000, test_only_selected_count_uncapped=True,
+                  production_budget_accepted=False)
     if scope_counts:
         report.update(scope='FIRST-PAGE scope counts only; not membership or vintage cost acceptance',
-                      audit_catalog_guard=20000, membership_complete=False, counts_complete=False)
+                      mode='scope_counts', audit_catalog_guard=20000, membership_complete=False,
+                      counts_complete=False, test_only_selected_count_uncapped=False)
     artifacts = {}
     try:
         if not re.fullmatch('[0-9a-fA-F]{40}', revision):
@@ -293,7 +321,7 @@ def run_exporter(binary, data_dir, output, key, revision, historical_csv, timeou
                 raise ValueError('invalid history checksum')
         with tempfile.TemporaryDirectory(prefix='fred-export-') as temporary:
             scratch = Path(temporary)
-            original, copied = copy_config(data_dir, scratch / 'data', raise_scan=not scope_counts)
+            original, copied = copy_config(data_dir, scratch / 'data')
             artifacts.update({'original-fred.toml': original, 'audit-fred.toml': copied})
             config_hash = hashlib.sha256(copied).hexdigest()
             scope_catalogs = None

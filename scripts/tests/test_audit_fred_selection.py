@@ -89,8 +89,7 @@ class CountAuditTests(unittest.TestCase):
             original, copied = AUDIT.copy_config(DATA, Path(temporary) / 'data')
         self.assertEqual(before, original)
         self.assertEqual((DATA / 'catalog_selection/fred.toml').read_bytes(), before)
-        self.assertEqual(copied, before.replace(b'max_catalog_series = 20000',
-                                                b'max_catalog_series = 100000'))
+        self.assertEqual(copied, before)
 
     def test_actual_child_statuses_preserved_and_output_sanitized(self):
         for status in (0, 1, 2, 3, 64, 124):
@@ -147,6 +146,8 @@ class ExportAuditTests(unittest.TestCase):
                                        'FRED_AUDIT_HISTORICAL_CSV', 'FRED_AUDIT_REVISION'})
             self.assertEqual(hashlib.sha256(Path(env['FRED_AUDIT_HISTORICAL_CSV']).read_bytes()).hexdigest(),
                              AUDIT.HISTORY_SHA256)
+            self.assertEqual(Path(env['CRAWLER_DATA_DIR'], 'catalog_selection/fred.toml').read_bytes(),
+                             (DATA / 'catalog_selection/fred.toml').read_bytes())
             directory = Path(env['FRED_AUDIT_OUTPUT_DIR'])
             directory.mkdir()
             raw = b'{ "count": 83, "data": ["public"] }\n'
@@ -159,6 +160,17 @@ class ExportAuditTests(unittest.TestCase):
                         'rules_sha256': hashlib.sha256(Path(env['CRAWLER_DATA_DIR'],
                                                            'catalog_selection/fred.toml').read_bytes()).hexdigest(),
                         'historical': {'sha256': AUDIT.HISTORY_SHA256},
+                        'mode': 'full_inventory', 'fixture_sha256': AUDIT.FIXTURE_SHA256,
+                        'bounds': AUDIT.FULL_BOUNDS.copy(), 'expected_positive_witnesses': 40,
+                        'positive_witnesses': [{'verified': True} for _ in range(40)],
+                        'scope_fingerprint': 'fred-catalog-v1:' + 'a' * 64,
+                        'original_scope_fingerprint': 'fred-catalog-v1:' + 'a' * 64,
+                        'effective_audit_scope_fingerprint': 'fred-catalog-v1:' + 'a' * 64,
+                        'selection_fingerprint_excludes_operational_guards': True,
+                        'audit_execution_fingerprint': 'fred-audit-run-v1:' + hashlib.sha256(json.dumps(
+                            {'selection_scope': 'fred-catalog-v1:' + 'a' * 64, 'scan_ceiling': 200000,
+                             'count_uncapped': True}, sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
+                        'production_budget_accepted': False,
                         'page': {'raw_path': 'release-53-0.response-text.json',
                                  'raw_sha256': hashlib.sha256(raw).hexdigest(),
                                  'normalized_path': 'release-53-0.normalized.json',
@@ -226,6 +238,28 @@ class ExportAuditTests(unittest.TestCase):
                 self.assertTrue(report['artifact_validation_issues'])
                 self.assertFalse((output / 'evidence/manifest.json').exists())
                 self.assertFalse((output / 'evidence/other.json').exists())
+
+    def test_full_inventory_requires_all40_and_separate_test_only_override(self):
+        def missing_witness(directory, manifest):
+            manifest['positive_witnesses'].pop()
+        def unverified(directory, manifest):
+            manifest['positive_witnesses'][39]['verified'] = False
+        def wrong_override(directory, manifest):
+            manifest['bounds']['test_only_scan_ceiling'] = 200001
+        def production_change(directory, manifest):
+            manifest['bounds']['production_config_scan_guard'] = 200000
+        def changed_scope(directory, manifest):
+            manifest['effective_audit_scope_fingerprint'] = 'fred-catalog-v1:' + 'c' * 64
+        def wrong_hash(directory, manifest):
+            manifest['rules_sha256'] = '0' * 64
+        for mutation in (missing_witness, unverified, wrong_override, production_change,
+                         changed_scope, wrong_hash):
+            with self.subTest(case=mutation.__name__), tempfile.TemporaryDirectory() as temporary:
+                status, output, report = self.export(Path(temporary), mutation)
+                self.assertEqual(status, 2)
+                self.assertFalse(report['complete'])
+                self.assertFalse((output / 'evidence/manifest.json').exists())
+                self.assertTrue((output / 'evidence/release-53-0.response-text.json').exists())
 
     def test_real_child_status_and_partial_completeness_never_green_wrapped(self):
         for child_status, complete, expected in ((101, False, 101), (124, False, 124),
