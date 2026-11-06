@@ -340,7 +340,9 @@ class PlatformTests(unittest.TestCase):
         self.assertEqual(route['receiver'], 'slack')
         routes = {tuple(r['matchers']): r for r in route['routes']}
         self.assertEqual(routes[('alertname = "Watchdog"',)]['receiver'], 'healthchecks')
-        self.assertLessEqual(int(routes[('alertname = "Watchdog"',)]['repeat_interval'].rstrip('m')), 2)
+        # Pings go out on the group_interval tick once repeat_interval has passed; both bound the period.
+        self.assertEqual({k: routes[('alertname = "Watchdog"',)][k] for k in ['group_wait', 'group_interval', 'repeat_interval']},
+                         {'group_wait': '0s', 'group_interval': '1m', 'repeat_interval': '1m'})
         self.assertEqual(routes[('alertname = "InfoInhibitor"',)]['receiver'], 'null')
         self.assertEqual(len(config['inhibit_rules']), 5)
         # A failing Slack integration must silence Watchdog so the dead-man's switch alarms.

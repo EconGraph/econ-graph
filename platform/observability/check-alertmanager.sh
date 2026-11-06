@@ -37,6 +37,7 @@ helm template monitoring "$chart" --namespace monitoring --values "$tmp/values.y
 mkdir "$tmp/secrets"
 printf 'https://slack.example.invalid/check\n' > "$tmp/secrets/slack-webhook-url"
 printf 'https://healthchecks.example.invalid/check\n' > "$tmp/secrets/watchdog-url"
+command -v amtool >/dev/null || { echo "amtool not found on PATH" >&2; exit 1; }
 python3 - "$tmp" "$(amtool --version 2>&1 | head -n 1)" <<'PY'
 import base64, os, sys, yaml
 tmp, amtool = sys.argv[1:]
