@@ -1,0 +1,169 @@
+# promtool unit tests for PrometheusRule econgraph-edge (rules-edge.yaml).
+# check-rules.sh writes that rule's spec to econgraph-edge.yml beside these.
+rule_files:
+- econgraph-edge.yml
+
+evaluation_interval: 1m
+
+tests:
+# Backend scaled to 0: Envoy Gateway answers /graphql with a direct 503, so
+# only the listener counter sees it (no upstream cluster series exist for the
+# route). Envoy's own stats listener (eg-stats-http) is heavily used by the
+# scrapes and must not dilute the ratio.
+- name: backend scaled to zero makes /graphql 503 and fires the 5xx alert
+  interval: 1m
+  input_series:
+  - series: 'envoy_http_downstream_rq_xx{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_http_conn_manager_prefix="http-10080",envoy_response_code_class="2"}'
+    values: '0+50x30'
+  - series: 'envoy_http_downstream_rq_xx{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_http_conn_manager_prefix="http-10080",envoy_response_code_class="5"}'
+    values: '0+50x30'
+  - series: 'envoy_http_downstream_rq_xx{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_http_conn_manager_prefix="eg-stats-http",envoy_response_code_class="2"}'
+    values: '0+10000x30'
+  - series: 'up{job="monitoring/econgraph-envoy-proxy",pod="envoy-a"}'
+    values: '1x30'
+  - series: 'up{job="monitoring/econgraph-keycloak",pod="keycloak-a"}'
+    values: '1x30'
+  alert_rule_test:
+  # Pending: the alert needs 5m above the ratio.
+  - eval_time: 5m
+    alertname: EconGraphEdge5xxRatioHigh
+    exp_alerts: []
+  - eval_time: 15m
+    alertname: EconGraphEdge5xxRatioHigh
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+      exp_annotations:
+        summary: More than 5% of public requests return 5xx at the gateway
+        description: 50% of requests through econ-graph-gateway returned 5xx over 5m. A 503 on every request to one path usually means its backend has no ready pods.
+  - eval_time: 15m
+    alertname: EconGraphEdgeMetricsMissing
+    exp_alerts: []
+  - eval_time: 15m
+    alertname: EconGraphKeycloakDown
+    exp_alerts: []
+
+- name: occasional 5xx below the ratio does not alert
+  interval: 1m
+  input_series:
+  - series: 'envoy_http_downstream_rq_xx{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_http_conn_manager_prefix="https-10443",envoy_response_code_class="2"}'
+    values: '0+99x30'
+  - series: 'envoy_http_downstream_rq_xx{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_http_conn_manager_prefix="https-10443",envoy_response_code_class="5"}'
+    values: '0+1x30'
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: EconGraphEdge5xxRatioHigh
+    exp_alerts: []
+
+- name: too little traffic to judge a 5xx ratio
+  interval: 1m
+  input_series:
+  # One failed request a minute: 100% 5xx, but 5 requests in 5m.
+  - series: 'envoy_http_downstream_rq_xx{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_http_conn_manager_prefix="http-10080",envoy_response_code_class="5"}'
+    values: '0+1x30'
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: EconGraphEdge5xxRatioHigh
+    exp_alerts: []
+
+- name: slow public route fires p95 per route; fast, idle and non-public routes do not
+  interval: 1m
+  input_series:
+  # econ-graph-graphql: every request between 2.5s and 5s.
+  - series: 'envoy_cluster_upstream_rq_time_bucket{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph/econ-graph-graphql/rule/0",le="1000"}'
+    values: '0x30'
+  - series: 'envoy_cluster_upstream_rq_time_bucket{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph/econ-graph-graphql/rule/0",le="2500"}'
+    values: '0x30'
+  - series: 'envoy_cluster_upstream_rq_time_bucket{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph/econ-graph-graphql/rule/0",le="5000"}'
+    values: '0+60x30'
+  - series: 'envoy_cluster_upstream_rq_time_bucket{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph/econ-graph-graphql/rule/0",le="+Inf"}'
+    values: '0+60x30'
+  - series: 'envoy_cluster_upstream_rq_time_count{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph/econ-graph-graphql/rule/0"}'
+    values: '0+60x30'
+  # econ-graph-frontend: fast.
+  - series: 'envoy_cluster_upstream_rq_time_bucket{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph/econ-graph-frontend/rule/0",le="25"}'
+    values: '0+60x30'
+  - series: 'envoy_cluster_upstream_rq_time_bucket{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph/econ-graph-frontend/rule/0",le="+Inf"}'
+    values: '0+60x30'
+  - series: 'envoy_cluster_upstream_rq_time_count{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph/econ-graph-frontend/rule/0"}'
+    values: '0+60x30'
+  # econ-graph-idp: slow but only one request a minute (10 in 10m).
+  - series: 'envoy_cluster_upstream_rq_time_bucket{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph/econ-graph-idp/rule/0",le="5000"}'
+    values: '0+1x30'
+  - series: 'envoy_cluster_upstream_rq_time_bucket{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph/econ-graph-idp/rule/0",le="+Inf"}'
+    values: '0+1x30'
+  - series: 'envoy_cluster_upstream_rq_time_count{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph/econ-graph-idp/rule/0"}'
+    values: '0+1x30'
+  # A cert-manager challenge route in econ-graph-gateway: slow, busy, not public.
+  - series: 'envoy_cluster_upstream_rq_time_bucket{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph-gateway/cm-acme-http-solver-abcde/rule/0",le="5000"}'
+    values: '0+60x30'
+  - series: 'envoy_cluster_upstream_rq_time_bucket{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph-gateway/cm-acme-http-solver-abcde/rule/0",le="+Inf"}'
+    values: '0+60x30'
+  - series: 'envoy_cluster_upstream_rq_time_count{job="monitoring/econgraph-envoy-proxy",pod="envoy-a",envoy_cluster_name="httproute/econ-graph-gateway/cm-acme-http-solver-abcde/rule/0"}'
+    values: '0+60x30'
+  alert_rule_test:
+  # Pending: the alert needs 15m above the threshold.
+  - eval_time: 10m
+    alertname: EconGraphEdgeLatencyP95High
+    exp_alerts: []
+  - eval_time: 28m
+    alertname: EconGraphEdgeLatencyP95High
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        envoy_cluster_name: httproute/econ-graph/econ-graph-graphql/rule/0
+      exp_annotations:
+        summary: Public route p95 latency is above 2s
+        description: p95 upstream time for httproute/econ-graph/econ-graph-graphql/rule/0 is 4875ms over 10m.
+
+- name: keycloak instance down, then all down
+  interval: 1m
+  input_series:
+  - series: 'up{job="monitoring/econgraph-keycloak",pod="keycloak-a"}'
+    values: '1x5 0x40'
+  - series: 'up{job="monitoring/econgraph-keycloak",pod="keycloak-b"}'
+    values: '0x45'
+  - series: 'up{job="monitoring/econgraph-envoy-proxy",pod="envoy-a"}'
+    values: '1x45'
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: EconGraphKeycloakDown
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: EconGraphKeycloakDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+      exp_annotations:
+        summary: No Keycloak instance is up; sign-in and token validation fail
+  # keycloak-a has been down 6m (still pending); keycloak-b for 12m.
+  - eval_time: 12m
+    alertname: EconGraphKeycloakInstanceDown
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        job: monitoring/econgraph-keycloak
+        pod: keycloak-b
+      exp_annotations:
+        summary: Keycloak instance keycloak-b is not answering metrics scrapes
+
+- name: nothing scraped at all (monitor missing, pods gone or scaled to 0)
+  interval: 1m
+  input_series:
+  - series: 'up{job="some-other-job"}'
+    values: '1x20'
+  alert_rule_test:
+  - eval_time: 12m
+    alertname: EconGraphKeycloakDown
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+      exp_annotations:
+        summary: No Keycloak instance is up; sign-in and token validation fail
+  - eval_time: 12m
+    alertname: EconGraphEdgeMetricsMissing
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: No Envoy Gateway proxy is being scraped; edge 5xx and latency alerts cannot fire

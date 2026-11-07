@@ -36,10 +36,24 @@ spec:
         enabled: true
         storageClassName: econgraph-local
         size: 5Gi
+      # Dashboards in platform/observability reference uid prometheus (chart default
+      # grafana.sidecar.datasources.uid) and uid loki (below).
+      additionalDataSources:
+      - name: Loki
+        uid: loki
+        type: loki
+        access: proxy
+        url: http://loki.monitoring.svc.cluster.local:3100
+        isDefault: false
+        editable: false
+        jsonData:
+          maxLines: 1000
     prometheus:
       prometheusSpec:
         replicas: 2
         retention: 30d
+        # Size-based retention fires before the 10Gi volume fills (TSDB + WAL overhead).
+        retentionSize: 8GB
         serviceMonitorSelectorNilUsesHelmValues: false
         podMonitorSelectorNilUsesHelmValues: false
         storageSpec:
@@ -51,3 +65,108 @@ spec:
               resources:
                 requests:
                   storage: 10Gi
+    # Receiver URLs live only in the SOPS Secret monitoring/alertmanager-receivers,
+    # mounted by the operator at /etc/alertmanager/secrets/alertmanager-receivers/.
+    # Avoid dollar signs in templates: Flux postBuild substitution reads this file.
+    alertmanager:
+      alertmanagerSpec:
+        secrets:
+        - alertmanager-receivers
+        # Silences and the notification log survive restarts and rescheduling.
+        storage:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: econgraph-local
+              accessModes:
+              - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 1Gi
+      config:
+        global:
+          resolve_timeout: 5m
+        inhibit_rules:
+        - source_matchers:
+          - severity = critical
+          target_matchers:
+          - severity =~ warning|info
+          equal:
+          - namespace
+          - alertname
+        - source_matchers:
+          - severity = warning
+          target_matchers:
+          - severity = info
+          equal:
+          - namespace
+          - alertname
+        - source_matchers:
+          - alertname = InfoInhibitor
+          target_matchers:
+          - severity = info
+          equal:
+          - namespace
+        - target_matchers:
+          - alertname = InfoInhibitor
+        # Slack is the only human path, so its failure must reach the dead-man's
+        # switch: holding Watchdog stops the pings and healthchecks.io alarms by email.
+        - source_matchers:
+          - alertname =~ "AlertmanagerFailedToSendAlerts|AlertmanagerClusterFailedToSendAlerts"
+          - integration = "slack"
+          target_matchers:
+          - alertname = "Watchdog"
+        route:
+          receiver: slack
+          group_by:
+          - namespace
+          - alertname
+          - severity
+          group_wait: 30s
+          group_interval: 5m
+          repeat_interval: 4h
+          routes:
+          # Always-firing Watchdog pings healthchecks.io every 2 minutes (the
+          # notification log dedups the 1m tick); the check (period 5m, grace 5m)
+          # alarms through Slack and email when pings stop.
+          - receiver: healthchecks
+            matchers:
+            - alertname = "Watchdog"
+            group_wait: 0s
+            group_interval: 1m
+            repeat_interval: 1m
+          - receiver: 'null'
+            matchers:
+            - alertname = "InfoInhibitor"
+        receivers:
+        - name: 'null'
+        - name: slack
+          slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/alertmanager-receivers/slack-webhook-url
+            send_resolved: true
+            title: '[{{ .Status | toUpper }}] {{ .CommonLabels.severity }}: {{ .CommonLabels.alertname }}'
+            # The chart's summaries are generic; descriptions name the pod, node or job.
+            text: |-
+              {{ range .Alerts.Firing }}*{{ .Labels.alertname }}* ({{ .Labels.severity }}) in `{{ or .Labels.namespace "cluster" }}`
+              {{ or .Annotations.description .Annotations.summary }}{{ if .Annotations.runbook_url }} <{{ .Annotations.runbook_url }}|runbook>{{ end }}
+              {{ end }}{{ if .Alerts.Resolved }}*Resolved:*
+              {{ range .Alerts.Resolved }}- {{ .Labels.alertname }} in `{{ or .Labels.namespace "cluster" }}`: {{ or .Annotations.description .Annotations.summary }}
+              {{ end }}{{ end }}
+        - name: healthchecks
+          webhook_configs:
+          # A resolved Watchdog means Prometheus stopped evaluating; never ping success for it.
+          - url_file: /etc/alertmanager/secrets/alertmanager-receivers/watchdog-url
+            send_resolved: false
+            max_alerts: 1
+    # Talos runs no kube-proxy (Cilium replaces it) and binds the controller
+    # manager and scheduler to localhost, so their scrapes and alerts would only
+    # ever report false outages.
+    kubeProxy:
+      enabled: false
+    kubeControllerManager:
+      enabled: false
+    kubeScheduler:
+      enabled: false
+    # Talos serves etcd metrics only on its mTLS client ports, and an etcd
+    # client certificate grants full etcd access, so etcd is not scraped.
+    kubeEtcd:
+      enabled: false

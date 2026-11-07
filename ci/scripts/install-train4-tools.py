@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--bin-dir', required=True, type=Path)
-    parser.add_argument('--tool', required=True, action='append', choices=['tofu', 'helm', 'kubectl'])
+    parser.add_argument('--tool', required=True, action='append', choices=['tofu', 'helm', 'kubectl', 'amtool'])
     args = parser.parse_args()
     for tool in args.tool:
         if tool == 'tofu':

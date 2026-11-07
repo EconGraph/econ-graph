@@ -1,0 +1,130 @@
+{
+  "uid": "econgraph-logging",
+  "title": "EconGraph Logs & Debugging",
+  "description": "Pod logs shipped by the OTel collector filelog receiver to Loki over OTLP. Loki stream labels come from the container parser resource attributes: k8s_namespace_name, k8s_pod_name, k8s_container_name.",
+  "tags": ["econgraph", "logs"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-1h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "datasource": {"type": "loki", "uid": "loki"},
+        "query": {"type": 1, "label": "k8s_namespace_name", "stream": "", "refId": "namespace"},
+        "definition": "label_values(k8s_namespace_name)",
+        "refresh": 2,
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "current": {"selected": true, "text": "econ-graph", "value": "econ-graph"},
+        "sort": 1
+      },
+      {
+        "name": "container",
+        "label": "Container",
+        "type": "query",
+        "datasource": {"type": "loki", "uid": "loki"},
+        "query": {"type": 1, "label": "k8s_container_name", "stream": "{k8s_namespace_name=\"$namespace\"}", "refId": "container"},
+        "definition": "label_values({k8s_namespace_name=\"$namespace\"}, k8s_container_name)",
+        "refresh": 2,
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "current": {"selected": true, "text": ["backend"], "value": ["backend"]},
+        "sort": 1
+      },
+      {
+        "name": "search",
+        "label": "Line contains",
+        "type": "textbox",
+        "query": "",
+        "current": {"text": "", "value": ""},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "logs",
+      "title": "Authentication Logs",
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 0},
+      "datasource": {"type": "loki", "uid": "loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "loki", "uid": "loki"},
+          "expr": "{k8s_namespace_name=\"$namespace\", k8s_container_name=~\"$container\"} |~ \"(?i)auth\""
+        }
+      ],
+      "options": {"showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true}
+    },
+    {
+      "id": 2,
+      "type": "logs",
+      "title": "Database Connection Logs",
+      "gridPos": {"h": 12, "w": 12, "x": 0, "y": 12},
+      "datasource": {"type": "loki", "uid": "loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "loki", "uid": "loki"},
+          "expr": "{k8s_namespace_name=\"$namespace\", k8s_container_name=~\"$container\"} |~ \"(?i)database\" |~ \"(?i)connection\""
+        }
+      ],
+      "options": {"showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true}
+    },
+    {
+      "id": 3,
+      "type": "logs",
+      "title": "Error Logs",
+      "gridPos": {"h": 12, "w": 12, "x": 12, "y": 12},
+      "datasource": {"type": "loki", "uid": "loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "loki", "uid": "loki"},
+          "expr": "{k8s_namespace_name=\"$namespace\", k8s_container_name=~\"$container\"} |~ \"(?i)\\\\berror\\\\b\""
+        }
+      ],
+      "options": {"showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Log Lines by Pod",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+      "datasource": {"type": "loki", "uid": "loki"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "loki", "uid": "loki"},
+          "expr": "sum by (k8s_pod_name) (count_over_time({k8s_namespace_name=\"$namespace\", k8s_container_name=~\"$container\"} |= \"$search\" [$__auto]))",
+          "legendFormat": "{{k8s_pod_name}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "logs",
+      "title": "All Logs (selected containers)",
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 32},
+      "datasource": {"type": "loki", "uid": "loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "loki", "uid": "loki"},
+          "expr": "{k8s_namespace_name=\"$namespace\", k8s_container_name=~\"$container\"} |= \"$search\""
+        }
+      ],
+      "options": {"showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true}
+    }
+  ]
+}

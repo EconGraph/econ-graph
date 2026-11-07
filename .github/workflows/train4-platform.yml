@@ -37,12 +37,16 @@ jobs:
           persist-credentials: false
       - name: Install checksum-locked rendering tools and validators
         run: |
-          python3 ci/scripts/install-train4-tools.py --bin-dir "$RUNNER_TEMP/train4-tools" --tool helm --tool kubectl
+          python3 ci/scripts/install-train4-tools.py --bin-dir "$RUNNER_TEMP/train4-tools" --tool helm --tool kubectl --tool amtool
           echo "$RUNNER_TEMP/train4-tools" >> "$GITHUB_PATH"
           python3 -m venv "$RUNNER_TEMP/train4-python"
           "$RUNNER_TEMP/train4-python/bin/python" -m pip install -r scripts/platform/requirements.txt
           echo "$RUNNER_TEMP/train4-python/bin" >> "$GITHUB_PATH"
       - name: Exercise bootstrap and recovery ownership guards
         run: python3 scripts/platform/test_platform.py
+      - name: Check platform Grafana dashboards
+        run: python3 scripts/platform/test_dashboards.py
       - name: Validate actual pinned charts and platform resources
         run: python3 scripts/platform/validate.py --fetch --helm helm --kubectl kubectl --cache "$RUNNER_TEMP/train4-platform-assets"
+      - name: Check rendered Alertmanager config and receiver routes
+        run: platform/observability/check-alertmanager.sh "$RUNNER_TEMP/train4-platform-assets"

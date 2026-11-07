@@ -1,0 +1,82 @@
+# User-facing alerts from the edge (Envoy Gateway) and Keycloak, scraped by
+# monitors-edge.yaml. Tests: tests/edge.test.yaml (rule_files names this
+# rule's spec as econgraph-edge.yml).
+#
+# Error ratio uses the listener (HTTP connection manager) counter
+# envoy_http_downstream_rq_xx, not the per-route upstream cluster counters:
+# when a backend has no ready endpoints (e.g. scaled to 0), Envoy Gateway
+# replaces the route with a direct 503 response, so no upstream cluster sees
+# the request; only the downstream counter does. The listener prefix is
+# http-<port> / https-<port>; the regex excludes Envoy Gateway's own stats and
+# readiness listeners (eg-*). Every route on the Gateway is public.
+#
+# Latency uses the per-route upstream histogram
+# envoy_cluster_upstream_rq_time_bucket (milliseconds). Envoy Gateway names a
+# route's cluster httproute/<namespace>/<route>/rule/<n>; the namespace
+# restricts it to the application routes (econ-graph-frontend, -backend,
+# -graphql, -data-graphql, -idp, -independent-data) and leaves out
+# cert-manager's challenge routes in econ-graph-gateway.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: econgraph-edge
+  namespace: monitoring
+  labels:
+    release: monitoring
+  # Flux postBuild substitution would expand $value and $labels in the
+  # annotation templates; this rule has no ${...} settings of its own.
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  groups:
+  - name: econgraph-edge
+    rules:
+    - alert: EconGraphEdge5xxRatioHigh
+      expr: |
+        (
+          sum(rate(envoy_http_downstream_rq_xx{job="monitoring/econgraph-envoy-proxy",envoy_http_conn_manager_prefix=~"https?-[0-9]+",envoy_response_code_class="5"}[5m]))
+          /
+          sum(rate(envoy_http_downstream_rq_xx{job="monitoring/econgraph-envoy-proxy",envoy_http_conn_manager_prefix=~"https?-[0-9]+"}[5m]))
+        ) > 0.05
+        and
+        sum(increase(envoy_http_downstream_rq_xx{job="monitoring/econgraph-envoy-proxy",envoy_http_conn_manager_prefix=~"https?-[0-9]+"}[5m])) >= 10
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: More than 5% of public requests return 5xx at the gateway
+        description: '{{ $value | humanizePercentage }} of requests through econ-graph-gateway returned 5xx over 5m. A 503 on every request to one path usually means its backend has no ready pods.'
+    - alert: EconGraphEdgeLatencyP95High
+      expr: |
+        histogram_quantile(0.95,
+          sum by (envoy_cluster_name, le) (rate(envoy_cluster_upstream_rq_time_bucket{job="monitoring/econgraph-envoy-proxy",envoy_cluster_name=~"httproute/econ-graph/.+"}[10m]))
+        ) > 2000
+        and on (envoy_cluster_name)
+        sum by (envoy_cluster_name) (increase(envoy_cluster_upstream_rq_time_count{job="monitoring/econgraph-envoy-proxy",envoy_cluster_name=~"httproute/econ-graph/.+"}[10m])) >= 50
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: Public route p95 latency is above 2s
+        description: 'p95 upstream time for {{ $labels.envoy_cluster_name }} is {{ printf "%.0f" $value }}ms over 10m.'
+    - alert: EconGraphEdgeMetricsMissing
+      expr: absent(up{job="monitoring/econgraph-envoy-proxy"} == 1)
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: No Envoy Gateway proxy is being scraped; edge 5xx and latency alerts cannot fire
+    - alert: EconGraphKeycloakDown
+      expr: absent(up{job="monitoring/econgraph-keycloak"} == 1)
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: No Keycloak instance is up; sign-in and token validation fail
+    - alert: EconGraphKeycloakInstanceDown
+      expr: up{job="monitoring/econgraph-keycloak"} == 0
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: 'Keycloak instance {{ $labels.pod }} is not answering metrics scrapes'

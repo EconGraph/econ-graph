@@ -29,6 +29,7 @@ def module(name, path):
 
 health = module('health', ROOT / 'platform/observability/backup-health.py')
 drill = module('drill', HERE / 'cnpg-drill.py')
+bootstrap = module('bootstrap', HERE / 'bootstrap.py')
 
 
 class PlatformTests(unittest.TestCase):
@@ -308,6 +309,13 @@ class PlatformTests(unittest.TestCase):
                     self.assertEqual(run.call_args.args[0], ['kubectl', 'version', '--client', '-o', 'json'])
                     self.assertEqual(run.call_count, 1)
 
+    def test_etcd_is_deliberately_unmonitored(self):
+        # Re-enabling needs a reviewed loopback listen-metrics-urls in Talos.
+        values = yaml.safe_load((ROOT / 'platform/addons/monitoring/release.yaml').read_text())['spec']['values']
+        self.assertEqual(values['kubeEtcd'], {'enabled': False})
+        for path in (ROOT / 'infra/talos').rglob('*.tf'):
+            self.assertNotIn('listen-metrics-urls', path.read_text(), path)
+
     def test_cilium_talos_hostdns_contract(self):
         release = yaml.safe_load((ROOT / 'platform/addons/cilium/release.yaml').read_text())
         self.assertEqual(release['spec']['releaseName'], 'cilium')
@@ -316,6 +324,62 @@ class PlatformTests(unittest.TestCase):
         self.assertTrue(release['spec']['values']['bpf']['hostLegacyRouting'])
         self.assertFalse(release['spec']['values']['gatewayAPI']['enabled'])
         self.assertTrue(release['spec']['values']['kubeProxyReplacement'])
+
+    def test_alert_receivers_come_only_from_the_encrypted_secret(self):
+        values = yaml.safe_load((ROOT / 'platform/addons/monitoring/release.yaml').read_text())['spec']['values']
+        self.assertEqual(values['alertmanager']['alertmanagerSpec']['secrets'], ['alertmanager-receivers'])
+        config = values['alertmanager']['config']
+        mount = '/etc/alertmanager/secrets/alertmanager-receivers/'
+        receivers = {r['name']: r for r in config['receivers']}
+        self.assertEqual(set(receivers), {'null', 'slack', 'healthchecks'})
+        self.assertEqual([c['api_url_file'] for c in receivers['slack']['slack_configs']], [mount + 'slack-webhook-url'])
+        self.assertTrue(all(c['send_resolved'] and 'api_url' not in c for c in receivers['slack']['slack_configs']))
+        # A resolved Watchdog means Prometheus stopped; it must never ping the dead-man's switch.
+        self.assertEqual(receivers['healthchecks']['webhook_configs'], [{'url_file': mount + 'watchdog-url', 'send_resolved': False, 'max_alerts': 1}])
+        route = config['route']
+        self.assertEqual(route['receiver'], 'slack')
+        routes = {tuple(r['matchers']): r for r in route['routes']}
+        self.assertEqual(routes[('alertname = "Watchdog"',)]['receiver'], 'healthchecks')
+        # Pings go out on the group_interval tick once repeat_interval has passed; both bound the period.
+        self.assertEqual({k: routes[('alertname = "Watchdog"',)][k] for k in ['group_wait', 'group_interval', 'repeat_interval']},
+                         {'group_wait': '0s', 'group_interval': '1m', 'repeat_interval': '1m'})
+        self.assertEqual(routes[('alertname = "InfoInhibitor"',)]['receiver'], 'null')
+        self.assertEqual(len(config['inhibit_rules']), 5)
+        # A failing Slack integration must silence Watchdog so the dead-man's switch alarms.
+        self.assertIn({'source_matchers': ['alertname =~ "AlertmanagerFailedToSendAlerts|AlertmanagerClusterFailedToSendAlerts"', 'integration = "slack"'],
+                       'target_matchers': ['alertname = "Watchdog"']}, config['inhibit_rules'])
+        self.assertIn('.Alerts.Firing', receivers['slack']['slack_configs'][0]['text'])
+        # Flux postBuild substitution would rewrite dollar expressions in Go templates.
+        self.assertNotIn('$', yaml.safe_dump(config))
+        roots = ['platform', 'infra', 'k8s', 'scripts', 'ci', 'docs', '.github']
+        for path in [p for r in roots for p in (ROOT / r).rglob('*') if p.is_file() and p.suffix in {'.yaml', '.yml', '.json', '.md', '.py', '.sh', '.tf'}]:
+            if not path.name.endswith('.sops.yaml') and path.resolve() != Path(__file__).resolve():
+                for host in ['hooks.slack.com', 'hc-ping.com', 'healthchecks.io/ping']:
+                    self.assertNotIn(host, path.read_text(), path)
+
+    def test_talos_absent_control_plane_scrapes_are_disabled(self):
+        values = yaml.safe_load((ROOT / 'platform/addons/monitoring/release.yaml').read_text())['spec']['values']
+        for component in ['kubeProxy', 'kubeControllerManager', 'kubeScheduler']:
+            self.assertIs(values[component]['enabled'], False, component)
+
+    def test_reconcile_requires_encrypted_alert_receivers(self):
+        def secret(namespace, name, keys):
+            return {'kind': 'Secret', 'sops': {'age': []}, 'metadata': {'namespace': namespace, 'name': name},
+                    'stringData': {k: 'ENC[AES256_GCM,data:test]' for k in keys}}
+        complete = [secret(namespace, name, bootstrap.REQUIRED_KEYS.get((namespace, name), ['key']))
+                    for namespace, name in sorted(bootstrap.REQUIRED_SECRETS)]
+        bootstrap.check_encrypted_inputs(complete)
+        self.assertIn(('monitoring', 'alertmanager-receivers'), bootstrap.REQUIRED_SECRETS)
+        without = [d for d in complete if d['metadata']['name'] != 'alertmanager-receivers']
+        with self.assertRaises(ValueError):
+            bootstrap.check_encrypted_inputs(without)
+        partial = without + [secret('monitoring', 'alertmanager-receivers', ['slack-webhook-url'])]
+        with self.assertRaises(ValueError):
+            bootstrap.check_encrypted_inputs(partial)
+        plaintext = copy.deepcopy(complete)
+        next(d for d in plaintext if d['metadata']['name'] == 'alertmanager-receivers')['stringData']['watchdog-url'] = 'https://example.invalid'
+        with self.assertRaises(ValueError):
+            bootstrap.check_encrypted_inputs(plaintext)
 
     def test_pin_checks_and_no_automatic_backup_delete(self):
         for path in (ROOT / 'platform').rglob('*.yaml'):

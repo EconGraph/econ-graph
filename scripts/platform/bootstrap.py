@@ -12,6 +12,26 @@ import yaml
 from safety import Kubernetes, identifier, scratch_environment
 
 ROOT = Path(__file__).resolve().parents[2]
+REQUIRED_SECRETS = {('econ-graph', n) for n in ['econ-graph-app-credentials', 'econ-graph-data-credentials', 'econ-graph-keycloak-credentials', 'econ-graph-secrets', 'econ-graph-keycloak', 'app-backup-s3', 'data-backup-s3', 'keycloak-backup-s3']} | {('monitoring', n) for n in ['grafana-admin', 'loki-objectstore', 'alertmanager-receivers']}
+# Alertmanager reads these files only when it notifies; a missing key would fail silently later.
+REQUIRED_KEYS = {('monitoring', 'alertmanager-receivers'): {'slack-webhook-url', 'watchdog-url'}}
+
+
+def check_encrypted_inputs(secret_docs):
+    """Raise ValueError unless every required deployment Secret is SOPS-encrypted and has its required keys."""
+    actual = set()
+    for document in secret_docs:
+        if document.get('kind') != 'Secret' or not document.get('sops'):
+            raise ValueError('secret package must contain only SOPS-encrypted Secrets')
+        values = {**document.get('data', {}), **document.get('stringData', {})}
+        if not values or not all(isinstance(v, str) and v.startswith('ENC[') for v in values.values()):
+            raise ValueError('secret values must all be encrypted')
+        key = (document['metadata'].get('namespace'), document['metadata']['name'])
+        if not REQUIRED_KEYS.get(key, set()) <= set(values):
+            raise ValueError('encrypted Secret %s/%s lacks required keys' % key)
+        actual.add(key)
+    if not REQUIRED_SECRETS <= actual:
+        raise ValueError('rendered secret package lacks required encrypted deployment inputs')
 
 
 def main():
@@ -77,22 +97,15 @@ def main():
         for key in ['BACKEND_IMAGE', 'FRONTEND_IMAGE', 'CRAWLER_IMAGE']:
             if not re.fullmatch(r'[^\s]+@sha256:[0-9a-f]{64}', data.get(key, '')):
                 raise ValueError('reviewed feature image digest required: ' + key)
+        # The host disk exporter target (platform/observability/scrape-host.yaml); an empty
+        # substitution would fail the whole observability Kustomization.
+        if not re.fullmatch(r'\d{1,3}(\.\d{1,3}){3}:\d{1,5}', data.get('HOST_EXPORTER_TARGET', '')):
+            raise ValueError('HOST_EXPORTER_TARGET must be the host bridge IPv4 address and node_exporter port')
         # Keys are created separately from protected files. Never read/export their values.
         for secret in ['sops-age', 'platform-git-auth']:
             kube.run('get', 'secret', secret, '-n', 'flux-system', '-o', 'name')
         rendered_secrets = subprocess.run([args.kubectl, 'kustomize', str(ROOT / 'platform/secrets')], check=True, capture_output=True, text=True).stdout
-        secret_docs = [d for d in yaml.safe_load_all(rendered_secrets) if d]
-        required = {('econ-graph', n) for n in ['econ-graph-app-credentials', 'econ-graph-data-credentials', 'econ-graph-keycloak-credentials', 'econ-graph-secrets', 'econ-graph-keycloak', 'app-backup-s3', 'data-backup-s3', 'keycloak-backup-s3']} | {('monitoring', n) for n in ['grafana-admin', 'loki-objectstore']}
-        actual = set()
-        for document in secret_docs:
-            if document.get('kind') != 'Secret' or not document.get('sops'):
-                raise ValueError('secret package must contain only SOPS-encrypted Secrets')
-            values = {**document.get('data', {}), **document.get('stringData', {})}
-            if not values or not all(isinstance(v, str) and v.startswith('ENC[') for v in values.values()):
-                raise ValueError('secret values must all be encrypted')
-            actual.add((document['metadata'].get('namespace'), document['metadata']['name']))
-        if not required <= actual:
-            raise ValueError('rendered secret package lacks required encrypted deployment inputs')
+        check_encrypted_inputs([d for d in yaml.safe_load_all(rendered_secrets) if d])
         # Flux reads Git, never this filesystem. Pin the reviewed remote-tracking commit
         # and ensure the local encrypted package exactly matches its committed bytes.
         reference = 'refs/remotes/origin/' + args.git_ref
