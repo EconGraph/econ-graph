@@ -1,0 +1,2887 @@
+{
+  "format": 1,
+  "representation": "complete_catalog_field_projection_not_raw_api_page",
+  "fields": [
+    "id",
+    "title",
+    "frequency",
+    "units"
+  ],
+  "audit_revision": "9beb3561110dd00a71603903d6b25ae2af82b4d6",
+  "catalog_realtime": "2026-11-05",
+  "global_inventory_complete": false,
+  "catalogs": [
+    {
+      "release_id": 18,
+      "complete": true,
+      "count": 270,
+      "provenance": {
+        "advertised_count": 270,
+        "normalized_path": "release-18-0.normalized.json",
+        "normalized_sha256": "b54947a7765872850f4423500af665df16cf6537fbe4771b2bc657f6dcbeb8c4",
+        "raw_path": "release-18-0.response-text.json",
+        "raw_representation": "response_text_utf8_not_http_wire",
+        "raw_sha256": "e7cc95d3ce97a8d6bf2a604ea349b8d9d89a1e8cc8354f62bae0eb71c1a0b48e",
+        "requested_offset": 0,
+        "response_limit": 1000,
+        "response_offset": 0,
+        "retrieved_at": "2026-11-05T16:44:15.566421697+00:00",
+        "validation": "validated"
+      },
+      "rows": [
+        {
+          "id": "CD1M",
+          "title": "Average Rate on 1-Month Negotiable Certificates of Deposit (Secondary Market), Quoted on an Investment Basis (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "CD3M",
+          "title": "Average Rate on 3-Month Negotiable Certificates of Deposit (Secondary Market), Quoted on an Investment Basis (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "CD6M",
+          "title": "Average Rate on 6-Month Negotiable Certificates of Deposit (Secondary Market), Quoted on an Investment Basis (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "CPF1M",
+          "title": "30-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "CPF2M",
+          "title": "60-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "CPF3M",
+          "title": "90-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "CPN1M",
+          "title": "30-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "CPN2M",
+          "title": "60-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "CPN3M",
+          "title": "90-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "DBKAC",
+          "title": "3-Month Bankers Acceptance Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DCD1M",
+          "title": "Average Rate on 1-Month Negotiable Certificates of Deposit (Secondary Market), Quoted on an Investment Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DCD6M",
+          "title": "Average Rate on 6-Month Negotiable Certificates of Deposit (Secondary Market), Quoted on an Investment Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DCD90",
+          "title": "Average Rate on 3-Month Negotiable Certificates of Deposit (Secondary Market), Quoted on an Investment Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DCP30",
+          "title": "1-Month Commercial Paper Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DCPF1M",
+          "title": "30-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DCPF2M",
+          "title": "60-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DCPF3M",
+          "title": "90-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DCPN2M",
+          "title": "60-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DCPN30",
+          "title": "30-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DCPN3M",
+          "title": "90-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DDISCRT",
+          "title": "Discount Rate (DISCONTINUED)",
+          "frequency": "Daily, 7-Day",
+          "units": "Percent"
+        },
+        {
+          "id": "DED1",
+          "title": "U.S. Short-Term Interest Rates: Daily 1-Month Eurodollar Deposit Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DED3",
+          "title": "U.S. Short-Term Interest Rates: Daily 3-Month Eurodollar Deposit Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DED6",
+          "title": "U.S. Short-Term Interest Rates: Daily 6-Month Eurodollar Deposit Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DFF",
+          "title": "Federal Funds Effective Rate",
+          "frequency": "Daily, 7-Day",
+          "units": "Percent"
+        },
+        {
+          "id": "DFII10",
+          "title": "Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DFII20",
+          "title": "Market Yield on U.S. Treasury Securities at 20-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DFII30",
+          "title": "Market Yield on U.S. Treasury Securities at 30-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DFII5",
+          "title": "Market Yield on U.S. Treasury Securities at 5-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DFII7",
+          "title": "Market Yield on U.S. Treasury Securities at 7-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DGS1",
+          "title": "Market Yield on U.S. Treasury Securities at 1-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DGS10",
+          "title": "Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DGS1MO",
+          "title": "Market Yield on U.S. Treasury Securities at 1-Month Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DGS2",
+          "title": "Market Yield on U.S. Treasury Securities at 2-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DGS20",
+          "title": "Market Yield on U.S. Treasury Securities at 20-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DGS3",
+          "title": "Market Yield on U.S. Treasury Securities at 3-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DGS30",
+          "title": "Market Yield on U.S. Treasury Securities at 30-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DGS3MO",
+          "title": "Market Yield on U.S. Treasury Securities at 3-Month Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DGS5",
+          "title": "Market Yield on U.S. Treasury Securities at 5-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DGS6MO",
+          "title": "Market Yield on U.S. Treasury Securities at 6-Month Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DGS7",
+          "title": "Market Yield on U.S. Treasury Securities at 7-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DLTA",
+          "title": "Treasury Long-Term Average (25 Years and Above) (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DLTBOARD",
+          "title": "Composite Yield on U.S. Treasury Bonds with Maturity over 10 Years (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DLTIIT",
+          "title": "Treasury Long-Term Average (Over 10 Years), Inflation-Indexed",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DPCREDIT",
+          "title": "Discount Window Primary Credit Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DPRIME",
+          "title": "Bank Prime Loan Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DSWP1",
+          "title": "1-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DSWP10",
+          "title": "10-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DSWP2",
+          "title": "2-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DSWP3",
+          "title": "3-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DSWP30",
+          "title": "30-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DSWP4",
+          "title": "4-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DSWP5",
+          "title": "5-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DSWP7",
+          "title": "7-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DTB1",
+          "title": "1-Year Treasury Bill: Secondary Market Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DTB1YR",
+          "title": "1-Year Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DTB3",
+          "title": "3-Month Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DTB4WK",
+          "title": "4-Week Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "DTB6",
+          "title": "6-Month Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "FEDFUNDS",
+          "title": "Federal Funds Effective Rate",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "FF",
+          "title": "Federal Funds Effective Rate",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Percent"
+        },
+        {
+          "id": "FII10",
+          "title": "Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "FII20",
+          "title": "Market Yield on U.S. Treasury Securities at 20-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "FII30",
+          "title": "Market Yield on U.S. Treasury Securities at 30-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "FII5",
+          "title": "Market Yield on U.S. Treasury Securities at 5-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "FII7",
+          "title": "Market Yield on U.S. Treasury Securities at 7-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "GS1",
+          "title": "Market Yield on U.S. Treasury Securities at 1-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "GS10",
+          "title": "Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "GS1M",
+          "title": "Market Yield on U.S. Treasury Securities at 1-Month Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "GS2",
+          "title": "Market Yield on U.S. Treasury Securities at 2-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "GS20",
+          "title": "Market Yield on U.S. Treasury Securities at 20-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "GS3",
+          "title": "Market Yield on U.S. Treasury Securities at 3-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "GS30",
+          "title": "Market Yield on U.S. Treasury Securities at 30-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "GS3M",
+          "title": "Market Yield on U.S. Treasury Securities at 3-Month Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "GS5",
+          "title": "Market Yield on U.S. Treasury Securities at 5-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "GS6M",
+          "title": "Market Yield on U.S. Treasury Securities at 6-Month Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "GS7",
+          "title": "Market Yield on U.S. Treasury Securities at 7-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFLGFCY20NA",
+          "title": "20-Year U.S. Government Constant Maturity Yield (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFLGFCY20NB",
+          "title": "20-Year U.S. Government Constant Maturity Yield (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFLGFCY20NM",
+          "title": "20 Year U.S. Govt. Constant Maturity Yield (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFLGFCY20NWF",
+          "title": "20-Year U.S. Government Constant Maturity Yield (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFLGFLNA",
+          "title": "Treasury Long-Term Average (25 Years and Above) (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSGFPAM06NB",
+          "title": "6-Month Treasury Bill Auction High, Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSGFPAY01NB",
+          "title": "12-Month Treasury Bill Auction High, Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSGFPIM06NA",
+          "title": "6-Month Auction High Bill Rate by Issue Date (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSGFPIM06NM",
+          "title": "6-Month Auction High Bill Rate by Issue Date (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSGFPIY01NA",
+          "title": "12-Month Auction High Bill Rate by Issue Date (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSGFPIY01NM",
+          "title": "12-Month Auction High Bill Rate by Issue Date (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPABM06NA",
+          "title": "Average Dealer Offering Rate on 6-Month Domestic Private Bankers' Acceptances, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPABM06NB",
+          "title": "Average Dealer Offering Rate on 6-Month Domestic Private Bankers' Acceptances, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPABM06NM",
+          "title": "Average Dealer Offering Rate on 6-Month Domestic Private Bankers' Acceptances, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPDCNSM01NA",
+          "title": "Average Rate on 1-Month Negotiable Certificates of Deposit (Secondary Market), Quoted on an Investment Basis (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPDCNSM03NA",
+          "title": "Average Rate on 3-Month Negotiable Certificates of Deposit (Secondary Market), Quoted on an Investment Basis (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPDCNSM06NA",
+          "title": "Average Rate on 6-Month Negotiable Certificates of Deposit (Secondary Market), Quoted on an Investment Basis (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPCM01NA",
+          "title": "1-Month Prime Commercial Paper, Average Dealer Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPCM01NM",
+          "title": "1-Month Prime Commercial Paper, Average Dealer Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPCM03NA",
+          "title": "3-Month Prime Commercial Paper, Average Dealer Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPCM03NM",
+          "title": "3-Month Prime Commercial Paper, Average Dealer Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPCM06NA",
+          "title": "6-Month Prime Commercial Paper, Average Dealer Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPCM06NB",
+          "title": "6-Month Prime Commercial Paper, Average Dealer Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPCM06NM",
+          "title": "6-Month Prime Commercial Paper, Average Dealer Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPFM01NA",
+          "title": "1-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPFM01NM",
+          "title": "1-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPFM01NWF",
+          "title": "1-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPFM03NA",
+          "title": "3-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPFM03NM",
+          "title": "3-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPFM03NWF",
+          "title": "3-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPFM06NA",
+          "title": "6-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPFM06NB",
+          "title": "6-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPFM06NM",
+          "title": "6-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSPPFM06NWF",
+          "title": "6-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSRDF02NA",
+          "title": "Discount Rate (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSRDF02NB",
+          "title": "Discount Rate (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "H0RIFSRDF02NWW",
+          "title": "Discount Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Percent"
+        },
+        {
+          "id": "H15H0RIFSPPCM01NB",
+          "title": "1-Month Prime Commercial Paper, Average Dealer Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "H15H0RIFSPPCM03NB",
+          "title": "3-Month Prime Commercial Paper, Average Dealer Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "H15H0RIFSPPFM01NB",
+          "title": "1-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "H15H0RIFSPPFM03NB",
+          "title": "3-Month Finance Paper Placed Directly, Average Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "H1RIFLGFY10PNA",
+          "title": "Composite Yield on U.S. Treasury Bonds with Maturity over 10 Years (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H1RIFLGFY10PNM",
+          "title": "Composite Yield on U.S. Treasury Bonds with Maturity over 10 Years (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H1RIFSGFPAM03NB",
+          "title": "3-Month Treasury Bill Auction High, Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "H1RIFSGFPIM03NA",
+          "title": "3-Month Auction High Bill Rate by Issue Date (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H1RIFSGFPIM03NM",
+          "title": "3-Month Auction High Bill Rate by Issue Date (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H1RIFSPABM03NA",
+          "title": "Average Dealer Offering Rate on 3-Month Domestic Private Bankers' Acceptances, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "H1RIFSPABM03NB",
+          "title": "Average Dealer Offering Rate on 3-Month Domestic Private Bankers' Acceptances, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "H1RIFSPABM03NM",
+          "title": "Average Dealer Offering Rate on 3-Month Domestic Private Bankers' Acceptances, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "H1RIFSPABM03NWF",
+          "title": "Average Dealer Offering Rate on 3-Month Domestic Private Bankers' Acceptances, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "LTA",
+          "title": "Treasury Long-Term Average (25 Years and Above) (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "LTBOARD",
+          "title": "Composite Yield on U.S. Treasury Bonds with Maturity over 10 Years (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "LTIIT",
+          "title": "Treasury Long-Term Average (Over 10 Years), Inflation-Indexed",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MDISCRT",
+          "title": "Discount Rate (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MED1",
+          "title": "U.S. Short-Term Interest Rates: Daily 1-Month Eurodollar Deposit Rate (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MED3",
+          "title": "U.S. Short-Term Interest Rates: Daily 3-Month Eurodollar Deposit Rate (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MED6",
+          "title": "U.S. Short-Term Interest Rates: Daily 6-Month Eurodollar Deposit Rate (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MORTG",
+          "title": "Contract Rate on 30-Year, Fixed-Rate Conventional Home Mortgage Commitments (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MPCREDIT",
+          "title": "Discount Window Primary Credit Rate",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MPRIME",
+          "title": "Bank Prime Loan Rate",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MSLB20",
+          "title": "Bond Buyer Go 20-Bond Municipal Bond Index (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MSWP1",
+          "title": "1-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MSWP10",
+          "title": "10-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MSWP2",
+          "title": "2-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MSWP3",
+          "title": "3-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MSWP30",
+          "title": "30-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MSWP4",
+          "title": "4-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MSWP5",
+          "title": "5-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "MSWP7",
+          "title": "7-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "PRIME",
+          "title": "Bank Prime Loan Rate Changes: Historical Dates of Changes and Rates",
+          "frequency": "Not Applicable",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLDIY01NA",
+          "title": "1-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLDIY02NA",
+          "title": "2-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLDIY03NA",
+          "title": "3-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLDIY04NA",
+          "title": "4-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLDIY05NA",
+          "title": "5-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLDIY07NA",
+          "title": "7-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLDIY10NA",
+          "title": "10-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLDIY30NA",
+          "title": "30-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCM01NA",
+          "title": "Market Yield on U.S. Treasury Securities at 1-Month Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCM03NA",
+          "title": "Market Yield on U.S. Treasury Securities at 3-Month Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCM06NA",
+          "title": "Market Yield on U.S. Treasury Securities at 6-Month Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCY01NA",
+          "title": "Market Yield on U.S. Treasury Securities at 1-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCY02NA",
+          "title": "Market Yield on U.S. Treasury Securities at 2-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCY03NA",
+          "title": "Market Yield on U.S. Treasury Securities at 3-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCY05NA",
+          "title": "Market Yield on U.S. Treasury Securities at 5-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCY05XIINA",
+          "title": "Market Yield on U.S. Treasury Securities at 5-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCY07NA",
+          "title": "Market Yield on U.S. Treasury Securities at 7-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCY07XIINA",
+          "title": "Market Yield on U.S. Treasury Securities at 7-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCY10NA",
+          "title": "Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCY10XIINA",
+          "title": "Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCY20NA",
+          "title": "Market Yield on U.S. Treasury Securities at 20-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCY20XIINA",
+          "title": "Market Yield on U.S. Treasury Securities at 20-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCY30NA",
+          "title": "Market Yield on U.S. Treasury Securities at 30-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFCY30XIINA",
+          "title": "Market Yield on U.S. Treasury Securities at 30-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFLGFLXIINA",
+          "title": "Treasury Long-Term Average (Over 10 Years), Inflation-Indexed",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSGFSM03NA",
+          "title": "3-Month Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSGFSM06NA",
+          "title": "6-Month Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSGFSW04NA",
+          "title": "4-Week Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSGFSY01NA",
+          "title": "1-Year Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPBLPNA",
+          "title": "Bank Prime Loan Rate",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPBLPND",
+          "title": "Bank Prime Loan Rate",
+          "frequency": "Daily, 7-Day",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPFFNA",
+          "title": "Federal Funds Effective Rate",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPFFNB",
+          "title": "Federal Funds Effective Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPFFNBWAW",
+          "title": "Federal Funds Effective Rate",
+          "frequency": "Biweekly, Ending Wednesday",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPCUNA",
+          "title": "Interest Rate That Issuers Not Subject to the Unsecured Credit Surcharge Pay to Issue 3-Month Unsecured Paper to the Commercial Paper Funding Facility (CPFF) (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPCUNB",
+          "title": "Interest Rate That Issuers Not Subject to the Unsecured Credit Surcharge Pay to Issue 3-Month Unsecured Paper to the Commercial Paper Funding Facility (CPFF) (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPCUNM",
+          "title": "Interest Rate That Issuers Not Subject to the Unsecured Credit Surcharge Pay to Issue 3-Month Unsecured Paper to the Commercial Paper Funding Facility (CPFF) (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPCUNWF",
+          "title": "Interest Rate That Issuers Not Subject to the Unsecured Credit Surcharge Pay to Issue 3-Month Unsecured Paper to the Commercial Paper Funding Facility (CPFF) (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPCUSNA",
+          "title": "Interest Rate That Issuers Subject to the Unsecured Credit Surcharge Pay to Issue 3-Month Unsecured Paper to the Commercial Paper Funding Facility (CPFF) (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPCUSNB",
+          "title": "Interest Rate That Issuers Subject to the Unsecured Credit Surcharge Pay to Issue 3-Month Unsecured Paper to the Commercial Paper Funding Facility (CPFF) (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPCUSNM",
+          "title": "Interest Rate That Issuers Subject to the Unsecured Credit Surcharge Pay to Issue 3-Month Unsecured Paper to the Commercial Paper Funding Facility (CPFF) (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPCUSNWF",
+          "title": "Interest Rate That Issuers Subject to the Unsecured Credit Surcharge Pay to Issue 3-Month Unsecured Paper to the Commercial Paper Funding Facility (CPFF) (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPFAAD30NA",
+          "title": "30-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPFAAD60NA",
+          "title": "60-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPFAAD90NA",
+          "title": "90-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNAAD30NA",
+          "title": "30-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNAAD60NA",
+          "title": "60-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNAAD90NA",
+          "title": "90-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSRPF02NA",
+          "title": "Discount Window Primary Credit Rate",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSRPF02ND",
+          "title": "Discount Window Primary Credit Rate",
+          "frequency": "Daily, 7-Day",
+          "units": "Percent"
+        },
+        {
+          "id": "RILSPDEPM01NA",
+          "title": "U.S. Short-Term Interest Rates: Daily 1-Month Eurodollar Deposit Rate (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RILSPDEPM03NA",
+          "title": "U.S. Short-Term Interest Rates: Daily 3-Month Eurodollar Deposit Rate (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RILSPDEPM06NA",
+          "title": "U.S. Short-Term Interest Rates: Daily 6-Month Eurodollar Deposit Rate (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIMLPAAARNA",
+          "title": "Moody's Yield on Seasoned Corporate Bonds, All Industries, AAA (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIMLPAAARNB",
+          "title": "Moody's Yield on Seasoned Corporate Bonds, All Industries, AAA (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIMLPAAARNM",
+          "title": "Moody's Yield on Seasoned Corporate Bonds, All Industries, AAA (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "RIMLPAAARNWF",
+          "title": "Moody's Yield on Seasoned Corporate Bonds, All Industries, AAA (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "RIMLPBAARNA",
+          "title": "Moody's Yield on Seasoned Corporate Bonds, All Industries, BAA (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "RIMLPBAARNB",
+          "title": "Moody's Yield on Seasoned Corporate Bonds, All Industries, BAA (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIMLPBAARNM",
+          "title": "Moody's Yield on Seasoned Corporate Bonds, All Industries, BAA (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "RIMLPBAARNWF",
+          "title": "Moody's Yield on Seasoned Corporate Bonds, All Industries, BAA (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "RMMPCCFCNA",
+          "title": "Contract Rate on 30-Year, Fixed-Rate Conventional Home Mortgage Commitments (DISCONTINUED)",
+          "frequency": "Annual",
+          "units": "Percent"
+        },
+        {
+          "id": "TB1YR",
+          "title": "1-Year Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "TB3MS",
+          "title": "3-Month Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "TB4WK",
+          "title": "4-Week Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "TB6MS",
+          "title": "6-Month Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Monthly",
+          "units": "Percent"
+        },
+        {
+          "id": "WBA3M",
+          "title": "3-Month Bankers Acceptance Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WBA6M",
+          "title": "Average Dealer Offering Rate on 6-Month Domestic Private Bankers' Acceptances, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WCD1M",
+          "title": "Average Rate on 1-Month Negotiable Certificates of Deposit (Secondary Market), Quoted on an Investment Basis (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WCD3M",
+          "title": "Average Rate on 3-Month Negotiable Certificates of Deposit (Secondary Market), Quoted on an Investment Basis (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WCD6M",
+          "title": "Average Rate on 6-Month Negotiable Certificates of Deposit (Secondary Market), Quoted on an Investment Basis (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WCP1M",
+          "title": "1-Month Prime Commercial Paper, Average Dealer Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WCP3M",
+          "title": "3-Month Prime Commercial Paper, Average Dealer Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WCP6M",
+          "title": "6-Month Prime Commercial Paper, Average Dealer Offering Rate, Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WCPF1M",
+          "title": "30-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WCPF2M",
+          "title": "60-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WCPF3M",
+          "title": "90-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WCPN1M",
+          "title": "30-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WCPN2M",
+          "title": "60-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WCPN3M",
+          "title": "90-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WDISCRT",
+          "title": "Discount Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Percent"
+        },
+        {
+          "id": "WED1",
+          "title": "U.S. Short-Term Interest Rates: Daily 1-Month Eurodollar Deposit Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WED3",
+          "title": "U.S. Short-Term Interest Rates: Daily 3-Month Eurodollar Deposit Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WED6",
+          "title": "U.S. Short-Term Interest Rates: Daily 6-Month Eurodollar Deposit Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WFII10",
+          "title": "Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WFII20",
+          "title": "Market Yield on U.S. Treasury Securities at 20-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WFII30",
+          "title": "Market Yield on U.S. Treasury Securities at 30-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WFII5",
+          "title": "Market Yield on U.S. Treasury Securities at 5-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WFII7",
+          "title": "Market Yield on U.S. Treasury Securities at 7-Year Constant Maturity, Quoted on an Investment Basis, Inflation-Indexed",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WGS10YR",
+          "title": "Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WGS1MO",
+          "title": "Market Yield on U.S. Treasury Securities at 1-Month Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WGS1YR",
+          "title": "Market Yield on U.S. Treasury Securities at 1-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WGS20YR",
+          "title": "Market Yield on U.S. Treasury Securities at 20-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WGS2YR",
+          "title": "Market Yield on U.S. Treasury Securities at 2-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WGS30YR",
+          "title": "Market Yield on U.S. Treasury Securities at 30-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WGS3MO",
+          "title": "Market Yield on U.S. Treasury Securities at 3-Month Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WGS3YR",
+          "title": "Market Yield on U.S. Treasury Securities at 3-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WGS5YR",
+          "title": "Market Yield on U.S. Treasury Securities at 5-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WGS6MO",
+          "title": "Market Yield on U.S. Treasury Securities at 6-Month Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WGS7YR",
+          "title": "Market Yield on U.S. Treasury Securities at 7-Year Constant Maturity, Quoted on an Investment Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WLTA",
+          "title": "Treasury Long-Term Average (25 Years and Above) (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WLTIIT",
+          "title": "Treasury Long-Term Average (Over 10 Years), Inflation-Indexed",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WMORTG",
+          "title": "Contract Rate on 30-Year, Fixed-Rate Conventional Home Mortgage Commitments (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WPCREDIT",
+          "title": "Discount Window Primary Credit Rate",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Percent"
+        },
+        {
+          "id": "WPRIME",
+          "title": "Bank Prime Loan Rate",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Percent"
+        },
+        {
+          "id": "WRMORTG",
+          "title": "Contract Rate on 30-Year, Fixed-Rate Conventional Home Mortgage Commitments (DISCONTINUED)",
+          "frequency": "Weekly, Ending Thursday",
+          "units": "Percent"
+        },
+        {
+          "id": "WSLB20",
+          "title": "Bond Buyer Go 20-Bond Municipal Bond Index (DISCONTINUED)",
+          "frequency": "Weekly, As of Thursday",
+          "units": "Percent"
+        },
+        {
+          "id": "WSWP1",
+          "title": "1-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WSWP10",
+          "title": "10-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WSWP2",
+          "title": "2-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WSWP3",
+          "title": "3-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WSWP30",
+          "title": "30-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WSWP4",
+          "title": "4-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WSWP5",
+          "title": "5-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WSWP7",
+          "title": "7-Year Swap Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WTB1YA",
+          "title": "12-Month Auction High Bill Rate by Issue Date (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WTB1YR",
+          "title": "1-Year Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WTB1YS",
+          "title": "1-Year Treasury Bill: Secondary Market Rate (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WTB3MA",
+          "title": "3-Month Auction High Bill Rate by Issue Date (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WTB3MS",
+          "title": "3-Month Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WTB4WK",
+          "title": "4-Week Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WTB6MA",
+          "title": "6-Month Auction High Bill Rate by Issue Date (DISCONTINUED)",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        },
+        {
+          "id": "WTB6MS",
+          "title": "6-Month Treasury Bill Secondary Market Rate, Discount Basis",
+          "frequency": "Weekly, Ending Friday",
+          "units": "Percent"
+        }
+      ]
+    },
+    {
+      "release_id": 86,
+      "complete": true,
+      "count": 202,
+      "provenance": {
+        "advertised_count": 202,
+        "normalized_path": "release-86-0.normalized.json",
+        "normalized_sha256": "5ddbf1b612afb5a457121090868036acc32fb6df2a30167d21ae86078286101d",
+        "raw_path": "release-86-0.response-text.json",
+        "raw_representation": "response_text_utf8_not_http_wire",
+        "raw_sha256": "d1b03ae95532c1892888552885ee74e2552c80a1f09990266bd576aa1cb8db0a",
+        "requested_offset": 0,
+        "response_limit": 1000,
+        "response_offset": 0,
+        "retrieved_at": "2026-11-05T16:44:23.304861110+00:00",
+        "validation": "validated"
+      },
+      "rows": [
+        {
+          "id": "AB1020AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 10 and 20 Days, Used in Calculating the AA Asset-Backed Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "AB1020AAVOL",
+          "title": "Number of Issues, with a Maturity Between 10 and 20 Days, Used in Calculating the AA Asset-Backed Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "AB14AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 1 and 4 Days, Used in Calculating the AA Asset-Backed Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "AB14AAVOL",
+          "title": "Number of Issues, with a Maturity Between 1 and 4 Days, Used in Calculating the AA Asset-Backed Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "AB2140AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 21 and 40 Days, Used in Calculating the AA Asset-Backed Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "AB2140AAVOL",
+          "title": "Number of Issues, with a Maturity Between 21 and 40 Days, Used in Calculating the AA Asset-Backed Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "AB4180AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 41 and 80 Days, Used in Calculating the AA Asset-Backed Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "AB4180AAVOL",
+          "title": "Number of Issues, with a Maturity Between 41 and 80 Days, Used in Calculating the AA Asset-Backed Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "AB59AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 5 and 9 Days, Used in Calculating the AA Asset-Backed Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "AB59AAVOL",
+          "title": "Number of Issues, with a Maturity Between 5 and 9 Days, Used in Calculating the AA Asset-Backed Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "ABCOMP",
+          "title": "Asset-Backed Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "ABCOMPN",
+          "title": "Asset-Backed Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "ABGT80AAAMT",
+          "title": "Total Value of Issues, with a Maturity Greater Than 80 Days, Used in Calculating the AA Asset-Backed Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "ABGT80AAVOL",
+          "title": "Number of Issues, with a Maturity Greater Than 80 Days, Used in Calculating the AA Asset-Backed Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "COMPAPER",
+          "title": "Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "COMPOUT",
+          "title": "Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "COMPUTN",
+          "title": "Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "DFINCP",
+          "title": "Domestic Financial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "DFINCPN",
+          "title": "Domestic Financial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "DNFINCP",
+          "title": "Domestic Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "DNFINCPN",
+          "title": "Domestic Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "DTBSPCKAM",
+          "title": "Asset-Backed Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKANM",
+          "title": "Asset-Backed Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKANYRENDWW",
+          "title": "Asset-Backed Commercial Paper Outstanding; Maturing After December 31",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKCLCNM",
+          "title": "Letter of Credit (LOC) Backed Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKCT1NM",
+          "title": "Commercial Paper Outstanding, Tier-1",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKCT1NWW",
+          "title": "Commercial Paper Outstanding, Tier-1",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKCT1NYRENDWW",
+          "title": "Commercial Paper Outstanding, Tier-1; Maturing After December 31",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKCT2NM",
+          "title": "Commercial Paper Outstanding, Tier-2",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKCT2NWW",
+          "title": "Commercial Paper Outstanding, Tier-2",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKCT2NYRENDWW",
+          "title": "Commercial Paper Outstanding, Tier-2; Maturing After December 31",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFDBNM",
+          "title": "Domestic Financial Commercial Paper Outstanding, Foreign Bank Parent",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFDBNWW",
+          "title": "Domestic Financial Commercial Paper Outstanding, Foreign Bank Parent",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFDM",
+          "title": "Domestic Financial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFDNM",
+          "title": "Domestic Financial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFDNNM",
+          "title": "Domestic Financial Commercial Paper Outstanding, Foreign Nonbank Parent",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFDNNWW",
+          "title": "Domestic Financial Commercial Paper Outstanding, Foreign Nonbank Parent",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFDONM",
+          "title": "Domestic Financial Commercial Paper Outstanding, Other",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFDONWW",
+          "title": "Domestic Financial Commercial Paper Outstanding, Other",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFDUNM",
+          "title": "Domestic Financial Commercial Paper Outstanding, U.S. Owned",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFDUNWW",
+          "title": "Domestic Financial Commercial Paper Outstanding, U.S. Owned",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFFBNM",
+          "title": "Foreign Financial Commercial Paper Outstanding, Bank or Bank-Holding Company",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFFBNWW",
+          "title": "Foreign Financial Commercial Paper Outstanding, Bank or Bank-Holding Company",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFFM",
+          "title": "Foreign Financial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFFNM",
+          "title": "Foreign Financial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFFONM",
+          "title": "Foreign Financial Commercial Paper Outstanding, Other",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFFONWW",
+          "title": "Foreign Financial Commercial Paper Outstanding, Other",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFM",
+          "title": "Financial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFNM",
+          "title": "Financial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFOM",
+          "title": "Other Financial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFONM",
+          "title": "Other Financial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFONWW",
+          "title": "Other Financial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKFOWW",
+          "title": "Other Financial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKM",
+          "title": "Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKNDM",
+          "title": "Domestic Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKNDNM",
+          "title": "Domestic Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKNFM",
+          "title": "Foreign Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKNFNM",
+          "title": "Foreign Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKNM",
+          "title": "Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKNMM",
+          "title": "Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKNNM",
+          "title": "Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKNOM",
+          "title": "Other Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKNONM",
+          "title": "Other Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKNONWW",
+          "title": "Other Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKNOWW",
+          "title": "Other Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKNYRENDWW",
+          "title": "Commercial Paper Outstanding; Maturing After December 31",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKOM",
+          "title": "Other Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKONM",
+          "title": "Other Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPLANM",
+          "title": "Dealer Placed Asset-Backed Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPLANWW",
+          "title": "Dealer Placed Asset-Backed Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPLFNM",
+          "title": "Dealer Placed Financial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPLFNWW",
+          "title": "Dealer Placed Financial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPLNNM",
+          "title": "Dealer Placed Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPLNNWW",
+          "title": "Dealer Placed Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPLONM",
+          "title": "Dealer Placed Other Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPLONWW",
+          "title": "Dealer Placed Other Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPTANM",
+          "title": "Directly Placed Asset-Backed Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPTANWW",
+          "title": "Directly Placed Asset-Backed Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPTFNM",
+          "title": "Directly Placed Financial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPTFNWW",
+          "title": "Directly Placed Financial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPTNNM",
+          "title": "Directly Placed Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPTNNWW",
+          "title": "Directly Placed Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPTONM",
+          "title": "Directly Placed Other Commercial Paper Outstanding",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "DTBSPCKPTONWW",
+          "title": "Directly Placed Other Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "FFINCP",
+          "title": "Foreign Financial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "FFINCPN",
+          "title": "Foreign Financial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "FIN1020AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 10 and 20 Days, Used in Calculating the AA Financial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "FIN1020AAVOL",
+          "title": "Number of Issues, with a Maturity Between 10 and 20 Days, Used in Calculating the AA Financial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "FIN14AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 1 and 4 Days, Used in Calculating the AA Financial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "FIN14AAVOL",
+          "title": "Number of Issues, with a Maturity Between 1 and 4 Days, Used in Calculating the AA Financial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "FIN2140AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 21 and 40 Days, Used in Calculating the AA Financial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "FIN2140AAVOL",
+          "title": "Number of Issues, with a Maturity Between 21 and 40 Days, Used in Calculating the AA Financial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "FIN4180AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 41 and 80 Days, Used in Calculating the AA Financial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "FIN4180AAVOL",
+          "title": "Number of Issues, with a Maturity Between 41 and 80 Days, Used in Calculating the AA Financial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "FIN59AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 5 and 9 Days, Used in Calculating the AA Financial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "FIN59AAVOL",
+          "title": "Number of Issues, with a Maturity Between 5 and 9 Days, Used in Calculating the AA Financial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "FINCP",
+          "title": "Financial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "FINCPN",
+          "title": "Financial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "FINGT80AAAMT",
+          "title": "Total Value of Issues, with a Maturity Greater Than 80 Days, Used in Calculating the AA Financial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "FINGT80AAVOL",
+          "title": "Number of Issues, with a Maturity Greater Than 80 Days, Used in Calculating the AA Financial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "FNFINCP",
+          "title": "Foreign Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "FNFINCPN",
+          "title": "Foreign Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKBANM",
+          "title": "Asset Backed Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKBLNM",
+          "title": "Letter of Credit Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKCT1NM",
+          "title": "Commercial Paper Outstanding, Tier 1 (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKCT2NM",
+          "title": "Commercial Paper Outstanding, Tier 2 (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKIFDDPNM",
+          "title": "Domestic Financial Commercial Paper Outstanding, No Foreign Bank Parent (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKIFDFBNM",
+          "title": "Domestic Financial Commercial Paper Outstanding, Foreign Bank Parent (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKIFDFXNM",
+          "title": "Domestic Financial Commercial Paper Outstanding, Foreign Non-Bank Parent (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKIFDM",
+          "title": "Domestic Financial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKIFDNM",
+          "title": "Domestic Financial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKIFFBNM",
+          "title": "Foreign Financial Commercial Paper Outstanding, Bank or Bank Holding Company (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKIFFM",
+          "title": "Foreign Financial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKIFFNM",
+          "title": "Foreign Financial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKIFFONM",
+          "title": "Foreign Financial Commercial Paper Outstanding, Other (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKIFM",
+          "title": "Financial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKIFNM",
+          "title": "Financial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKINDM",
+          "title": "Domestic Nonfinancial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKINDNM",
+          "title": "Domestic Nonfinancial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKINFM",
+          "title": "Foreign Nonfinancial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKNM",
+          "title": "Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKPDPFNM",
+          "title": "Directly-Placed Financial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0DTBSPCKPDPNNM",
+          "title": "Directly-Placed Nonfinancial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H0RIFSPPCD01NB",
+          "title": "Overnight Commercial Paper: Average Dealer Offering Rate Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent per Annum"
+        },
+        {
+          "id": "H0RIFSPPCD07NB",
+          "title": "7-Day Commercial Paper: Average Dealer Offering Rate Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent per Annum"
+        },
+        {
+          "id": "H0RIFSPPCD15NB",
+          "title": "15-Day Prime Commercial Paper: Average Dealer Offering Rate Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent per Annum"
+        },
+        {
+          "id": "H0RIFSPPCM01NB",
+          "title": "1-Month Prime Commercial Paper: Average Dealer Offering Rate Quoted on Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent per Annum"
+        },
+        {
+          "id": "H0RIFSPPCM02NB",
+          "title": "2-Month Prime Commercial Paper: Average Dealer Offering Rate Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent per Annum"
+        },
+        {
+          "id": "H0RIFSPPCM03NB",
+          "title": "3-Month Prime Commercial Paper: Average Dealer Offering Rate Quoted on Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent per Annum"
+        },
+        {
+          "id": "H0RIFSPPFD01NB",
+          "title": "Overnight Finance Paper Placed Directly: Average Offering Rate Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent per Annum"
+        },
+        {
+          "id": "H0RIFSPPFD07NB",
+          "title": "7-Day Finance Paper Placed Directly: Average Offering Rate Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent per Annum"
+        },
+        {
+          "id": "H0RIFSPPFD15NB",
+          "title": "15-Day Finance Paper Placed Directly: Average Offering Rate Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent per Annum"
+        },
+        {
+          "id": "H0RIFSPPFM01NB",
+          "title": "1-Month Finance Paper Placed Directly: Average Offering Rate Quoted on Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent per Annum"
+        },
+        {
+          "id": "H0RIFSPPFM02NB",
+          "title": "2-Month Finance Paper Placed Directly: Average Offering Rate Quoted on a Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent per Annum"
+        },
+        {
+          "id": "H0RIFSPPFM03NB",
+          "title": "3-Month Finance Paper Placed Directly: Average Offering Rate Quoted on Discount Basis (DISCONTINUED)",
+          "frequency": "Daily",
+          "units": "Percent per Annum"
+        },
+        {
+          "id": "H1DTBSPCKINFNM",
+          "title": "Foreign Nonfinancial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H1DTBSPCKINM",
+          "title": "Nonfinancial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H1DTBSPCKINNM",
+          "title": "Nonfinancial Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "H1DTBSPCKM",
+          "title": "Commercial Paper Outstanding (DISCONTINUED)",
+          "frequency": "Monthly",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "MKT1020MKTAMT",
+          "title": "Total Value of Commercial Paper Issues with a Maturity Between 10 and 20 Days",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "MKT1020MKTVOL",
+          "title": "Number of Commercial Paper Issues with a Maturity Between 10 and 20 Days",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "MKT14MKTAMT",
+          "title": "Total Value of Commercial Paper Issues with a Maturity Between 1 and 4 Days",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "MKT14MKTVOL",
+          "title": "Number of Commercial Paper Issues with a Maturity Between 1 and 4 Days",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "MKT2140MKTAMT",
+          "title": "Total Value of Issuers of Commercial Paper with a Maturity Between 21 and 40 Days",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "MKT2140MKTVOL",
+          "title": "Number of Commercial Paper Issues with a Maturity Between 21 and 40 Days",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "MKT4180MKTAMT",
+          "title": "Total Value of Issuers of Commercial Paper with a Maturity Between 41 and 80 Days",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "MKT4180MKTVOL",
+          "title": "Number of Commercial Paper Issues with a Maturity Between 41 and 80 Days",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "MKT59MKTAMT",
+          "title": "Total Value of Issuers of Commercial Paper with a Maturity Between 5 and 9 Days",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "MKT59MKTVOL",
+          "title": "Number of Commercial Paper Issues with a Maturity Between 5 and 9 Days",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "MKTGT80MKTAMT",
+          "title": "Total Value of Issuers of Commercial Paper with a Maturity Greater Than 80 Days",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "MKTGT80MKTVOL",
+          "title": "Number of Commercial Paper Issues with a Maturity Greater Than 80 Days",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "NFINCP",
+          "title": "Nonfinancial Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "NONFIN1020A2P2AMT",
+          "title": "Total Value of Issues, with a Maturity Between 10 and 20 Days, Used in Calculating the A2/P2 Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "NONFIN1020A2P2VOL",
+          "title": "Number of Issues, with a Maturity Between 10 and 20 Days, Used in Calculating the A2/P2 Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "NONFIN1020AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 10 and 20 Days, Used in Calculating the AA Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "NONFIN1020AAVOL",
+          "title": "Number of Issues, with a Maturity Between 10 and 20 Days, Used in Calculating the AA Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "NONFIN14A2P2AMT",
+          "title": "Total Value of Issues, with a Maturity Between 1 and 4 Days, Used in Calculating the A2/P2 Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "NONFIN14A2P2VOL",
+          "title": "Number of Issues, with a Maturity Between 1 and 4 Days, Used in Calculating the A2/P2 Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "NONFIN14AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 1 and 4 Days, Used in Calculating the AA Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "NONFIN14AAVOL",
+          "title": "Number of Issues, with a Maturity Between 1 and 4 Days, Used in Calculating the AA Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "NONFIN2140A2P2AMT",
+          "title": "Total Value of Issues, with a Maturity Between 21 and 40 Days, Used in Calculating the A2/P2 Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "NONFIN2140A2P2VOL",
+          "title": "Number of Issues, with a Maturity Between 21 and 40 Days, Used in Calculating the A2/P2 Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "NONFIN2140AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 21 and 40 Days, Used in Calculating the AA Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "NONFIN2140AAVOL",
+          "title": "Number of Issues, with a Maturity Between 21 and 40 Days, Used in Calculating the AA Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "NONFIN4180A2P2AMT",
+          "title": "Total Value of Issues, with a Maturity Between 41 and 80 Days, Used in Calculating the A2/P2 Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "NONFIN4180A2P2VOL",
+          "title": "Number of Issues, with a Maturity Between 41 and 80 Days, Used in Calculating the A2/P2 Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "NONFIN4180AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 41 and 80 Days, Used in Calculating the AA Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "NONFIN4180AAVOL",
+          "title": "Number of Issues, with a Maturity Between 41 and 80 Days, Used in Calculating the AA Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "NONFIN59A2P2AMT",
+          "title": "Total Value of Issues, with a Maturity Between 5 and 9 Days, Used in Calculating the A2/P2 Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "NONFIN59A2P2VOL",
+          "title": "Number of Issues, with a Maturity Between 5 and 9 Days, Used in Calculating the A2/P2 Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "NONFIN59AAAMT",
+          "title": "Total Value of Issues, with a Maturity Between 5 and 9 Days, Used in Calculating the AA Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "NONFIN59AAVOL",
+          "title": "Number of Issues, with a Maturity Between 5 and 9 Days, Used in Calculating the AA Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "NONFINGT80A2P2AMT",
+          "title": "Total Value of Issues, with a Maturity Greater Than 80 Days, Used in Calculating the A2/P2 Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "NONFINGT80A2P2VOL",
+          "title": "Number of Issues, with a Maturity Greater Than 80 Days, Used in Calculating the A2/P2 Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "NONFINGT80AAAMT",
+          "title": "Total Value of Issues, with a Maturity Greater Than 80 Days, Used in Calculating the AA Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Millions of Dollars"
+        },
+        {
+          "id": "NONFINGT80AAVOL",
+          "title": "Number of Issues, with a Maturity Greater Than 80 Days, Used in Calculating the AA Nonfinancial Commercial Paper Rates",
+          "frequency": "Daily",
+          "units": "Number"
+        },
+        {
+          "id": "OTHCOMP",
+          "title": "Other Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "OTHCOMPN",
+          "title": "Other Commercial Paper Outstanding",
+          "frequency": "Weekly, Ending Wednesday",
+          "units": "Billions of Dollars"
+        },
+        {
+          "id": "RIFSPPAAAD01NB",
+          "title": "Overnight AA Asset-Backed Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPAAAD07NB",
+          "title": "7-Day AA Asset-Backed Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPAAAD15NB",
+          "title": "15-Day AA Asset-Backed Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPAAAD30NB",
+          "title": "30-Day AA Asset-Backed Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPAAAD60NB",
+          "title": "60-Day AA Asset-Backed Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPAAAD90NB",
+          "title": "90-Day AA Asset-Backed Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPFAAD01NB",
+          "title": "Overnight AA Financial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPFAAD07NB",
+          "title": "7-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPFAAD15NB",
+          "title": "15-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPFAAD30NB",
+          "title": "30-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPFAAD60NB",
+          "title": "60-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPFAAD90NB",
+          "title": "90-Day AA Financial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNA2P2D01NB",
+          "title": "Overnight A2/P2 Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNA2P2D07NB",
+          "title": "7-Day A2/P2 Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNA2P2D15NB",
+          "title": "15-Day A2/P2 Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNA2P2D30NB",
+          "title": "30-Day A2/P2 Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNA2P2D60NB",
+          "title": "60-Day A2/P2 Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNA2P2D90NB",
+          "title": "90-Day A2/P2 Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNAAD01NB",
+          "title": "Overnight AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNAAD07NB",
+          "title": "7-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNAAD15NB",
+          "title": "15-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNAAD30NB",
+          "title": "30-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNAAD60NB",
+          "title": "60-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        },
+        {
+          "id": "RIFSPPNAAD90NB",
+          "title": "90-Day AA Nonfinancial Commercial Paper Interest Rate",
+          "frequency": "Daily",
+          "units": "Percent"
+        }
+      ]
+    }
+  ]
+}

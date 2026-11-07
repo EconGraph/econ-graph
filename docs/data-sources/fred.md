@@ -17,13 +17,19 @@ The dashboard's cards use public BEA and BLS series instead. Admins read it as u
 
 Discovery reads bounded release and category catalogs selected by
 `backend/crates/econ-graph-crawler/data/catalog_selection/fred.toml`. Rules can constrain
-title, id prefix and frequency. The first catalog request omits real-time dates so FRED
-chooses its documented default of today. Its response must identify a valid single-day
-real-time period; that provider date is sent on every later page and rule's catalog request
-in the walk. Every response must agree with it. Missing, malformed or changing real-time
-metadata fails discovery without substituting the client's UTC date or an earlier date.
-This pins release/category catalogs; include overrides still use separate current `/series`
-metadata requests. All pages must agree on count and ordering before the
+title, id prefix and frequency. An optional `id_pattern` matches the whole series identifier
+with a regular expression, so a provider-defined family such as two-letter state house-price
+identifiers can grow without listing every member or also selecting metro/county identifiers.
+Patterns are limited to 256 bytes and compiled once with bounded compilation/cache size;
+they are ANDed with the other predicates. Rules sharing a release or category reuse one
+complete catalog walk. The scan budget counts that catalog's rows once, while each rule
+keeps its own match count. The first catalog request omits real-time dates so FRED chooses
+its documented default of today. Its response must identify a valid single-day real-time
+period; that provider date is then sent on every remaining page and physical catalog in
+the walk. Every response must agree with it. Missing, malformed or changing real-time
+metadata fails discovery, without substituting the client's UTC date or an earlier date.
+This pins the release/category snapshot; include overrides still use their separate
+current `/series` metadata requests. All pages must agree on count and ordering before the
 snapshot supplies absence evidence; failed, truncated or changing pages fail discovery.
 Separate scan and selected-series bounds stop unexpected expansion before observation
 jobs are enqueued. A small include/exclude list handles explicit exceptions.
@@ -41,13 +47,26 @@ discovery is refused and nothing changes. Setting `CRAWLER_SINGLE_JOB_DISCOVERY_
 the worker discovers FRED with a single job instead; see the
 [crawler deployment guide](../technical/CRAWLER_DEPLOYMENT_GUIDE.md#run-the-worker).
 
-The default scope is GDP release series plus headline overrides, including the NBER
-recession indicator (`USREC`) and probes for two previously curated retired ids. `expected_missing` explicitly exempts those known retired
+The checked-in [coverage proposal](fred-coverage.md) expands the former GDP-only scope to
+33 national and regional subject families, with small headline overrides including the
+NBER recession indicator (`USREC`) and probes for two previously curated retired ids.
+It remains a draft: its inherited 500-series/20,000-row limits deliberately block acceptance
+until complete API membership and crawl costs establish suitable operating bounds.
+Fixture matches do not establish that the proposed scope can run within those limits.
+Commercial and finance paper rates retain release 86 `RIFSPP` and discontinued
+`H0RIFSPP` IDs plus release 18 H.15 products through separate predicates. H.15 selects
+titles containing `paper`, including weekly, annual and discontinued offering rates;
+the shared H.15 catalog is fetched once.
+These distinct IDs do not have their histories merged.
+Natural-gas release 342 and M2-related release 63 have separate whole-release rules for
+families 04 and 11. These restore Henry Hub daily/monthly and M2 less small time deposits
+through automatic catalog membership, with public witnesses pending authenticated validation.
+`expected_missing` explicitly exempts those known retired
 probes from the unexpected-missing warning, while keeping their lifecycle evidence. An
 ordinary included id that disappears still raises the warning. Existing stored series
 outside that scope stay retained and scheduled; changing the discovery scope does not
-deactivate them. This is not a full FRED catalog crawl. Defaults are fixture-tested, not
-validated against the live API.
+deactivate them. This is not a full FRED catalog crawl. The proposed rules have not been
+validated against the complete live API catalogs.
 
 Series whose `notes` match known copyright or reproduction-restriction phrases, such as
 those on Coinbase and S&P/Case-Shiller series, are recorded as restricted and are not
