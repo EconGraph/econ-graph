@@ -2,6 +2,8 @@
 
 Restart a Kubernetes deployment and wait for rollout.
 
+Ask Joe before you restart anything on a live cluster. It needs his say-so; see [AGENTS.md](../../AGENTS.md).
+
 - deployment (string, required): deployment name
 - namespace (string, optional): target namespace; if omitted, use the current kubectl context's configured namespace, or `default` if none is configured
 

@@ -11,6 +11,8 @@ Apply pending migrations for one explicitly selected plane from `backend/`.
 /db-migrate data database_url=MIGRATION_DATABASE_URL
 ```
 
+Ask Joe before you migrate a live database. It is a deploy and needs his say-so; see [AGENTS.md](../../AGENTS.md).
+
 Ask for the plane if it is missing. Use existing connection configuration; never request, inspect, or display credential values. The override example names an environment variable already configured by the operator, not a literal URL.
 
 The planes have separate migrations even when their URLs point to the same database. Before running, follow [Database migrations](../../docs/development/MIGRATIONS.md) to establish the target's baseline history. For a [shared database](../../docs/development/MIGRATIONS.md#applying-both-sets-to-one-database), apply data plane migrations before app plane migrations. A database built from the [legacy single v4.0.0 baseline](../../docs/development/MIGRATIONS.md#the-v400-baseline-split) needs the guide's backend-startup transition; do not use the app Diesel command below for that transition.

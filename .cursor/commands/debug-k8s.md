@@ -29,7 +29,7 @@ Agent loop:
   - Port-forward to probe health/ready endpoints directly; `kubectl exec` to run curl/env checks in-pod
   - Confirm Service selectors match pod labels; confirm EndpointSlices contain ready endpoints
 - Only after isolating the failing component, form ONE clear hypothesis
-- Make ONE targeted change (small manifest tweak, config fix, rollout restart), apply, and watch rollout to completion
+- Make ONE targeted change (small manifest tweak, config fix, rollout restart), apply, and watch rollout to completion. On a live cluster, propose the change and ask Joe before you apply it; see [AGENTS.md](../../AGENTS.md). Agent sessions are read-only there, so port-forward and `kubectl exec` are operator steps.
 - Collect before/after evidence; if unresolved, revert or iterate with a new focused hypothesis; document findings
 
 Example Cursor invocation (namespace, deployment, symptom):

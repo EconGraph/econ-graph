@@ -2,6 +2,8 @@
 
 Apply Kubernetes manifests from `k8s/manifests` (or a provided path).
 
+Ask Joe before you apply to a live cluster. It is a deploy and needs his say-so; see [AGENTS.md](../../AGENTS.md).
+
 - path (string, optional): manifests path (default: `k8s/manifests`)
 - namespace (string, optional): passed to `kubectl apply --namespace`; must match any explicit `metadata.namespace` in the selected manifests.
 

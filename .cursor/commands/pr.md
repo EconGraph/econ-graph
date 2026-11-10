@@ -48,7 +48,7 @@ Follow the [developer standards](../../personas/ai-developer-standards.md) and [
 - Validate the change with appropriate checks. Add or update unit, integration, or end-to-end tests when behavior changes; documentation changes need relevant documentation checks. Do not bypass pre-commit.
 - Update documentation and workflows when the behavior they describe changes.
 - Mark finished work ready for review; CodeRabbit skips drafts. On an update that omits `draft`, preserve its state and use an explicit readiness operation when appropriate.
-- Watch CI and address automated review comments before considering the PR complete. [Docs Checks](../../.github/workflows/docs-checks.yml) runs on every PR. [Core CI](../../.github/workflows/ci-core.yml) skips a PR only when every changed path matches its exclusions; Markdown under `.cursor/` still triggers Core CI. Do not merge without authorization.
+- Watch CI and address automated review comments before considering the PR complete. [Docs Checks](../../.github/workflows/docs-checks.yml) runs on every PR. [Core CI](../../.github/workflows/ci-core.yml) skips a PR only when every changed path matches its exclusions; Markdown under `.cursor/` still triggers Core CI. Get two independent reviews. Do not merge: merging needs Joe's approving review; see [AGENTS.md](../../AGENTS.md).
 
 ## Helper commands
 
