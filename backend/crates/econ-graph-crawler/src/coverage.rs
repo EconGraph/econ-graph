@@ -35,6 +35,12 @@
 //!   scheduler also considers a *failed* `fetch_series` attempt (not just a successful crawl), so a
 //!   single failed or not_found refresh can make a series overdue here slightly before the
 //!   scheduler actually retries it.
+//!
+//!   A source refreshed once per trading day ([`refresh_slots`](crate::scheduler::refresh_slots),
+//!   Massive) is measured in slots instead: a series is overdue when its last successful crawl is
+//!   before the **previous** slot, so it missed a whole trading day's refresh. Weekends and
+//!   holidays add no slot, so they never make a series overdue. Its `not_found` and `absent`
+//!   backoffs count back from the previous slot rather than from now.
 //! - **oldest success**: the earliest `last_crawled_at` among its active series.
 //!
 //! Census counts only the ids its adapter can fetch, as the scheduler does.
@@ -103,13 +109,16 @@ struct CoverageRow {
     oldest_success: Option<DateTime<Utc>>,
 }
 
-/// `$1` data_sources names, `$2` matching source codes, `$3` regex of fetchable Census ids.
+/// `$1` data_sources names, `$2` matching source codes, `$3` regex of fetchable Census ids,
+/// `$4` the codes of sources refreshed on trading-day slots and `$5` the previous slot of each.
 static COVERAGE_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "WITH src AS ( \
-             SELECT m.code, ds.id AS ds_id \
+             SELECT m.code, ds.id AS ds_id, sl.slot AS previous_slot \
              FROM unnest($1::text[], $2::text[]) AS m(ds_name, code) \
              LEFT JOIN data_sources ds ON ds.name = m.ds_name \
+             LEFT JOIN unnest($4::text[], $5::timestamptz[]) AS sl(code, slot) \
+                    ON sl.code = m.code \
              WHERE ds.id IS NULL OR ds.is_enabled \
          ), ids AS ( \
              SELECT src.code, sm.external_id::text AS external_id \
@@ -139,9 +148,13 @@ static COVERAGE_SQL: LazyLock<String> = LazyLock::new(|| {
              SELECT src.code, \
                     COUNT(*) FILTER (WHERE es.end_date IS NOT NULL) AS with_data, \
                     COUNT(*) FILTER (WHERE es.end_date IS NOT NULL \
-                        AND COALESCE(es.last_crawled_at, '-infinity') \
-                            <= NOW() - {backoff} \
-                               * make_interval(days => ({days}))) \
+                        AND CASE WHEN src.previous_slot IS NOT NULL \
+                                  AND es.crawl_status IS DISTINCT FROM 'not_found' \
+                                  AND es.crawl_status IS DISTINCT FROM 'absent' \
+                            THEN COALESCE(es.last_crawled_at, '-infinity') < src.previous_slot \
+                            ELSE COALESCE(es.last_crawled_at, '-infinity') \
+                                <= COALESCE(src.previous_slot, NOW()) - {backoff} \
+                                   * make_interval(days => ({days})) END) \
                         AS overdue, \
                     MIN(es.last_crawled_at) AS oldest_success \
              FROM src JOIN economic_series es ON es.source_id = src.ds_id \
@@ -196,14 +209,32 @@ pub async fn crawl_coverage(
     } else {
         String::new()
     };
-    coverage_for(pool, &pairs, &census_ids).await
+    let (slot_codes, previous_slots) =
+        crate::scheduler::slot_binds(sources, Utc::now(), |s| s.previous);
+    coverage_with_slots(pool, &pairs, &census_ids, &slot_codes, &previous_slots).await
 }
 
-/// [`crawl_coverage`] for explicit `(source code, data_sources name)` pairs.
+/// [`crawl_coverage`] for explicit `(source code, data_sources name)` pairs, none refreshed on
+/// trading-day slots.
+#[cfg(test)]
 async fn coverage_for(
     pool: &DatabasePool,
     pairs: &[(String, String)],
     census_ids: &str,
+) -> AppResult<Vec<SourceCoverage>> {
+    coverage_with_slots(pool, pairs, census_ids, &[], &[]).await
+}
+
+/// [`crawl_coverage`] for explicit `(source code, data_sources name)` pairs. The sources in
+/// `slot_codes` are refreshed on trading-day slots, and `previous_slots` holds the
+/// [previous slot](crate::scheduler::RefreshSlots::previous) of each: a series with data whose
+/// last successful crawl is before it is overdue.
+async fn coverage_with_slots(
+    pool: &DatabasePool,
+    pairs: &[(String, String)],
+    census_ids: &str,
+    slot_codes: &[String],
+    previous_slots: &[DateTime<Utc>],
 ) -> AppResult<Vec<SourceCoverage>> {
     if pairs.is_empty() {
         return Ok(Vec::new());
@@ -217,6 +248,8 @@ async fn coverage_for(
         .bind::<Array<Text>, _>(&names)
         .bind::<Array<Text>, _>(&codes)
         .bind::<Text, _>(census_ids)
+        .bind::<Array<Text>, _>(slot_codes)
+        .bind::<Array<Timestamptz>, _>(previous_slots)
         .load(&mut conn)
         .await?;
     Ok(rows
@@ -578,6 +611,47 @@ mod tests {
             "DELETE FROM data_sources WHERE name = 't_cov notfound'",
         )
         .await;
+    }
+
+    /// A trading-day source is overdue only once a series missed a whole slot, however long the
+    /// weekend or holiday since its last refresh.
+    #[tokio::test]
+    async fn trading_day_sources_are_overdue_by_slot() {
+        let Some((url, _guard)) = crate::testkit::lock_test_db("coverage").await else {
+            return;
+        };
+        let pool = econ_graph_core::create_pool(&url).await.expect("pool");
+
+        let s = source(&pool, "t_cov slots", true).await;
+        // The previous slot was 3 days ago, as on the Monday of a long weekend.
+        let previous_slot = Utc::now() - chrono::Duration::days(3);
+        // s1: refreshed after the previous slot, 2.5 days ago: past twice its daily interval,
+        // but not overdue.
+        series(&pool, s, "s1", "Daily", true, Some(2.5)).await;
+        // s2: last refreshed before the previous slot: missed a whole slot, overdue.
+        series(&pool, s, "s2", "Daily", true, Some(3.5)).await;
+        // s3: not_found 12 days ago: its ten-interval backoff counts back from the previous slot
+        // (13 days ago), so it is not overdue yet.
+        series(&pool, s, "s3", "Daily", true, Some(12.0)).await;
+        set_crawl_status(&pool, s, "s3", "not_found").await;
+
+        let got = coverage_with_slots(
+            &pool,
+            &[pair("S", "t_cov slots")],
+            "",
+            &["S".to_string()],
+            &[previous_slot],
+        )
+        .await
+        .unwrap();
+        assert_eq!((got[0].with_data, got[0].overdue), (3, 1));
+        // The same rows measured by interval from now: all three are overdue.
+        let got = coverage_for(&pool, &[pair("S", "t_cov slots")], "")
+            .await
+            .unwrap();
+        assert_eq!(got[0].overdue, 3);
+
+        exec(&pool, "DELETE FROM data_sources WHERE name = 't_cov slots'").await;
     }
 
     #[tokio::test]
