@@ -16,6 +16,7 @@ const RESTRICTED_BY_DEFAULT: &[Role] = &[
     Role::CatalogWorldTradeOrganizationRead,
     Role::CatalogBankOfCanadaRead,
     Role::CatalogSecRead,
+    Role::CatalogMassiveMarketDataRead,
 ];
 
 fn realm() -> Value {

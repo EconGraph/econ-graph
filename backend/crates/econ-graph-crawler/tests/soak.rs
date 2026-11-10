@@ -311,6 +311,7 @@ async fn make_worker(
             bea: None,
             census: None,
             wto: None,
+            massive: None,
         },
         bypass_validators: false,
     };

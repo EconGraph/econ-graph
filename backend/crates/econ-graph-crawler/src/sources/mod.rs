@@ -132,6 +132,7 @@ mod tests {
     fn registry_for_keys_skips_keyless_optional_sources() {
         let none = registry_for_keys(&ApiKeys::default());
         assert!(none.get(SourceId::Wto).is_none());
+        assert!(none.get(SourceId::Massive).is_none());
         assert!(
             none.get(SourceId::Fred).is_some(),
             "FRED is kept without its key"
@@ -142,6 +143,7 @@ mod tests {
         );
         let with = registry_for_keys(&ApiKeys {
             wto: Some("k".into()),
+            massive: Some("k".into()),
             ..ApiKeys::default()
         });
         assert_eq!(with.ids(), default_registry().ids());

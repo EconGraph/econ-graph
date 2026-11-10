@@ -65,9 +65,11 @@ impl SourcePolicy {
     /// that strictest limit, 1/s with no burst and one at a time, which also keeps the hourly
     /// total at 3,600. The key is required: the API answers 401 without one.
     ///
-    /// Massive, a market data vendor: its lowest plan allows 5 calls/minute, so every request
-    /// is held to that, one at a time. The key is required. Prices are refreshed daily, after
-    /// each trading day, and the lookback re-fetches the last week for late corrections.
+    /// Massive, a market data vendor: we assume a paid plan, which has no hard request limit
+    /// (Massive asks clients to stay under about 100 requests a second). 300/min with two in
+    /// flight is our own politeness setting, not a vendor limit. The key is required. Prices are
+    /// refreshed daily, after each trading day, and the lookback re-fetches the last week for
+    /// late corrections.
     pub fn default_for(source: SourceId) -> Self {
         let base = SourcePolicy {
             requests_per_second: 1.0,
@@ -128,9 +130,9 @@ impl SourcePolicy {
                 ..base
             },
             SourceId::Massive => SourcePolicy {
-                requests_per_second: 5.0 / 60.0,
-                burst: 1,
-                max_concurrency: 1,
+                requests_per_second: 300.0 / 60.0,
+                burst: 5,
+                max_concurrency: 2,
                 needs_api_key: true,
                 revision_lookback: DAY * 7,
                 ..base
