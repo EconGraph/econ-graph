@@ -886,8 +886,11 @@ struct WrittenPoint {
 /// The World Bank stamps every point of a WDI release with the release's `lastupdated`. Stored
 /// as-is, each release would append the whole history of every series again, though most
 /// values are the same as the release before.
+///
+/// Massive stamps every bar with the day it was fetched, so re-fetching a day to pick up a
+/// vendor correction appends a revision only for the fields whose value changed.
 fn appends_only_changed_values(source: SourceId) -> bool {
-    matches!(source, SourceId::WorldBank)
+    matches!(source, SourceId::WorldBank | SourceId::Massive)
 }
 
 /// The newest stored row for a point's date at or before the point's `revision_date`.
@@ -1062,7 +1065,7 @@ async fn upsert_points(
 ///   is_original_release)` in chunks of [`INSERT_CHUNK`]; a conflicting row gets the new value
 ///   only if it differs.
 ///   Duplicate keys in the input keep the last occurrence. For a source that
-///   [appends only changed values](appends_only_changed_values) (the World Bank), a point equal
+///   [appends only changed values](appends_only_changed_values) (the World Bank, Massive), a point equal
 ///   to the newest stored row for its date is not written at all, and `is_original_release` is
 ///   set from what is stored ([`keep_changed_points`]).
 /// - `start_date` / `end_date` are recomputed from the stored points.

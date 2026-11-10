@@ -11,4 +11,5 @@ pub mod adapter;
 pub mod backfill;
 pub mod calendar;
 pub mod client;
+pub mod dataset;
 pub mod symbols;

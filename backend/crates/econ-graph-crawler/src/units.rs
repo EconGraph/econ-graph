@@ -396,6 +396,7 @@ const COUNT: &[&str] = &[
     "people",
     "employees",
     "all employees",
+    "shares",
 ];
 const RATE: &[&str] = &[
     "per 1000 people",
@@ -409,6 +410,7 @@ const INDEX_NAMES: &[&str] = &["index", "fisher price index", "fisher quantity i
 
 /// Currencies by name. `None` is a currency the text does not identify.
 const CURRENCIES: &[(&str, Option<&str>)] = &[
+    ("usd", Some("USD")),
     ("us dollars", Some("USD")),
     ("u.s. dollars", Some("USD")),
     ("us$", Some("USD")),

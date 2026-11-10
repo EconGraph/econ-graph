@@ -1,0 +1,40 @@
+# Massive, a market data vendor: daily stock prices (see src/sources/massive/dataset.rs).
+#
+# One series per share class and price field. The external id is `{share_class_figi}:{field}`,
+# not the canonical `{code}/{v1}...` form: the share-class FIGI names one security for good, while
+# its ticker and exchange can change. Ticker, exchange and currency come from the symbol table
+# (data/massive/sp500.csv). The SEC CIK, the join key to company data, is the `cik10` attribute.
+[[dataset]]
+code = "stock_price_daily"
+name = "Daily stock prices (unadjusted)"
+description = "Daily open, high, low, close, volume and volume-weighted average price for each share class, from Massive, a market data vendor. Prices are unadjusted: stored as the vendor reports them on the day, with no split or dividend adjustment. A vendor correction is a new revision of the same observation. Licence class: internal."
+
+[[dataset.dimensions]]
+name = "ticker"
+label = "Ticker"
+
+[[dataset.dimensions]]
+name = "exchange"
+label = "Primary exchange (ISO 10383 MIC)"
+
+[[dataset.dimensions]]
+name = "currency"
+label = "Currency (ISO 4217)"
+
+# Prices are in the row's currency; volume is in shares.
+[[dataset.dimensions]]
+name = "field"
+label = "Price field"
+codes = [
+  { code = "open", label = "Open" },
+  { code = "high", label = "High" },
+  { code = "low", label = "Low" },
+  { code = "close", label = "Close" },
+  { code = "volume", label = "Volume", unit = "Shares" },
+  { code = "vwap", label = "Volume-weighted average price" },
+]
+
+# Stored on every observation, so it travels with the data to the SEC join.
+[[dataset.attributes]]
+name = "cik10"
+label = "SEC Central Index Key (10 digits)"
