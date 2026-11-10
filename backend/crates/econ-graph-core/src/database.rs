@@ -900,6 +900,8 @@ mod tests {
         "series_fetch_validators",
         "iceberg_catalog",
         "iceberg_commits",
+        "massive_backfill_runs",
+        "massive_backfill_units",
         "timeseries_recovery_state",
         "timeseries_recovery_transitions",
         "series_lifecycle",
