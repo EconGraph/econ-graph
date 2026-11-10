@@ -36,6 +36,13 @@ dispatched run builds the ref selected in the workflow UI. The resulting images 
 `sha-<full-commit-SHA>` image tags; an RC Git tag push also gives the images that RC tag.
 QA deploys these images and records the tested commit SHA.
 
+The workflow builds only reviewed commits: a manual run must be started from `main` or a
+`release/*` branch, and the commit it builds (or the commit an rc tag points at) must be on
+`origin/main` or an `origin/release/<name>` branch. Anything else fails before building. Each
+image gets a signed build provenance attestation, and the deploy side
+(`scripts/deploy/load-release-images.sh`) refuses an image without one. Release builds use no
+BuildKit cache. See the header of the workflow for the details (ECO-896).
+
 [Core CI](../../.github/workflows/ci-core.yml) and
 [Release E2E](../../.github/workflows/release-e2e.yml) accept pull requests into any branch,
 including `release/**`, subject to their path filters. Only fixes for QA findings go into the

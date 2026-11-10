@@ -9,6 +9,10 @@
 #   - a re-run is a no-op ("already applied");
 #   - the release ruleset has no merge queue, and is created once, then
 #     updated in place;
+#   - the tag ruleset is tag-ruleset.json (v* and train-* tags: creation,
+#     update and deletion only by admins), created once, then updated in place
+#     keeping its live extras; two of the same name, or a tag-ruleset.json
+#     that is not a tag ruleset, are refused;
 #   - it refuses without admin rights, when gh is logged out, on a missing or
 #     unexpected main ruleset, on duplicate release rulesets, and without a
 #     terminal or --yes;
@@ -23,6 +27,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 script="${APPLY_RULESETS:-${SCRIPT_DIR}/apply-rulesets.sh}"
 rules="${SCRIPT_DIR}/merge-queue-rules.json"
+tag_rules="${SCRIPT_DIR}/tag-ruleset.json"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 failed=0
@@ -33,7 +38,8 @@ failed=0
 # (PUT, POST, PATCH, DELETE). STUB_ADMIN (true/false), STUB_AUTH_RC,
 # STUB_DROP_ON_WRITE (a rule type the stub silently drops when it stores a
 # write), STUB_REJECT (a method, PUT or POST, answered with GitHub's HTTP 422
-# validation error instead of being stored) and STUB_REJECT_BODY (the body of
+# validation error instead of being stored), STUB_REJECT_AFTER (how many writes
+# of that method go through first; default 0) and STUB_REJECT_BODY (the body of
 # that error, when not the default one).
 mkdir -p "$WORK/bin"
 cat >"$WORK/bin/gh" <<'STUB'
@@ -56,7 +62,11 @@ while [ $# -gt 0 ]; do
 done
 repo="repos/EconGraph/econ-graph"
 [ "$method" = GET ] || echo "$method $path" >>"$state/writes.log"
-if [ "$method" = "${STUB_REJECT:-}" ]; then
+seen=0
+[ ! -f "$state/reject-seen" ] || seen="$(cat "$state/reject-seen")"
+if [ "$method" = "${STUB_REJECT:-}" ] && [ "$seen" -lt "${STUB_REJECT_AFTER:-0}" ]; then
+    echo $(( seen + 1 )) >"$state/reject-seen"
+elif [ "$method" = "${STUB_REJECT:-}" ]; then
     # What gh does on an error response: the body on stdout, a summary on stderr.
     # STUB_REJECT_BODY replaces the body.
     if [ -n "${STUB_REJECT_BODY:-}" ]; then
@@ -142,7 +152,7 @@ reset() {
     : >"$STUB_STATE/calls.log"
     : >"$STUB_STATE/writes.log"
     printf '%s\n' "${1:-$live_main}" >"$STUB_STATE/rulesets/8429203.json"
-    unset STUB_ADMIN STUB_AUTH_RC STUB_DROP_ON_WRITE STUB_REJECT STUB_REJECT_BODY
+    unset STUB_ADMIN STUB_AUTH_RC STUB_DROP_ON_WRITE STUB_REJECT STUB_REJECT_AFTER STUB_REJECT_BODY
 }
 
 ok() { echo "ok   $1"; }
@@ -160,6 +170,7 @@ run() {
 
 writes() { wc -l <"$STUB_STATE/writes.log" | tr -d ' '; }
 release_files() { grep -l '"release branches by pr"' "$STUB_STATE"/rulesets/*.json 2>/dev/null; }
+tag_files() { grep -l '"release tags by admins only"' "$STUB_STATE"/rulesets/*.json 2>/dev/null; }
 
 # expect_refusal NAME MESSAGE ARGS...: exits non-zero, prints MESSAGE, writes nothing.
 expect_refusal() {
@@ -205,8 +216,10 @@ same_ruleset() {
 reset
 run --dry-run
 if [ "$rc" -eq 0 ] && [ "$(writes)" = 0 ] && grep -qF 'Dry run: nothing was changed.' <<<"$out" &&
-    grep -qF '+      "type": "merge_queue"' <<<"$out" && grep -qF '== new ruleset "release branches by pr": changes' <<<"$out"; then
-    ok "dry run prints both diffs and writes nothing"
+    grep -qF '+      "type": "merge_queue"' <<<"$out" && grep -qF '== new ruleset "release branches by pr": changes' <<<"$out" &&
+    grep -qF '== new ruleset "release tags by admins only": changes' <<<"$out" &&
+    grep -qF '+        "refs/tags/v*"' <<<"$out"; then
+    ok "dry run prints every diff and writes nothing"
 else
     fail "dry run (exit $rc, $(writes) writes)" "$out"
 fi
@@ -226,17 +239,17 @@ fi
 
 reset
 run --yes
-if [ "$rc" -eq 0 ] && grep -qF 'Verified: both rulesets match.' <<<"$out" &&
+if [ "$rc" -eq 0 ] && grep -qF 'Verified: all three rulesets match.' <<<"$out" &&
     [ "$(grep -c '^PUT repos/EconGraph/econ-graph/rulesets/8429203$' "$STUB_STATE/writes.log")" = 1 ] &&
-    [ "$(grep -c '^POST repos/EconGraph/econ-graph/rulesets$' "$STUB_STATE/writes.log")" = 1 ] &&
-    [ "$(writes)" = 2 ]; then
-    ok "first apply: PUT main, POST release, verified"
+    [ "$(grep -c '^POST repos/EconGraph/econ-graph/rulesets$' "$STUB_STATE/writes.log")" = 2 ] &&
+    [ "$(writes)" = 3 ]; then
+    ok "first apply: PUT main, POST release and tag, verified"
 else
     fail "first apply (exit $rc)" "$out"$'\n'"$(cat "$STUB_STATE/writes.log")"
 fi
 same_ruleset "first apply: main is MERGE_QUEUE.md's ruleset" "$WORK/doc-main.json" "$STUB_STATE/rulesets/8429203.json"
 release_file="$(release_files)"
-if [ "$(wc -w <<<"$release_file")" = 1 ]; then
+if [ "$(wc -w <<<"$release_file" | tr -d ' ')" = 1 ]; then
     same_ruleset "first apply: release is MERGE_QUEUE.md's ruleset" "$WORK/doc-release.json" "$release_file"
 else
     fail "first apply: one release ruleset" "$release_file"
@@ -260,6 +273,23 @@ if jq -e --argjson live "$live_main" '
     ok "first apply keeps every live field and rule of main"
 else
     fail "first apply dropped or changed a live field of main" "$(jq -c . "$STUB_STATE/rulesets/8429203.json")"
+fi
+
+tag_file="$(tag_files)"
+if [ "$(wc -w <<<"$tag_file" | tr -d ' ')" = 1 ]; then
+    same_ruleset "first apply: the tag ruleset is tag-ruleset.json" "$tag_rules" "$tag_file"
+else
+    fail "first apply: one tag ruleset" "$tag_file"
+fi
+# What ECO-896 asks of it: v* and train-* tags, only admins create, move or delete them.
+if jq -e '.target == "tag" and .enforcement == "active"
+          and (.conditions.ref_name.include | sort) == ["refs/tags/train-*", "refs/tags/v*"]
+          and ([.rules[].type] | sort) == ["creation", "deletion", "non_fast_forward", "update"]
+          and all(.bypass_actors[]; .actor_type == "OrganizationAdmin"
+                  or (.actor_type == "RepositoryRole" and .actor_id == 5))' "$tag_rules" >/dev/null; then
+    ok "tag-ruleset.json protects v* and train-* tags, bypassed only by admins"
+else
+    fail "tag-ruleset.json" "$(jq -c . "$tag_rules")"
 fi
 
 # --- Re-run --------------------------------------------------------------------
@@ -290,7 +320,7 @@ cp "$WORK/r.json" "$release_file"
 : >"$STUB_STATE/writes.log"
 run --yes
 if [ "$rc" -eq 0 ] && [ "$(cat "$STUB_STATE/writes.log")" = "PUT repos/EconGraph/econ-graph/rulesets/${release_id}" ] &&
-    [ "$(release_files | wc -l)" = 1 ]; then
+    [ "$(release_files | wc -l | tr -d ' ')" = 1 ]; then
     ok "a changed release ruleset is updated in place, not duplicated"
 else
     fail "release update (exit $rc)" "$out"$'\n'"$(cat "$STUB_STATE/writes.log")"
@@ -305,6 +335,28 @@ if jq -e '
     ok "release update keeps its own rules and refs and restores the managed values"
 else
     fail "release update result" "$(jq -c . "$release_file")"
+fi
+
+# --- Tag ruleset updated in place ---------------------------------------------
+
+tag_id="$(jq -r .id "$tag_file")"
+jq '.enforcement = "evaluate"
+    | .rules |= map(select(.type != "deletion")) | .rules += [{"type": "required_signatures"}]
+    | .conditions.ref_name.include += ["refs/tags/hotfix-*"]
+    | .bypass_actors += [{"actor_id": 99, "actor_type": "Integration", "bypass_mode": "always"}]' \
+    "$tag_file" >"$WORK/t.json"
+cp "$WORK/t.json" "$tag_file"
+: >"$STUB_STATE/writes.log"
+run --yes
+if [ "$rc" -eq 0 ] && [ "$(cat "$STUB_STATE/writes.log")" = "PUT repos/EconGraph/econ-graph/rulesets/${tag_id}" ] &&
+    [ "$(tag_files | wc -l | tr -d ' ')" = 1 ] &&
+    jq -e '.enforcement == "active"
+           and ([.rules[].type] | index("deletion") and index("required_signatures"))
+           and (.conditions.ref_name.include | index("refs/tags/hotfix-*") and index("refs/tags/v*"))
+           and any(.bypass_actors[]; .actor_id == 99)' "$tag_file" >/dev/null; then
+    ok "a changed tag ruleset is updated in place, keeping its live extras"
+else
+    fail "tag update (exit $rc)" "$out"$'\n'"$(cat "$STUB_STATE/writes.log")"$'\n'"$(jq -c . "$tag_file")"
 fi
 
 # --- Live main with more than the script manages ------------------------------
@@ -393,6 +445,24 @@ done
 expect_refusal "refuses two release rulesets of the same name" "2 rulesets are named" --yes
 
 reset
+for id in 601 602; do
+    jq --argjson id "$id" '. + {id: $id}' "$tag_rules" >"$STUB_STATE/rulesets/$id.json"
+done
+expect_refusal "refuses two tag rulesets of the same name" "2 tag rulesets are named" --yes
+
+# A tag-ruleset.json that is not a tag ruleset, beside a copy of the script.
+mkdir -p "$WORK/broken"
+cp "${SCRIPT_DIR}/apply-rulesets.sh" "$rules" "$WORK/broken/"
+jq '.target = "branch"' "$tag_rules" >"$WORK/broken/tag-ruleset.json"
+reset
+real_script="$script"
+script="$WORK/broken/apply-rulesets.sh"
+expect_refusal "refuses a tag-ruleset.json that is not a tag ruleset" "is not a tag ruleset" --dry-run
+rm "$WORK/broken/tag-ruleset.json"
+expect_refusal "refuses without tag-ruleset.json" "missing $WORK/broken/tag-ruleset.json" --dry-run
+script="$real_script"
+
+reset
 expect_refusal "refuses to apply without a terminal or --yes" "confirmation needs a terminal"
 
 reset
@@ -419,7 +489,7 @@ if [ "$rc" -ne 0 ] &&
     grep -qF 'gh: Validation Failed (HTTP 422)' <<<"$out" &&
     grep -qF 'message: Validation Failed' <<<"$out" &&
     grep -qF "error: Merge queue cannot be used with wildcard branch patterns" <<<"$out" &&
-    grep -qF 'Ruleset 8429203 "main only by pr" was already updated' <<<"$out" &&
+    grep -qF 'Already written: ruleset 8429203 "main only by pr"' <<<"$out" &&
     ! grep -qF 'Created ruleset' <<<"$out" && ! grep -qF 'Verified' <<<"$out"; then
     ok "a rejected release POST prints GitHub's error, says main was written, exits non-zero"
 else
@@ -445,7 +515,7 @@ export STUB_REJECT_BODY='{"message": "Odd", "errors": [1, {"code": "x"}, "plain"
 run --yes
 if [ "$rc" -ne 0 ] && grep -qF 'message: Odd' <<<"$out" && grep -qxF '  error: 1' <<<"$out" &&
     grep -qxF '  error: {"code":"x"}' <<<"$out" && grep -qxF '  error: plain' <<<"$out" &&
-    grep -qF 'Ruleset 8429203 "main only by pr" was already updated' <<<"$out"; then
+    grep -qF 'Already written: ruleset 8429203 "main only by pr"' <<<"$out"; then
     ok "a rejected write with non-object errors entries prints them and the summary"
 else
     fail "rejected write, non-object errors (exit $rc)" "$out"
@@ -456,10 +526,23 @@ export STUB_REJECT=POST
 export STUB_REJECT_BODY='<html>502 Bad Gateway</html>'
 run --yes
 if [ "$rc" -ne 0 ] && grep -qxF '  <html>502 Bad Gateway</html>' <<<"$out" &&
-    grep -qF 'Ruleset 8429203 "main only by pr" was already updated' <<<"$out"; then
+    grep -qF 'Already written: ruleset 8429203 "main only by pr"' <<<"$out"; then
     ok "a rejected write with a non-JSON body prints it and the summary"
 else
     fail "rejected write, non-JSON body (exit $rc)" "$out"
+fi
+
+# The tag ruleset's POST, after main and release were written: both are named.
+reset
+export STUB_REJECT=POST STUB_REJECT_AFTER=1
+run --yes
+if [ "$rc" -ne 0 ] &&
+    grep -qF 'GitHub rejected the write of new ruleset "release tags by admins only"' <<<"$out" &&
+    grep -qF 'Already written: ruleset 8429203 "main only by pr", ruleset 9000001 "release branches by pr"' <<<"$out" &&
+    grep -qF 'Not written: new ruleset "release tags by admins only"' <<<"$out"; then
+    ok "a rejected tag POST names the rulesets already written"
+else
+    fail "rejected tag POST (exit $rc)" "$out"
 fi
 
 exit "$failed"

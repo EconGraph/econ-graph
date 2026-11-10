@@ -16,6 +16,28 @@ name: Release Images
 #   drafts a GitHub release from CHANGELOG.md. This never runs on a push to
 #   main: see docs/development/RELEASE_PROCESS.md for when tags get pushed.
 #
+# Provenance (ECO-896):
+# - Only reviewed commits are built or published: the commit must be on
+#   origin/main or an origin/release/<name> branch, which rulesets keep
+#   PR-only (scripts/release/check-release-ref.sh), and a manual run must be
+#   started from main or a release branch. Both are checked before anything
+#   is built.
+# - Each built image gets a Sigstore-signed SLSA build provenance attestation
+#   (actions/attest-build-provenance, keyless through the run's OIDC token)
+#   before its sha tag exists, so a sha tag always names an attested image.
+# - An image that already has the sha tag is adopted only when
+#   scripts/release/verify-image-provenance.sh shows it was built by this
+#   workflow on main, a release branch or an rc tag; anything else (an image
+#   pushed by hand or by another workflow, or by a copy of this one on a
+#   feature branch) fails the run instead of being adopted or overwritten.
+#   It is not rebuilt either: a rebuild is not byte-identical, so it would
+#   replace the image QA tested. The publish job verifies the same before it
+#   retags, and scripts/deploy/load-release-images.sh before it loads.
+# - No BuildKit cache: every release build starts from an empty builder, so
+#   nothing another workflow wrote to the shared GitHub Actions cache (Core
+#   CI's Docker Build Test writes the default scope) ends up in a release
+#   image.
+#
 # scripts/release/tag.sh is what pushes the final tag that triggers the second
 # case; it runs the flags remove_by check (config/flags) before pushing, so a
 # flag due for removal is caught before the tag exists rather than after. The
@@ -52,7 +74,14 @@ jobs:
     # rather than rebuilding.
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.ref_name, '-rc.'))
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Uncached builds of all four images (see "No BuildKit cache" above).
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      # Keyless signing of the provenance attestations.
+      id-token: write
+      attestations: write
     # Shared across every ref (a main-branch workflow_dispatch and an rc tag
     # push for the same commit use different github.ref values, so the
     # top-level group wouldn't serialize them against each other), so two
@@ -67,6 +96,9 @@ jobs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         ref: ${{ github.event.inputs.ref || github.ref }}
+        # Every branch with full history, so check-release-ref.sh can tell
+        # whether the commit is on main or a release branch.
+        fetch-depth: 0
         # This job only needs to read the checked-out tree; it never pushes to
         # the repo, so the default token credential has no reason to persist
         # in the git config where a later step (or a compromised dependency in
@@ -80,6 +112,22 @@ jobs:
           echo "release.yml: '${GITHUB_REF_NAME}' doesn't look like vX.Y.Z-rc.N; refusing to build it as a release candidate." >&2
           exit 1
         fi
+
+    # Before anything is built. A manual run uses the workflow file of the
+    # branch it is started from, so it must be started from main or a release
+    # branch; whatever ref it then builds, and the commit an rc tag points at,
+    # must be on one of them.
+    - name: Refuse a commit that is not on main or a release branch
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+      run: |
+        set -euo pipefail
+        if [ "${EVENT_NAME}" = workflow_dispatch ] &&
+            ! [[ "${GITHUB_REF}" =~ ^refs/heads/(main|release/[^/]+)$ ]]; then
+          echo "release.yml: started from ${GITHUB_REF}; start release builds from main or a release/* branch (the ref input picks the commit)." >&2
+          exit 1
+        fi
+        scripts/release/check-release-ref.sh HEAD
 
     - name: Set lowercase image owner
       id: owner
@@ -108,9 +156,14 @@ jobs:
     # retry after a partial failure (e.g. backend pushed, frontend didn't),
     # must build only what's actually missing. Never overwrite a sha tag that
     # already exists - the publish job treats it as "what QA tested", and the
-    # whole point of retagging-not-rebuilding is to avoid that drifting.
+    # whole point of retagging-not-rebuilding is to avoid that drifting. An
+    # existing image is adopted only with valid provenance from this workflow
+    # (see the header); without it the run fails, and the image has to be
+    # looked at and its package version deleted by hand before a re-run.
     - name: Check which images already have this commit's sha tag
       id: check
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         owner="${{ steps.owner.outputs.owner }}"
@@ -119,7 +172,12 @@ jobs:
           ref="${REGISTRY}/${owner}/${image}:${sha_tag}"
           key="$(echo "${image}" | tr '-' '_')"
           if inspect_err="$(docker buildx imagetools inspect "${ref}" 2>&1 >/dev/null)"; then
-            echo "${ref} already exists; will not rebuild it."
+            digest="$(docker buildx imagetools inspect "${ref}" --format '{{json .Manifest}}' | jq -r '.digest')"
+            if ! scripts/release/verify-image-provenance.sh "${REGISTRY}/${owner}/${image}@${digest}"; then
+              echo "release.yml: ${ref} (${digest}) already exists but was not built by this workflow from a reviewed ref; refusing to adopt or overwrite it. Find out where it came from, delete that package version, and re-run." >&2
+              exit 1
+            fi
+            echo "${ref} already exists with release provenance; will not rebuild it."
             echo "${key}=true" >> "$GITHUB_OUTPUT"
           elif echo "${inspect_err}" | grep -qiE 'manifest unknown|not found'; then
             echo "${ref} doesn't exist yet; will build it."
@@ -180,37 +238,40 @@ jobs:
         labels: org.opencontainers.image.revision=${{ steps.sha.outputs.sha }}
         flavor: latest=false
 
+    # Each image is pushed by digest only. Its sha tag is applied after its
+    # attestation exists ("Apply the sha tags" below), so a failure in between
+    # leaves an untagged digest, and a re-run builds again instead of finding
+    # an unattested sha tag. No cache-from or cache-to: see the header.
     - name: Build and push backend image
+      id: build-backend
       if: steps.check.outputs.econ_graph_backend != 'true'
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
       with:
         context: ./backend
         target: backend
-        push: true
-        tags: ${{ steps.meta-backend.outputs.tags }}
+        pull: true
+        outputs: type=image,name=${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-backend,push-by-digest=true,name-canonical=true,push=true
         labels: ${{ steps.meta-backend.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
 
     - name: Build and push crawler-worker image
+      id: build-crawler-worker
       if: steps.check.outputs.econ_graph_crawler_worker != 'true'
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
       with:
         context: ./backend
         target: crawler-worker
-        push: true
-        tags: ${{ steps.meta-crawler-worker.outputs.tags }}
+        pull: true
+        outputs: type=image,name=${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-crawler-worker,push-by-digest=true,name-canonical=true,push=true
         labels: ${{ steps.meta-crawler-worker.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
 
     - name: Build and push frontend image
+      id: build-frontend
       if: steps.check.outputs.econ_graph_frontend != 'true'
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
       with:
         context: ./frontend
-        push: true
-        tags: ${{ steps.meta-frontend.outputs.tags }}
+        pull: true
+        outputs: type=image,name=${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-frontend,push-by-digest=true,name-canonical=true,push=true
         labels: ${{ steps.meta-frontend.outputs.labels }}
         # Same build args as ci-core.yml's docker-build job (AUTH-7, ECO-220/225
         # review): VITE_API_URL/GRAPHQL_URL/WS_URL stay unset so the frontend
@@ -220,19 +281,76 @@ jobs:
           VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER || '/idp/realms/econ-graph' }}
           VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID || 'econ-graph-web' }}
           NODE_ENV=production
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
 
     - name: Build and push chart-api image
+      id: build-chart-api
       if: steps.check.outputs.econ_graph_chart_api != 'true'
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
       with:
         context: ./chart-api-service
-        push: true
-        tags: ${{ steps.meta-chart-api.outputs.tags }}
+        pull: true
+        outputs: type=image,name=${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-chart-api,push-by-digest=true,name-canonical=true,push=true
         labels: ${{ steps.meta-chart-api.outputs.labels }}
-        cache-from: type=gha,scope=chart-api
-        cache-to: type=gha,mode=max,scope=chart-api
+
+    # Signed SLSA build provenance for each image just built, stored with
+    # GitHub's attestations API (gh attestation verify reads it from there).
+    - name: Attest backend image provenance
+      if: steps.check.outputs.econ_graph_backend != 'true'
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      with:
+        subject-name: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-backend
+        subject-digest: ${{ steps.build-backend.outputs.digest }}
+
+    - name: Attest crawler-worker image provenance
+      if: steps.check.outputs.econ_graph_crawler_worker != 'true'
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      with:
+        subject-name: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-crawler-worker
+        subject-digest: ${{ steps.build-crawler-worker.outputs.digest }}
+
+    - name: Attest frontend image provenance
+      if: steps.check.outputs.econ_graph_frontend != 'true'
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      with:
+        subject-name: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-frontend
+        subject-digest: ${{ steps.build-frontend.outputs.digest }}
+
+    - name: Attest chart-api image provenance
+      if: steps.check.outputs.econ_graph_chart_api != 'true'
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      with:
+        subject-name: ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-chart-api
+        subject-digest: ${{ steps.build-chart-api.outputs.digest }}
+
+    # Only now, with every attestation in place, does each new digest get
+    # its sha tag. Checked with verify-image-provenance.sh first, so a sha tag
+    # never names a digest that fails the check the deploy runs.
+    - name: Apply the sha tags to the attested digests
+      env:
+        GH_TOKEN: ${{ github.token }}
+        BACKEND_DIGEST: ${{ steps.build-backend.outputs.digest }}
+        CRAWLER_WORKER_DIGEST: ${{ steps.build-crawler-worker.outputs.digest }}
+        FRONTEND_DIGEST: ${{ steps.build-frontend.outputs.digest }}
+        CHART_API_DIGEST: ${{ steps.build-chart-api.outputs.digest }}
+      run: |
+        set -euo pipefail
+        owner="${{ steps.owner.outputs.owner }}"
+        sha_tag="sha-${{ steps.sha.outputs.sha }}"
+        declare -A built=(
+          [econ-graph-backend]="${BACKEND_DIGEST}"
+          [econ-graph-crawler-worker]="${CRAWLER_WORKER_DIGEST}"
+          [econ-graph-frontend]="${FRONTEND_DIGEST}"
+          [econ-graph-chart-api]="${CHART_API_DIGEST}"
+        )
+        for image in "${!built[@]}"; do
+          digest="${built[$image]}"
+          # Empty: the image already existed and was adopted above.
+          [ -n "${digest}" ] || continue
+          src="${REGISTRY}/${owner}/${image}@${digest}"
+          scripts/release/verify-image-provenance.sh "${src}"
+          echo "Tagging ${src} as ${sha_tag}"
+          docker buildx imagetools create -t "${REGISTRY}/${owner}/${image}:${sha_tag}" "${src}"
+        done
 
     # Apply the rc tag itself here (only for a tag push, not workflow_dispatch:
     # the Actions UI lets a manual run be started "from" a tag, which must
@@ -265,6 +383,8 @@ jobs:
     permissions:
       contents: write
       packages: write
+      # verify-image-provenance.sh reads the attestations.
+      attestations: read
     # Not keyed on github.ref like the top-level group: two final-tag pushes
     # (e.g. v4.0.0 and a same-day v4.0.1 patch) must never resolve "newest
     # release" and retag concurrently, since each decides and writes `latest`
@@ -293,6 +413,11 @@ jobs:
           echo "release.yml: '${GITHUB_REF_NAME}' isn't a plain vX.Y.Z tag; refusing to publish it as a release (an rc, beta or hotfix-style tag isn't final)." >&2
           exit 1
         fi
+
+    # The rc build already refused an unreviewed commit; a final tag can be
+    # pushed on any commit, so check it again here, before anything is retagged.
+    - name: Refuse a commit that is not on main or a release branch
+      run: scripts/release/check-release-ref.sh "${GITHUB_SHA}"
 
     - name: Set lowercase image owner
       id: owner
@@ -330,6 +455,8 @@ jobs:
     # some images retagged.
     - name: Resolve the rc-built images to their digests
       id: digests
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         owner="${{ steps.owner.outputs.owner }}"
@@ -342,6 +469,9 @@ jobs:
             echo "release.yml: couldn't resolve a digest for ${src}" >&2
             exit 1
           fi
+          # Never promote an image this workflow did not build from a
+          # reviewed ref (see the header).
+          scripts/release/verify-image-provenance.sh "${REGISTRY}/${owner}/${image}@${digest}"
           key="$(echo "${image}" | tr '-' '_')"
           echo "${key}=${digest}" >> "$GITHUB_OUTPUT"
         done

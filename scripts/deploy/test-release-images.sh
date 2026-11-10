@@ -29,6 +29,8 @@
 #   - --cluster: an exported KIND_CLUSTER or ECONGRAPH_SCRATCH_STORAGE does not
 #     stop load or rollback;
 #   - --dry-run pulls, tags, loads, restarts and writes nothing;
+#   - load verifies each image's release provenance by digest (stub gh) and
+#     refuses, before pulling and in a dry run too, an image without it;
 #   - load refuses before anything reaches the nodes on: a revision label that
 #     isn't the commit or is missing, a pulled image without the registry's
 #     digest, an rc tag on another digest, an unreachable or rootless daemon,
@@ -326,7 +328,17 @@ case "$*" in
   *) echo "stub kubectl: unexpected call: $*" >&2; exit 1 ;;
 esac
 STUB
-chmod +x "$tmp/bin/git" "$tmp/bin/docker" "$tmp/bin/kind" "$tmp/bin/kubectl"
+# gh attestation verify (scripts/release/verify-image-provenance.sh): passes,
+# unless STUB_NO_PROVENANCE names the image.
+cat >"$tmp/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+echo "gh $*" >>"$STUB_LOG"
+[ "$1 $2" = "attestation verify" ] || { echo "stub gh: unexpected call: $*" >&2; exit 1; }
+case "$3" in
+  *"/econ-graph-${STUB_NO_PROVENANCE:-none}@"*) echo "Error: no attestations found"; exit 1 ;;
+esac
+STUB
+chmod +x "$tmp/bin/git" "$tmp/bin/docker" "$tmp/bin/kind" "$tmp/bin/kubectl" "$tmp/bin/gh"
 # shellcheck source=/dev/null
 source "$tmp/bin/stub-common"
 
@@ -400,6 +412,8 @@ make_repo() {
   # lib/kind-env.sh sources the backup encryption helpers.
   cp "$repo_root/scripts/backup/encryption.sh" "$tmp/repo/scripts/backup/"
   cp "$load" "$verify" "$rollback" "$tmp/repo/scripts/deploy/"
+  mkdir -p "$tmp/repo/scripts/release"
+  cp "$repo_root/scripts/release/verify-image-provenance.sh" "$tmp/repo/scripts/release/"
   cp -r "$repo_root/k8s/manifests" "$tmp/repo/k8s/"
 }
 run() {
@@ -433,6 +447,8 @@ for n in "${names[@]}"; do
   grep -qF "imagetools inspect ghcr.io/econgraph/econ-graph-$n:$TAG --format" "$STUB_LOG" ||
     fail "load --dry-run did not resolve ghcr.io/econgraph/econ-graph-$n:$TAG"
   grep -qF "econ-graph-$n:$(local_tag "$n")" "$tmp/out" || fail "load --dry-run did not name econ-graph-$n:$(local_tag "$n")"
+  grep -qF "gh attestation verify oci://ghcr.io/econgraph/econ-graph-$n@$(digest_of "$n") --repo EconGraph/econ-graph --cert-identity-regex " "$STUB_LOG" ||
+    fail "load --dry-run did not verify the provenance of econ-graph-$n by digest"
 done
 grep -qF "keep $old_crawler as $(pre crawler-worker)" "$tmp/out" ||
   fail "load --dry-run would not keep the crawler-worker image that runs: $(cat "$tmp/out")"
@@ -741,6 +757,11 @@ refuses "a chart revision mismatch" "has org.opencontainers.image.revision" STUB
 refuses "a missing revision label" "has no org.opencontainers.image.revision label" STUB_NO_REVISION=frontend
 refuses "a pulled image without the registry's digest" "does not carry digest $(digest_of backend)" STUB_PULLED_DIGEST_DIFFERS=backend
 refuses "an rc tag on another digest" "refusing" STUB_RC_DIGEST_DIFFERS=1
+# Missing or wrong signature: refused before anything is pulled, in a dry run too.
+refuses "an image without release provenance" "has no valid build provenance from release.yml" STUB_NO_PROVENANCE=frontend
+grep -qE '^docker .* pull ' "$STUB_LOG" && fail "load pulled despite an image without release provenance"
+reset
+expect_fail "has no valid release provenance; refusing" env STUB_NO_PROVENANCE=chart-api "$load" --tag "$TAG" --dry-run
 refuses "an unreachable daemon" "is not reachable" STUB_DOCKER_DOWN=1
 refuses "a rootless daemon" "is a rootless daemon" STUB_ROOTLESS=1
 # Docker's containerd image store: refused before anything is pulled, and in a dry run.

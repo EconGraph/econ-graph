@@ -150,14 +150,25 @@ ruleset whose branch name pattern has a wildcard, as `refs/heads/release/*`
 does (HTTP 422, "Validation Failed"). The script finds it by name and target,
 so a re-run updates it rather than creating another.
 
+It also creates, or updates, the tag ruleset in
+[tag-ruleset.json](../../scripts/github/tag-ruleset.json),
+`release tags by admins only` (ECO-896). It covers `refs/tags/v*` and
+`refs/tags/train-*` with the `creation`, `update`, `deletion` and
+`non_fast_forward` rules, and only organization admins and the repository
+admin role bypass it. Everyone else is refused when they create, move or
+delete a release tag, so the Release Images workflow only builds and publishes
+tags an admin pushed (with [tag.sh](../../scripts/release/tag.sh)). A live tag
+ruleset of that name is merged the same additive way: its own rules, refs and
+bypass actors stay.
+
 Before writing, the script refuses when the account has no admin rights or
 the main ruleset is missing or not the expected one (another id, name, target
 or branch condition, or without its pull-request rule). When GitHub rejects a
 write, the script prints which ruleset failed and GitHub's error (its
-`message` and `errors`), says whether the main ruleset was already updated,
+`message` and `errors`), names the rulesets it already wrote,
 and exits non-zero; a re-run after fixing the cause picks up from there,
 since an applied ruleset shows as already applied. After writing, it
-re-reads both rulesets and fails unless they match. When they already match,
+re-reads every ruleset and fails unless they match. When they already match,
 it prints "already applied" and writes nothing. `--yes` skips the prompt.
 [test-apply-rulesets.sh](../../scripts/github/test-apply-rulesets.sh) checks
 it against a stub `gh`, in the Lint workflows job.

@@ -72,13 +72,26 @@ class ReleaseArtifactsTest(unittest.TestCase):
             self.assertEqual(values['tags'], 'type=raw,value=sha-${{ steps.sha.outputs.sha }}')
             self.assertEqual(values['labels'], 'org.opencontainers.image.revision=${{ steps.sha.outputs.sha }}')
             self.assertEqual(values['flavor'], 'latest=false')
-            build, = [s for s in builds if s['with']['tags'] == '${{ steps.meta-' + name + '.outputs.tags }}']
-            self.assertTrue(build['with']['push'])
+            build, = [s for s in builds if s.get('id') == 'build-' + name]
+            # Pushed by digest only; the sha tag comes after the attestation.
+            self.assertEqual(build['with']['outputs'],
+                             'type=image,name=${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/econ-graph-' + name +
+                             ',push-by-digest=true,name-canonical=true,push=true')
+            self.assertNotIn('tags', build['with'])
             self.assertEqual(build['with']['labels'], '${{ steps.meta-' + name + '.outputs.labels }}')
             self.assertEqual(build['if'], "steps.check.outputs.econ_graph_" + name.replace('-', '_') + " != 'true'")
             self.assertTrue((ROOT / build['with']['context'] / 'Dockerfile').is_file())
+            attest, = [s for s in self.steps if s.get('uses', '').startswith('actions/attest-build-provenance@')
+                       and s['with']['subject-name'].endswith('/econ-graph-' + name)]
+            self.assertEqual(attest['with']['subject-digest'], '${{ steps.build-' + name + '.outputs.digest }}')
+            self.assertEqual(attest['if'], build['if'])
         chart, = [s for s in builds if s['with']['context'] == './chart-api-service']
-        self.assertEqual(chart['with']['tags'], '${{ steps.meta-chart-api.outputs.tags }}')
+        self.assertEqual(chart['id'], 'build-chart-api')
+        tagging, = [s for s in self.steps if s.get('name') == 'Apply the sha tags to the attested digests']
+        for name in self.names:
+            self.assertIn('[econ-graph-' + name + ']=', tagging['run'])
+            self.assertIn('${{ steps.build-' + name + '.outputs.digest }}', tagging['env'].values())
+        self.assertIn('scripts/release/verify-image-provenance.sh', tagging['run'])
         # Existence guard, rc tag promotion, and final digest resolution each
         # enumerate the complete set; final promotion consumes each resolved digest.
         loops = []
@@ -91,6 +104,33 @@ class ReleaseArtifactsTest(unittest.TestCase):
         for name in self.names:
             self.assertIn('[econ-graph-' + name + ']="${{ steps.digests.outputs.econ_graph_' +
                           name.replace('-', '_') + ' }}"', promotion)
+
+    def test_release_builds_use_no_shared_cache(self):
+        text = (ROOT / '.github/workflows/release.yml').read_text()
+        self.assertNotIn('type=gha', text)
+        for step in self.steps:
+            if step.get('uses', '').startswith('docker/build-push-action@'):
+                self.assertFalse({'cache-from', 'cache-to', 'no-cache'} & set(step['with']), step['name'])
+
+    def test_only_reviewed_commits_and_attested_images(self):
+        jobs = self.workflow['jobs']
+        self.assertEqual(jobs['build']['permissions']['id-token'], 'write')
+        self.assertEqual(jobs['build']['permissions']['attestations'], 'write')
+        for job_name, job in jobs.items():
+            names = [step.get('name') for step in job['steps']]
+            guard = names.index('Refuse a commit that is not on main or a release branch')
+            checkout, = [step for step in job['steps'] if step.get('uses', '').startswith('actions/checkout@')]
+            self.assertEqual(checkout['with']['fetch-depth'], 0, job_name)
+            self.assertIn('scripts/release/check-release-ref.sh', job['steps'][guard]['run'])
+            # Before any build, attestation, tag or retag.
+            for i, step in enumerate(job['steps']):
+                if 'imagetools create' in step.get('run', '') or step.get('uses', '').startswith(
+                        ('docker/build-push-action@', 'actions/attest-build-provenance@')):
+                    self.assertGreater(i, guard, step['name'])
+        check, = [s for s in self.steps if s.get('id') == 'check']
+        self.assertIn('scripts/release/verify-image-provenance.sh', check['run'])
+        digests, = [s for s in self.steps if s.get('id') == 'digests']
+        self.assertIn('scripts/release/verify-image-provenance.sh', digests['run'])
 
 
 if __name__ == '__main__':

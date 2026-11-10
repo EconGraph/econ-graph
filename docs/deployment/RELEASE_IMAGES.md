@@ -57,7 +57,14 @@ kept in `~/.cache/econgraph`, and prints that cluster's identity first.
 1. It runs `git fetch --tags origin` (also in `--dry-run`) and resolves the tag to its commit.
 2. It requires `ghcr.io/econgraph/econ-graph-<name>:sha-<full commit>` and the rc tag to report
    one digest on GHCR. The packages are private, so the Docker client needs a
-   `docker login ghcr.io` with a token that has `read:packages`.
+   `docker login ghcr.io` with a token that has `read:packages`. Each digest must carry a
+   signed build provenance attestation from `.github/workflows/release.yml` run on `main`, a
+   `release/*` branch or an rc tag
+   ([verify-image-provenance.sh](../../scripts/release/verify-image-provenance.sh), which runs
+   `gh attestation verify`, so `gh` must be logged in). An image without one, or attested by
+   anything else, stops the script before anything is pulled, in `--dry-run` too. Images built
+   before ECO-896 have no attestation: build the release candidate again (a new commit, or
+   delete the old `sha-<commit>` package versions first).
 3. It decides what to keep for each image: what the Deployment's running pods run now, or,
    once the tag has a load record, what the first record kept. It stops before changing
    anything if an earlier load of the tag moved another name (the record's `local=`) than the

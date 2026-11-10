@@ -31,7 +31,12 @@
 #      the tag to its commit.
 #   2. The refs release.yml pushes: ghcr.io/econgraph/econ-graph-{backend,
 #      crawler-worker,frontend,chart-api}:sha-<full commit>, and :<tag> on the same
-#      digest. Both must resolve to one digest on GHCR.
+#      digest. Both must resolve to one digest on GHCR, and that digest must
+#      carry a signed build provenance attestation from release.yml run on
+#      main, a release/* branch or an rc tag
+#      (scripts/release/verify-image-provenance.sh, which needs gh logged in);
+#      an image without one, or signed by anything else, stops the script
+#      before anything is pulled, in a dry run too.
 #   3. Decide what to keep for each image: the image its Deployment's running
 #      pods use now (with none running, the one the manifests' name points at on
 #      the nodes). When an earlier load of the same tag is on record, its first
@@ -77,7 +82,7 @@
 #
 # Running it again with the same tag is safe: an image that already carries the
 # name is not retagged, pre-<tag> is kept as it is, and kind skips nodes that
-# already have the image. Needs jq, and the pinned kind that
+# already have the image. Needs jq, gh (logged in, for the provenance check), and the pinned kind that
 # scripts/deploy/install-kind.sh installs (`kind load` stops without it). Other
 # environment: ECONGRAPH_DOCKER_HOST, KUBECTL, KUBECONFIG (default: the kind
 # cluster's copies in ~/.cache/econgraph, as lib/cluster-role.sh picks them).
@@ -163,6 +168,11 @@ for name in "${RI_NAMES[@]}"; do
     echo "  ${SHA_REF[$name]}"
     echo "    = ${repo}:${TAG} = ${PIN_REF[$name]} -> ${LOCAL[$name]}"
 done
+# Signed by release.yml from a reviewed ref, or nothing is pulled.
+pin_refs=()
+for name in "${RI_NAMES[@]}"; do pin_refs+=("${PIN_REF[$name]}"); done
+"$PROJECT_ROOT/scripts/release/verify-image-provenance.sh" "${pin_refs[@]}" ||
+    ri_die "an image of ${TAG} has no valid release provenance; refusing"
 
 # 3. What to keep, and every check, before anything changes.
 FIRST_RECORD="$(ri_first_record "$TAG")"

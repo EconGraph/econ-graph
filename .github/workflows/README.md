@@ -4,25 +4,66 @@ The workflow YAML files in this directory define what runs. See the [CI pipeline
 
 ## Workflow inventory
 
-| File | Automatic triggers | Purpose |
-| --- | --- | --- |
-| [ci-core.yml](ci-core.yml) | Push to main, develop, optimize/ci-core-primary and release/** (push subject to paths-ignore); all PRs (a docs-only PR runs only Detect changes and Core CI Result); merge groups | Backend build and tests, frontend tests, quality, audit, licenses and Docker validation |
-| [docs-checks.yml](docs-checks.yml) | Push to main/develop; all PRs, including docs-only and stacked PRs; merge groups | Markdown lint and offline relative-link checks |
-| [actionlint.yml](actionlint.yml) | Push to main/develop that changes workflows, local actions or their validation; all PRs; merge groups | Immutable action references and actionlint, with shellcheck on `run:` scripts |
-| [feature-flags.yml](feature-flags.yml) | Push to main/develop/release/**; train-* tags; all PRs; merge groups; Monday 06:17 UTC | Flag validation and generated-file consistency |
-| [release.yml](release.yml) | Push of `v*.*.*` tags | Manual dispatch or `vX.Y.Z-rc.N` tag pushes build and publish missing commit-tagged images; final version tags promote existing image digests without rebuilding and draft a GitHub release. See the [release process](../../docs/development/RELEASE_PROCESS.md). |
-| [release-e2e.yml](release-e2e.yml) | All PRs (the suite runs when its listed application, Keycloak, release-stack or workflow paths change); merge groups | Chromium against a release frontend, real backend and PostgreSQL 18 with recorded fixtures |
-| [security.yml](security.yml) | Daily 02:00 UTC | Dependency audits, Trivy, CodeQL, licenses and Dockerfile scanning |
-| [accessibility-tests.yml](accessibility-tests.yml) | Monday 09:00 UTC | Accessibility static/runtime checks and manual-testing guidance |
-| [update-cost-analysis.yml](update-cost-analysis.yml) | Manual dispatch; matching PRs | Validate calculations and generated-output repeatability; manual runs on main attempt to publish changes |
-| [crawler-integration-test.yml](crawler-integration-test.yml) | None | Enqueue and execute a real source crawl; needs network access and source credentials where required |
-| [playwright-tests.yml](playwright-tests.yml) | None | Legacy Playwright and Grafana checks |
-| [playwright-tests-comprehensive.yml](playwright-tests-comprehensive.yml) | None | Legacy comprehensive Playwright suite |
-| [playwright-tests-deployed.yml](playwright-tests-deployed.yml) | None | Legacy suite: its `base_url` input sets `PLAYWRIGHT_BASE_URL`, but the default config reads `FRONTEND_URL`, so the input does not select the target. Use the [release suite’s deployed mode](../../frontend/tests/e2e/release/README.md#against-a-deployed-build-rel-qa-check-3). |
-| [ci-experimental.yml](ci-experimental.yml) | None | Optional RAM-disk experiment |
-| [ramdisk-build-cache.yml](ramdisk-build-cache.yml) | None | Manual build-cache experiment |
+All 23 workflow files. **Required** means a job of the workflow is a required check in the
+`main only by pr` ruleset, as listed in
+[merge-queue-rules.json](../../scripts/github/merge-queue-rules.json) (the check name follows in
+parentheses). Every other workflow is advisory: it can be red, or not run, without blocking a
+merge.
 
-The merge queue's required checks are the result jobs of Core CI and Release E2E, and the Docs Checks, Feature Flags and Actionlint jobs; see [Merge queue](../../docs/development/MERGE_QUEUE.md). All listed workflows support manual dispatch. Scheduled times are UTC; GitHub may delay scheduled runs. The Playwright workflows do not run automatically on version tags. Admin Frontend Tests is a job in Core CI, not a separate workflow file.
+| File | Required | Automatic triggers | Purpose |
+| --- | --- | --- | --- |
+| [ci-core.yml](ci-core.yml) | Yes (`Core CI Result`) | Push to main, develop, optimize/ci-core-primary and release/** (push subject to paths-ignore); all PRs (a docs-only PR runs only Detect changes and Core CI Result); merge groups | Backend build and tests, frontend tests, quality, audit, licenses and Docker validation |
+| [release-e2e.yml](release-e2e.yml) | Yes (`Release E2E Result`) | All PRs (the suite runs when its listed application, Keycloak, release-stack or workflow paths change); merge groups | Chromium against a release frontend, real backend and PostgreSQL 18 with recorded fixtures |
+| [docs-checks.yml](docs-checks.yml) | Yes (`Markdown lint and links`) | Push to main/develop; all PRs, including docs-only and stacked PRs; merge groups | Markdown lint and offline relative-link checks |
+| [feature-flags.yml](feature-flags.yml) | Yes (`Feature Flags Check`) | Push to main/develop/release/**; train-* tags; all PRs; merge groups; Monday 06:17 UTC | Flag validation and generated-file consistency |
+| [actionlint.yml](actionlint.yml) | Yes (`Lint workflows`; main only, not release branches) | Push to main/develop that changes workflows, local actions or their validation; all PRs; merge groups | Immutable action references, actionlint with shellcheck on `run:` scripts, and the offline tests of the ruleset and release provenance scripts |
+| [train3-compatibility.yml](train3-compatibility.yml) | No | All PRs; merge groups; push to main | Split-plane compatibility contracts |
+| [train4-platform.yml](train4-platform.yml) | No | PRs and pushes to main that change platform, k8s, Keycloak or the Train 4 tool installer; merge groups | Platform guards and pinned schemas |
+| [train4-talos.yml](train4-talos.yml) | No | PRs and pushes to main that change infra/talos, scripts/talos or the Train 4 tool installer; merge groups | Talos ownership and plan guards; pinned Talos provider configuration |
+| [train4-objectstore.yml](train4-objectstore.yml) | No | PRs and pushes to main that change the object-store scripts, backup snapshot scripts or their docs; merge groups | Offline object-store ownership and backup guards |
+| [train4-npm-compat.yml](train4-npm-compat.yml) | No | PRs and pushes to main that change npm manifests, the npm compatibility scripts, ci/docker or the frontend Dockerfile; merge groups | Patched npm registry-matcher compatibility and audits |
+| [app-data-conversion.yml](app-data-conversion.yml) | No | PRs and pushes to main that change the app/data split or conversion scripts, the deploy library, create-secrets.sh or backend migrations | Rehearse the app/data database conversion on synthetic PostgreSQL records |
+| [train5.yml](train5.yml) | No | PRs that change the company research code, backend manifests, migrations or the GraphQL roots | Company research contracts and enabled APIs |
+| [visual-layout.yml](visual-layout.yml) | No | PRs that change frontend, admin-frontend or config/flags | Public and admin layout checks in Chromium |
+| [release.yml](release.yml) | No (not a PR check) | Push of `v*.*.*` tags | Manual dispatch or `vX.Y.Z-rc.N` tag pushes build and publish missing commit-tagged images, only for commits on main or a release branch, with signed build provenance and no BuildKit cache; final version tags promote existing, verified image digests without rebuilding and draft a GitHub release. See the [release process](../../docs/development/RELEASE_PROCESS.md). |
+| [security.yml](security.yml) | No | Daily 02:00 UTC | Dependency audits, Trivy, CodeQL, licenses and Dockerfile scanning |
+| [accessibility-tests.yml](accessibility-tests.yml) | No | Monday 09:00 UTC | Accessibility static/runtime checks and manual-testing guidance |
+| [update-cost-analysis.yml](update-cost-analysis.yml) | No | Manual dispatch; matching PRs | Validate calculations and generated-output repeatability; manual runs on main attempt to publish changes |
+| [crawler-integration-test.yml](crawler-integration-test.yml) | No | None | Enqueue and execute a real source crawl; needs network access and source credentials where required |
+| [playwright-tests.yml](playwright-tests.yml) | No | None | Legacy Playwright and Grafana checks |
+| [playwright-tests-comprehensive.yml](playwright-tests-comprehensive.yml) | No | None | Legacy comprehensive Playwright suite |
+| [playwright-tests-deployed.yml](playwright-tests-deployed.yml) | No | None | Legacy suite: its `base_url` input sets `PLAYWRIGHT_BASE_URL`, but the default config reads `FRONTEND_URL`, so the input does not select the target. Use the [release suite’s deployed mode](../../frontend/tests/e2e/release/README.md#against-a-deployed-build-rel-qa-check-3). |
+| [ci-experimental.yml](ci-experimental.yml) | No | None | Optional RAM-disk experiment |
+| [ramdisk-build-cache.yml](ramdisk-build-cache.yml) | No | None | Manual build-cache experiment |
+
+The merge queue's required checks are the result jobs of Core CI and Release E2E, and the Docs Checks, Feature Flags and Actionlint jobs; see [Merge queue](../../docs/development/MERGE_QUEUE.md). The `release branches by pr` ruleset requires the same checks except `Lint workflows`. All listed workflows support manual dispatch. Scheduled times are UTC; GitHub may delay scheduled runs. The Playwright workflows do not run automatically on version tags. Admin Frontend Tests is a job in Core CI, not a separate workflow file.
+
+### Required checks: proposed changes (not applied)
+
+This is a proposal for a maintainer (ECO-896). Nothing here changes GitHub; the required set
+changes only when `merge-queue-rules.json` is edited and `scripts/github/apply-rulesets.sh` is
+run by an admin.
+
+A workflow with a path filter on `pull_request` cannot simply be made required: on a PR that
+does not touch its paths it never reports, and the PR waits forever. Core CI and Release E2E
+avoid this with an always-running result job (`ci/scripts/check-required-jobs.sh`).
+
+- **Require now: `Split-plane compatibility`** (train3-compatibility.yml). It runs on every PR
+  and merge group with no path filter, and a release depends on the app/data split it checks.
+  `release/v4.1` has no such workflow, so the release ruleset must leave it out, the way it
+  leaves out `Lint workflows`.
+- **Require after adding a result job:** train4-platform.yml, train4-talos.yml,
+  train4-objectstore.yml and app-data-conversion.yml. The platform release deploys through the
+  Talos cluster and Flux, keeps its backups in the object store, and runs the app/data
+  conversion, so each guards something a release depends on. Each needs a job that always
+  runs and fails when the path-selected job failed, as in Release E2E.
+- **Decide with its owner:** train4-npm-compat.yml. Its paths include the frontend Dockerfile
+  and ci/docker, so it may guard what goes into a release image; if it does, give it a result
+  job and require it.
+- **Keep advisory:** train5.yml (Train 5 is unscheduled, and its paths are one feature area),
+  visual-layout.yml (layout checks for review; a release does not depend on them), and the
+  scheduled, manual and legacy workflows. release.yml is not a PR check: it runs on tags and dispatch, and its failures
+  show in the existing CI alerts.
 
 ## Operational notes
 
