@@ -16,6 +16,12 @@ NAMESPACE = uuid.UUID('1f871bd6-25e5-5022-b7ba-790efbc3bd30')
 CODES = {'FRED', 'BLS', 'BEA', 'CENSUS', 'WORLD_BANK', 'IMF', 'ECB', 'OECD',
          'BOE', 'BOJ', 'BOC', 'RBA', 'SNB', 'UN_STATS', 'ILO', 'WTO', 'FHFA', 'SEC'}
 
+# The table inventory follows this checkout's data migrations, which create and drop tables, so
+# a source that has not run all of them (e.g. restored from an older backup) does not match it.
+UNMIGRATED = ('. If the source has not run every data migration of this checkout (for example, '
+              'it was restored from an older backup), deploy this release to it first, or run '
+              '`crawler migrate` against it, and try again.')
+
 
 def inventory(plane):
     """Read the table/type inventories every checked-in migration of the plane creates (the
@@ -311,11 +317,11 @@ def convert(args):
         require(target_tables == set(app_tables) | metadata, 'Target table inventory is not exactly the app schema')
         source_app = source_tables & set(app_tables)
         require(source_app in (set(), set(app_tables)), 'Source has a partial app schema; operator investigation required')
-        require(source_tables == set(data_tables) | source_app | metadata, 'Source has unknown or missing tables')
+        require(source_tables == set(data_tables) | source_app | metadata, 'Source has unknown or missing tables' + UNMIGRATED)
         source.execute(sql.SQL('LOCK TABLE {} IN SHARE MODE').format(identifiers(sorted(source_tables))))
         target.execute(sql.SQL('LOCK TABLE {} IN ACCESS EXCLUSIVE MODE').format(identifiers(sorted(target_tables))))
         require(app_versions == versions(target), 'Target app migrations are not current; initialize/migrate it first')
-        require(data_versions <= versions(source), 'Source data migration history is incomplete')
+        require(data_versions <= versions(source), 'Source data migration history is incomplete' + UNMIGRATED)
         require(versions(source) <= app_versions | data_versions, 'Source has migration versions unknown to this checkout')
         require(tables(source) == source_tables and tables(target) == target_tables, 'Table inventory changed during locking')
         if source_app:
@@ -485,7 +491,7 @@ def restore_source_app(args):
     with psycopg.connect(service=args.source_service) as source:
         require(list(query(source, identity)[0]) == evidence.get('source_identity'),
                 'The source is not the database this backup was taken from')
-        require(tables(source) - set(app_tables) == set(data_tables) | metadata, 'Source has unknown or missing tables')
+        require(tables(source) - set(app_tables) == set(data_tables) | metadata, 'Source has unknown or missing tables' + UNMIGRATED)
         present, enums = inspect(source)
     restored = False
     if not present and not enums:
