@@ -9,32 +9,36 @@ evaluation_interval: 1m
 
 tests:
   # A fresh pod whose first Massive request is rejected: the counter appears at 1, which
-  # `increase` alone would miss. It fires at once and clears 15 minutes later. The same
-  # series in a branch namespace fires nothing.
-  - interval: 1m
+  # `increase` alone would miss. It fires at once and, with no further rejection, keeps firing
+  # for 24 hours (the source pauses after auth errors and refreshes once a trading day). The
+  # same series in a branch namespace fires nothing.
+  - interval: 5m
     input_series:
       - series: 'crawler_source_auth_rejections_total{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
-        values: '_x10 1x30'
+        values: '_x2 1x340'
       - series: 'crawler_source_auth_rejections_total{namespace="econ-graph-br-test", source="MASSIVE", pod="crawler-worker-1"}'
-        values: '_x10 1+1x30'
+        values: '_x2 1+1x340'
     alert_rule_test:
       - eval_time: 9m
         alertname: MassiveApiKeyRejected
         exp_alerts: []
       - eval_time: 12m
         alertname: MassiveApiKeyRejected
-        exp_alerts:
+        exp_alerts: &massive_key_rejected
           - exp_labels:
               severity: warning
               source: MASSIVE
             exp_annotations:
               summary: Massive rejected the API key
-              description: Massive answered HTTP 401, or 403 not entitled, in the last 15 minutes, so no daily bars are being fetched. The key was revoked or rotated, or the subscription lapsed or was downgraded (a 403 for a date outside the plan window is not counted here). Check the subscription on the Massive dashboard, then install the current key as massive-api-key in Secret crawler-api-keys and restart crawler-worker (Massive runbook, docs/monitoring/massive-runbook.md).
-      - eval_time: 27m
+              description: Massive answered HTTP 401, or 403 not entitled, so no daily bars are being fetched. The key was revoked or rotated, or the subscription lapsed or was downgraded (a 403 for a date outside the plan window is not counted here). The alert keeps firing for 24 hours after the last rejection, since the source pauses after repeated auth errors and refreshes once a trading day; resolving does not mean the key works, only that no rejection was seen for 24 hours. Check the subscription on the Massive dashboard, then install the current key as massive-api-key in Secret crawler-api-keys and restart crawler-worker (Massive runbook, docs/monitoring/massive-runbook.md).
+      - eval_time: 23h
+        alertname: MassiveApiKeyRejected
+        exp_alerts: *massive_key_rejected
+      - eval_time: 25h
         alertname: MassiveApiKeyRejected
         exp_alerts: []
 
-  # A long-running pod: rejections from 10m on fire; a counter that stays at 0 does not.
+  # A long-running pod: a counter that stays at 0 fires nothing; rejections from 20m on fire.
   - interval: 1m
     input_series:
       - series: 'crawler_source_auth_rejections_total{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
@@ -50,13 +54,30 @@ tests:
     alert_rule_test:
       - eval_time: 25m
         alertname: MassiveApiKeyRejected
-        exp_alerts:
-          - exp_labels:
-              severity: warning
-              source: MASSIVE
-            exp_annotations:
-              summary: Massive rejected the API key
-              description: Massive answered HTTP 401, or 403 not entitled, in the last 15 minutes, so no daily bars are being fetched. The key was revoked or rotated, or the subscription lapsed or was downgraded (a 403 for a date outside the plan window is not counted here). Check the subscription on the Massive dashboard, then install the current key as massive-api-key in Secret crawler-api-keys and restart crawler-worker (Massive runbook, docs/monitoring/massive-runbook.md).
+        exp_alerts: *massive_key_rejected
+
+  # An old counter (its rejections, at the start of the series, stopped firing after 24h15m)
+  # does not look new after a failed scrape (a stale marker at 25h) or after a 6-minute scrape
+  # gap (a Prometheus restart at 25h).
+  - interval: 1m
+    input_series:
+      - series: 'crawler_source_auth_rejections_total{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '1x1499 stale 1x60'
+    alert_rule_test:
+      - eval_time: 24h50m
+        alertname: MassiveApiKeyRejected
+        exp_alerts: []
+      - eval_time: 25h20m
+        alertname: MassiveApiKeyRejected
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'crawler_source_auth_rejections_total{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '3x1500 _x6 3x40'
+    alert_rule_test:
+      - eval_time: 25h20m
+        alertname: MassiveApiKeyRejected
+        exp_alerts: []
 
   # A normal weekend, Friday close to Monday close, sampled every 5 minutes: no trading day passes
   # its slot without being stored, so the lag stays 0 and nothing fires.
@@ -188,7 +209,7 @@ tests:
   # the next day, then clears.
   - interval: 1h
     input_series:
-      - series: 'crawler_backfill_runs_total{namespace="econ-graph", source="MASSIVE", outcome="failure", pod="crawler-worker-1"}'
+      - series: 'crawler_backfill_runs_total{namespace="econ-graph", source="MASSIVE", outcome="failure", pod="massive-backfill-a-1"}'
         values: '0x4 1x40'
     alert_rule_test:
       - eval_time: 6h
@@ -204,37 +225,60 @@ tests:
         alertname: MassiveBackfillFailed
         exp_alerts: []
 
-  # A massive-backfill Job that failed without reporting (crashed or evicted) fires through
-  # kube-state-metrics for a day after it was created. A failed Job created more than a day
-  # ago, and a failed Job in a branch namespace, fire nothing.
+  # A massive-backfill Job that failed without reporting (crashed or evicted) at 30m fires
+  # through kube-state-metrics for a day after it became failed, while the Job object still
+  # exists. A failed Job in a branch namespace fires nothing.
   - interval: 5m
     input_series:
-      - series: 'kube_job_status_failed{namespace="econ-graph", job_name="massive-backfill-20261109"}'
+      - series: 'kube_job_status_failed{namespace="econ-graph", job_name="massive-backfill-202611090000"}'
         values: '0x6 1x400'
-      - series: 'kube_job_created{namespace="econ-graph", job_name="massive-backfill-20261109"}'
-        values: '600x406'
-      - series: 'kube_job_status_failed{namespace="econ-graph", job_name="massive-backfill-20261101"}'
-        values: '1x406'
-      - series: 'kube_job_created{namespace="econ-graph", job_name="massive-backfill-20261101"}'
-        values: '-172800x406'
-      - series: 'kube_job_status_failed{namespace="econ-graph-br-test", job_name="massive-backfill-20261109"}'
-        values: '1x406'
-      - series: 'kube_job_created{namespace="econ-graph-br-test", job_name="massive-backfill-20261109"}'
-        values: '0x406'
+      - series: 'kube_job_status_failed{namespace="econ-graph-br-test", job_name="massive-backfill-202611090000"}'
+        values: '0x6 1x400'
     alert_rule_test:
       - eval_time: 20m
         alertname: MassiveBackfillFailed
         exp_alerts: []
       - eval_time: 1h
         alertname: MassiveBackfillFailed
-        exp_alerts:
+        exp_alerts: &massive_backfill_failed
           - exp_labels:
               severity: warning
               source: MASSIVE
             exp_annotations:
               summary: A Massive backfill run failed
               description: A Massive historical backfill run ended with outcome failure, or a massive-backfill Job failed, in the last day; crawler_backfill_days_remaining{source="MASSIVE"} shows how much history is still to load. Find the error in the Job pod log (`kubectl -n econ-graph logs job/<name>`; key, rate limit, or object store disk space), fix it and create a new Job from CronJob massive-backfill (Massive runbook, docs/monitoring/massive-runbook.md).
+      - eval_time: 24h
+        alertname: MassiveBackfillFailed
+        exp_alerts: *massive_backfill_failed
       - eval_time: 25h
+        alertname: MassiveBackfillFailed
+        exp_alerts: []
+
+  # Jobs that fail 24 hours after creation, when activeDeadlineSeconds (86400) passes: one
+  # whose run was still going (DeadlineExceeded), and one whose pod never started
+  # (CreateContainerConfigError, so it reports nothing) until the deadline. Both fire for a
+  # day from the failure, not from creation.
+  - interval: 5m
+    input_series:
+      - series: 'kube_job_status_failed{namespace="econ-graph", job_name="massive-backfill-202611090000"}'
+        values: '0x288 1x300'
+      - series: 'kube_job_status_active{namespace="econ-graph", job_name="massive-backfill-202611090000"}'
+        values: '1x288 0x300'
+      - series: 'kube_job_status_failed{namespace="econ-graph", job_name="massive-backfill-202611090100"}'
+        values: '_x12 0x288 1x288'
+      - series: 'kube_job_status_active{namespace="econ-graph", job_name="massive-backfill-202611090100"}'
+        values: '_x12 1x288 0x288'
+    alert_rule_test:
+      - eval_time: 23h
+        alertname: MassiveBackfillFailed
+        exp_alerts: []
+      - eval_time: 24h10m
+        alertname: MassiveBackfillFailed
+        exp_alerts: *massive_backfill_failed
+      - eval_time: 48h
+        alertname: MassiveBackfillFailed
+        exp_alerts: *massive_backfill_failed
+      - eval_time: 49h30m
         alertname: MassiveBackfillFailed
         exp_alerts: []
 
@@ -325,4 +369,4 @@ tests:
               crawler_type: massive
             exp_annotations:
               summary: Frequent 429 rate limit hits for massive
-              description: Rate limit hits are frequent for source massive; its SourcePolicy rate may be too high (or more than one worker replica is running). On a paid plan with no request quota (massive), a 429 is a vendor fault, so check the vendor's status page before lowering the rate.
+              description: Rate limit hits are frequent for source massive; its SourcePolicy rate may be too high (or more than one worker replica is running). Massive's paid plan has only a soft limit of about 100 requests/s, so a 429 is likely a vendor fault; check Massive's status page, and whether a massive-backfill Job is running as a second caller, before lowering the rate.

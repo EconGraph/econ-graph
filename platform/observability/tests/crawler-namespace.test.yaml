@@ -158,8 +158,7 @@ tests:
       exp_annotations:
         summary: Frequent 429 rate limit hits for fred
         description: Rate limit hits are frequent for source fred; its SourcePolicy rate may be too high (or more
-          than one worker replica is running). On a paid plan with no request quota (massive), a 429 is
-          a vendor fault, so check the vendor's status page before lowering the rate.
+          than one worker replica is running).
   - eval_time: 30m
     alertname: CrawlerHighTimeouts
     exp_alerts:

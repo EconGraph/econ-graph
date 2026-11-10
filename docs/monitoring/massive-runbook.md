@@ -15,8 +15,14 @@ committed in plain text.
 Without the key the worker skips the source entirely: no Massive discovery, refreshes,
 backfill or coverage gauges, and none of the Massive alerts below can fire. At startup it logs
 one warning, "source skipped: its API key is not set ...", with fields `source=MASSIVE` and
-`env=MASSIVE_API_KEY`. With the key, the worker registers the source on its next start, and the
-scheduler enqueues the daily refreshes.
+`env=MASSIVE_API_KEY`.
+
+The source also needs the `crawl_massive` build flag (config/flags/flags.flagd.json, off in
+every profile until the licence question in
+[ECO-206](https://linear.app/econgraph/issue/ECO-206) is settled). With both the flag and the
+key, the worker registers the source on its next start, and the scheduler enqueues the daily
+refreshes. With the key but not the flag, `crawler sources` lists MASSIVE as
+`disabled: licence (ECO-206)` and nothing is crawled; as with no key, no Massive alert can fire.
 
 ### Adding or rotating the key
 
@@ -36,9 +42,10 @@ On the Talos platform (Flux, `platform/`), `crawler-api-keys` is a SOPS-encrypte
 On the kind cluster, run `scripts/deploy/set-crawler-keys.sh` in your own terminal. It prompts
 for `MASSIVE_API_KEY` with hidden input, writes `massive-api-key`, and restarts the worker.
 
-Afterwards, check that the worker log has no "source skipped" warning for MASSIVE, and that
-`crawler_coverage_series_discovered{source="MASSIVE"}` appears in Prometheus. Removing the key
-and restarting the worker turns the source off again. Stored data is kept.
+With the `crawl_massive` flag also on, check afterwards that the worker log has no "source
+skipped" warning for MASSIVE, and that `crawler_coverage_series_discovered{source="MASSIVE"}`
+appears in Prometheus. Removing the key or turning the flag off, then restarting the worker,
+turns the source off again. Stored data is kept.
 
 ## Alerts
 
@@ -52,7 +59,7 @@ per-source crawler alerts (`CrawlerSourceFailing`, `CrawlerCrawlFailed`, `Crawle
 
 | Alert | Fires when |
 |---|---|
-| `MassiveApiKeyRejected` | Massive answered 401, or a "not entitled" 403, in the last 15 minutes |
+| `MassiveApiKeyRejected` | Massive answered 401, or a "not entitled" 403; keeps firing for 24 hours after the last one |
 | `MassiveDataStale` | `crawler_source_observation_lag_trading_days{source="MASSIVE"}` has been 1 or more for 6 hours, or the source runs but exports no lag gauge |
 | `MassiveBackfillFailed` | A backfill run ended with outcome `failure`, or a `massive-backfill-*` Job failed, in the last day |
 
@@ -63,6 +70,12 @@ outside the plan's history window is not counted. Check the subscription on the 
 dashboard. If the key changed, install the new one as above. A lapsed subscription needs
 renewing. Until then, every Massive job fails and `MassiveDataStale` follows.
 
+The worker pauses the source after 5 auth errors (`CRAWLER_PAUSE_AFTER`), and the source
+refreshes once a trading day, so rejections stop for long stretches while the key is still
+bad. The alert therefore keeps firing for 24 hours after the last rejection. When it resolves,
+that only means no rejection was seen for 24 hours, not that the key works: check that the
+next refresh stored data.
+
 ### MassiveDataStale
 
 The lag gauge counts the trading days after the newest stored day whose refresh slot (11:30
@@ -70,8 +83,10 @@ America/New_York on the next calendar day) has passed, on the NYSE calendar. Wee
 holidays and unscheduled closures have no slot, so they don't raise it, and the rule needs no
 headroom for them. The worker recomputes the gauge from storage at startup and on its coverage
 interval. Until data is stored (none in the last 45 days, or no table yet) the lag is 260, its
-cap, so the alert fires 6 hours after the key is first installed unless the backfill has
-stored recent bars by then. It clears once the backfill and the daily refresh have caught up.
+cap. So the alert fires about 6 hours after the source is enabled (the flag and the key), and
+keeps firing until the backfill and the daily refresh have stored recent bars. Either enable the
+source only when the backfill is approved and about to start, or add an Alertmanager silence for
+`alertname="MassiveDataStale"` that covers the backfill.
 
 Check `MassiveApiKeyRejected` and the per-source alerts for MASSIVE first. Then look for
 failed jobs with `SELECT series_id, kind, error_message FROM crawl_queue WHERE source =
@@ -95,8 +110,13 @@ Find the error with `kubectl -n econ-graph logs job/<name>`. Common causes are t
 above), the vendor's rate limits, and disk space on the host object store (the disk alerts
 from ECO-867). Fix the cause and create a new Job as above.
 
-A 429 from Massive on a paid plan is a vendor fault, not a sign that the crawler is too fast.
-Check Massive's status page before lowering the source's rate.
+A backfill Job started while `MASSIVE_API_KEY` is unset gets stuck before it starts, rather
+than failing (#834 fixes this). Install the key first.
+
+Massive's paid plans have only a soft limit of about 100 requests a second, so a 429 from
+Massive is likely a vendor fault rather than the crawler being too fast. Check Massive's status
+page, and whether a backfill Job is running as a second caller next to the worker, before
+lowering the source's rate.
 
 ## Forcing the alerts (QA)
 
@@ -104,7 +124,12 @@ Use a branch environment with its own Massive key, and its own Prometheus or rul
 namespace matcher names the branch namespace. The production rules ignore branch namespaces.
 
 - `MassiveApiKeyRejected`: set `massive-api-key` to a wrong value and restart the worker. The
-  next Massive request is rejected, and the alert fires within a minute. Restore the key.
+  alert fires on the worker's next Massive request, which may be the next day's refresh. To
+  make one now, enqueue a fetch for the worker:
+  `kubectl -n <namespace> exec deploy/crawler-worker -- /app/crawler enqueue --source MASSIVE --series 0000320193:close`.
+  `crawler fetch --source MASSIVE --series 0000320193:close` shows the rejection at once, but
+  it runs in its own process, which Prometheus doesn't scrape, so it doesn't fire the alert.
+  Restore the key afterwards. The alert keeps firing for 24 hours.
 - `MassiveDataStale`: with the source running, scale the worker to 0 replicas past a trading
   day's slot, then back to 1 with the scheduler disabled (`CRAWLER_SCHEDULER=false`). The lag
   gauge reports 1, and the alert fires 6 hours later. Re-enable the scheduler to clear it.

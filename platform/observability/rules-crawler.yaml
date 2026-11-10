@@ -125,7 +125,7 @@ spec:
         severity: warning
       annotations:
         summary: Frequent 429 rate limit hits for {{ $labels.crawler_type }}
-        description: Rate limit hits are frequent for source {{ $labels.crawler_type }}; its SourcePolicy rate may be too high (or more than one worker replica is running). On a paid plan with no request quota (massive), a 429 is a vendor fault, so check the vendor's status page before lowering the rate.
+        description: Rate limit hits are frequent for source {{ $labels.crawler_type }}; its SourcePolicy rate may be too high (or more than one worker replica is running).{{ if eq $labels.crawler_type "massive" }} Massive's paid plan has only a soft limit of about 100 requests/s, so a 429 is likely a vendor fault; check Massive's status page, and whether a massive-backfill Job is running as a second caller, before lowering the rate.{{ end }}
 
     - alert: CrawlerHighTimeouts
       expr: sum(rate(econgraph_crawler_timeouts_total{namespace="econ-graph"}[10m])) > 0.2
@@ -429,27 +429,33 @@ spec:
   # Massive, a market data vendor: daily stock bars (ECO-871, docs/monitoring/massive-runbook.md).
   # The per-source crawler alerts above already cover it as source="MASSIVE" (crawler_type
   # "massive"); these add what is specific to a paid key and a trading calendar. While
-  # MASSIVE_API_KEY is unset the worker skips the source and exports none of these series.
+  # MASSIVE_API_KEY is unset or the crawl_massive build flag is off, the worker skips the
+  # source and exports none of these series.
   #
   # The counters are process-local, and a series can appear already at 1 (a fresh pod whose
   # first request was rejected, or a backfill run in a new process). `increase` needs two
-  # samples and misses that, so the `unless ... offset` branch also counts a series that did
-  # not exist at the start of the window.
+  # samples and misses that, so the `unless max_over_time(... offset)` branch also counts a
+  # series with no sample in the 6 hours before the window. A range, not an instant: a failed
+  # scrape leaves a stale marker and a scrape gap (a Prometheus restart) leaves no sample, and
+  # an instant lookup there would make an old counter look new.
   - name: crawler.massive
     rules:
+    # The worker pauses a source after repeated auth errors, so rejections can stop while the
+    # key is still bad; keep_firing_for holds the alert through those pauses.
     - alert: MassiveApiKeyRejected
       expr: |
         (sum by (source) (increase(crawler_source_auth_rejections_total{namespace="econ-graph", source="MASSIVE"}[15m])) > 0)
         or
         (sum by (source) (
           crawler_source_auth_rejections_total{namespace="econ-graph", source="MASSIVE"}
-          unless crawler_source_auth_rejections_total{namespace="econ-graph", source="MASSIVE"} offset 15m
+          unless max_over_time(crawler_source_auth_rejections_total{namespace="econ-graph", source="MASSIVE"}[6h] offset 15m)
         ) > 0)
+      keep_firing_for: 24h
       labels:
         severity: warning
       annotations:
         summary: Massive rejected the API key
-        description: Massive answered HTTP 401, or 403 not entitled, in the last 15 minutes, so no daily bars are being fetched. The key was revoked or rotated, or the subscription lapsed or was downgraded (a 403 for a date outside the plan window is not counted here). Check the subscription on the Massive dashboard, then install the current key as massive-api-key in Secret crawler-api-keys and restart crawler-worker (Massive runbook, docs/monitoring/massive-runbook.md).
+        description: Massive answered HTTP 401, or 403 not entitled, so no daily bars are being fetched. The key was revoked or rotated, or the subscription lapsed or was downgraded (a 403 for a date outside the plan window is not counted here). The alert keeps firing for 24 hours after the last rejection, since the source pauses after repeated auth errors and refreshes once a trading day; resolving does not mean the key works, only that no rejection was seen for 24 hours. Check the subscription on the Massive dashboard, then install the current key as massive-api-key in Secret crawler-api-keys and restart crawler-worker (Massive runbook, docs/monitoring/massive-runbook.md).
 
     # The lag gauge counts the trading days after the newest stored day whose refresh slot has
     # passed (11:30 America/New_York on the calendar day after the trading day), on the NYSE
@@ -479,8 +485,10 @@ spec:
     # scraped by PodMonitor econgraph-massive-backfill while it runs and for 120s after. The
     # pod's series ends with the pod, so the alert looks back a day over the samples:
     # `increase` for a counter that went from 0 to 1, `max_over_time` for one first scraped
-    # at 1. A Job that failed without reporting (crash, OOM, eviction) fires through
-    # kube-state-metrics for a day after the Job was created, while the Job object exists.
+    # at 1. A Job that failed without reporting (crash, OOM, eviction, its deadline passing
+    # while a pod could not start) fires through kube-state-metrics for a day after the Job
+    # became failed, not after it was created: with a 24h activeDeadlineSeconds a Job can
+    # fail a day after creation. It needs the Job object to still exist.
     - alert: MassiveBackfillFailed
       expr: |
         (
@@ -489,7 +497,7 @@ spec:
             or
             (
               max_over_time(crawler_backfill_runs_total{namespace="econ-graph", source="MASSIVE", outcome="failure"}[1d])
-              unless crawler_backfill_runs_total{namespace="econ-graph", source="MASSIVE", outcome="failure"} offset 1d
+              unless max_over_time(crawler_backfill_runs_total{namespace="econ-graph", source="MASSIVE", outcome="failure"}[6h] offset 1d)
             )
           ) > 0
         )
@@ -497,8 +505,8 @@ spec:
         label_replace(
           max(
             (kube_job_status_failed{namespace="econ-graph", job_name=~"massive-backfill-.*"} > 0)
-            and on(namespace, job_name)
-            (kube_job_created{namespace="econ-graph", job_name=~"massive-backfill-.*"} > time() - 86400)
+            unless on(namespace, job_name)
+            (max_over_time(kube_job_status_failed{namespace="econ-graph", job_name=~"massive-backfill-.*"}[6h] offset 1d) > 0)
           ),
           "source", "MASSIVE", "", ""
         )
