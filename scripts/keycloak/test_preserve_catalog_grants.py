@@ -734,6 +734,17 @@ class CatalogPolicyTests(unittest.TestCase):
         self.state[self.prefix] = None
         self.merge()
 
+    def test_a_malformed_never_granted_marker_fails_the_deploy(self):
+        # A hand edit must not silently unprotect the role: anything but ["true"] fails closed.
+        massive = next(role for role in self.realm["roles"]["client"]["econ-graph-api"]
+                       if role["name"] == self.MASSIVE)
+        for value in (["True"], "true", ["yes"], []):
+            massive["attributes"][preserve.NEVER_GRANTED] = value
+            with self.assertRaises(RuntimeError) as raised:
+                self.merge()
+            self.assertIn(self.MASSIVE + " the attribute econgraph.never-granted with a value other "
+                          'than ["true"]', str(raised.exception))
+
     def test_a_realm_file_granting_a_never_granted_role_to_admin_fails_the_deploy(self):
         self.role(self.realm, "admin")["composites"]["client"]["econ-graph-api"].append(self.MASSIVE)
         for observed in ({"attributes": {preserve.INITIALIZED: "true"}}, None):

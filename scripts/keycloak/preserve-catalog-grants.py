@@ -129,9 +129,20 @@ NEVER_GRANTED = "econgraph.never-granted"
 
 
 def never_granted_roles(realm):
-    """The econ-graph-api roles the realm file marks never granted."""
-    return {role["name"] for role in (realm.get("roles") or {}).get("client", {}).get(API_CLIENT, [])
-            if (role.get("attributes") or {}).get(NEVER_GRANTED) == ["true"]}
+    """The econ-graph-api roles the realm file marks never granted. Fails closed: the attribute
+    with any value but ["true"] (a hand edit such as "true" or ["True"]) refuses the deploy
+    rather than leaving the role unprotected."""
+    marked = set()
+    for role in (realm.get("roles") or {}).get("client", {}).get(API_CLIENT, []):
+        attributes = role.get("attributes") or {}
+        if NEVER_GRANTED in attributes:
+            if attributes[NEVER_GRANTED] != ["true"]:
+                raise RuntimeError('The realm file gives %s the attribute %s with a value other than '
+                                   '["true"]; set it to ["true"], or remove it to grant the role on '
+                                   'purpose (config/keycloak/README.md, Never-granted catalogs)'
+                                   % (role["name"], NEVER_GRANTED))
+            marked.add(role["name"])
+    return marked
 
 
 def declared_never_granted(realm, marked):

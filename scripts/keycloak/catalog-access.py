@@ -98,7 +98,8 @@ def check_role(kc, role_name, mode="withdraw"):
     role = kc.call("GET", "/clients/%s/roles/%s" % (api_id, q(role_name)), missing_ok=True)
     if role is None:
         raise Refused("%s has no role %s" % (API_CLIENT, role_name))
-    if mode != "withdraw" and (role.get("attributes") or {}).get(NEVER_GRANTED) == ["true"]:
+    # Any value counts, failing closed; the deploy refuses a value other than ["true"].
+    if mode != "withdraw" and NEVER_GRANTED in (role.get("attributes") or {}):
         raise Refused("%s is never granted (realm file attribute %s), not to admins and not to the "
                       "public; granting it is a code change first, see config/keycloak/README.md, "
                       "Never-granted catalogs" % (role_name, NEVER_GRANTED))

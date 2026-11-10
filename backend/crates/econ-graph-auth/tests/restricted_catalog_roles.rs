@@ -138,22 +138,54 @@ fn restricting_a_catalog_leaves_the_public_defaults_alone() {
 /// catalog-access.py and the dev-readonly overlay read the same attribute.
 const NEVER_GRANTED: &str = "econgraph.never-granted";
 
-/// The `econ-graph-api` roles the realm file marks never granted.
-fn marked_never_granted(realm: &Value) -> BTreeSet<String> {
-    realm["roles"]["client"][API_CLIENT]
+/// The `econ-graph-api` roles the realm file marks never granted. Fails closed, as the deploy
+/// check does: the attribute with any value but `["true"]` is an error, not an unmarked role.
+fn marked_never_granted(realm: &Value) -> Result<BTreeSet<String>, String> {
+    let mut marked = BTreeSet::new();
+    for role in realm["roles"]["client"][API_CLIENT]
         .as_array()
         .expect("econ-graph-api client roles")
-        .iter()
-        .filter(|r| r["attributes"][NEVER_GRANTED] == serde_json::json!(["true"]))
-        .map(|r| r["name"].as_str().expect("a role name").to_string())
-        .collect()
+    {
+        let name = role["name"].as_str().expect("a role name");
+        match role["attributes"].get(NEVER_GRANTED) {
+            None => {}
+            Some(value) if *value == serde_json::json!(["true"]) => {
+                marked.insert(name.to_string());
+            }
+            Some(value) => {
+                return Err(format!(
+                    "{name} has {NEVER_GRANTED} = {value}; it must be [\"true\"], or be removed"
+                ))
+            }
+        }
+    }
+    Ok(marked)
+}
+
+fn marked_roles(realm: &Value) -> BTreeSet<String> {
+    marked_never_granted(realm).unwrap_or_else(|problem| panic!("{problem}"))
+}
+
+/// A hand edit of the marker to anything but `["true"]` fails rather than unprotecting the role.
+#[test]
+fn a_malformed_never_granted_marker_fails() {
+    let mut realm = realm();
+    let massive = Role::CatalogMassiveMarketDataRead.as_str();
+    realm["roles"]["client"][API_CLIENT]
+        .as_array_mut()
+        .expect("econ-graph-api client roles")
+        .iter_mut()
+        .find(|r| r["name"] == massive)
+        .expect("the Massive role")["attributes"][NEVER_GRANTED] = serde_json::json!(["True"]);
+    let problem = marked_never_granted(&realm).expect_err("a malformed marker is refused");
+    assert!(problem.contains(massive), "{problem}");
 }
 
 /// The realm file's marker and `Role::is_never_granted` agree, so neither can be dropped
 /// unnoticed, and Massive's market data is on both.
 #[test]
 fn never_granted_roles_match_the_realm_file() {
-    let marked = marked_never_granted(&realm());
+    let marked = marked_roles(&realm());
     let listed: BTreeSet<String> = Role::ALL
         .iter()
         .filter(|role| role.is_never_granted())
@@ -229,7 +261,7 @@ fn grants_of(realm: &Value, marked: &BTreeSet<String>) -> Vec<String> {
 #[test]
 fn nothing_in_the_realm_file_grants_a_never_granted_role() {
     let realm = realm();
-    let marked = marked_never_granted(&realm);
+    let marked = marked_roles(&realm);
     assert!(marked.contains(Role::CatalogMassiveMarketDataRead.as_str()));
     assert!(marked.is_subset(&defined(&realm)));
     assert_eq!(grants_of(&realm, &marked), Vec::<String>::new());
@@ -239,7 +271,7 @@ fn nothing_in_the_realm_file_grants_a_never_granted_role() {
 #[test]
 fn a_never_granted_role_on_admin_is_caught() {
     let mut realm = realm();
-    let marked = marked_never_granted(&realm);
+    let marked = marked_roles(&realm);
     let massive = Role::CatalogMassiveMarketDataRead.as_str();
     realm["roles"]["realm"]
         .as_array_mut()
