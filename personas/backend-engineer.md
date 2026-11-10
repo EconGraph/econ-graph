@@ -183,7 +183,7 @@ The command prompts live in [`.cursor/commands`](../.cursor/commands). Use their
 - `/pr` and `/pr-ready` create or update a reviewable PR and its description.
 - `/pr-checks` watches checks; `/ci-latest` inspects recent runs.
 - `/e2e` runs local end-to-end validation; arrange its prerequisites before execution.
-- `/db-migrate` assists with Diesel migrations against configured `DATABASE_URL`. Select the owning plane and directory using the [migration guide](../docs/development/MIGRATIONS.md); the shorthand does not choose the data plane for you.
+- `/db-migrate` assists with Diesel migrations against configured `DATABASE_URL`. Select the owning plane and directory using the [migration guide](../docs/development/MIGRATIONS.md); the shorthand does not choose the data plane for you. Before migrating a live database, ask Joe first (see [AGENTS.md](../AGENTS.md)).
 - `/debug-backend` supports a single-issue debugging loop: form a hypothesis, make one targeted change, then check the result.
 
 Run targeted tests before committing, validate affected multi-crate builds before the PR, and complete required unit, integration, end-to-end, and security checks for the change. Prefer rebase when maintaining clean feature history. Keep PR descriptions focused on behavior and rationale, and follow checks and automated review through completion.

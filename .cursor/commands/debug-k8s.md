@@ -26,10 +26,11 @@ Agent loop:
 - Bisect the path to isolate the failing layer before forming a hypothesis:
   - Client → Envoy proxy (Gateway listener and HTTPRoute match) → Service → ready EndpointSlices/Pods → Application → external dependencies (DB, APIs)
   - Verify the request's host and path match the intended HTTPRoute and listener; check route namespace admission and backend references
+  - On a live cluster, port-forward and `kubectl exec` are operator steps: the agent's read-only identity can't do them. A live cluster is any cluster you did not create yourself for this task; `kind-econ-graph` is production.
   - Port-forward to probe health/ready endpoints directly; `kubectl exec` to run curl/env checks in-pod
   - Confirm Service selectors match pod labels; confirm EndpointSlices contain ready endpoints
 - Only after isolating the failing component, form ONE clear hypothesis
-- Make ONE targeted change (small manifest tweak, config fix, rollout restart), apply, and watch rollout to completion. On a live cluster, propose the change and ask Joe before you apply it; see [AGENTS.md](../../AGENTS.md). Agent sessions are read-only there, so port-forward and `kubectl exec` are operator steps.
+- Make ONE targeted change (small manifest tweak, config fix, rollout restart), apply, and watch rollout to completion. On a live cluster, propose the change and ask Joe before you apply it; see [AGENTS.md](../../AGENTS.md).
 - Collect before/after evidence; if unresolved, revert or iterate with a new focused hypothesis; document findings
 
 Example Cursor invocation (namespace, deployment, symptom):

@@ -31,10 +31,10 @@ DevOps engineers follow these standards for infrastructure automation, reliabili
 ## DevOps-Specific Responsibilities
 
 ### Cursor-native commands
-* Use `/k8s-context`, `/k8s-deploy`, `/k8s-restart`, `/k8s-logs` to manage and inspect Kubernetes rollouts and logs
+* Use `/k8s-context`, `/k8s-deploy`, `/k8s-restart`, `/k8s-logs` to manage and inspect Kubernetes rollouts and logs; for `/k8s-deploy` and `/k8s-restart`, ask Joe first on a live cluster (see [AGENTS.md](../AGENTS.md))
 * Use `/workflow-audit` to check GitHub Actions workflow triggers, steps, and names, and identify missing permissions, timeouts, or concurrency settings
-* Use `/deploy` to run the standard deployment script when available; use `/docker-logs` for local container debugging
-* Use `/debug-k8s` to drive a disciplined k8s debugging loop (survey components → bisect → one targeted change)
+* Use `/deploy` to run the standard deployment script when available, but ask Joe first (see [AGENTS.md](../AGENTS.md)); use `/docker-logs` for local container debugging
+* Use `/debug-k8s` to drive a disciplined k8s debugging loop (survey components → bisect → one targeted change); before applying a change, ask Joe first on a live cluster (see [AGENTS.md](../AGENTS.md))
 
 ### Infrastructure as Code (IaC)
 * **Terraform best practices**:

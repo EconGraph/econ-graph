@@ -35,20 +35,20 @@ Include design choices, compatibility concerns, security effects, migrations, ro
 
 ## Link the Linear issue
 
-Each PR has exactly one PR-level Linear issue. Use the existing issue, or create it before the PR if none exists, following [How agents keep Linear up to date](https://linear.app/econgraph/document/how-agents-keep-linear-up-to-date-7d547a9af496). Include `Fixes ECO-NNN` for that issue in the description. If it has a parent, use `Part of ECO-MMM` to link the parent without closing it; reserve closing words for the PR's own issue.
+Each PR has exactly one PR-level Linear issue. Use the existing issue, or create it before the PR if none exists, following [How agents keep Linear up to date](https://linear.app/econgraph/document/how-agents-keep-linear-up-to-date-7d547a9af496). Include `Part of ECO-NNN` for that issue in the description, not `Fixes`: `Fixes` moves the issue to Done on merge, and the issue is closed by hand after the Done check in [AGENTS.md](../../AGENTS.md). If it has a parent, use `Part of ECO-MMM` for the parent too.
 
 Once the PR exists, attach its URL through the Linear issue's `links` field and keep the issue's state current as described in that guidance. A link-only comment does not establish this relationship. Preserve useful issue references and related links when replacing a description.
 
 ## Repository conventions
 
-Follow the [developer standards](../../personas/ai-developer-standards.md) and [repository conventions](https://linear.app/econgraph/document/repository-conventions-63c5891a9777).
+Follow [AGENTS.md](../../AGENTS.md) and the [repository conventions](https://linear.app/econgraph/document/repository-conventions-63c5891a9777).
 
 - Use Conventional Commits titles: `feat`, `fix`, `docs`, `chore`, `refactor`, `perf`, `test`, `style`, `ci`, `build`, or `revert`, with an optional scope. Examples: `feat(backend): add series search by tag`, `docs(personas): clarify Cursor slash commands`.
 - Keep each PR focused on one concern; split independent fixes or features into separate PRs.
 - Validate the change with appropriate checks. Add or update unit, integration, or end-to-end tests when behavior changes; documentation changes need relevant documentation checks. Do not bypass pre-commit.
 - Update documentation and workflows when the behavior they describe changes.
 - Mark finished work ready for review; CodeRabbit skips drafts. On an update that omits `draft`, preserve its state and use an explicit readiness operation when appropriate.
-- Watch CI and address automated review comments before considering the PR complete. [Docs Checks](../../.github/workflows/docs-checks.yml) runs on every PR. [Core CI](../../.github/workflows/ci-core.yml) skips a PR only when every changed path matches its exclusions; Markdown under `.cursor/` still triggers Core CI. Get two independent reviews. Do not merge: merging needs Joe's approving review; see [AGENTS.md](../../AGENTS.md).
+- Watch CI and address automated review comments before considering the PR complete. [Docs Checks](../../.github/workflows/docs-checks.yml) runs on every PR. [Core CI](../../.github/workflows/ci-core.yml) skips a PR only when every changed path matches its exclusions; Markdown under `.cursor/` still triggers Core CI. Get two independent reviews; reviewers work from the code, not your summary. Merge only when Joe has approved the PR on GitHub and has told you to merge it in this session; see [AGENTS.md](../../AGENTS.md).
 
 ## Helper commands
 
