@@ -17,7 +17,12 @@
 //! (`crawler_discovery_run_*`, `crawler_discovery_last_complete_run_timestamp_seconds`) of the
 //! enabled sources whose adapter discovers in chunks every interval, and [`coverage_gauge_loop`] the
 //! coverage gauges from [`econ_graph_crawler::coverage::crawl_coverage`] (a heavier query, so on a
-//! longer interval).
+//! longer interval), plus the freshness gauges of the trading-day sources
+//! (`crawler_source_latest_observation_timestamp_seconds`,
+//! `crawler_source_observation_lag_trading_days`) from
+//! [`econ_graph_crawler::freshness::source_freshness`], read from Iceberg. The coverage loop's
+//! first pass runs at startup, so the freshness gauges are back right after a restart, before
+//! any fetch.
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -30,14 +35,17 @@ use econ_graph_core::error::AppResult;
 use econ_graph_core::DatabasePool;
 use econ_graph_crawler::coverage::{crawl_coverage, SourceCoverage};
 use econ_graph_crawler::discovery_run::{alerting_run_progress, DiscoveryRunProgress};
+use econ_graph_crawler::freshness::{source_freshness, SourceFreshness};
+use econ_graph_crawler::sources::massive::calendar::date_timestamp_seconds;
 use econ_graph_crawler::status::{crawler_status, CrawlerStatusSnapshot};
 use econ_graph_crawler::SourceId;
 use econ_graph_metrics::crawler::discovery_runs::{
     CrawlerDiscoveryRunMetrics, CRAWLER_DISCOVERY_RUN_METRICS,
 };
 use econ_graph_metrics::crawler::{
-    CrawlerCoverageMetrics, CrawlerQueueMetrics, CRAWLER_COVERAGE_METRICS, CRAWLER_METRICS,
-    CRAWLER_QUEUE_METRICS, CRAWLER_SCHEDULER_METRICS,
+    CrawlerCoverageMetrics, CrawlerQueueMetrics, CrawlerSourceHealthMetrics,
+    CRAWLER_COVERAGE_METRICS, CRAWLER_METRICS, CRAWLER_QUEUE_METRICS, CRAWLER_SCHEDULER_METRICS,
+    CRAWLER_SOURCE_HEALTH_METRICS,
 };
 use econ_graph_metrics::prometheus::{Encoder, TextEncoder};
 use econ_graph_metrics::DEFAULT_REGISTRY;
@@ -66,6 +74,7 @@ pub fn init_metrics() {
     let _ = &*CRAWLER_COVERAGE_METRICS;
     let _ = &*CRAWLER_SCHEDULER_METRICS;
     let _ = &*CRAWLER_DISCOVERY_RUN_METRICS;
+    let _ = &*CRAWLER_SOURCE_HEALTH_METRICS;
     econ_graph_crawler::units::init_metrics();
 }
 
@@ -264,6 +273,52 @@ pub async fn update_coverage_gauges(
     Ok(())
 }
 
+/// Sets the freshness gauges in `m` from `rows`: the latest-observation timestamp (00:00 UTC of
+/// the newest stored trading day, removed when there is none) and the lag in trading days.
+/// `known` holds the sources set by the previous call; sources no longer present have both
+/// removed.
+pub fn apply_freshness(
+    m: &CrawlerSourceHealthMetrics,
+    rows: &[SourceFreshness],
+    known: &mut HashSet<String>,
+) {
+    let current: HashSet<String> = rows.iter().map(|f| f.source.as_str().to_string()).collect();
+    for gone in known.difference(&current) {
+        let _ = m
+            .latest_observation_timestamp_seconds
+            .remove_label_values(&[gone]);
+        let _ = m.observation_lag_trading_days.remove_label_values(&[gone]);
+    }
+    for f in rows {
+        let src = f.source.as_str();
+        match f.latest {
+            Some(day) => m.set_latest_observation(src, date_timestamp_seconds(day)),
+            None => {
+                let _ = m
+                    .latest_observation_timestamp_seconds
+                    .remove_label_values(&[src]);
+            }
+        }
+        m.set_observation_lag(src, f.lag_trading_days);
+    }
+    *known = current;
+}
+
+/// Reads the freshness of `sources` at `now` from Iceberg
+/// ([`econ_graph_crawler::freshness::source_freshness`]) and updates the gauges in `m`. On error
+/// the gauges keep their previous values.
+pub async fn update_freshness_gauges(
+    pool: &DatabasePool,
+    sources: &[SourceId],
+    now: chrono::DateTime<chrono::Utc>,
+    m: &CrawlerSourceHealthMetrics,
+    known: &mut HashSet<String>,
+) -> AppResult<()> {
+    let rows = source_freshness(pool, sources, now).await?;
+    apply_freshness(m, &rows, known);
+    Ok(())
+}
+
 /// Reads `crawl_queue` and updates the gauges in `m`.
 pub async fn update_queue_gauges(
     pool: &DatabasePool,
@@ -351,6 +406,7 @@ pub async fn coverage_gauge_loop(
     mut stop: watch::Receiver<bool>,
 ) {
     let mut known = HashSet::new();
+    let mut known_fresh = HashSet::new();
     loop {
         if *stop.borrow() {
             return;
@@ -362,6 +418,17 @@ pub async fn coverage_gauge_loop(
         }
         if let Err(e) = econ_graph_crawler::lifecycle::refresh_metrics(&pool, &sources).await {
             tracing::warn!(error = %e, "updating catalog lifecycle gauges failed");
+        }
+        if let Err(e) = update_freshness_gauges(
+            &pool,
+            &sources,
+            chrono::Utc::now(),
+            &CRAWLER_SOURCE_HEALTH_METRICS,
+            &mut known_fresh,
+        )
+        .await
+        {
+            tracing::warn!(error = %e, "updating source freshness gauges failed");
         }
         tokio::select! {
             _ = tokio::time::sleep(interval) => {}
@@ -676,6 +743,64 @@ mod tests {
             .map(|l| l.value().to_string())
             .collect();
         assert_eq!(sources, HashSet::from(["FRED".to_string()]));
+    }
+
+    /// The timestamp is 00:00 UTC of the newest stored trading day, absent with nothing stored;
+    /// the lag is always set; a source that drops out loses both.
+    #[test]
+    fn freshness_gauges_set_and_removed() {
+        use econ_graph_crawler::freshness::MAX_LAG_TRADING_DAYS;
+        let registry = Registry::new();
+        let m = CrawlerSourceHealthMetrics::new(&registry).unwrap();
+        let mut known = HashSet::new();
+        let now = chrono::DateTime::parse_from_rfc3339("2026-04-06T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let thursday = chrono::NaiveDate::from_ymd_opt(2026, 4, 2).unwrap();
+        // Good Friday weekend, Thursday stored: current.
+        apply_freshness(
+            &m,
+            &[SourceFreshness::at(SourceId::Massive, Some(thursday), now)],
+            &mut known,
+        );
+        assert_eq!(
+            m.latest_observation_timestamp_seconds
+                .with_label_values(&["MASSIVE"])
+                .get(),
+            1_775_088_000.0
+        );
+        assert_eq!(
+            m.observation_lag_trading_days
+                .with_label_values(&["MASSIVE"])
+                .get(),
+            0
+        );
+
+        // Nothing stored: no timestamp, lag at its cap.
+        apply_freshness(
+            &m,
+            &[SourceFreshness::at(SourceId::Massive, None, now)],
+            &mut known,
+        );
+        let names = |registry: &Registry| -> HashSet<String> {
+            registry
+                .gather()
+                .iter()
+                .filter(|f| !f.get_metric().is_empty())
+                .map(|f| f.name().to_string())
+                .collect()
+        };
+        assert!(!names(&registry).contains("crawler_source_latest_observation_timestamp_seconds"));
+        assert_eq!(
+            m.observation_lag_trading_days
+                .with_label_values(&["MASSIVE"])
+                .get(),
+            MAX_LAG_TRADING_DAYS
+        );
+
+        // Massive no longer covered: both gone.
+        apply_freshness(&m, &[], &mut known);
+        assert!(!names(&registry).contains("crawler_source_observation_lag_trading_days"));
     }
 
     /// The newest run's chunk counts and activity, and the last complete run (else the oldest

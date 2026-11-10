@@ -596,6 +596,9 @@ pub static CRAWLER_UNITS_METRICS: Lazy<CrawlerUnitsMetrics> = Lazy::new(|| {
 ///   403, meaning the API key is wrong or the subscription has lapsed.
 /// - `crawler_source_latest_observation_timestamp_seconds{source}`: Unix time of the newest
 ///   stored observation date (for daily prices, the newest stored trading day).
+/// - `crawler_source_observation_lag_trading_days{source}`: trading days after the newest stored
+///   one whose refresh slot has passed; 0 when current. Counted on the source's trading
+///   calendar, so weekends and holidays never add to it.
 /// - `crawler_backfill_days_remaining{source}`: days the backfill has still to load.
 /// - `crawler_backfill_runs_total{source,outcome}`: finished backfill runs.
 pub struct CrawlerSourceHealthMetrics {
@@ -603,6 +606,8 @@ pub struct CrawlerSourceHealthMetrics {
     pub auth_rejections_total: IntCounterVec,
     /// Unix time of the newest stored observation date, by source.
     pub latest_observation_timestamp_seconds: GaugeVec,
+    /// Trading days whose refresh slot has passed after the newest stored one, by source.
+    pub observation_lag_trading_days: IntGaugeVec,
     /// Days the backfill has still to load, by source.
     pub backfill_days_remaining: IntGaugeVec,
     /// Finished backfill runs, by source and outcome.
@@ -631,6 +636,14 @@ impl CrawlerSourceHealthMetrics {
             ),
             &["source"],
         )?;
+        let observation_lag_trading_days = IntGaugeVec::new(
+            Opts::new(
+                "crawler_source_observation_lag_trading_days",
+                "Trading days whose refresh slot has passed after the newest stored \
+                 observation date, by source (0 when current)",
+            ),
+            &["source"],
+        )?;
         let backfill_days_remaining = IntGaugeVec::new(
             Opts::new(
                 "crawler_backfill_days_remaining",
@@ -647,11 +660,13 @@ impl CrawlerSourceHealthMetrics {
         )?;
         registry.register(Box::new(auth_rejections_total.clone()))?;
         registry.register(Box::new(latest_observation_timestamp_seconds.clone()))?;
+        registry.register(Box::new(observation_lag_trading_days.clone()))?;
         registry.register(Box::new(backfill_days_remaining.clone()))?;
         registry.register(Box::new(backfill_runs_total.clone()))?;
         Ok(Self {
             auth_rejections_total,
             latest_observation_timestamp_seconds,
+            observation_lag_trading_days,
             backfill_days_remaining,
             backfill_runs_total,
         })
@@ -669,6 +684,13 @@ impl CrawlerSourceHealthMetrics {
         self.latest_observation_timestamp_seconds
             .with_label_values(&[source])
             .set(unix_seconds);
+    }
+
+    /// Sets how many trading days `source`'s newest stored observation is behind.
+    pub fn set_observation_lag(&self, source: &str, trading_days: i64) {
+        self.observation_lag_trading_days
+            .with_label_values(&[source])
+            .set(trading_days);
     }
 
     /// Sets the days `source`'s backfill has still to load.
@@ -909,6 +931,7 @@ mod queue_metrics_tests {
         let m = CrawlerSourceHealthMetrics::new(&registry).unwrap();
         m.record_auth_rejection("MASSIVE");
         m.set_latest_observation("MASSIVE", 1.0);
+        m.set_observation_lag("MASSIVE", 2);
         m.set_backfill_days_remaining("MASSIVE", 5);
         m.record_backfill_run("MASSIVE", true);
         m.record_backfill_run("MASSIVE", false);
@@ -932,6 +955,7 @@ mod queue_metrics_tests {
         for n in [
             "crawler_source_auth_rejections_total",
             "crawler_source_latest_observation_timestamp_seconds",
+            "crawler_source_observation_lag_trading_days",
             "crawler_backfill_days_remaining",
             "crawler_backfill_runs_total",
         ] {
