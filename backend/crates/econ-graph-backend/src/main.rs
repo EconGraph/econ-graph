@@ -19,8 +19,8 @@ use econ_graph_core::{
         backend_database_urls, backend_pool_sizes, data_graphql_config, BackendDatabaseUrls,
         BackendPoolSizes, DataGraphqlConfig,
     },
-    create_pool_with_size,
-    database::{readiness_check_set, run_migration_set, MigrationSet},
+    create_pool_with_statement_timeout,
+    database::{readiness_check_set, run_migration_set, MigrationSet, API_STATEMENT_TIMEOUT},
     models::admin::{ClientInfo, NewSecurityEvent},
     redact_database_url, AppError, AppPool, AppResult, Config, DataPool,
 };
@@ -91,11 +91,14 @@ impl Databases {
         let pool = |url: &str, size: u32, which: &'static str| {
             let url = url.to_string();
             async move {
-                create_pool_with_size(&url, size).await.map_err(|e| {
-                    AppError::DatabaseError(format!(
-                        "Failed to create the {which} database pool: {e}"
-                    ))
-                })
+                // Every statement the API runs is cut off at API_STATEMENT_TIMEOUT (ECO-888).
+                create_pool_with_statement_timeout(&url, size, API_STATEMENT_TIMEOUT)
+                    .await
+                    .map_err(|e| {
+                        AppError::DatabaseError(format!(
+                            "Failed to create the {which} database pool: {e}"
+                        ))
+                    })
             }
         };
 
@@ -976,7 +979,10 @@ fn build_routes_for_plane(
                             auth_context,
                         );
 
-                    Ok(GraphQLResponse::from(auth_schema.execute(request).await).into_response())
+                    let started = std::time::Instant::now();
+                    let response = auth_schema.execute(request).await;
+                    metrics::record_graphql_request(started.elapsed(), response.errors.is_empty());
+                    Ok(GraphQLResponse::from(response).into_response())
                 }
             },
         );

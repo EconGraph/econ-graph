@@ -281,6 +281,69 @@ fn sync_audit_write_failures() {
     }
 }
 
+/// GraphQL requests refused or cut short by the per-request limits, by `reason` (complexity,
+/// depth, fields, timeout, statement_timeout; see `econ_graph_graphql::graphql::limits`).
+/// Every reason is exported from the first scrape, at zero until one happens.
+static GRAPHQL_REJECTIONS: once_cell::sync::Lazy<IntCounterVec> =
+    once_cell::sync::Lazy::new(|| {
+        let counter = IntCounterVec::new(
+            Opts::new(
+                "econgraph_graphql_rejected_requests_total",
+                "GraphQL requests refused or cut short by a per-request limit, by reason",
+            ),
+            &["reason"],
+        )
+        .expect("valid metric");
+        REGISTRY
+            .register(Box::new(counter.clone()))
+            .expect("econgraph_graphql_rejected_requests_total registers once");
+        counter
+    });
+
+/// Bring [`GRAPHQL_REJECTIONS`] up to the totals `econ-graph-graphql` counts.
+fn sync_graphql_rejections() {
+    static SYNC: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = SYNC
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for (reason, total) in econ_graph_graphql::graphql::limits::rejection_counts() {
+        let counter = GRAPHQL_REJECTIONS.with_label_values(&[reason]);
+        let seen = counter.get();
+        if total > seen {
+            counter.inc_by(total - seen);
+        }
+    }
+}
+
+/// How long `/graphql` (and the data plane's `/data/graphql`) took to answer, by `outcome`:
+/// `ok` when the response has no errors, `error` otherwise. Its buckets reach the 25-second
+/// request timeout.
+static GRAPHQL_REQUEST_DURATION: once_cell::sync::Lazy<HistogramVec> =
+    once_cell::sync::Lazy::new(|| {
+        let histogram = HistogramVec::new(
+            HistogramOpts::new(
+                "econgraph_graphql_request_duration_seconds",
+                "Time to answer one GraphQL request, by outcome (ok, error)",
+            )
+            .buckets(vec![
+                0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 25.0, 30.0,
+            ]),
+            &["outcome"],
+        )
+        .expect("valid metric");
+        REGISTRY
+            .register(Box::new(histogram.clone()))
+            .expect("econgraph_graphql_request_duration_seconds registers once");
+        histogram
+    });
+
+/// Record one GraphQL request's duration and whether it answered without errors.
+pub fn record_graphql_request(duration: std::time::Duration, ok: bool) {
+    GRAPHQL_REQUEST_DURATION
+        .with_label_values(&[if ok { "ok" } else { "error" }])
+        .observe(duration.as_secs_f64());
+}
+
 /// The verifier whose anonymous catalog grant renewal `/metrics` reports, set at startup when
 /// anonymous grants are configured. Without it, none of those metrics is exported.
 static ANONYMOUS_GRANTS: once_cell::sync::OnceCell<Arc<econ_graph_auth::OidcVerifier>> =
@@ -379,6 +442,8 @@ fn sync_anonymous_grants() {
 pub fn generate_metrics() -> anyhow::Result<String> {
     sync_audit_write_failures();
     sync_anonymous_grants();
+    sync_graphql_rejections();
+    once_cell::sync::Lazy::force(&GRAPHQL_REQUEST_DURATION);
     let encoder = TextEncoder::new();
     let metric_families = REGISTRY.gather();
     encoder

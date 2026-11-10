@@ -131,7 +131,10 @@ one: null, or `false`.
 ### Read a series and recent observations
 
 `recentDataPoints(limit: ...)` returns the latest revision for each selected
-observation date, newest date first. `dataPointCount` counts all stored point rows,
+observation date, newest date first. `limit` is 0 to 10,000 (default 100).
+`dataPoints` returns every matching observation in date order, but at most
+10,000: when more match it fails with `QUERY_LIMIT_EXCEEDED` rather than return
+part of the history. Read longer histories with `seriesData`, a page at a time. `dataPointCount` counts all stored point rows,
 including revisions, so it can exceed the number of distinct observation dates.
 
 ```graphql
@@ -394,8 +397,11 @@ query GetMultipleSeries($sourceId: ID!) {
 
 ## Request limits and exploration
 
-Queries are limited to depth 15 and complexity 1,000 (one unit per selected field);
-requests exceeding either limit are rejected. Request only the fields needed by the application, and use
+Queries are limited to depth 15, 500 field selections (aliases and expanded fragments
+included) and a cost of 20,000, where a list costs its page size times its selections and
+observations cost one unit per 25 rows; requests exceeding a limit are rejected before they
+run, and a request still running after 25 seconds is cancelled. See the
+[security guide](../security/GRAPHQL_SECURITY_GUIDE.md#per-request-limits) for the cost rules. Request only the fields needed by the application, and use
 pagination for large series lists and observation histories.
 
 Schema introspection is supported. The optional GraphQL Playground at `/playground`

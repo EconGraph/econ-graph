@@ -16,6 +16,7 @@ pub mod datasets;
 pub mod errors;
 pub mod global_analysis;
 pub mod lifecycle;
+pub mod limits;
 pub mod mutation;
 pub mod query;
 pub mod schema;
@@ -41,6 +42,8 @@ mod latest_readers_agree_tests;
 pub mod n_plus_one_tests;
 #[cfg(test)]
 mod original_only_db_tests;
+#[cfg(test)]
+mod request_limits_tests;
 #[cfg(test)]
 mod revised_from_original_db_tests;
 #[cfg(test)]

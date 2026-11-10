@@ -44,7 +44,7 @@ fn invalid_after(cursor: &str) -> async_graphql::Error {
 }
 
 /// Search/list services accept offsets only within the i32 range.
-fn parse_series_cursor(after: Option<&str>) -> Result<i32> {
+pub(crate) fn parse_series_cursor(after: Option<&str>) -> Result<i32> {
     i32::try_from(parse_offset_cursor(after)?)
         .map_err(|_| invalid_after(after.expect("an omitted cursor is zero")))
 }
@@ -52,6 +52,9 @@ fn parse_series_cursor(after: Option<&str>) -> Result<i32> {
 #[Object]
 impl Query {
     /// Search structured SEC companies (requires the SEC catalog grant).
+    #[graphql(
+        complexity = "crate::graphql::limits::list_cost(crate::graphql::limits::page_rows(first, 25, 100), child_complexity)"
+    )]
     async fn companies(
         &self,
         ctx: &Context<'_>,
@@ -68,6 +71,9 @@ impl Query {
     ) -> Result<Option<crate::graphql::company_research::CompanyResearchCompany>> {
         crate::graphql::company_research::company(ctx, cik).await
     }
+    #[graphql(
+        complexity = "crate::graphql::limits::observation_cost(crate::graphql::limits::page_rows(first, 25, 1000), child_complexity)"
+    )]
     async fn company_facts(
         &self,
         ctx: &Context<'_>,
@@ -79,6 +85,9 @@ impl Query {
         crate::graphql::company_research::company_facts(ctx, cik, filter, first, after).await
     }
     /// Normalized companyfacts statements; original filing layouts ship separately.
+    #[graphql(
+        complexity = "crate::graphql::limits::statement_cost(unclassified_first, child_complexity)"
+    )]
     async fn financial_statement(
         &self,
         ctx: &Context<'_>,
@@ -104,6 +113,9 @@ impl Query {
         )
         .await
     }
+    #[graphql(
+        complexity = "crate::graphql::limits::EXPENSIVE_QUERY_COST.saturating_add(child_complexity)"
+    )]
     async fn company_ratios(
         &self,
         ctx: &Context<'_>,
@@ -121,6 +133,9 @@ impl Query {
         )
         .await
     }
+    #[graphql(
+        complexity = "crate::graphql::limits::EXPENSIVE_QUERY_COST.saturating_add(crate::graphql::limits::list_cost(crate::graphql::limits::page_rows(first, 20, 20), child_complexity.saturating_add(crate::graphql::limits::COMPANY_PEER_COST)))"
+    )]
     async fn company_peers(
         &self,
         ctx: &Context<'_>,
@@ -246,6 +261,9 @@ impl Query {
     }
 
     /// List economic series with filtering and pagination
+    #[graphql(
+        complexity = "crate::graphql::limits::list_cost(crate::graphql::limits::page_rows(pagination.as_ref().and_then(|p| p.first), 50, crate::graphql::limits::MAX_SERIES_PER_PAGE).max(1), child_complexity)"
+    )]
     async fn series_list(
         &self,
         ctx: &Context<'_>,
@@ -317,6 +335,9 @@ impl Query {
     /// first published after `asOf` are treated as not yet known. Omit it to read the current
     /// revision.
     #[allow(clippy::too_many_arguments)]
+    #[graphql(
+        complexity = "crate::graphql::limits::EXPENSIVE_QUERY_COST.saturating_add(crate::graphql::limits::list_cost(crate::graphql::limits::CROSS_SECTION_ROWS, child_complexity))"
+    )]
     async fn cross_section(
         &self,
         ctx: &Context<'_>,
@@ -335,6 +356,9 @@ impl Query {
     }
 
     /// List all data sources
+    #[graphql(
+        complexity = "crate::graphql::limits::list_cost(crate::graphql::limits::UNPAGED_SOURCE_ROWS, child_complexity)"
+    )]
     async fn data_sources(&self, ctx: &Context<'_>) -> Result<Vec<DataSourceType>> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
 
@@ -370,6 +394,9 @@ impl Query {
     /// order across sources) and by code within a source. Unpaginated: sources publish a
     /// handful of datasets each. A `sourceId` that isn't a UUID is rejected with a
     /// `BAD_USER_INPUT` error.
+    #[graphql(
+        complexity = "crate::graphql::limits::list_cost(crate::graphql::limits::UNPAGED_DATASET_ROWS, child_complexity)"
+    )]
     async fn datasets(
         &self,
         ctx: &Context<'_>,
@@ -432,6 +459,9 @@ impl Query {
     /// A series can hold several revisions of one date's value. A `transformation` is computed
     /// over the latest revisions unless the filter picks a revision mode (`asOf`, `originalOnly`,
     /// or `latestRevisionOnly: false` for every stored revision).
+    #[graphql(
+        complexity = "crate::graphql::limits::observation_cost(crate::graphql::limits::page_rows(first, crate::graphql::limits::MAX_OBSERVATIONS_PER_PAGE, crate::graphql::limits::MAX_OBSERVATIONS_PER_PAGE), child_complexity)"
+    )]
     async fn series_data(
         &self,
         ctx: &Context<'_>,
@@ -543,6 +573,9 @@ impl Query {
     }
 
     /// Persistent queue history, most recently updated first (requires admin.system:read).
+    #[graphql(
+        complexity = "crate::graphql::limits::list_cost(crate::graphql::limits::page_rows(limit, 50, 200), child_complexity)"
+    )]
     async fn crawler_jobs(
         &self,
         ctx: &Context<'_>,
@@ -594,8 +627,12 @@ impl Query {
     ///
     /// `source` is a data source id; a value that isn't a UUID is rejected with a
     /// `BAD_USER_INPUT` error. `after` must be a nonnegative integer in the i32 range,
-    /// or it is rejected with the same code. `totalCount` counts every matching series;
+    /// or it is rejected with the same code, as is a `first` outside 0 to 1000 (default 50).
+    /// `totalCount` counts every matching series;
     /// read the next page with `after` set to the number of series already read.
+    #[graphql(
+        complexity = "crate::graphql::limits::EXPENSIVE_QUERY_COST.saturating_add(crate::graphql::limits::list_cost(crate::graphql::limits::page_rows(first, 50, crate::graphql::limits::MAX_SEARCH_RESULTS), child_complexity))"
+    )]
     async fn search_series(
         &self,
         ctx: &Context<'_>,
@@ -609,6 +646,12 @@ impl Query {
         // PURPOSE: Provide comprehensive search capabilities for economic time series
 
         let start_time = std::time::Instant::now();
+        let max = crate::graphql::limits::MAX_SEARCH_RESULTS;
+        if first.is_some_and(|first| !usize::try_from(first).is_ok_and(|first| first <= max)) {
+            return Err(crate::graphql::errors::bad_user_input(format!(
+                "first must be between 0 and {max}"
+            )));
+        }
         let source_id = source
             .as_deref()
             .map(|id| parse_id_argument("source", id))
@@ -645,6 +688,9 @@ impl Query {
     }
 
     /// Get search suggestions for partial queries
+    #[graphql(
+        complexity = "crate::graphql::limits::EXPENSIVE_QUERY_COST.saturating_add(crate::graphql::limits::list_cost(crate::graphql::limits::page_rows(limit, 10, 20), child_complexity))"
+    )]
     async fn search_suggestions(
         &self,
         ctx: &Context<'_>,
@@ -768,6 +814,9 @@ impl Query {
     // Admin Queries
 
     /// Get all users (requires `admin.users:read`)
+    #[graphql(
+        complexity = "crate::graphql::limits::list_cost(crate::graphql::limits::page_rows(pagination.as_ref().and_then(|p| p.first), 50, 100), child_complexity)"
+    )]
     async fn users(
         &self,
         ctx: &Context<'_>,
@@ -933,6 +982,9 @@ impl Query {
 
     /// Get security events (requires `admin.security:read`). Existing list clients retain
     /// their response shape; use `securityEventsPage` for cursors and total count.
+    #[graphql(
+        complexity = "crate::graphql::limits::list_cost(crate::graphql::limits::page_rows(limit, 50, 100), child_complexity)"
+    )]
     async fn security_events(
         &self,
         ctx: &Context<'_>,
@@ -956,6 +1008,9 @@ impl Query {
 
     /// Get a filtered security-event connection (requires `admin.security:read`). Offset
     /// cursors have the same semantics as `auditLogs`, including concurrent-insert drift.
+    #[graphql(
+        complexity = "crate::graphql::limits::list_cost(crate::graphql::limits::page_rows(pagination.as_ref().and_then(|p| p.first), 50, 100), child_complexity)"
+    )]
     async fn security_events_page(
         &self,
         ctx: &Context<'_>,
@@ -968,6 +1023,9 @@ impl Query {
     }
 
     /// Get audit logs (requires `admin.audit:read`)
+    #[graphql(
+        complexity = "crate::graphql::limits::list_cost(crate::graphql::limits::page_rows(pagination.as_ref().and_then(|p| p.first), 50, 100), child_complexity)"
+    )]
     async fn audit_logs(
         &self,
         ctx: &Context<'_>,
@@ -1896,6 +1954,119 @@ mod empty_series_tests {
             .collect();
         assert!(ids.contains(&with_data.id.to_string()));
         assert!(!ids.contains(&without_data.id.to_string()));
+    }
+
+    /// `DataSource.series` pages in SQL, in title order, and answers a bad page argument with a
+    /// `BAD_USER_INPUT` error rather than panicking (an `after` past the end used to slice out of
+    /// range) or returning the whole source (`first: -1` used to wrap to "everything").
+    #[tokio::test]
+    #[serial]
+    async fn data_source_series_pages_and_rejects_bad_page_arguments() {
+        let container = get_test_db().await;
+        let pool = container.pool().clone();
+        let schema = create_schema(
+            econ_graph_core::database::AppPool(pool.clone()),
+            Some(econ_graph_core::database::DataPool(pool.clone())),
+        );
+        let (source, with_data, _without_data) = seed(&pool, "Pagesource").await;
+        let dataset_id =
+            test_dataset_id(&mut pool.get().await.expect("connection"), source.id).await;
+        for title in ["Aa first", "Zz last"] {
+            EconomicSeries::create(
+                &pool,
+                &NewEconomicSeries {
+                    source_id: source.id,
+                    external_id: format!("{title}_{}", source.id),
+                    title: title.to_string(),
+                    description: None,
+                    units: None,
+                    frequency: "Monthly".to_string(),
+                    seasonal_adjustment: None,
+                    start_date: chrono::NaiveDate::from_ymd_opt(2020, 1, 1),
+                    end_date: chrono::NaiveDate::from_ymd_opt(2020, 12, 1),
+                    is_active: true,
+                    first_discovered_at: None,
+                    last_crawled_at: None,
+                    first_missing_date: None,
+                    crawl_status: None,
+                    crawl_error_message: None,
+                    dataset_id,
+                    dimensions: Default::default(),
+                    default_measure: None,
+                    units_source: None,
+                },
+            )
+            .await
+            .expect("create series");
+        }
+        let page = |args: &str| {
+            format!(
+                r#"{{ dataSource(id: "{}") {{ series({args}) {{ nodes {{ title }} totalCount
+                    pageInfo {{ hasNextPage hasPreviousPage endCursor }} }} }} }}"#,
+                source.id
+            )
+        };
+        let run = |args: &str| {
+            let query = page(args);
+            let schema = schema.clone();
+            async move { schema.execute(Request::new(query)).await }
+        };
+
+        let resp = run("first: 2").await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+        let first = resp.data.into_json().unwrap()["dataSource"]["series"].clone();
+        assert_eq!(first["nodes"][0]["title"], "Aa first");
+        assert_eq!(first["nodes"][1]["title"], with_data.title.as_str());
+        assert_eq!(first["totalCount"], 3);
+        assert_eq!(first["pageInfo"]["hasNextPage"], true);
+        assert_eq!(first["pageInfo"]["endCursor"], "2");
+
+        let resp = run(r#"first: 2, after: "2""#).await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+        let second = resp.data.into_json().unwrap()["dataSource"]["series"].clone();
+        let titles: Vec<&str> = second["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["title"].as_str().unwrap())
+            .collect();
+        assert_eq!(titles, vec!["Zz last"]);
+        assert_eq!(second["pageInfo"]["hasNextPage"], false);
+        assert_eq!(second["pageInfo"]["hasPreviousPage"], true);
+
+        // Past the end: an empty page, not a panic.
+        let resp = run(r#"after: "999999""#).await;
+        assert!(resp.errors.is_empty(), "{:?}", resp.errors);
+        let past = resp.data.into_json().unwrap()["dataSource"]["series"].clone();
+        assert_eq!(past["nodes"].as_array().unwrap().len(), 0);
+        assert_eq!(past["totalCount"], 3);
+        assert_eq!(past["pageInfo"]["hasNextPage"], false);
+
+        for args in [
+            "first: -1",
+            "first: 101",
+            "first: 2147483647",
+            r#"after: "-1""#,
+            r#"after: "abc""#,
+        ] {
+            let resp = run(args).await;
+            let codes: Vec<_> = resp
+                .errors
+                .iter()
+                .map(|e| {
+                    e.extensions
+                        .as_ref()
+                        .and_then(|x| x.get("code"))
+                        .map(|c| c.to_string())
+                })
+                .collect();
+            assert_eq!(
+                codes,
+                vec![Some("\"BAD_USER_INPUT\"".to_string())],
+                "{args}: {:?}",
+                resp.errors
+            );
+        }
     }
 
     #[tokio::test]

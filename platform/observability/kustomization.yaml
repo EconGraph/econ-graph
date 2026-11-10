@@ -13,6 +13,7 @@ resources:
 - rules-disk.yaml
 - scrape-host.yaml
 - dashboard-disk.yaml
+- rules-backend.yaml
 configMapGenerator:
 - name: cnpg-backup-health
   namespace: econ-graph
@@ -36,6 +37,15 @@ configMapGenerator:
   namespace: monitoring
   files:
   - dashboards/logging-dashboard.json
+  options:
+    labels:
+      grafana_dashboard: '1'
+    annotations:
+      kustomize.toolkit.fluxcd.io/substitute: disabled
+- name: econgraph-api-dashboard
+  namespace: monitoring
+  files:
+  - dashboards/graphql-api.json
   options:
     labels:
       grafana_dashboard: '1'

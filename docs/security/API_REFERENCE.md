@@ -103,14 +103,16 @@ refuse an operation even when the required token role is present.
 | --- | --- | --- |
 | POST body | 1 MiB (1,048,576 bytes) | The entire received body, including variables and request metadata. Bodies larger than this receive HTTP 413. |
 | Query depth | 15 | Maximum selection nesting depth. Deeper operations fail GraphQL validation before execution. |
-| Query complexity | 1000 | One unit per selected field. Operations above the limit fail GraphQL validation before execution. This is not a row or result-size limit. |
+| Query fields | 500 | Field selections after expanding fragments, every alias counted. Larger operations are refused before validation. |
+| Query cost | 20,000 | Lists cost their page size times their selections; observation lists one unit per 25 rows. Unpaged `dataPoints` costs as 10,000 points. Operations above the limit fail before execution. See the [security guide](GRAPHQL_SECURITY_GUIDE.md#per-request-limits). |
+| Request time | 25 seconds | A request still running is cancelled with `REQUEST_TIMEOUT`. API database statements are cancelled at 20 seconds. |
 
 `/graphql` accepts a single GraphQL request per POST; it also accepts GET queries
 in the URL. The POST body limit is not a separate query-text limit and does not
 apply to the GET URL. Clients must also respect the limits of their gateway and
 HTTP stack.
 
-Schema introspection is available under the same depth and complexity limits.
+Schema introspection is available under the same depth, field and cost limits.
 The `/playground` browser page is a separate feature: the backend serves it only
 when `ENABLE_GRAPHQL_PLAYGROUND` is `true` (case-insensitive) or `1`, with
 surrounding whitespace allowed. Other values, or an unset variable, return 404.
@@ -134,7 +136,7 @@ other requested fields remain in `data`.
 | Malformed JSON or an invalid GraphQL request body | HTTP 400 with `errors` containing a `message`; the text depends on the parse failure. | Correct the request encoding and body. |
 | Body larger than 1,048,576 bytes | HTTP 413 with the body shown below. | Reduce the complete request body. |
 | Authentication refusal | HTTP 401, 403, or 500 as specified above, with `data: null`. | Renew an invalid token; resolve account suspension or retry account-loading failures as appropriate. |
-| GraphQL syntax, schema, depth, or complexity failure | GraphQL `errors` before field execution. | Correct or reduce the operation. |
+| GraphQL syntax, schema, depth, field-count or cost failure | GraphQL `errors` before field execution; limit refusals carry `extensions.code = QUERY_LIMIT_EXCEEDED`. | Correct or reduce the operation: smaller pages, fewer aliases, or `seriesData` pages for observations. |
 | Missing sign-in, missing role, or resource denial | GraphQL `errors` during field execution. | Check caller identity, token roles, and resource access. |
 | Invalid argument | A client-facing GraphQL error message; some errors include `extensions.code: BAD_USER_INPUT`. | Correct the named argument. |
 | Internal field failure | `Internal server error` with `extensions.code: INTERNAL_SERVER_ERROR`. | Treat the field as failed; server details are not exposed. |

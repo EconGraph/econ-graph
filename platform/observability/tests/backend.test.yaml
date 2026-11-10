@@ -1,0 +1,94 @@
+# promtool unit tests for rules-backend.yaml. Run through ../check-rules.sh, which writes each
+# PrometheusRule's spec to <metadata.name>.yml in a temp directory and copies this file there.
+rule_files:
+- econgraph-backend.yml
+
+evaluation_interval: 1m
+
+tests:
+# Memory: the API backend climbs to 450Mi of 512Mi (88%) at 5m and stays; the data backend sits
+# at 300Mi (59%). The cAdvisor series carries the kubelet's extra labels and a duplicate from
+# another scrape path. Fires 10 minutes after crossing, for that pod only; the crawler pod over
+# its own limit is not a backend.
+- interval: 1m
+  input_series:
+  - series: container_memory_working_set_bytes{job="kubelet", metrics_path="/metrics/cadvisor", namespace="econ-graph", pod="econ-graph-backend-7d9f-abcde", container="backend", id="/a"}
+    values: 104857600x4 471859200x20
+  - series: container_memory_working_set_bytes{job="kubelet", metrics_path="/metrics/cadvisor", namespace="econ-graph", pod="econ-graph-backend-7d9f-abcde", container="backend", id="/b"}
+    values: 104857600x4 471859200x20
+  - series: container_memory_working_set_bytes{job="kubelet", metrics_path="/metrics/cadvisor", namespace="econ-graph", pod="econ-graph-data-backend-5c4b-fghij", container="backend", id="/c"}
+    values: 314572800x25
+  - series: container_memory_working_set_bytes{job="kubelet", metrics_path="/metrics/cadvisor", namespace="econ-graph", pod="crawler-worker-6f8-klmno", container="worker", id="/d"}
+    values: 999999999x25
+  - series: kube_pod_container_resource_limits{job="kube-state-metrics", namespace="econ-graph", pod="econ-graph-backend-7d9f-abcde", container="backend", resource="memory", unit="byte"}
+    values: 536870912x25
+  - series: kube_pod_container_resource_limits{job="kube-state-metrics", namespace="econ-graph", pod="econ-graph-backend-7d9f-abcde", container="backend", resource="cpu", unit="core"}
+    values: 1x25
+  - series: kube_pod_container_resource_limits{job="kube-state-metrics", namespace="econ-graph", pod="econ-graph-data-backend-5c4b-fghij", container="backend", resource="memory", unit="byte"}
+    values: 536870912x25
+  - series: kube_pod_container_resource_limits{job="kube-state-metrics", namespace="econ-graph", pod="crawler-worker-6f8-klmno", container="worker", resource="memory", unit="byte"}
+    values: 536870912x25
+  alert_rule_test:
+  - eval_time: 14m
+    alertname: EconGraphBackendMemoryHigh
+    exp_alerts: []
+  - eval_time: 15m
+    alertname: EconGraphBackendMemoryHigh
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        namespace: econ-graph
+        pod: econ-graph-backend-7d9f-abcde
+        container: backend
+      exp_annotations:
+        summary: A backend pod has used over 80% of its memory limit for 10 minutes
+        description: Backend pod econ-graph-backend-7d9f-abcde has held more than 80% of its memory limit for 10 minutes and is close to being OOM-killed. Check the econgraph-api dashboard for refused and slow GraphQL requests (a costly request pattern shows as rising cost or timeout refusals), then the pod's memory over time for a leak. Raising the limit or lowering MAX_QUERY_COMPLEXITY are the levers.
+
+# A brief spike over 80% (5 minutes) does not fire.
+- interval: 1m
+  input_series:
+  - series: container_memory_working_set_bytes{job="kubelet", namespace="econ-graph", pod="econ-graph-backend-7d9f-abcde", container="backend"}
+    values: 104857600x4 471859200x5 104857600x15
+  - series: kube_pod_container_resource_limits{job="kube-state-metrics", namespace="econ-graph", pod="econ-graph-backend-7d9f-abcde", container="backend", resource="memory", unit="byte"}
+    values: 536870912x25
+  alert_rule_test:
+  - eval_time: 25m
+    alertname: EconGraphBackendMemoryHigh
+    exp_alerts: []
+
+# OOM kill: the data backend's container is OOM-killed and restarts at 5m. Fires at once and
+# clears 15 minutes after the restart, though the last termination reason stays OOMKilled. An
+# API backend that restarted for another reason (Error) does not fire, nor does one whose last
+# OOM kill was long ago.
+- interval: 1m
+  input_series:
+  - series: kube_pod_container_status_last_terminated_reason{job="kube-state-metrics", namespace="econ-graph", pod="econ-graph-data-backend-5c4b-fghij", container="backend", reason="OOMKilled"}
+    values: _x5 1x30
+  - series: kube_pod_container_status_restarts_total{job="kube-state-metrics", namespace="econ-graph", pod="econ-graph-data-backend-5c4b-fghij", container="backend"}
+    values: 0x5 1x30
+  - series: kube_pod_container_status_last_terminated_reason{job="kube-state-metrics", namespace="econ-graph", pod="econ-graph-backend-7d9f-abcde", container="backend", reason="Error"}
+    values: _x5 1x30
+  - series: kube_pod_container_status_restarts_total{job="kube-state-metrics", namespace="econ-graph", pod="econ-graph-backend-7d9f-abcde", container="backend"}
+    values: 0x5 1x30
+  - series: kube_pod_container_status_last_terminated_reason{job="kube-state-metrics", namespace="econ-graph", pod="econ-graph-backend-7d9f-pqrst", container="backend", reason="OOMKilled"}
+    values: 1x35
+  - series: kube_pod_container_status_restarts_total{job="kube-state-metrics", namespace="econ-graph", pod="econ-graph-backend-7d9f-pqrst", container="backend"}
+    values: 3x35
+  alert_rule_test:
+  - eval_time: 4m
+    alertname: EconGraphBackendOOMKilled
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: EconGraphBackendOOMKilled
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        namespace: econ-graph
+        pod: econ-graph-data-backend-5c4b-fghij
+        container: backend
+      exp_annotations:
+        summary: A backend container was OOM-killed
+        description: Backend pod econ-graph-data-backend-5c4b-fghij was killed for exceeding its memory limit and restarted; requests it was serving failed. Look at the econgraph-api dashboard and the backend log just before the restart (`kubectl -n econ-graph logs econ-graph-data-backend-5c4b-fghij -c backend --previous`) for the request that was running.
+  - eval_time: 25m
+    alertname: EconGraphBackendOOMKilled
+    exp_alerts: []

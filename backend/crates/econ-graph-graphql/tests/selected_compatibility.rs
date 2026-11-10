@@ -202,6 +202,28 @@ async fn selected_compatibility_contract() {
                 .len(),
             2
         );
+        // recentDataPoints takes 0 to 10000 points; anything else is a client error (ECO-888).
+        for limit in [-1, 10001] {
+            let refused = schema
+                .execute(
+                    Request::new(format!(
+                        r#"{{series(id:"{series}"){{recentDataPoints(limit:{limit}){{id}}}}}}"#
+                    ))
+                    .data(context.clone()),
+                )
+                .await;
+            assert_eq!(refused.errors.len(), 1, "{limit}: {:?}", refused.errors);
+            assert_eq!(
+                refused.errors[0]
+                    .extensions
+                    .as_ref()
+                    .and_then(|e| e.get("code"))
+                    .map(|c| c.to_string()),
+                Some("\"BAD_USER_INPUT\"".to_string()),
+                "{limit}: {:?}",
+                refused.errors
+            );
+        }
         // Configured output budgets cover the whole public batch, even when
         // each frozen dataset's own two-result query would fit separately.
         let extra_dataset = Uuid::new_v4();
@@ -315,8 +337,9 @@ async fn selected_compatibility_contract() {
     assert!(denied.errors.is_empty());
     assert_eq!(denied.data.into_json().unwrap()["series"], Value::Null);
 
-    // The legacy direct field is not the paginated store's 10000-point page. Exercise
-    // an actual API result above that boundary without changing the bounded scan budget.
+    // The legacy direct field answers at most 10000 points (ECO-888). Above that it fails
+    // with QUERY_LIMIT_EXCEEDED rather than return part of the history, and the same
+    // history narrowed to exactly 10000 points is answered whole.
     let (large_dataset, large_series) = (Uuid::new_v4(), Uuid::new_v4());
     let mut conn = data.get().await.unwrap();
     conn.batch_execute(&format!("INSERT INTO datasets(id,source_id,code,name) VALUES('{large_dataset}','{}','large','Large compatibility'); INSERT INTO economic_series(id,source_id,dataset_id,external_id,title,frequency,end_date) VALUES('{large_series}','{}','{large_dataset}','LARGE','Large compatibility','Daily','1927-05-20')", fred.id,fred.id)).await.unwrap();
@@ -357,12 +380,32 @@ async fn selected_compatibility_contract() {
             .data(context.clone()),
         )
         .await;
-    assert!(large.errors.is_empty(), "{:?}", large.errors);
-    let large = large.data.into_json().unwrap();
-    assert_eq!(large["series"]["dataPointCount"], 10001);
+    assert_eq!(large.errors.len(), 1, "{:?}", large.errors);
     assert_eq!(
-        large["series"]["dataPoints"].as_array().unwrap().len(),
-        10001
+        large.errors[0]
+            .extensions
+            .as_ref()
+            .and_then(|e| e.get("code"))
+            .map(|c| c.to_string()),
+        Some("\"QUERY_LIMIT_EXCEEDED\"".to_string()),
+        "{:?}",
+        large.errors
+    );
+    assert!(large.errors[0].message.contains("seriesData"));
+    let at_cap = schema
+        .execute(
+            Request::new(format!(
+                r#"{{series(id:"{large_series}"){{dataPointCount dataPoints(filter:{{endDate:"1927-05-19"}}){{id}}}}}}"#
+            ))
+            .data(context.clone()),
+        )
+        .await;
+    assert!(at_cap.errors.is_empty(), "{:?}", at_cap.errors);
+    let at_cap = at_cap.data.into_json().unwrap();
+    assert_eq!(at_cap["series"]["dataPointCount"], 10001);
+    assert_eq!(
+        at_cap["series"]["dataPoints"].as_array().unwrap().len(),
+        10000
     );
 
     // A single series exceeds the real default 100k history cap; two further
