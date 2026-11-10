@@ -77,7 +77,7 @@ Configuration (flags or environment):
 | `CRAWLER_HTTP_TIMEOUT_SECS` | 30 | ordinary HTTP request timeout; source reference-file requests use at least 120 seconds |
 | `CRAWLER_DATA_DIR` | `/app/data` in the image | crawler selection files and dataset definitions, described below |
 | `REFERENCE_DATA_DIR` | `/app/reference` in the image | shared country data and backend search abbreviations, described below |
-| `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY`, `WTO_API_KEY` | unset | from Secret `crawler-api-keys`; the worker starts without them, but FRED, BEA and Census jobs fail with an auth error when their key is missing. Without `WTO_API_KEY` the worker leaves the WTO source out entirely (no discovery, refreshes or coverage gauges) and logs a warning at startup |
+| `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY`, `WTO_API_KEY`, `MASSIVE_API_KEY` | unset | from Secret `crawler-api-keys`; the worker starts without them, but FRED, BEA and Census jobs fail with an auth error when their key is missing. Without `WTO_API_KEY` or `MASSIVE_API_KEY` the worker leaves that source out entirely (no discovery, refreshes or coverage gauges) and logs a warning at startup; see the [Massive runbook](../monitoring/massive-runbook.md) |
 | `CRAWLER_SCHEDULER` | true | enqueue due refreshes and catalog discovery in the background (see below); `false` disables it, leaving `triggerCrawl` / the CLI as the only way to enqueue work |
 | `CRAWLER_SCHEDULER_INTERVAL_SECS` | 300 | seconds between scheduler ticks |
 | `CRAWLER_SINGLE_JOB_DISCOVERY_SOURCES` | unset | comma-separated sources to discover with a single `discover_catalog` job even though their adapter discovers in chunks (today only FRED does); see below |

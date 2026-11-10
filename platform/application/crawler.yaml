@@ -105,6 +105,13 @@ spec:
               name: crawler-api-keys
               key: census-api-key
               optional: true
+        # Massive, a market data vendor (ECO-871). Without the key the worker skips the source.
+        - name: MASSIVE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: crawler-api-keys
+              key: massive-api-key
+              optional: true
         resources:
           requests:
             memory: 128Mi
