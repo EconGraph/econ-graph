@@ -16,7 +16,10 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      backoffLimit: 0
+      # The binary retries each bulk download three times. One more pod covers a killed or
+      # evicted pod; a rerun skips companies already loaded and writes no unchanged rows.
+      # activeDeadlineSeconds bounds both attempts together.
+      backoffLimit: 1
       activeDeadlineSeconds: 28800
       template:
         spec:

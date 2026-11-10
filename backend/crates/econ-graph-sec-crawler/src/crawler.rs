@@ -10,6 +10,41 @@ use crate::models::DtsReference;
 use crate::models::{CrawlConfig, CrawlResult, FilingInfo, SecCompany};
 use crate::storage::{FilingIdentityConflict, XbrlFileTooLarge, XbrlStorage, XbrlStorageConfig};
 use crate::submissions::EdgarSubmissions;
+
+/// `companies` columns from submissions metadata, trimmed and cut to the column widths
+/// (`name` 255, `ticker` 10, `sic_code` 4, `sic_description` 255, `entity_type` 50). Empty
+/// optional values become NULL, and an empty name becomes "CIK <cik>".
+pub(crate) struct CompanyFields {
+    pub name: String,
+    pub ticker: Option<String>,
+    pub sic: Option<String>,
+    pub sic_description: Option<String>,
+    pub entity_type: Option<String>,
+}
+
+impl CompanyFields {
+    pub(crate) fn clipped(
+        cik: &str,
+        name: &str,
+        ticker: Option<&str>,
+        sic: Option<&str>,
+        sic_description: Option<&str>,
+        entity_type: Option<&str>,
+    ) -> Self {
+        fn clip(s: Option<&str>, max: usize) -> Option<String> {
+            s.map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.chars().take(max).collect())
+        }
+        Self {
+            name: clip(Some(name), 255).unwrap_or_else(|| format!("CIK {cik}")),
+            ticker: clip(ticker, 10),
+            sic: clip(sic, 4),
+            sic_description: clip(sic_description, 255),
+            entity_type: clip(entity_type, 50),
+        }
+    }
+}
 use crate::utils::{
     get_fiscal_quarter, pad_cik, parse_accession_number, parse_sec_date, unpad_cik,
 };
@@ -324,21 +359,20 @@ impl SecEdgarCrawler {
         use diesel_async::RunQueryDsl;
         use econ_graph_core::schema::companies::dsl as c;
 
-        fn clip(s: Option<&str>, max: usize) -> Option<String> {
-            s.map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(|s| s.chars().take(max).collect())
-        }
-        let name: String = subs.name.trim().chars().take(255).collect();
-        let name = if name.is_empty() {
-            format!("CIK {cik}")
-        } else {
-            name
-        };
-        let ticker = clip(<[String]>::first(&subs.tickers).map(String::as_str), 10);
-        let sic = clip(subs.sic.as_deref(), 4);
-        let sic_description = clip(subs.sic_description.as_deref(), 255);
-        let entity_type = clip(subs.entity_type.as_deref(), 50);
+        let CompanyFields {
+            name,
+            ticker,
+            sic,
+            sic_description,
+            entity_type,
+        } = CompanyFields::clipped(
+            cik,
+            &subs.name,
+            <[String]>::first(&subs.tickers).map(String::as_str),
+            subs.sic.as_deref(),
+            subs.sic_description.as_deref(),
+            subs.entity_type.as_deref(),
+        );
 
         let mut conn = self
             .pool

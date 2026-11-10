@@ -30,6 +30,16 @@ values or incompatible filed/form provenance must fail validation rather than
 replace a pinned revision. An omitted fact in a later bulk download does not
 authorize deleting retained facts or note targets.
 
+### Source corrections (ECO-890)
+
+A load never replaces a stored fact or filing. A source row whose value, filed date or form
+differs from the stored revision of the same key, and two source rows for one key that
+disagree, are quarantined in `company_fact_conflicts`; the rest of the load continues and the
+run is `succeeded_with_conflicts`. An operator may accept a quarantined value as revision n+1
+in `company_fact_revisions` / `company_fact_filing_revisions`, keeping revision 1 in
+`company_facts` unchanged, or reject it. Read paths still return revision 1 only; how an
+accepted same-accession correction is exposed to consumers and notes is not yet decided.
+
 ## Taxonomy and unit boundaries
 
 Companyfacts reports taxonomy families such as `us-gaap` and units such as
@@ -67,10 +77,11 @@ and are never inserted as fabricated filed facts. Calculations must match
 periods, concepts and units and report missing/incompatible inputs explicitly.
 
 `company_fact_load_runs` records each bulk attempt and its completion status,
-counts, source digests and failure. Its `source_mode` distinguishes upstream
+counts, rows written, conflicts, archive staleness, source digests and failure. Its `source_mode` distinguishes upstream
 `downloaded` archives from operator `staged` files. Successful downloaded runs
-must retain both upstream Last-Modified timestamps, each within 24 hours before
-completion and at most five minutes in the future. Running or failed attempts
+must retain both upstream Last-Modified timestamps; `archive_stale` records whether either
+was outside 24 hours before completion to five minutes after, and a stale run is not a
+freshness observation. Running or failed attempts
 and all staged imports are ineligible freshness observations. Existing attempts
 without source provenance migrate to staged conservatively. This evidence
 supports the release requirement for seven consecutive nightly successes;

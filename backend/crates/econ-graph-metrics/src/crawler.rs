@@ -27,6 +27,7 @@
 //! CRAWLER_METRICS.record_error("sec_edgar", "sec.gov", "network_timeout");
 //! ```
 
+pub mod companyfacts;
 pub mod discovery_runs;
 
 use crate::DEFAULT_REGISTRY;

@@ -249,6 +249,66 @@ diesel::table! {
 }
 
 diesel::table! {
+    company_fact_company_digests (cik) {
+        #[max_length = 10]
+        cik -> Varchar,
+        entry_sha256 -> Text,
+        facts_count -> Int8,
+        filings_count -> Int8,
+        run_id -> Uuid,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    company_fact_concepts (taxonomy, concept) {
+        taxonomy -> Text,
+        concept -> Text,
+        label -> Nullable<Text>,
+        description -> Nullable<Text>,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    company_fact_conflicts (id) {
+        id -> Uuid,
+        kind -> Text,
+        #[max_length = 10]
+        cik -> Varchar,
+        accession -> Text,
+        target_key -> Text,
+        stored -> Jsonb,
+        proposed -> Jsonb,
+        proposed_digest -> Text,
+        status -> Text,
+        first_seen_run_id -> Uuid,
+        last_seen_run_id -> Uuid,
+        seen_count -> Int8,
+        first_seen_at -> Timestamptz,
+        last_seen_at -> Timestamptz,
+        resolved_at -> Nullable<Timestamptz>,
+        resolved_by -> Nullable<Text>,
+        resolution_note -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    company_fact_filing_revisions (id) {
+        id -> Uuid,
+        filing_id -> Uuid,
+        revision -> Int4,
+        filed -> Date,
+        report_date -> Nullable<Date>,
+        form -> Text,
+        conflict_id -> Uuid,
+        accepted_by -> Text,
+        accepted_at -> Timestamptz,
+        note -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
     company_fact_filings (id) {
         id -> Uuid,
         #[max_length = 10]
@@ -279,6 +339,26 @@ diesel::table! {
         source_mode -> Text,
         companyfacts_last_modified -> Nullable<Timestamptz>,
         submissions_last_modified -> Nullable<Timestamptz>,
+        conflicts_count -> Int8,
+        fact_rows_written -> Int8,
+        filing_rows_written -> Int8,
+        companies_skipped -> Int8,
+        archive_stale -> Bool,
+    }
+}
+
+diesel::table! {
+    company_fact_revisions (id) {
+        id -> Uuid,
+        fact_id -> Uuid,
+        revision -> Int4,
+        value -> Numeric,
+        filed -> Date,
+        form -> Text,
+        conflict_id -> Uuid,
+        accepted_by -> Text,
+        accepted_at -> Timestamptz,
+        note -> Nullable<Text>,
     }
 }
 
@@ -299,8 +379,6 @@ diesel::table! {
         fiscal_year -> Nullable<Int4>,
         fiscal_period -> Nullable<Text>,
         frame -> Nullable<Text>,
-        label -> Nullable<Text>,
-        description -> Nullable<Text>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
     }
@@ -1147,6 +1225,11 @@ diesel::joinable!(annotation_replies -> financial_annotations (annotation_id));
 diesel::joinable!(audit_logs -> users (user_id));
 diesel::joinable!(catalog_lifecycle_scopes -> data_sources (source_id));
 diesel::joinable!(chart_annotations -> users (user_id));
+diesel::joinable!(company_fact_company_digests -> company_fact_load_runs (run_id));
+diesel::joinable!(company_fact_filing_revisions -> company_fact_conflicts (conflict_id));
+diesel::joinable!(company_fact_filing_revisions -> company_fact_filings (filing_id));
+diesel::joinable!(company_fact_revisions -> company_fact_conflicts (conflict_id));
+diesel::joinable!(company_fact_revisions -> company_facts (fact_id));
 diesel::joinable!(crawl_attempts -> economic_series (series_id));
 diesel::joinable!(data_points -> economic_series (series_id));
 diesel::joinable!(datasets -> data_sources (source_id));
@@ -1190,8 +1273,13 @@ diesel::allow_tables_to_appear_in_same_query!(
     chart_annotations,
     chart_collaborators,
     companies,
+    company_fact_company_digests,
+    company_fact_concepts,
+    company_fact_conflicts,
+    company_fact_filing_revisions,
     company_fact_filings,
     company_fact_load_runs,
+    company_fact_revisions,
     company_facts,
     countries,
     country_correlations,

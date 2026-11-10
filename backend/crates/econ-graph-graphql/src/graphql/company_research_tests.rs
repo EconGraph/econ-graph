@@ -140,7 +140,9 @@ async fn insert_fact(
     )
     .unwrap();
     let mut conn = pool.get().await.unwrap();
-    diesel::sql_query("INSERT INTO company_facts(id,cik,taxonomy,concept,period_start,period_end,unit,accession,filed,value,form,label) VALUES($1,$2,'us-gaap',$3,$4,$5,'USD',$6,$7,$8,'10-K',$3)")
+    diesel::sql_query("INSERT INTO company_fact_concepts(taxonomy,concept,label) VALUES('us-gaap',$1,$1) ON CONFLICT DO NOTHING")
+      .bind::<Text,_>(concept).execute(&mut conn).await.unwrap();
+    diesel::sql_query("INSERT INTO company_facts(id,cik,taxonomy,concept,period_start,period_end,unit,accession,filed,value,form) VALUES($1,$2,'us-gaap',$3,$4,$5,'USD',$6,$7,$8,'10-K')")
       .bind::<SqlUuid,_>(fact.id).bind::<Text,_>(cik).bind::<Text,_>(concept).bind::<Nullable<Date>,_>(start.map(|s|s.parse::<NaiveDate>().unwrap())).bind::<Date,_>(end.parse::<NaiveDate>().unwrap()).bind::<Text,_>(accession).bind::<Date,_>(filed.parse::<NaiveDate>().unwrap()).bind::<Numeric,_>(&fact.value).execute(&mut conn).await.unwrap();
     fact
 }

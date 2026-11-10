@@ -15,6 +15,10 @@ const PROVENANCE_UP: &str =
     include_str!("../../../migrations/data/2026-11-01-000300_company_fact_run_provenance/up.sql");
 const PROVENANCE_DOWN: &str =
     include_str!("../../../migrations/data/2026-11-01-000300_company_fact_run_provenance/down.sql");
+const CONFLICTS_UP: &str =
+    include_str!("../../../migrations/data/2026-11-10-000100_company_fact_conflicts/up.sql");
+const CONFLICTS_DOWN: &str =
+    include_str!("../../../migrations/data/2026-11-10-000100_company_fact_conflicts/down.sql");
 
 #[derive(QueryableByName)]
 struct Value {
@@ -116,4 +120,55 @@ async fn companyfacts_migration_preserves_precision_and_revision_boundaries() {
     conn.batch_execute(DOWN).unwrap();
     conn.batch_execute(UP).unwrap();
     conn.batch_execute(PROVENANCE_UP).unwrap();
+
+    // ECO-890: labels move to company_fact_concepts, conflicts no longer fail a run and
+    // archive staleness is a recorded attribute that must match the receipts.
+    diesel::sql_query(
+        "INSERT INTO company_facts (id,cik,taxonomy,concept,period_end,unit,accession,filed,value,form,label,description)
+         VALUES ('00000000-0000-0000-0000-000000000009','0000320193','us-gaap','Revenue','2023-12-31','USD',
+                 '0000320193-24-000001','2024-02-01',1,'10-K','Revenue','Revenue from customers')",
+    )
+    .execute(&mut conn)
+    .unwrap();
+    conn.batch_execute(CONFLICTS_UP).unwrap();
+    assert_eq!(
+        diesel::sql_query("SELECT count(*)::numeric AS value FROM company_fact_concepts WHERE label='Revenue' AND description='Revenue from customers'")
+            .get_result::<Value>(&mut conn).unwrap().value,
+        BigDecimal::from(1)
+    );
+    assert!(diesel::sql_query("SELECT label FROM company_facts")
+        .execute(&mut conn)
+        .is_err());
+    for invalid in [
+        "INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode,conflicts_count) VALUES (gen_random_uuid(),'succeeded_with_conflicts',now(),'staged',0)",
+        "INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode,conflicts_count) VALUES (gen_random_uuid(),'succeeded',now(),'staged',3)",
+        "INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode,companyfacts_last_modified,submissions_last_modified) VALUES (gen_random_uuid(),'succeeded',now(),'downloaded',now()-interval '25 hours',now())",
+        "INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode,companyfacts_last_modified,submissions_last_modified,archive_stale) VALUES (gen_random_uuid(),'succeeded',now(),'downloaded',now(),now(),true)",
+        "INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode,archive_stale) VALUES (gen_random_uuid(),'succeeded',now(),'staged',true)",
+    ] {
+        assert!(diesel::sql_query(invalid).execute(&mut conn).is_err(), "{invalid}");
+    }
+    for valid in [
+        "INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode,conflicts_count) VALUES (gen_random_uuid(),'succeeded_with_conflicts',now(),'staged',3)",
+        "INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode,conflicts_count) VALUES (gen_random_uuid(),'failed',now(),'staged',3)",
+        "INSERT INTO company_fact_load_runs (id,status,completed_at,source_mode,companyfacts_last_modified,submissions_last_modified,archive_stale) VALUES (gen_random_uuid(),'succeeded',now(),'downloaded',now()-interval '25 hours',now(),true)",
+    ] {
+        diesel::sql_query(valid).execute(&mut conn).unwrap();
+    }
+    // Rollback refuses to discard a run state the old schema cannot hold.
+    assert!(conn.batch_execute(CONFLICTS_DOWN).is_err());
+    diesel::sql_query("DELETE FROM company_fact_load_runs WHERE archive_stale OR status='succeeded_with_conflicts'")
+        .execute(&mut conn)
+        .unwrap();
+    conn.batch_execute(CONFLICTS_DOWN).unwrap();
+    assert_eq!(
+        diesel::sql_query(
+            "SELECT count(*)::numeric AS value FROM company_facts WHERE label='Revenue'"
+        )
+        .get_result::<Value>(&mut conn)
+        .unwrap()
+        .value,
+        BigDecimal::from(1)
+    );
+    conn.batch_execute(CONFLICTS_UP).unwrap();
 }

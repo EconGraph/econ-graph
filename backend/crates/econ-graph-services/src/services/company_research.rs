@@ -207,10 +207,10 @@ pub async fn company_facts(
         .await
         .map_err(|e| AppError::DatabasePool(e.to_string()))?;
     let rows = diesel::sql_query("WITH ranked AS (
-        SELECT cf.*, ROW_NUMBER() OVER (PARTITION BY cik,taxonomy,concept,unit,period_start,period_end
+        SELECT cf.*, cc.label, cc.description, ROW_NUMBER() OVER (PARTITION BY cik,taxonomy,concept,unit,period_start,period_end
           ORDER BY CASE WHEN $9 THEN filed END ASC, CASE WHEN NOT $9 THEN filed END DESC,
                    CASE WHEN $9 THEN accession END ASC, CASE WHEN NOT $9 THEN accession END DESC, id) AS revision_rank
-        FROM company_facts cf WHERE cik=$1
+        FROM company_facts cf LEFT JOIN company_fact_concepts cc USING (taxonomy,concept) WHERE cik=$1
           AND ($2::text IS NULL OR taxonomy=$2) AND ($3::text IS NULL OR concept=$3)
           AND ($4::text IS NULL OR unit=$4) AND ($5::date IS NULL OR period_start=$5)
           AND ($6::date IS NULL OR period_end=$6) AND (NOT $7 OR period_start IS NULL)
@@ -232,7 +232,7 @@ pub async fn calculation_facts(pool: &DatabasePool, cik: &str) -> AppResult<Vec<
         .get()
         .await
         .map_err(|e| AppError::DatabasePool(e.to_string()))?;
-    let rows=diesel::sql_query("SELECT id,cik,taxonomy,concept,period_start,period_end,unit,accession,filed,value,form,fiscal_year,fiscal_period,frame,label,description FROM company_facts WHERE cik=$1 ORDER BY period_end,taxonomy,concept,unit,period_start,filed,accession,id LIMIT 100001")
+    let rows=diesel::sql_query("SELECT id,cik,taxonomy,concept,period_start,period_end,unit,accession,filed,value,form,fiscal_year,fiscal_period,frame,label,description FROM company_facts LEFT JOIN company_fact_concepts USING (taxonomy,concept) WHERE cik=$1 ORDER BY period_end,taxonomy,concept,unit,period_start,filed,accession,id LIMIT 100001")
       .bind::<Text,_>(cik).load::<FactRow>(&mut conn).await?;
     if rows.len() > 100_000 {
         return Err(AppError::Validation(
@@ -277,7 +277,7 @@ pub async fn ratio_facts(
         .get()
         .await
         .map_err(|e| AppError::DatabasePool(e.to_string()))?;
-    let rows=diesel::sql_query("SELECT id,cik,taxonomy,concept,period_start,period_end,unit,accession,filed,value,form,fiscal_year,fiscal_period,frame,label,description FROM company_facts
+    let rows=diesel::sql_query("SELECT id,cik,taxonomy,concept,period_start,period_end,unit,accession,filed,value,form,fiscal_year,fiscal_period,frame,label,description FROM company_facts LEFT JOIN company_fact_concepts USING (taxonomy,concept)
         WHERE cik=$1 AND taxonomy=ANY($2) AND concept=ANY($3)
           AND (($4 AND period_start IS NULL AND period_end=$6)
             OR (NOT $4 AND period_start IS NOT NULL AND period_start<=$6 AND period_end BETWEEN $5 AND $6))
