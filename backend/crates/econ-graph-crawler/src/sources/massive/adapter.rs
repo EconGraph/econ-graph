@@ -2,7 +2,7 @@
 // Licensed under the Microsoft Reference Source License (MS-RSL).
 // See LICENSE file for complete terms and conditions.
 
-//! The Massive [`SourceAdapter`](crate::SourceAdapter) implementation: unadjusted daily bars of
+//! The Massive [`SourceAdapter`] implementation: unadjusted daily bars of
 //! the tickers in the symbol table, from Massive, a market data vendor.
 //!
 //! # Key
