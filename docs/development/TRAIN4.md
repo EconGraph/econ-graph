@@ -58,7 +58,22 @@ hosts. No daemon-wide cleanup or deletion of unrelated resources is permitted.
 Rendering, schema validation, offline guards and bounded compatibility tests do
 not establish live Talos/KVM rebuild and upgrade behavior, policy enforcement,
 CNPG backup/WAL/PITR, node drain during release E2E, or production capacity and
-recovery objectives. Those remain explicit release gates. Persistent host-store
-service form and production targets still require recorded operator decisions;
-missing evidence must remain visible. No production cutover, kind retirement or
-destructive history retirement is authorized by these packages.
+recovery objectives. Those remain explicit release gates, one Linear ticket each
+under [ECO-884](https://linear.app/econgraph/issue/ECO-884), with the command,
+pass threshold and evidence location for each; a gate passes only when its
+evidence is linked on its ticket. The gates run on the scratch Talos cluster
+built in [ECO-902](https://linear.app/econgraph/issue/ECO-902):
+
+1. Real Talos boot and fit test: [ECO-903](https://linear.app/econgraph/issue/ECO-903).
+2. CNPG operator and backup plugin startup: [ECO-904](https://linear.app/econgraph/issue/ECO-904).
+3. Base backup, WAL archive and PITR: [ECO-905](https://linear.app/econgraph/issue/ECO-905).
+4. Source-to-copy migration integrity: [ECO-906](https://linear.app/econgraph/issue/ECO-906).
+5. One-node drain during the release E2E: [ECO-907](https://linear.app/econgraph/issue/ECO-907).
+6. Live alert delivery: [ECO-908](https://linear.app/econgraph/issue/ECO-908).
+7. Resource measurements: [ECO-909](https://linear.app/econgraph/issue/ECO-909).
+8. Private-CA integration: [ECO-910](https://linear.app/econgraph/issue/ECO-910).
+9. Sustained backup history: [ECO-911](https://linear.app/econgraph/issue/ECO-911).
+
+Persistent host-store service form and production targets still require recorded
+operator decisions; missing evidence must remain visible. No production cutover,
+kind retirement or destructive history retirement is authorized by these packages.

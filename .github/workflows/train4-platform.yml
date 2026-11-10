@@ -46,6 +46,8 @@ jobs:
         run: python3 scripts/platform/test_platform.py
       - name: Check platform Grafana dashboards
         run: python3 scripts/platform/test_dashboards.py
+      - name: Check release-gate threshold checks and probe
+        run: python3 scripts/platform/test_release_gates.py
       - name: Validate actual pinned charts and platform resources
         run: python3 scripts/platform/validate.py --fetch --helm helm --kubectl kubectl --cache "$RUNNER_TEMP/train4-platform-assets"
       - name: Check rendered Alertmanager config and receiver routes
