@@ -30,13 +30,14 @@ def inventory(plane):
 
     # A later migration may drop a table an earlier one created (e.g. the global-analysis tables,
     # ECO-898). Replay creates and drops in migration order, so a dropped table leaves the
-    # inventory and a table created again afterwards comes back.
+    # inventory and a table created again afterwards comes back. The CREATE pattern is the one
+    # used before drops were followed, so with no DROP TABLE the result is unchanged.
     live = {}
-    for statement, name in re.findall(r'^(CREATE TABLE|DROP TABLE(?: IF EXISTS)?) (\w+)', every, re.M):
-        if statement == 'CREATE TABLE':
-            live[name] = None
+    for create, drop in re.findall(r'^(?:CREATE TABLE (\w+) |DROP TABLE (?:IF EXISTS )?(\w+))', every, re.M):
+        if create:
+            live[create] = None
         else:
-            live.pop(name, None)
+            live.pop(drop, None)
     return (list(live),
             created(r'^CREATE TYPE (\w+) AS ENUM'),
             {p.name.split('_', 1)[0].replace('-', '') for p in directory.iterdir() if p.is_dir()},
