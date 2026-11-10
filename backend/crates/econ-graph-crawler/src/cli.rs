@@ -383,6 +383,7 @@ pub fn api_key_env_var(source: SourceId) -> Option<&'static str> {
         SourceId::Bea => Some("BEA_API_KEY"),
         SourceId::Census => Some("CENSUS_API_KEY"),
         SourceId::Wto => Some("WTO_API_KEY"),
+        SourceId::Massive => Some("MASSIVE_API_KEY"),
         _ => None,
     }
 }

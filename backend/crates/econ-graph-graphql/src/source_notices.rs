@@ -94,7 +94,8 @@ pub fn notice(source: SourceId) -> Option<SourceNotice> {
         | SourceId::UnStats
         | SourceId::Ilo
         | SourceId::Wto
-        | SourceId::Sec => return None,
+        | SourceId::Sec
+        | SourceId::Massive => return None,
     };
     Some(SourceNotice {
         citation: citation.map(str::to_string),

@@ -588,6 +588,115 @@ pub static CRAWLER_UNITS_METRICS: Lazy<CrawlerUnitsMetrics> = Lazy::new(|| {
     CrawlerUnitsMetrics::new(&DEFAULT_REGISTRY).expect("Failed to initialize crawler units metrics")
 });
 
+/// Source health and backfill progress for keyed, licensed sources (first used by Massive, a
+/// market data vendor). `source` is the source id (`"MASSIVE"`, ...); `outcome` is `success` or
+/// `failure`.
+///
+/// - `crawler_source_auth_rejections_total{source}`: requests the source refused with 401 or
+///   403, meaning the API key is wrong or the subscription has lapsed.
+/// - `crawler_source_latest_observation_timestamp_seconds{source}`: Unix time of the newest
+///   stored observation date (for daily prices, the newest stored trading day).
+/// - `crawler_backfill_days_remaining{source}`: days the backfill has still to load.
+/// - `crawler_backfill_runs_total{source,outcome}`: finished backfill runs.
+pub struct CrawlerSourceHealthMetrics {
+    /// Requests refused with 401 or 403, by source.
+    pub auth_rejections_total: IntCounterVec,
+    /// Unix time of the newest stored observation date, by source.
+    pub latest_observation_timestamp_seconds: GaugeVec,
+    /// Days the backfill has still to load, by source.
+    pub backfill_days_remaining: IntGaugeVec,
+    /// Finished backfill runs, by source and outcome.
+    pub backfill_runs_total: IntCounterVec,
+}
+
+impl CrawlerSourceHealthMetrics {
+    /// Creates the source health metrics and registers them with `registry`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any metric fails to register with the provided registry
+    pub fn new(registry: &Registry) -> anyhow::Result<Self> {
+        let auth_rejections_total = IntCounterVec::new(
+            Opts::new(
+                "crawler_source_auth_rejections_total",
+                "Requests the source refused with 401 or 403 (bad API key or lapsed \
+                 subscription), by source",
+            ),
+            &["source"],
+        )?;
+        let latest_observation_timestamp_seconds = GaugeVec::new(
+            Opts::new(
+                "crawler_source_latest_observation_timestamp_seconds",
+                "Unix time of the newest stored observation date, by source",
+            ),
+            &["source"],
+        )?;
+        let backfill_days_remaining = IntGaugeVec::new(
+            Opts::new(
+                "crawler_backfill_days_remaining",
+                "Days the backfill has still to load, by source",
+            ),
+            &["source"],
+        )?;
+        let backfill_runs_total = IntCounterVec::new(
+            Opts::new(
+                "crawler_backfill_runs_total",
+                "Finished backfill runs, by source and outcome (success or failure)",
+            ),
+            &["source", "outcome"],
+        )?;
+        registry.register(Box::new(auth_rejections_total.clone()))?;
+        registry.register(Box::new(latest_observation_timestamp_seconds.clone()))?;
+        registry.register(Box::new(backfill_days_remaining.clone()))?;
+        registry.register(Box::new(backfill_runs_total.clone()))?;
+        Ok(Self {
+            auth_rejections_total,
+            latest_observation_timestamp_seconds,
+            backfill_days_remaining,
+            backfill_runs_total,
+        })
+    }
+
+    /// Counts one request `source` refused with 401 or 403.
+    pub fn record_auth_rejection(&self, source: &str) {
+        self.auth_rejections_total
+            .with_label_values(&[source])
+            .inc();
+    }
+
+    /// Sets the newest stored observation date for `source`, as Unix seconds.
+    pub fn set_latest_observation(&self, source: &str, unix_seconds: f64) {
+        self.latest_observation_timestamp_seconds
+            .with_label_values(&[source])
+            .set(unix_seconds);
+    }
+
+    /// Sets the days `source`'s backfill has still to load.
+    pub fn set_backfill_days_remaining(&self, source: &str, days: i64) {
+        self.backfill_days_remaining
+            .with_label_values(&[source])
+            .set(days);
+    }
+
+    /// Counts one finished backfill run for `source`.
+    pub fn record_backfill_run(&self, source: &str, success: bool) {
+        let outcome = if success { "success" } else { "failure" };
+        self.backfill_runs_total
+            .with_label_values(&[source, outcome])
+            .inc();
+    }
+}
+
+/// Global source health metrics, registered with [`DEFAULT_REGISTRY`].
+///
+/// # Panics
+///
+/// Panics if the metrics fail to initialize during lazy initialization
+pub static CRAWLER_SOURCE_HEALTH_METRICS: Lazy<CrawlerSourceHealthMetrics> = Lazy::new(|| {
+    CrawlerSourceHealthMetrics::new(&DEFAULT_REGISTRY)
+        .expect("Failed to initialize crawler source health metrics")
+});
+
 /// Catalog safety guards and retained series lifecycle. Labels are bounded source codes,
 /// lifecycle statuses, guard reasons and configured selection rules, never upstream series
 /// identifiers.
@@ -791,6 +900,43 @@ mod queue_metrics_tests {
             .collect();
         assert!(names.contains(&"crawler_jobs_total".to_string()));
         assert!(names.contains(&"crawler_queue_items".to_string()));
+    }
+
+    /// Registers the source health families and records through each helper.
+    #[test]
+    fn source_health_metrics_register_and_record() {
+        let registry = Registry::new();
+        let m = CrawlerSourceHealthMetrics::new(&registry).unwrap();
+        m.record_auth_rejection("MASSIVE");
+        m.set_latest_observation("MASSIVE", 1.0);
+        m.set_backfill_days_remaining("MASSIVE", 5);
+        m.record_backfill_run("MASSIVE", true);
+        m.record_backfill_run("MASSIVE", false);
+        assert_eq!(
+            m.auth_rejections_total
+                .with_label_values(&["MASSIVE"])
+                .get(),
+            1
+        );
+        assert_eq!(
+            m.backfill_runs_total
+                .with_label_values(&["MASSIVE", "failure"])
+                .get(),
+            1
+        );
+        let names: Vec<String> = registry
+            .gather()
+            .iter()
+            .map(|f| f.name().to_string())
+            .collect();
+        for n in [
+            "crawler_source_auth_rejections_total",
+            "crawler_source_latest_observation_timestamp_seconds",
+            "crawler_backfill_days_remaining",
+            "crawler_backfill_runs_total",
+        ] {
+            assert!(names.contains(&n.to_string()), "{n} missing: {names:?}");
+        }
     }
 
     /// Registers each per-source coverage family exposed by the worker.

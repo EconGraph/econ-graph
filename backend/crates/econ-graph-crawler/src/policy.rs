@@ -64,6 +64,10 @@ impl SourcePolicy {
     /// for the time-series data endpoints (`/data`, `/data_count`). Every WTO request is held to
     /// that strictest limit, 1/s with no burst and one at a time, which also keeps the hourly
     /// total at 3,600. The key is required: the API answers 401 without one.
+    ///
+    /// Massive, a market data vendor: its lowest plan allows 5 calls/minute, so every request
+    /// is held to that, one at a time. The key is required. Prices are refreshed daily, after
+    /// each trading day, and the lookback re-fetches the last week for late corrections.
     pub fn default_for(source: SourceId) -> Self {
         let base = SourcePolicy {
             requests_per_second: 1.0,
@@ -121,6 +125,14 @@ impl SourcePolicy {
                 burst: 1,
                 max_concurrency: 1,
                 needs_api_key: true,
+                ..base
+            },
+            SourceId::Massive => SourcePolicy {
+                requests_per_second: 5.0 / 60.0,
+                burst: 1,
+                max_concurrency: 1,
+                needs_api_key: true,
+                revision_lookback: DAY * 7,
                 ..base
             },
             _ => base,
@@ -238,6 +250,7 @@ mod tests {
         assert!(SourcePolicy::default_for(SourceId::Bea).needs_api_key);
         assert!(SourcePolicy::default_for(SourceId::Census).needs_api_key);
         assert!(SourcePolicy::default_for(SourceId::Wto).needs_api_key);
+        assert!(SourcePolicy::default_for(SourceId::Massive).needs_api_key);
         assert!(!SourcePolicy::default_for(SourceId::Bls).needs_api_key);
     }
 
