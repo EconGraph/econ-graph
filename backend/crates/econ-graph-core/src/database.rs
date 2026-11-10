@@ -888,7 +888,7 @@ mod tests {
     }
 
     /// The tables of each set, as listed in docs/development/MIGRATIONS.md.
-    const DATA_TABLES: [&str; 39] = [
+    const DATA_TABLES: [&str; 41] = [
         "data_sources",
         "datasets",
         "economic_series",
@@ -900,6 +900,8 @@ mod tests {
         "series_fetch_validators",
         "iceberg_catalog",
         "iceberg_commits",
+        "massive_backfill_runs",
+        "massive_backfill_units",
         "timeseries_recovery_state",
         "timeseries_recovery_transitions",
         "series_lifecycle",

@@ -1116,6 +1116,27 @@ diesel::table! {
 }
 
 diesel::table! {
+    massive_backfill_runs (id) {
+        id -> Uuid,
+        window_start -> Date,
+        window_end -> Date,
+        mode -> Text,
+        created_at -> Timestamptz,
+        completed_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    massive_backfill_units (run_id, unit) {
+        run_id -> Uuid,
+        unit -> Text,
+        rows_written -> Int4,
+        commit_id -> Nullable<Uuid>,
+        completed_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     timeseries_recovery_state (singleton) {
         singleton -> Bool,
         target_id -> Uuid,
@@ -1162,6 +1183,8 @@ diesel::joinable!(global_economic_indicators -> countries (country_id));
 diesel::joinable!(global_indicator_data -> global_economic_indicators (indicator_id));
 diesel::joinable!(iceberg_catalog -> datasets (dataset_id));
 diesel::joinable!(iceberg_commits -> datasets (dataset_id));
+diesel::joinable!(massive_backfill_units -> iceberg_commits (commit_id));
+diesel::joinable!(massive_backfill_units -> massive_backfill_runs (run_id));
 diesel::joinable!(reference_file_cache -> data_sources (source_id));
 diesel::joinable!(series_fetch_validators -> economic_series (series_id));
 diesel::joinable!(series_lifecycle -> data_sources (source_id));
@@ -1176,6 +1199,8 @@ diesel::joinable!(xbrl_taxonomy_concepts -> xbrl_taxonomy_schemas (schema_id));
 diesel::joinable!(xbrl_taxonomy_linkbases -> xbrl_taxonomy_schemas (schema_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    massive_backfill_runs,
+    massive_backfill_units,
     timeseries_recovery_transitions,
     timeseries_recovery_state,
     iceberg_commits,

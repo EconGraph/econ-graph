@@ -8,6 +8,7 @@ resources:
 - disruption-budgets.yaml
 - network-policies.yaml
 - crawler.yaml
+- massive-backfill.yaml
 - api-egress.yaml
 namespace: econ-graph
 patches:

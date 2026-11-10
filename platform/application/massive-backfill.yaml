@@ -1,0 +1,176 @@
+# Massive (market data vendor) historical backfill (ECO-214): `crawler massive-backfill`.
+# Manual only. The CronJob is suspended and never runs on its schedule; an operator starts a
+# run after the disk estimate is approved:
+#
+#   kubectl -n econ-graph create job --from=cronjob/massive-backfill massive-backfill-$(date +%Y%m%d%H%M)
+#
+# Rerunning after a failure resumes the unfinished run without writing anything twice. The
+# pod serves /metrics on 9102 (crawler_backfill_days_remaining, crawler_backfill_runs_total)
+# and keeps serving for two minutes after the run so the outcome is scraped. Keep the
+# massive-backfill- Job name prefix: the MassiveBackfillFailed alert matches on it.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: massive-backfill
+  namespace: econ-graph
+  labels:
+    app: massive-backfill
+    component: crawler
+spec:
+  suspend: true
+  schedule: '0 0 31 2 *'
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        app: massive-backfill
+        component: crawler
+    spec:
+      # A failed run is rerun by hand after a look at its log: progress is durable.
+      backoffLimit: 0
+      activeDeadlineSeconds: 86400
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app: massive-backfill
+            component: crawler
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          # On SIGTERM (deadline, eviction) the run counts a failure and serves it for the
+          # 120 s linger before exiting.
+          terminationGracePeriodSeconds: 150
+          containers:
+          - name: massive-backfill
+            image: ${CRAWLER_IMAGE}
+            imagePullPolicy: IfNotPresent
+            command:
+            - /app/crawler
+            - massive-backfill
+            - --years
+            - '5'
+            - --requests-per-second
+            - '10'
+            - --metrics-linger-secs
+            - '120'
+            ports:
+            - containerPort: 9102
+              name: metrics
+              protocol: TCP
+            env:
+            - name: DATA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: econ-graph-secrets
+                  key: data-database-url
+            - name: RUST_LOG
+              value: info
+            - name: CRAWLER_METRICS_ADDR
+              value: 0.0.0.0:9102
+            # Optional, so a missing key fails the run at once with a clear message and a
+            # failure outcome, instead of a pod stuck in CreateContainerConfigError.
+            - name: MASSIVE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: crawler-api-keys
+                  key: massive-api-key
+                  optional: true
+            - name: TIMESERIES_BACKEND
+              value: iceberg
+            # ICEBERG_WAREHOUSE, TIMESERIES_TARGET_ID and the object store credentials.
+            envFrom:
+            - secretRef:
+                name: iceberg-maintenance
+            resources:
+              requests:
+                memory: 256Mi
+                cpu: 100m
+              limits:
+                memory: 1Gi
+                cpu: '1'
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                - ALL
+              seccompProfile:
+                type: RuntimeDefault
+          securityContext:
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-massive-backfill
+spec:
+  podSelector:
+    matchLabels:
+      app: massive-backfill
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          cnpg.io/cluster: econgraph-data
+    ports:
+    - port: 5432
+      protocol: TCP
+  - to:
+    - ipBlock:
+        cidr: ${OBJECT_STORE_CIDR}
+    ports:
+    - port: ${OBJECT_STORE_PORT}
+      protocol: TCP
+  # api.massive.com over HTTPS.
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 169.254.0.0/16
+        - 127.0.0.0/8
+    ports:
+    - port: 443
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metrics-massive-backfill
+spec:
+  podSelector:
+    matchLabels:
+      app: massive-backfill
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - port: 9102
+      protocol: TCP
