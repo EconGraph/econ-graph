@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { auditPage } from './audit';
 import { MemoryRouter } from 'react-router-dom';
@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from '../../App';
 
 describe('App accessibility', () => {
-  it.each(['/about', '/privacy', '/missing-page'])(
+  it.each(['/about', '/privacy', '/terms', '/missing-page'])(
     'audits the real app shell on %s',
     async path => {
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -21,6 +21,13 @@ describe('App accessibility', () => {
       try {
         expect(await screen.findByRole('main')).toBeVisible();
         expect(screen.getAllByRole('heading').length).toBeGreaterThan(0);
+        // ECO-881: the shared footer links to the privacy policy and the terms on every page.
+        const footer = within(screen.getByRole('contentinfo'));
+        expect(footer.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute(
+          'href',
+          '/privacy'
+        );
+        expect(footer.getByRole('link', { name: 'Terms of Use' })).toHaveAttribute('href', '/terms');
         await auditPage(path.slice(1));
       } finally {
         unmount();

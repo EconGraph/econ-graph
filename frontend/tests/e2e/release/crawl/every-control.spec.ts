@@ -56,6 +56,7 @@ const ROUTE_URLS: Record<string, (request: APIRequestContext) => Promise<string[
   '/about': async () => ['/about'],
   '/global': async () => ['/global'],
   '/privacy': async () => ['/privacy'],
+  '/terms': async () => ['/terms'],
   // Behind the build_canary flag (docs/build-flags.md), off in release: the route isn't
   // rendered, so this crawls whatever the app shows instead (the catch-all), which is the
   // point — a flagged-off route should 404 cleanly, not break.
@@ -71,7 +72,7 @@ const ROUTE_URLS: Record<string, (request: APIRequestContext) => Promise<string[
 };
 
 /**
- * The header and sidebar, which every route shares; crawled once, from the dashboard. Distinct
+ * The header, sidebar and footer, which every route shares; crawled once, from the dashboard. Distinct
  * from the `'*'` route path (App.tsx's catch-all, rendering NotFound) so an allowlist entry for
  * one is never mistaken for the other.
  */

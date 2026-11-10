@@ -18,7 +18,7 @@ export interface Control {
   name: string;
   /** Position among the visible controls of this role, to find it again after a reload. */
   index: number;
-  /** In the header or sidebar (outside `main`), which every route shares. */
+  /** In the header, sidebar or footer (outside `main`), which every route shares. */
   inLayout: boolean;
   /** For a link: its resolved href. */
   href?: string;
@@ -133,10 +133,12 @@ export async function observableState(page: Page): Promise<string> {
       '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="alert"]'
     ).length;
     const style = getComputedStyle(document.body);
-    const geometry = Array.from(document.querySelectorAll('header, nav, main, aside')).map(el => {
-      const r = el.getBoundingClientRect();
-      return [r.left, r.top, r.width, r.height].map(Math.round).join(',');
-    });
+    const geometry = Array.from(document.querySelectorAll('header, nav, main, aside, footer')).map(
+      el => {
+        const r = el.getBoundingClientRect();
+        return [r.left, r.top, r.width, r.height].map(Math.round).join(',');
+      }
+    );
     return JSON.stringify([
       location.href,
       document.title,

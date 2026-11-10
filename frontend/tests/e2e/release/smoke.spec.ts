@@ -40,6 +40,40 @@ test.describe('release smoke', () => {
     expect(response.status()).toBe(404);
   });
 
+  test('every page footer links to the Terms of Use, and the link resolves', async ({
+    page,
+    request,
+  }) => {
+    // ECO-881: the terms pass the public sources' conditions on, so every page must reach them.
+    const pages = [
+      '/',
+      '/explore',
+      `/series/${await seededSeriesId(request, SEEDED.fhfaHpi)}`,
+      '/sources',
+      '/global',
+      '/about',
+      '/privacy',
+      '/terms',
+      '/this-page-does-not-exist',
+    ];
+    for (const path of pages) {
+      await page.goto(path);
+      const terms = page.getByRole('contentinfo').getByRole('link', { name: 'Terms of Use' });
+      await expect(terms, `footer Terms of Use link on ${path}`).toBeVisible();
+      await expect(terms).toHaveAttribute('href', '/terms');
+    }
+
+    await page.goto('/');
+    await page.getByRole('contentinfo').getByRole('link', { name: 'Terms of Use' }).click();
+    await expect(page).toHaveURL(/\/terms$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Terms of Use' })).toBeVisible();
+
+    // Loaded directly too, as a link shared from outside the app would be.
+    const response = await page.goto('/terms');
+    expect(response?.ok()).toBe(true);
+    await expect(page.getByRole('heading', { level: 1, name: 'Terms of Use' })).toBeVisible();
+  });
+
   test('explore search finds a seeded series', async ({ page }) => {
     await page.goto('/explore');
     // The page's own search box, not the header's ("Search economic series...").
