@@ -374,7 +374,7 @@ jobs:
     # manifests through render-public-host.py and lib/public-host.sh; check the
     # rendering against the manifests, the library and the cut-over's rollback
     # NetworkPolicy step against a stub kubectl, and check-public-site.sh's main-host
-    # redirect and CORS checks and restart-k8s-rollout.sh's URL summary against a stub
+    # redirect and CORS checks and lib/public-host.sh's URL summary against a stub
     # curl.
     - name: Check the public-host rendering
       run: |
@@ -445,7 +445,7 @@ jobs:
     - name: Check that the deploy scripts default to the kind cluster's kubectl
       run: scripts/deploy/test-kind-kubectl-default.sh
 
-    # Both deployment entrypoints build dashboards in their own mktemp file under TMPDIR
+    # deploy.sh builds dashboards in its own mktemp file under TMPDIR
     # and clean it up on exit, including when kubectl apply fails.
     - name: Check deployment dashboard temporary files
       run: |

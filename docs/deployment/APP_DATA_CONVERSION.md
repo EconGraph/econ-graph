@@ -16,7 +16,7 @@ can also be run on its own against any two libpq services.
 - **Set `APP_DATABASE` only while `app-database-url` is missing, or to change it.** A
   cluster deployed from a release before the app database existed has no
   `app-database-url` in `econ-graph-secrets`, and every script that runs
-  `create-secrets.sh` (`deploy.sh`, `release-deploy.sh`, `restart-k8s-rollout.sh`,
+  `create-secrets.sh` (`deploy.sh`, `release-deploy.sh`,
   `set-crawler-keys.sh`, `restore-kind-databases.sh`) refuses it until
   `APP_DATABASE=shared` is given. Once the key is written, leave `APP_DATABASE` unset: the
   key is kept (a value equal to it counts as kept). Only a cluster without

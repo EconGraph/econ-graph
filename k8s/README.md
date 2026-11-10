@@ -285,8 +285,8 @@ connection's own.
 
 **`PUBLIC_HOST` is the base domain; `MAIN_HOST` is the main address.** With
 `PUBLIC_HOST=econgraph.com`, `MAIN_HOST` defaults to `www.econgraph.com`. Set
-`MAIN_HOST=econgraph.com` explicitly to use the apex instead. `deploy.sh` and
-`restart-k8s-rollout.sh` apply these settings through
+`MAIN_HOST=econgraph.com` explicitly to use the apex instead. `deploy.sh` applies
+these settings through
 `scripts/deploy/lib/public-host.sh` and `scripts/deploy/render-public-host.py`.
 The committed manifests stay localhost-only. `http://localhost` still serves the app
 on the host, but a public deployment accepts sign-in redirects only on its main HTTPS
@@ -465,8 +465,8 @@ How the scripts use the marker:
 
 - `k8s/manifests/cloudflared.yaml` is committed with `replicas: 0`, so applying it, or all
   of `k8s/manifests`, never starts the connector, and on production stops it: run
-  `deploy.sh` or `restart-k8s-rollout.sh` instead, or leave `cloudflared.yaml` out.
-  `apply_cloudflared` in `scripts/deploy/lib/public-host.sh`, used by both scripts, is the
+  `deploy.sh` instead, or leave `cloudflared.yaml` out.
+  `apply_cloudflared` in `scripts/deploy/lib/public-host.sh`, used by `deploy.sh`, is the
   only thing that scales it up, and only on a marked cluster with a `PUBLIC_HOST` and the
   token. On a cluster that is not marked it applies it with 0 replicas and says why. The
   alert `CloudflareTunnelStoppedOnProduction` fires when a marked cluster's cloudflared asks
@@ -476,13 +476,11 @@ How the scripts use the marker:
   running there keeps running until `--unmark` or a deploy with `PUBLIC_HOST=` (empty).
 - `create-secrets.sh` refuses to write `CLOUDFLARE_TUNNEL_TOKEN` (or
   `--prompt-tunnel-token`, before it prompts) into a cluster that is not marked.
-- The check and every kubectl call of `deploy.sh`, `restart-k8s-rollout.sh`, the deploy
-  library and `create-secrets.sh` use the same binary, `${KUBECTL:-kubectl}`, on one
-  context: `deploy.sh` and `set-crawler-keys.sh` set `KUBECTL` to the kind cluster's own
-  kubectl (`scripts/deploy/lib/kind-env.sh`) and pin `kind-econ-graph`;
-  `restart-k8s-rollout.sh` uses plain `kubectl` with the kubeconfig it writes from
-  MicroK8s and pins `microk8s`. Each replaces any `CLUSTER_ROLE_CONTEXT` in the
-  environment, and scripts they start inherit the pin; `create-secrets.sh` follows an
+- The check and every kubectl call of `deploy.sh`, the deploy library and
+  `create-secrets.sh` use the same binary, `${KUBECTL:-kubectl}`, on one context:
+  `deploy.sh` and `set-crawler-keys.sh` set `KUBECTL` to the kind cluster's own kubectl
+  (`scripts/deploy/lib/kind-env.sh`) and pin `kind-econ-graph`. Each replaces any
+  `CLUSTER_ROLE_CONTEXT` in the environment, and scripts they start inherit the pin; `create-secrets.sh` follows an
   inherited one only while it is its kubectl's current context. So the check and the
   writes it allows cannot reach different clusters.
 - If the cluster cannot be asked (kube-system or the marker unreadable), it counts as not

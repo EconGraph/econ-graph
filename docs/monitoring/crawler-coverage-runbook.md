@@ -62,7 +62,7 @@ sets the mode to 0.
 
 The alerts are in the [crawler rules ConfigMap](../../k8s/monitoring/prometheus-rules-crawler.yaml),
 group `crawler.coverage`. Prometheus mounts it at `/etc/prometheus/rules`;
-[`restart-k8s-rollout.sh`](../../scripts/deploy/restart-k8s-rollout.sh) applies it.
+[`deploy.sh`](../../scripts/deploy/deploy.sh) applies it.
 No Alertmanager is deployed, so firing alerts are visible in Prometheus without notifications: open `/alerts` on the Prometheus service
 (`kubectl -n econ-graph port-forward svc/prometheus-service 9090`) or query
 `ALERTS{alertname="CrawlerCrawlFailed"}`.

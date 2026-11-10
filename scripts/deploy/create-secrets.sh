@@ -226,8 +226,8 @@ KUBECTL="${KUBECTL:-kubectl}"
 # --context=NAME pins that context, replacing an inherited one (as
 # setup-letsencrypt-cloudflare.sh --context does, without switching contexts).
 # Otherwise a CLUSTER_ROLE_CONTEXT from the environment is followed only while
-# it is the current context of $KUBECTL, as when deploy.sh,
-# restart-k8s-rollout.sh or set-crawler-keys.sh run this right after switching
+# it is the current context of $KUBECTL, as when deploy.sh
+# or set-crawler-keys.sh run this right after switching
 # to it. A stray one would send the check and the writes to a context the
 # selected kubectl is not on.
 if [[ -n "$CONTEXT_ARG" ]]; then

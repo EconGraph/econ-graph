@@ -32,11 +32,7 @@ This guide provides comprehensive instructions for deploying the EconGraph appli
 
 For the maintained Kind setup, follow [k8s/README.md](../../k8s/README.md).
 
-The existing `scripts/deploy/restart-k8s-rollout.sh` is not a supported fresh
-MicroK8s bootstrap: it calls `build-images.sh`, which imports images into a Kind
-cluster, then expects an admin image that the build script currently excludes.
-Do not use it as a one-command MicroK8s deployment. The manual steps below show
-how to build and import images for MicroK8s without that script. The admin UI is
+The manual steps below show how to build and import images for MicroK8s. The admin UI is
 not included in the current build path; its deployment requires separate work.
 
 ## Manual Deployment
@@ -105,8 +101,8 @@ kubectl apply -f k8s/manifests/namespace.yaml
 ./scripts/deploy/create-secrets.sh
 # Review manifests and prerequisites (including cert-manager below) before applying.
 # Every manifest except cloudflared.yaml: it is committed with 0 replicas, so
-# applying it stops the tunnel connector. scripts/deploy/deploy.sh and
-# restart-k8s-rollout.sh start it, on the production cluster only.
+# applying it stops the tunnel connector. scripts/deploy/deploy.sh starts it,
+# on the production cluster only.
 for f in k8s/manifests/*.yaml; do
   [ "${f##*/}" = cloudflared.yaml ] || kubectl apply -f "$f"
 done

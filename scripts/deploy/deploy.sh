@@ -119,7 +119,7 @@ export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"
 # https://www.econgraph.com through the cloudflared tunnel (MAIN_HOST overrides
 # the main name independently); empty serves
 # http://localhost only. See scripts/deploy/lib/public-host.sh (which sources
-# lib/cluster-role.sh), shared with restart-k8s-rollout.sh, for the rules and
+# lib/cluster-role.sh) for the rules and
 # render_manifest. The frontend image needs no rebuild for it: it resolves its
 # sign-in issuer against the page's origin.
 # shellcheck source=scripts/deploy/lib/public-host.sh

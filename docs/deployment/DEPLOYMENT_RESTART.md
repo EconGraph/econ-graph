@@ -9,8 +9,7 @@ A change to the `econ-graph-config` ConfigMap made through `deploy.sh` needs no 
 pod template carries a hash of its data, `econgraph.io/app-config-hash`). A ConfigMap
 edited by hand is not rolled.
 
-Run commands from the repository root in Bash on the cluster host. This procedure
-does not use `restart-k8s-rollout.sh`, which targets MicroK8s.
+Run commands from the repository root in Bash on the cluster host.
 
 ## Prerequisites and cluster selection
 
