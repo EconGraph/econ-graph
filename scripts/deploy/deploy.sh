@@ -226,7 +226,24 @@ kubectl -n econ-graph rollout status statefulset/app-postgres --timeout=300s
 echo "🗄️  Deploying PostgreSQL backup CronJob..."
 kubectl apply -f k8s/manifests/postgres-backup-pvc.yaml
 kubectl apply -f k8s/manifests/postgres-backup-configmap.yaml
-kubectl apply -f k8s/manifests/postgres-backup-cronjob.yaml
+# The CronJob encrypts to the same public age recipient as the host dumps
+# (BACKUP_AGE_RECIPIENT, from the environment or ~/.config/econgraph/backup.env;
+# docs/deployment/BACKUPS.md). The committed manifest leaves it empty, and
+# encrypt.sh fails every run without one, so without a recipient the CronJob is
+# not applied, and one an earlier deploy applied is removed: it could only fail.
+# Its PVC, and the backups on it, stay.
+# shellcheck source=scripts/backup/encryption.sh
+source "$PROJECT_ROOT/scripts/backup/encryption.sh"
+if backup_recipient_load; then
+  backup_cronjob="$(python3 "$PROJECT_ROOT/scripts/deploy/render-backup-cronjob.py" "$BACKUP_AGE_RECIPIENT" \
+    k8s/manifests/postgres-backup-cronjob.yaml)"
+  printf '%s\n' "$backup_cronjob" | kubectl apply -f -
+else
+  echo "⚠️  No public age recipient (BACKUP_AGE_RECIPIENT in the environment or ~/.config/econgraph/backup.env):"
+  echo "   the in-cluster backup CronJob is not applied, and an existing one is removed. The host dumps"
+  echo "   (scripts/backup/dump-databases.sh) need the same recipient; see docs/deployment/BACKUPS.md."
+  kubectl -n econ-graph delete cronjob postgres-backup --ignore-not-found
+fi
 run_script "$PROJECT_ROOT/scripts/deploy/protect-postgres-pv.sh"
 
 # Deploy Keycloak (its own Postgres, then Keycloak with the econ-graph realm).

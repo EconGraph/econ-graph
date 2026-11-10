@@ -1,7 +1,11 @@
 # shellcheck shell=bash
 # Public-key-only backup storage. Never source or store an age identity here.
 
-backup_encryption_preflight() {
+# backup_recipient_load: BACKUP_AGE_RECIPIENT from the environment, else from
+# backup.env (read in a subshell, so nothing else in it leaks in). Succeeds only
+# when it is a well-formed public age recipient. deploy.sh uses it for the
+# in-cluster backup CronJob, so both encrypt to the same recipient.
+backup_recipient_load() {
     local config="${ECONGRAPH_CONFIG_DIR:-$HOME/.config/econgraph}/backup.env"
     if [[ -z "${BACKUP_AGE_RECIPIENT:-}" && -f "$config" ]]; then
         BACKUP_AGE_RECIPIENT="$(
@@ -10,7 +14,11 @@ backup_encryption_preflight() {
             printf '%s' "${BACKUP_AGE_RECIPIENT:-}"
         )"
     fi
-    [[ "${BACKUP_AGE_RECIPIENT:-}" =~ ^age1[0-9a-z]+$ ]] ||
+    [[ "${BACKUP_AGE_RECIPIENT:-}" =~ ^age1[0-9a-z]+$ ]]
+}
+
+backup_encryption_preflight() {
+    backup_recipient_load ||
         die "set BACKUP_AGE_RECIPIENT to the maintainer's public age recipient; no plaintext fallback"
     command -v age >/dev/null || die "age is required for encrypted backups"
     # age-keygen makes the throwaway key that backup_seal_dir decrypts with.
