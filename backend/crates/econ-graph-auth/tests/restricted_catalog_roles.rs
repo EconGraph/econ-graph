@@ -92,19 +92,26 @@ fn new_catalogs_are_restricted_by_default() {
     }
 }
 
-/// No realm role grants SEC reads on a fresh realm, directly or through a composite. An operator
-/// grants them once company research is accepted.
+/// No realm role (admin, super_admin, support, plan roles, ...) and no `econ-graph-api` client
+/// role grants a restricted catalog on a fresh realm through its composites. An operator grants
+/// them explicitly.
 #[test]
-fn no_realm_role_grants_sec_reads_by_default() {
+fn no_role_composite_grants_a_restricted_catalog_by_default() {
     let realm = realm();
-    let sec = Role::CatalogSecRead.as_str();
-    for role in realm["roles"]["realm"].as_array().expect("realm roles") {
-        let granted = role["composites"]["client"][API_CLIENT]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|name| name == sec);
-        assert!(!granted, "{} must not grant {sec}", role["name"]);
+    let realm_roles = realm["roles"]["realm"].as_array().expect("realm roles");
+    let client_roles = realm["roles"]["client"][API_CLIENT]
+        .as_array()
+        .expect("client roles");
+    for restricted in RESTRICTED_BY_DEFAULT {
+        let restricted = restricted.as_str();
+        for role in realm_roles.iter().chain(client_roles) {
+            let granted = role["composites"]["client"][API_CLIENT]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|name| name == restricted);
+            assert!(!granted, "{} must not grant {restricted}", role["name"]);
+        }
     }
 }
 

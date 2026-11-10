@@ -133,6 +133,9 @@ mod tests {
         let none = registry_for_keys(&ApiKeys::default());
         assert!(none.get(SourceId::Wto).is_none());
         assert!(none.get(SourceId::Massive).is_none());
+        // Massive has no adapter registered yet, so the line above holds regardless; this
+        // asserts the skip itself.
+        assert!(SKIPPED_WITHOUT_KEY.contains(&SourceId::Massive));
         assert!(
             none.get(SourceId::Fred).is_some(),
             "FRED is kept without its key"

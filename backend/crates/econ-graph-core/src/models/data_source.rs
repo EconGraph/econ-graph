@@ -313,8 +313,9 @@ impl DataSource {
             base_url: "https://api.massive.com".to_string(),
             // Every request needs the subscription's API key.
             api_key_required: true,
-            // Conservative: the lowest plan allows five calls per minute.
-            rate_limit_per_minute: 5,
+            // The crawler's politeness rate (`SourcePolicy::default_for`). The paid plan has no
+            // hard request limit.
+            rate_limit_per_minute: 300,
             is_visible: true,
             is_enabled: true,
             requires_admin_approval: false,

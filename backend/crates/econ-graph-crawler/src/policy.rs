@@ -187,6 +187,16 @@ mod tests {
         );
     }
 
+    /// The `data_sources` row states the rate the crawler actually uses.
+    #[test]
+    fn massive_template_rate_is_the_policy_rate() {
+        let template = crate::persist::data_source_template(SourceId::Massive);
+        let policy = SourcePolicy::default_for(SourceId::Massive);
+        let policy_per_minute = (policy.requests_per_second * 60.0).round() as i32;
+        assert_eq!(template.rate_limit_per_minute, policy_per_minute);
+        assert_eq!(policy.max_concurrency, 2);
+    }
+
     #[test]
     fn sec_is_eight_per_second() {
         let p = SourcePolicy::default_for(SourceId::Sec);
