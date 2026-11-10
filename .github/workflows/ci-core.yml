@@ -166,6 +166,10 @@ jobs:
             - 'admin-frontend/package.json'
             - 'admin-frontend/package-lock.json'
             - 'admin-frontend/scripts/npm-audit-allowlist.json'
+            - 'chart-api-service/package.json'
+            - 'chart-api-service/package-lock.json'
+            - 'chart-api-service/scripts/npm-audit-allowlist.json'
+            - 'scripts/security/**'
           # Docker Build Test builds the whole backend and frontend inside the
           # image, so a dependency or toolchain bump can break it with no
           # Dockerfile touched (a new -sys crate needing a system library, an
@@ -1781,10 +1785,10 @@ jobs:
         # Keyed on Cargo.lock and the toolchain; only the build job saves it
         save-if: ${{ github.job == 'backend-build-cache' }}
 
-    - name: Install cargo-audit
+    - name: Install cargo-audit and cargo-deny
       uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
       with:
-        tool: cargo-audit@0.22.2
+        tool: cargo-audit@0.22.2,cargo-deny@0.20.2
 
     - name: Run Rust security audit
       run: |
@@ -1793,6 +1797,7 @@ jobs:
         python3 -m unittest discover -s scripts -p test_security_adapters.py -v
         cargo test --locked -p zstd@0.13.3 -p quick-xml@0.39.4 -p thrift@0.17.0 --doc
         cargo audit
+        cargo deny check advisories
       working-directory: backend
 
     - name: Setup Node.js for npm audit
@@ -1824,6 +1829,17 @@ jobs:
       # (ECO-394/ECO-395) — kept as one copy since they'd otherwise drift.
       run: node ../frontend/scripts/check-npm-audit.mjs . --allowlist scripts/npm-audit-allowlist.json
       working-directory: admin-frontend
+
+    - name: Run chart-api-service npm security audit
+      # Reads the lockfile only; nothing needs installing (ECO-897).
+      run: node ../frontend/scripts/check-npm-audit.mjs . --allowlist scripts/npm-audit-allowlist.json
+      working-directory: chart-api-service
+
+    - name: Check the audits fail on a known-vulnerable dependency
+      # cargo audit and cargo deny are installed above.
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        scripts/security/test-audit-gates.sh
 
   license-compliance:
     name: License Compliance Check

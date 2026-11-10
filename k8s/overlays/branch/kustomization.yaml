@@ -265,7 +265,7 @@ patches:
     \ type: Recreate\n    selector:\n      matchLabels:\n        app: keycloak\n \
     \   template:\n      metadata:\n        labels:\n          app: keycloak\n   \
     \       component: auth\n      spec:\n        containers:\n        - name: keycloak\n\
-    \          image: quay.io/keycloak/keycloak:26.8.1\n          command:\n     \
+    \          image: quay.io/keycloak/keycloak:26.8.2@sha256:723b1d6e254c0fc96d5cffec860c7e0744d6a3277822b865bb538cf891575e41\n          command:\n     \
     \     - /bin/bash\n          - -c\n          args:\n          - 'if [ -n \"${KC_GOOGLE_CLIENT_ID:-}\"\
     \ ] && [ -n \"${KC_GOOGLE_CLIENT_SECRET:-}\"\n            ]; then export KC_GOOGLE_ENABLED=true;\
     \ fi\n\n            if [ -n \"${KC_FACEBOOK_CLIENT_ID:-}\" ] && [ -n \"${KC_FACEBOOK_CLIENT_SECRET:-}\"\

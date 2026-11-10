@@ -3,6 +3,9 @@
 # Run E2E Tests with Pre-built Containers
 # This script runs E2E tests using pre-built Docker containers
 # to avoid the overhead of installing dependencies and building frontend
+#
+# The Vite dev server listens on localhost only. To reach it through
+# host.docker.internal, start it with VITE_DEV_HOST=0.0.0.0 npm start.
 
 set -e
 

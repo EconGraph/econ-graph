@@ -208,7 +208,7 @@ would apply) installs pinned versions from the upstream release manifests, with 
 | Component | Version | Notes |
 | --- | --- | --- |
 | Gateway API CRDs | v1.6.3, standard channel | |
-| Envoy Gateway | v1.9.2 (Envoy Proxy 1.39) | supports Kubernetes v1.33 to v1.36 |
+| Envoy Gateway | v1.9.3 (Envoy Proxy 1.39.6, image overridden) | supports Kubernetes v1.33 to v1.36 |
 
 New kind clusters run Kubernetes 1.36: `terraform/k8s/kind-config.yaml` pins
 `kindest/node:v1.36.4` by digest, which needs kind v0.33.0 or newer

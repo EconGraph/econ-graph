@@ -25,7 +25,7 @@ RUN cargo install diesel_cli --no-default-features --features postgres --verbose
 RUN cargo build --release --bin econ-graph-backend
 
 # Stage 2: Build Frontend
-FROM node:26-trixie AS frontend-builder
+FROM node:26.13.0-trixie@sha256:438603bbb5cda404b9416f0b5c8026f61501ab911760d861ec28c36b5d675725 AS frontend-builder
 
 # Set working directory
 WORKDIR /app
@@ -51,7 +51,7 @@ RUN npm ci
 WORKDIR /app
 
 # Stage 3: Final E2E Container
-FROM node:26-trixie
+FROM node:26.13.0-trixie@sha256:438603bbb5cda404b9416f0b5c8026f61501ab911760d861ec28c36b5d675725
 
 # Install system dependencies for Playwright
 RUN apt-get update && apt-get install -y \

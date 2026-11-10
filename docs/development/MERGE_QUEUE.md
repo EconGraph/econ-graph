@@ -81,7 +81,7 @@ in the GraphQL schema.
 
 ### When a new advisory blocks the queue
 
-Security Audit (cargo audit and npm audit) and License Compliance Check run in
+Security Audit (cargo audit, cargo deny advisories and npm audit) and License Compliance Check run in
 every merge group, whatever the PRs change: a merge group, like a push to
 `main`, is not path-filtered. So an advisory published today fails every merge
 group, and the queue merges nothing, until the advisory is dealt with on the
@@ -90,8 +90,10 @@ branch. To unblock it:
 1. Open a PR that fixes it: update the dependency (`cargo update -p <crate>`,
    or the npm lockfile entry or an `overrides` pin), or, when no fixed version
    exists, add an entry with a reason and a review date to the audit allowlist
-   (`backend/.cargo/audit.toml`, `frontend/scripts/npm-audit-allowlist.json`,
-   `admin-frontend/scripts/npm-audit-allowlist.json`). An npm entry also names
+   (Rust: both `backend/.cargo/audit.toml` and `[advisories].ignore` in
+   `backend/deny.toml`; npm: `frontend/scripts/npm-audit-allowlist.json`,
+   `admin-frontend/scripts/npm-audit-allowlist.json` or
+   `chart-api-service/scripts/npm-audit-allowlist.json`). An npm entry also names
    the installed `versions` it excuses (an exact version or a range of `<`,
    `<=`, `>`, `>=` comparators and `||`), and optionally the lockfile `paths` of
    those copies; any other copy of the package still fails the audit, and so
@@ -99,6 +101,12 @@ branch. To unblock it:
 2. Queue it. Its own merge group passes, since it carries the fix, and the
    PRs queued after it pass once it is ahead of them. Remove other PRs from
    the queue first if they keep failing in front of it.
+
+The same audits run nightly (`.github/workflows/security.yml`), so an advisory
+published against an unchanged lockfile still fails a run. A failing nightly run
+opens, or comments on, the issue "Nightly dependency audit is failing".
+`scripts/security/test-audit-gates.sh` runs in both places and shows each audit
+fails on a known-vulnerable dependency.
 
 An organization admin can also merge the fix directly (below), but a reviewed
 fix through the queue is the normal way.

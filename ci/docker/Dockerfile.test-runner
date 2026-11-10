@@ -3,7 +3,7 @@
 # The tag matches the @playwright/test version resolved in
 # frontend/package-lock.json, so the browsers bundled in /ms-playwright are the
 # ones the tests expect. Keep Ubuntu 24.04 and replace its bundled Node.js runtime.
-FROM node:26-bookworm AS node-runtime
+FROM node:26.13.0-bookworm@sha256:a546d3f8acd2af4382668a7e6acd3bc4418e6a27478373e3246f8162f5181509 AS node-runtime
 
 FROM mcr.microsoft.com/playwright:v1.63.0-noble
 

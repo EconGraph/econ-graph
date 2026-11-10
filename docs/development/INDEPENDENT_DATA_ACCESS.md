@@ -170,7 +170,7 @@ does not replace that sibling deployment evidence.
 ## Optional real Keycloak acceptance
 
 The optional integration harness imports the actual rendered overlay into a new
-local realm using the repository's Keycloak 26.8.1 image, pinned to its verified
+local realm using the repository's Keycloak 26.8.2 image, pinned to its verified
 immutable OCI digest. It uses Chromium to perform authorization code login with
 S256 PKCE. A privileged fixture account receives both app and data audiences and
 staff capabilities through the normal web client; the same account receives only
