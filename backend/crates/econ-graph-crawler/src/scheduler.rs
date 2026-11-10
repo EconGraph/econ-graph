@@ -1022,7 +1022,8 @@ mod tests {
                 SourceId::WorldBank,
                 SourceId::Boc,
                 SourceId::Wto,
-                SourceId::Fhfa
+                SourceId::Fhfa,
+                SourceId::Massive
             ]
         );
     }
