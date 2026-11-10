@@ -178,7 +178,7 @@ migrate() {
 }
 
 DATA_SQL="$(cat <<SQL
--- The data baseline seeds the sources, countries and some series_metadata.
+-- The data baseline seeds the sources and some series_metadata.
 UPDATE data_sources SET description = description || '; questions to fred.help@stlouisfed.org'
     WHERE name LIKE '%(FRED)';
 INSERT INTO datasets (source_id, code, name)
@@ -638,9 +638,9 @@ check "10 series from each of the 3 sources with series, none too long" \
 check "every data point and vintage of the kept series" \
     test "$(q subset "select count(*) from data_points")" = $((30 * 48)) -a \
          "$(q subset "select count(distinct revision_date) from data_points")" = 2
-check "every reference row: data sources and countries, and the datasets of kept series" \
-    test "$(q subset "select (select count(*) from data_sources) || ',' || (select count(*) from countries) || ',' || (select count(*) from datasets)")" = \
-         "$(q econ_graph "select (select count(*) from data_sources) || ',' || (select count(*) from countries)"),3"
+check "every reference row: data sources, and the datasets of kept series" \
+    test "$(q subset "select (select count(*) from data_sources) || ',' || (select count(*) from datasets)")" = \
+         "$(q econ_graph "select count(*) from data_sources"),3"
 check "series metadata and validators of the kept series only" \
     test "$(q subset "select (select count(*) from series_metadata) || ',' || (select count(*) from series_fetch_validators)")" = "30,30"
 check "crawl state is emptied" \

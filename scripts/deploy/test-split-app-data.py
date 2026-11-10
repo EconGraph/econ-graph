@@ -12,6 +12,7 @@ import hashlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import sys
@@ -56,6 +57,93 @@ class BackupLocation(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'refusing to overwrite a backup'):
                 conversion.verified_backup(None, 'unused', existing, {})
             self.assertEqual((existing / 'econ_graph.dump').read_text(), 'earlier backup')
+
+
+class MigrationInventory(unittest.TestCase):
+    """The table inventory follows creates and drops through the migrations in version order."""
+
+    # The legacy global-analysis tables, created by the data baseline and dropped by
+    # 2026-11-10-000100_drop_global_analysis_tables (ECO-898).
+    GLOBAL_ANALYSIS = {'countries', 'global_economic_indicators', 'global_indicator_data',
+                       'country_correlations', 'trade_relationships', 'global_economic_events',
+                       'event_country_impacts', 'leading_indicators'}
+
+    def plane(self, scratch, migrations):
+        """Lay out a synthetic data plane: {directory name: up.sql text}."""
+        for name, up in migrations.items():
+            directory = Path(scratch) / 'backend/migrations/data' / name
+            directory.mkdir(parents=True)
+            (directory / 'up.sql').write_text(up)
+
+    def test_dropped_tables_leave_and_recreated_tables_stay(self):
+        """A table created then dropped is left out; one dropped then created again is kept."""
+        with tempfile.TemporaryDirectory() as scratch:
+            self.plane(scratch, {
+                '2026-01-01-000100_baseline': 'CREATE TABLE kept (id int);\n'
+                                              'CREATE TABLE gone (id int);\n'
+                                              'CREATE TABLE reborn (id int);\n'
+                                              'CREATE TABLE gone_if_exists (id int);\n',
+                '2026-01-02-000100_drop': 'DROP TABLE gone;\nDROP TABLE reborn;\n'
+                                          'DROP TABLE IF EXISTS gone_if_exists;\n',
+                '2026-01-03-000100_recreate': 'CREATE TABLE reborn (id int);\n'
+                                              'CREATE TABLE later (id int);\n',
+            })
+            with patch.object(conversion, 'ROOT', Path(scratch)):
+                data_tables, _, data_versions, _ = conversion.inventory('data')
+        self.assertEqual(data_tables, ['kept', 'reborn', 'later'])
+        self.assertEqual(data_versions, {'20260101000100', '20260102000100', '20260103000100'})
+
+    def test_checked_in_data_plane_differs_only_by_the_dropped_tables(self):
+        """Every table any data migration creates, except the eight global-analysis tables."""
+        directory = conversion.ROOT / 'backend/migrations/data'
+        every = '\n'.join(p.read_text() for p in sorted(directory.glob('*/up.sql')))
+        created = list(dict.fromkeys(re.findall(r'^CREATE TABLE (\w+) ', every, re.M)))
+        self.assertTrue(self.GLOBAL_ANALYSIS <= set(created))
+        self.assertEqual(conversion.inventory('data')[0],
+                         [t for t in created if t not in self.GLOBAL_ANALYSIS])
+
+    def test_checked_in_planes_use_only_followed_forms(self):
+        """Neither checked-in plane has a table statement the inventory refuses."""
+        for plane in ('data', 'app'):
+            self.assertTrue(conversion.inventory(plane)[0])
+
+    def test_create_if_not_exists_names_the_table(self):
+        """`CREATE TABLE IF NOT EXISTS name` records name, not a table called IF."""
+        with tempfile.TemporaryDirectory() as scratch:
+            self.plane(scratch, {
+                '2026-01-01-000100_baseline': 'CREATE TABLE kept (id int);\n',
+                '2026-01-02-000100_more': 'CREATE TABLE IF NOT EXISTS added (id int);\n',
+            })
+            with patch.object(conversion, 'ROOT', Path(scratch)):
+                self.assertEqual(conversion.inventory('data')[0], ['kept', 'added'])
+
+    def test_unfollowed_table_statements_are_refused(self):
+        """Every other create, drop or rename form raises, naming the file and line."""
+        refused = [
+            '    DROP TABLE kept;',                  # indented
+            'drop table kept;',                     # lower case
+            'DROP TABLE public.kept;',              # schema-qualified
+            'DROP TABLE "kept";',                   # quoted
+            'DROP TABLE kept, other;',              # several tables
+            'DROP TABLE kept CASCADE;',             # anything after the name
+            'DROP TABLE kept',                      # statement continues on the next line
+            'ALTER TABLE kept RENAME TO renamed;',  # table rename
+            'ALTER TABLE kept RENAME COLUMN id TO key;',
+            'CREATE TABLE public.other (id int);',  # schema-qualified create
+            'CREATE TABLE "other" (id int);',       # quoted create
+            '  CREATE TABLE other (id int);',       # indented create
+        ]
+        for statement in refused:
+            with self.subTest(statement=statement), tempfile.TemporaryDirectory() as scratch:
+                self.plane(scratch, {
+                    '2026-01-01-000100_baseline': 'CREATE TABLE kept (id int);\n',
+                    '2026-01-02-000100_change': f'-- a comment\n{statement}\n',
+                })
+                with patch.object(conversion, 'ROOT', Path(scratch)):
+                    with self.assertRaisesRegex(RuntimeError,
+                                                r'2026-01-02-000100_change/up\.sql:2: .*not one the '
+                                                r'conversion inventory follows'):
+                        conversion.inventory('data')
 
 
 class ConversionRehearsal(unittest.TestCase):

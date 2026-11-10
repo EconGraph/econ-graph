@@ -307,51 +307,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    countries (id) {
-        id -> Uuid,
-        #[max_length = 3]
-        iso_code -> Varchar,
-        #[max_length = 2]
-        iso_code_2 -> Varchar,
-        #[max_length = 255]
-        name -> Varchar,
-        #[max_length = 100]
-        region -> Varchar,
-        #[max_length = 100]
-        sub_region -> Nullable<Varchar>,
-        #[max_length = 50]
-        income_group -> Nullable<Varchar>,
-        population -> Nullable<Int8>,
-        gdp_usd -> Nullable<Numeric>,
-        gdp_per_capita_usd -> Nullable<Numeric>,
-        latitude -> Nullable<Numeric>,
-        longitude -> Nullable<Numeric>,
-        #[max_length = 3]
-        currency_code -> Nullable<Varchar>,
-        is_active -> Bool,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    country_correlations (id) {
-        id -> Uuid,
-        country_a_id -> Uuid,
-        country_b_id -> Uuid,
-        #[max_length = 100]
-        indicator_category -> Varchar,
-        correlation_coefficient -> Numeric,
-        time_period_start -> Date,
-        time_period_end -> Date,
-        sample_size -> Int4,
-        p_value -> Nullable<Numeric>,
-        is_significant -> Bool,
-        calculated_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
     crawl_attempts (id) {
         id -> Uuid,
         series_id -> Uuid,
@@ -552,21 +507,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    event_country_impacts (id) {
-        id -> Uuid,
-        event_id -> Uuid,
-        country_id -> Uuid,
-        #[max_length = 50]
-        impact_type -> Varchar,
-        impact_magnitude -> Nullable<Numeric>,
-        impact_duration_days -> Nullable<Int4>,
-        recovery_time_days -> Nullable<Int4>,
-        confidence_score -> Nullable<Numeric>,
-        created_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::AnnotationType;
     use super::sql_types::AnnotationStatus;
@@ -704,76 +644,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    global_economic_events (id) {
-        id -> Uuid,
-        #[max_length = 500]
-        name -> Varchar,
-        description -> Nullable<Text>,
-        #[max_length = 50]
-        event_type -> Varchar,
-        #[max_length = 20]
-        severity -> Varchar,
-        start_date -> Date,
-        end_date -> Nullable<Date>,
-        primary_country_id -> Nullable<Uuid>,
-        affected_regions -> Nullable<Array<Nullable<Text>>>,
-        economic_impact_score -> Nullable<Numeric>,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    global_economic_indicators (id) {
-        id -> Uuid,
-        country_id -> Uuid,
-        #[max_length = 50]
-        indicator_code -> Varchar,
-        #[max_length = 500]
-        indicator_name -> Varchar,
-        #[max_length = 100]
-        category -> Varchar,
-        #[max_length = 100]
-        subcategory -> Nullable<Varchar>,
-        #[max_length = 50]
-        unit -> Nullable<Varchar>,
-        #[max_length = 20]
-        frequency -> Varchar,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    global_indicator_data (id) {
-        id -> Uuid,
-        indicator_id -> Uuid,
-        date -> Date,
-        value -> Nullable<Numeric>,
-        is_preliminary -> Bool,
-        #[max_length = 50]
-        data_source -> Varchar,
-        created_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
-    leading_indicators (id) {
-        id -> Uuid,
-        leading_country_id -> Uuid,
-        following_country_id -> Uuid,
-        #[max_length = 100]
-        indicator_category -> Varchar,
-        lead_time_months -> Int4,
-        correlation_strength -> Numeric,
-        predictive_accuracy -> Nullable<Numeric>,
-        time_period_start -> Date,
-        time_period_end -> Date,
-        calculated_at -> Timestamptz,
-    }
-}
-
-diesel::table! {
     reference_file_cache (source_id, url) {
         source_id -> Uuid,
         url -> Text,
@@ -875,22 +745,6 @@ diesel::table! {
         dimensions -> Jsonb,
         #[max_length = 100]
         default_measure -> Nullable<Varchar>,
-    }
-}
-
-diesel::table! {
-    trade_relationships (id) {
-        id -> Uuid,
-        exporter_country_id -> Uuid,
-        importer_country_id -> Uuid,
-        #[max_length = 20]
-        trade_flow_type -> Varchar,
-        year -> Int4,
-        export_value_usd -> Nullable<Numeric>,
-        import_value_usd -> Nullable<Numeric>,
-        trade_balance_usd -> Nullable<Numeric>,
-        trade_intensity -> Nullable<Numeric>,
-        created_at -> Timestamptz,
     }
 }
 
@@ -1152,14 +1006,9 @@ diesel::joinable!(data_points -> economic_series (series_id));
 diesel::joinable!(datasets -> data_sources (source_id));
 diesel::joinable!(discovery_run_chunks -> discovery_runs (run_id));
 diesel::joinable!(economic_series -> data_sources (source_id));
-diesel::joinable!(event_country_impacts -> countries (country_id));
-diesel::joinable!(event_country_impacts -> global_economic_events (event_id));
 diesel::joinable!(financial_line_items -> financial_statements (statement_id));
 diesel::joinable!(financial_ratios -> financial_statements (statement_id));
 diesel::joinable!(financial_statements -> companies (company_id));
-diesel::joinable!(global_economic_events -> countries (primary_country_id));
-diesel::joinable!(global_economic_indicators -> countries (country_id));
-diesel::joinable!(global_indicator_data -> global_economic_indicators (indicator_id));
 diesel::joinable!(iceberg_catalog -> datasets (dataset_id));
 diesel::joinable!(iceberg_commits -> datasets (dataset_id));
 diesel::joinable!(reference_file_cache -> data_sources (source_id));
@@ -1193,8 +1042,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     company_fact_filings,
     company_fact_load_runs,
     company_facts,
-    countries,
-    country_correlations,
     crawl_attempts,
     crawl_queue,
     data_points,
@@ -1203,22 +1050,16 @@ diesel::allow_tables_to_appear_in_same_query!(
     discovery_run_chunks,
     discovery_runs,
     economic_series,
-    event_country_impacts,
     financial_annotations,
     financial_line_items,
     financial_ratios,
     financial_statements,
-    global_economic_events,
-    global_economic_indicators,
-    global_indicator_data,
-    leading_indicators,
     reference_file_cache,
     security_events,
     series_fetch_validators,
     series_lifecycle,
     series_lifecycle_events,
     series_metadata,
-    trade_relationships,
     user_data_source_preferences,
     user_sessions,
     users,

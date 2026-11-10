@@ -56,6 +56,15 @@ can also be run on its own against any two libpq services.
   source has run. The conversion refuses a source that lacks an app migration of the
   checkout, and the rollback refuses a backup whose removed tables, enum types or
   migration versions differ from the checkout.
+- **The source has run every data migration of the checkout.** Data migrations create and
+  drop tables (`2026-11-10-000100` drops the eight legacy global-analysis tables), and the
+  conversion compares the source's tables with the ones the checkout's migrations leave. A
+  source that is behind, for example one restored from an older backup, is refused with
+  "Source has unknown or missing tables" or "Source data migration history is incomplete"
+  before anything changes. Deploying the release (`deploy.sh` runs the `crawler-migrate` Job
+  before the backend) brings it up to date, as do the rehearsal and production steps below;
+  when running `split-app-data.py` directly against a restored database, run `crawler
+  migrate` against it first.
 - **Run it inside tmux or screen.** A dropped connection or a closed pipe no longer
   leaves the writers stopped, but the removal's typed confirmation needs the terminal.
 
@@ -331,10 +340,17 @@ python scripts/deploy/split-app-data.py --source-service SRC --restore-source-ap
 
 The services are names in a private libpq service file (`PGSERVICEFILE`) with passwords in
 a mode-0600 password file, never on the command line; `pg_dump` and `pg_restore` on `PATH`
-must match the server's major version. The script refuses unknown or missing tables, a
-partial split, unknown migration versions, column differences in name, type or nullability,
-unrelated rows in the app database, and a run without `--writers-stopped`. Later
-migrations that add or rename tables require reviewing this tool before use.
+must match the server's major version. The script refuses unknown or missing tables (run `crawler migrate` on a source that is
+behind the checkout first), a partial split, unknown migration versions, column differences in name, type or nullability,
+unrelated rows in the app database, and a run without `--writers-stopped`.
+
+The script takes each plane's tables from the checkout's migrations. It follows only
+`CREATE TABLE [IF NOT EXISTS] name (` and `DROP TABLE [IF EXISTS] name;`, for one unquoted,
+unqualified table at the start of a line, replayed in migration order: a dropped table is
+left out, and one created again later is back in. Any other statement that creates, drops
+or renames a table (indented, lower case, schema-qualified, quoted, several tables or
+`CASCADE` in one `DROP`, any `ALTER TABLE ... RENAME`) makes it stop with the file and line,
+before it connects. A migration that needs such a form requires reviewing this tool first.
 
 ## Synthetic engineering checks
 

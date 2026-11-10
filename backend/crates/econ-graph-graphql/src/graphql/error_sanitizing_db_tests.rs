@@ -7,9 +7,7 @@
 
 use crate::graphql::context::GraphQLContext;
 use crate::graphql::errors::{capture_logs, SanitizeErrors, INTERNAL_ERROR_MESSAGE};
-use crate::graphql::global_analysis::GlobalAnalysisQuery;
 use crate::graphql::schema::create_schema_with_data;
-use async_graphql::{EmptyMutation, EmptySubscription, Schema};
 use econ_graph_core::DatabasePool;
 use std::sync::Arc;
 
@@ -70,31 +68,4 @@ async fn search_series_db_error_is_generic_and_logged() {
         .execute(r#"{ searchSeries(query: "unemployment") { totalCount } }"#)
         .await;
     assert_hidden_and_logged(&response, &logs, "economic_series");
-}
-
-/// The global analysis resolvers used to format the service error into their own message,
-/// which dropped its source and so slipped past the sanitizer.
-#[tokio::test]
-async fn global_analysis_db_errors_are_generic_and_logged() {
-    let Some(pool) = broken_pool().await else {
-        return;
-    };
-    let schema = Schema::build(GlobalAnalysisQuery, EmptyMutation, EmptySubscription)
-        .data(econ_graph_core::database::DataPool(pool))
-        .extension(SanitizeErrors)
-        .finish();
-    for (query, relation) in [
-        (
-            "{ countriesWithEconomicData { country { id } } }",
-            "countries",
-        ),
-        (
-            "{ globalEventsWithImpacts { event { id } } }",
-            "global_economic_events",
-        ),
-    ] {
-        let (_guard, logs) = capture_logs();
-        let response = schema.execute(query).await;
-        assert_hidden_and_logged(&response, &logs, relation);
-    }
 }
