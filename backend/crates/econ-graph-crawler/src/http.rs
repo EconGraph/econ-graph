@@ -181,6 +181,9 @@ struct Target {
     timeout: Option<Duration>,
     /// In-process retries after the first attempt ([`EXTRA_ATTEMPTS`] unless overridden).
     extra_attempts: u32,
+    /// Token sent as `Authorization: Bearer <token>` ([`HttpFetcher::get_text_bearer`]). Also in
+    /// `secrets`, so it is scrubbed from errors like a query key.
+    bearer: Option<String>,
     /// The URL with secret query values replaced; the only form that may be logged.
     redacted: String,
     /// Secret values sent in the query or a JSON body (decoded), scrubbed from every error
@@ -223,6 +226,7 @@ impl Target {
             if_modified_since: None,
             timeout: None,
             extra_attempts: EXTRA_ATTEMPTS,
+            bearer: None,
         })
     }
 
@@ -309,6 +313,24 @@ impl HttpFetcher {
         query: &[(&str, &str)],
     ) -> Result<String, CrawlError> {
         let target = Target::new(source, Method::GET, url, query, None, false)?;
+        Ok(self.execute(&target).await?.body)
+    }
+
+    /// [`get_text`](Self::get_text) sending `token` as `Authorization: Bearer <token>`, for an
+    /// API that takes its key in a header rather than the URL. The token never appears in a
+    /// URL, and is scrubbed from every error message as query keys are.
+    pub async fn get_text_bearer(
+        &self,
+        source: SourceId,
+        url: &str,
+        query: &[(&str, &str)],
+        token: &str,
+    ) -> Result<String, CrawlError> {
+        let mut target = Target::new(source, Method::GET, url, query, None, true)?;
+        if !token.is_empty() {
+            target.secrets.push(token.to_owned());
+        }
+        target.bearer = Some(token.to_owned());
         Ok(self.execute(&target).await?.body)
     }
 
@@ -639,6 +661,9 @@ impl HttpFetcher {
         }
         if let Some(date) = &target.if_modified_since {
             request = request.header(IF_MODIFIED_SINCE, date.clone());
+        }
+        if let Some(token) = &target.bearer {
+            request = request.bearer_auth(token);
         }
         if let Some(timeout) = target.timeout {
             request = request.timeout(timeout);
@@ -1484,6 +1509,59 @@ mod tests {
             "{err:?}"
         );
         assert_eq!(hits(&server).await, 1);
+    }
+
+    /// `get_text_bearer` sends the token as `Authorization: Bearer`, never in the URL.
+    #[tokio::test]
+    async fn bearer_token_is_sent_in_the_header_only() {
+        let server = MockServer::start().await;
+        Mock::given(path("/bearer"))
+            .and(wiremock::matchers::header(
+                "authorization",
+                "Bearer SUPERSECRET",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+            .mount(&server)
+            .await;
+        let body = fetcher()
+            .get_text_bearer(
+                SourceId::Massive,
+                &format!("{}/bearer", server.uri()),
+                &[("adjusted", "false")],
+                "SUPERSECRET",
+            )
+            .await
+            .unwrap();
+        assert_eq!(body, "ok");
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(!requests[0].url.as_str().contains("SUPERSECRET"));
+    }
+
+    /// A server that echoes the bearer token, in any form, gets it scrubbed from the error.
+    #[tokio::test]
+    async fn bearer_token_is_scrubbed_from_errors() {
+        let server = MockServer::start().await;
+        Mock::given(path("/bearer"))
+            .respond_with(
+                ResponseTemplate::new(401)
+                    .set_body_string("bad token SUPER/SECRET+1 (SUPER%2FSECRET%2B1)"),
+            )
+            .mount(&server)
+            .await;
+        let err = fetcher()
+            .get_text_bearer(
+                SourceId::Massive,
+                &format!("{}/bearer", server.uri()),
+                &[],
+                "SUPER/SECRET+1",
+            )
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(matches!(err, CrawlError::Auth(_)), "{err:?}");
+        assert!(!msg.contains("SECRET"), "{msg}");
+        assert!(msg.contains("REDACTED"), "{msg}");
     }
 
     #[tokio::test]

@@ -10,6 +10,8 @@
 //! downloaded and stored the same way, its catalog hidden until its terms' conditions are met
 //! (ECO-762), so it is not gated either. IMF is gated because
 //! the decision is not to download it; SNB, BOJ and UN_STATS have no adapter and no decision.
+//! MASSIVE (Massive, a market data vendor) has an adapter, but its individual plan doesn't
+//! licence EconGraph's use, so crawling it needs `crawl_massive` as well as `MASSIVE_API_KEY`.
 //!
 //! Each entry of [`LICENCE_GATES`] names a source, the restriction in its terms, the Linear
 //! ticket holding the full review, and the `crawl_<source>` build flag
@@ -101,6 +103,16 @@ pub const LICENCE_GATES: &[LicenceGate] = &[
         restriction: "the UN SDG Global Database states no terms of its own, and the generic UN \
                       terms allow personal, non-commercial use only",
         compiled_in: cfg!(flag_crawl_un_stats),
+    },
+    // Massive, a market data vendor: the individual plan's terms don't cover redistribution by
+    // EconGraph, so a key alone must not start crawling: https://linear.app/econgraph/issue/ECO-206
+    LicenceGate {
+        source: SourceId::Massive,
+        flag: "crawl_massive",
+        ticket: "ECO-206",
+        restriction: "Massive's individual plan does not licence EconGraph to store or show its \
+                      market data",
+        compiled_in: cfg!(flag_crawl_massive),
     },
 ];
 
@@ -287,11 +299,12 @@ mod tests {
 
     /// The sources the terms register rules out (needs permission, or unclear) and that the
     /// maintainer has not decided to crawl anyway.
-    const GATED: [SourceId; 4] = [
+    const GATED: [SourceId; 5] = [
         SourceId::Imf,
         SourceId::Boj,
         SourceId::Snb,
         SourceId::UnStats,
+        SourceId::Massive,
     ];
 
     #[test]
@@ -323,6 +336,7 @@ mod tests {
                 "crawl_un_stats",
                 cfg!(flag_crawl_un_stats),
             ),
+            (SourceId::Massive, "crawl_massive", cfg!(flag_crawl_massive)),
         ];
         for (source, flag, on) in compiled {
             let g = gate(source).unwrap();

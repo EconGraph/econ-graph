@@ -140,9 +140,9 @@ run `node scripts/flags-merge`, and remove the code paths for its other value.
   `build_canary`, it is permanent: these catalogs are a development convenience,
   so there is no release deadline for removing the flag.
 
-- `crawl_imf`, `crawl_boj`, `crawl_snb` and `crawl_un_stats` (build, off in both profiles,
-  `remove_by: unscheduled`, each owned by its source's licence review: ECO-175, ECO-743,
-  ECO-742 and ECO-182) are the crawler's
+- `crawl_imf`, `crawl_boj`, `crawl_snb`, `crawl_un_stats` and `crawl_massive` (build, off in
+  both profiles, `remove_by: unscheduled`, each owned by its source's licence review: ECO-175,
+  ECO-743, ECO-742, ECO-182 and ECO-206) are the crawler's
   [licence gate](../../backend/crates/econ-graph-crawler/README.md#licence-gate). Each one
   lets the crawler download a source that has restrictive or unclear terms and no maintainer
   decision to download it. They are permanent: a flag is turned on only once that source's
@@ -172,7 +172,7 @@ earlier seeded MCP deadline; its current configured deadline is Train 7.
 | `financial_components` | Train 5 | The SEC financial UI/demo belongs to Train 5 company research; completion replaces the unfinished financial surface. |
 | `technical_analysis` | Unscheduled | No committed feature completion train yet. |
 | `build_canary`, `static_catalogs` | Unscheduled | Permanent development/build checks described above. |
-| `crawl_imf`, `crawl_boj`, `crawl_snb`, `crawl_un_stats` | Unscheduled | Existing source licence gates retain their current values and deadlines. |
+| `crawl_imf`, `crawl_boj`, `crawl_snb`, `crawl_un_stats`, `crawl_massive` | Unscheduled | Existing source licence gates retain their current values and deadlines. |
 
 Only deadline metadata changes at this cut. The generated development and release
 profiles retain exactly the same values. Product versions remain Train 4 v4.2.0,

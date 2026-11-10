@@ -25,6 +25,15 @@
 //!    | annual, semiannual (`A`, `SA`)              | 30 days  |
 //!    | anything else                               | 7 days   |
 //!
+//!    **Trading-day sources.** Massive (a market data vendor) is refreshed once per NYSE trading
+//!    day instead, on that day's slot: 11:30 America/New_York on the next calendar day (see
+//!    [`calendar`](crate::sources::massive::calendar) and [`refresh_slots`]). A Massive series is
+//!    due when its last successful crawl is before the latest slot, and a failed one when its
+//!    last attempt is (one retry per trading day). NotFound, absent and fetch-retired backoffs
+//!    count back from the latest slot rather than from now. Weekends and holidays add no slot,
+//!    so after a day's refresh nothing more is due until the next trading day's slot. A newly
+//!    discovered series that has never been crawled is due at once, as for any source.
+//!
 //!    Series whose `crawl_status` is `failed` back off: they are due only once
 //!    `max(last_crawled_at, last crawl_attempts.attempted_at)` is older than **twice** the interval
 //!    (a never-successful series therefore isn't retried every tick). A discovered series without
@@ -82,7 +91,8 @@ use std::future::Future;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use diesel::sql_types::{Array, BigInt, Bool, Double, Nullable, Text};
+use chrono::{DateTime, Utc};
+use diesel::sql_types::{Array, BigInt, Bool, Double, Nullable, Text, Timestamptz};
 use diesel::QueryableByName;
 use diesel_async::RunQueryDsl;
 use econ_graph_core::error::{AppError, AppResult};
@@ -217,7 +227,13 @@ pub(crate) fn frequency_days_sql(f: &str) -> String {
 }
 
 /// Due-series query. `$1` data_sources names, `$2` matching source codes, `$3` limit, `$4` the
-/// regex of fetchable Census ids.
+/// regex of fetchable Census ids, `$5` the codes of sources refreshed on [trading-day
+/// slots](refresh_slots) and `$6` the latest slot of each.
+///
+/// For a slot source, the slot stands in for `NOW()`: a series is due when its last successful
+/// crawl is before the latest slot; a failed one when its last attempt is; and NotFound, absent
+/// and fetch-retired backoffs count back from the latest slot. Due-ness therefore only changes
+/// when a new slot passes.
 ///
 /// Candidates are active `economic_series` rows plus active `series_metadata` rows (from catalog
 /// discovery) that have no `economic_series` row yet. A metadata-only candidate has never been
@@ -240,9 +256,12 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
              WHERE q.kind = 'fetch_series' AND q.status = 'failed' \
                AND q.source IN (SELECT code FROM src) \
              GROUP BY q.source, q.series_id \
+         ), slots AS ( \
+             SELECT * FROM unnest($5::text[], $6::timestamptz[]) AS s(code, slot) \
          ), cand AS ( \
              SELECT src.code, es.id, es.external_id, es.last_crawled_at, es.crawl_status, \
                     NULL::timestamptz AS failed_at, FALSE AS discovered, \
+                    (SELECT s.slot FROM slots s WHERE s.code = src.code) AS slot, \
                     make_interval(days => ({es_days})) AS refresh, \
                     EXISTS (SELECT 1 FROM series_lifecycle lc WHERE lc.source_id = es.source_id \
                         AND lc.external_id = es.external_id AND {fetch_retired}) AS probe \
@@ -259,6 +278,7 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
              UNION ALL \
              SELECT src.code, NULL::uuid, sm.external_id, NULL::timestamptz, \
                     CASE WHEN f.failed_at IS NOT NULL THEN 'failed' END, f.failed_at, TRUE, \
+                    (SELECT s.slot FROM slots s WHERE s.code = src.code), \
                     make_interval(days => ({sm_days})), \
                     EXISTS (SELECT 1 FROM series_lifecycle lc WHERE lc.source_id = sm.source_id \
                         AND lc.external_id = sm.external_id AND {fetch_retired}) \
@@ -291,13 +311,20 @@ static DUE_SERIES_SQL: LazyLock<String> = LazyLock::new(|| {
                                      (SELECT max(ca.attempted_at) FROM crawl_attempts ca \
                                       WHERE ca.series_id = c.id)), \
                             '-infinity'::timestamptz) \
-                       <= NOW() - {probe_factor} * c.refresh \
+                       <= COALESCE(c.slot, NOW()) - {probe_factor} * c.refresh \
+               WHEN c.slot IS NOT NULL AND c.crawl_status = 'failed' THEN \
+                   COALESCE(GREATEST(c.last_crawled_at, c.failed_at, \
+                                     (SELECT max(ca.attempted_at) FROM crawl_attempts ca \
+                                      WHERE ca.series_id = c.id)), \
+                            '-infinity'::timestamptz) < c.slot \
                WHEN c.crawl_status IN ('failed', 'not_found', 'absent') THEN \
                    COALESCE(GREATEST(c.last_crawled_at, c.failed_at, \
                                      (SELECT max(ca.attempted_at) FROM crawl_attempts ca \
                                       WHERE ca.series_id = c.id)), \
                             '-infinity'::timestamptz) \
-                       <= NOW() - {failure_backoff} * c.refresh \
+                       <= COALESCE(c.slot, NOW()) - {failure_backoff} * c.refresh \
+               WHEN c.slot IS NOT NULL THEN \
+                   c.last_crawled_at IS NULL OR c.last_crawled_at < c.slot \
                ELSE c.last_crawled_at IS NULL OR c.last_crawled_at <= NOW() - c.refresh \
                END \
          ) \
@@ -478,6 +505,12 @@ impl RefreshScheduler {
 
     /// One scheduling pass: enqueue due series refreshes, then due catalog discoveries.
     pub async fn tick(&self) -> AppResult<SchedulerTickStats> {
+        self.tick_at(Utc::now()).await
+    }
+
+    /// [`tick`](Self::tick) with the [trading-day slots](refresh_slots) taken at `now`. Every
+    /// other due test uses the database clock.
+    pub async fn tick_at(&self, now: DateTime<Utc>) -> AppResult<SchedulerTickStats> {
         // Count attempted passes even when idle or a database operation fails. Initialize the
         // enqueue counters to zero so an idle scheduler is visible in /metrics.
         for (sources, kind) in [
@@ -495,12 +528,16 @@ impl RefreshScheduler {
             }
         }
         let mut stats = SchedulerTickStats::default();
-        self.enqueue_due_series(&mut stats).await?;
+        self.enqueue_due_series(&mut stats, now).await?;
         self.enqueue_due_discovery(&mut stats).await?;
         Ok(stats)
     }
 
-    async fn enqueue_due_series(&self, stats: &mut SchedulerTickStats) -> AppResult<()> {
+    async fn enqueue_due_series(
+        &self,
+        stats: &mut SchedulerTickStats,
+        now: DateTime<Utc>,
+    ) -> AppResult<()> {
         let sources = self.refreshable_sources();
         if sources.is_empty() || self.config.batch_limit <= 0 {
             return Ok(());
@@ -516,6 +553,7 @@ impl RefreshScheduler {
         } else {
             String::new()
         };
+        let (slot_codes, slots) = slot_binds(&sources, now, |s| s.latest);
         let due: Vec<DueSeries> = {
             let mut conn = self.pool.get().await.map_err(conn_err)?;
             diesel::sql_query(DUE_SERIES_SQL.as_str())
@@ -523,6 +561,8 @@ impl RefreshScheduler {
                 .bind::<Array<Text>, _>(&codes)
                 .bind::<BigInt, _>(self.config.batch_limit)
                 .bind::<Text, _>(&census_ids)
+                .bind::<Array<Text>, _>(&slot_codes)
+                .bind::<Array<Timestamptz>, _>(&slots)
                 .load(&mut conn)
                 .await?
         };
@@ -634,6 +674,43 @@ impl RefreshScheduler {
         }
         tracing::info!("refresh scheduler stopped");
     }
+}
+
+/// The refresh slots around a moment, for a source refreshed once per trading day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RefreshSlots {
+    /// The most recent slot at or before the moment: a series last refreshed before it is due.
+    pub latest: DateTime<Utc>,
+    /// The slot before `latest`: a series with data last refreshed before it missed a whole
+    /// slot and is overdue.
+    pub previous: DateTime<Utc>,
+}
+
+/// The [`RefreshSlots`] of `source` at `now`, or `None` for a source refreshed by
+/// [`refresh_interval`]. Massive (a market data vendor) is refreshed once per NYSE trading day,
+/// on the slot [`calendar::refresh_slot`](crate::sources::massive::calendar::refresh_slot).
+pub fn refresh_slots(source: SourceId, now: DateTime<Utc>) -> Option<RefreshSlots> {
+    use crate::sources::massive::calendar;
+    match source {
+        SourceId::Massive => Some(RefreshSlots {
+            latest: calendar::latest_refresh_slot(now),
+            previous: calendar::previous_refresh_slot(now),
+        }),
+        _ => None,
+    }
+}
+
+/// `(code, slot)` arrays for the slot sources among `sources`, `slot` chosen by `pick`, to bind
+/// as SQL arrays.
+pub(crate) fn slot_binds(
+    sources: &[SourceId],
+    now: DateTime<Utc>,
+    pick: impl Fn(RefreshSlots) -> DateTime<Utc>,
+) -> (Vec<String>, Vec<DateTime<Utc>>) {
+    sources
+        .iter()
+        .filter_map(|&s| refresh_slots(s, now).map(|slots| (s.as_str().to_string(), pick(slots))))
+        .unzip()
 }
 
 /// Whether the scheduler should enqueue `fetch_series` for `source`: false for static catalogs,
@@ -945,7 +1022,8 @@ mod tests {
                 SourceId::WorldBank,
                 SourceId::Boc,
                 SourceId::Wto,
-                SourceId::Fhfa
+                SourceId::Fhfa,
+                SourceId::Massive
             ]
         );
     }
@@ -2204,5 +2282,158 @@ mod tests {
         .await
         .expect("run stops on shutdown");
         assert_eq!(queued_discovery(p).await, set(&["FRED"]));
+    }
+
+    fn utc(s: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(s)
+            .expect("test timestamp")
+            .with_timezone(&Utc)
+    }
+
+    /// A Massive series last crawled (successfully, or with `status`) at `crawled`.
+    async fn seed_massive_at(
+        pool: &DatabasePool,
+        external_id: &str,
+        crawled: Option<DateTime<Utc>>,
+        status: Option<&str>,
+    ) -> Uuid {
+        let id = seed(pool, SourceId::Massive, external_id, "Daily", None, status).await;
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query("UPDATE economic_series SET last_crawled_at = $2 WHERE id = $1")
+            .bind::<diesel::sql_types::Uuid, _>(id)
+            .bind::<Nullable<Timestamptz>, _>(crawled)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        id
+    }
+
+    async fn attempt_at(pool: &DatabasePool, series_id: Uuid, at: DateTime<Utc>) {
+        let mut conn = pool.get().await.unwrap();
+        diesel::sql_query(
+            "INSERT INTO crawl_attempts (series_id, attempted_at, crawl_method, success) \
+             VALUES ($1, $2, 'api', false)",
+        )
+        .bind::<diesel::sql_types::Uuid, _>(series_id)
+        .bind::<Timestamptz, _>(at)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    }
+
+    #[test]
+    fn only_massive_has_trading_day_slots() {
+        let now = utc("2026-04-06T12:00:00Z");
+        for id in SourceId::ALL {
+            assert_eq!(
+                refresh_slots(id, now).is_some(),
+                id == SourceId::Massive,
+                "{id}"
+            );
+        }
+        // Over Good Friday 2026 the latest slot is Thursday's (Friday 11:30 EDT) and the previous
+        // Wednesday's.
+        assert_eq!(
+            refresh_slots(SourceId::Massive, now),
+            Some(RefreshSlots {
+                latest: utc("2026-04-03T15:30:00Z"),
+                previous: utc("2026-04-02T15:30:00Z"),
+            })
+        );
+    }
+
+    /// Over the Good Friday weekend a Massive series refreshed after Thursday's slot isn't due
+    /// again until Monday's slot (Tuesday 11:30 New York time); one refreshed before it is.
+    #[tokio::test]
+    async fn massive_series_are_due_once_per_trading_day_slot() {
+        // As a build with the crawl_massive licence flag on would (it is off in every profile).
+        let _unlocked = crate::licence::testing::unlock(SourceId::Massive);
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        set_enabled(p, SourceId::Massive, true).await;
+        let thursday_slot = utc("2026-04-03T15:30:00Z");
+        let fresh = Some(thursday_slot + chrono::Duration::minutes(5));
+        let stale = Some(thursday_slot - chrono::Duration::minutes(5));
+        seed_massive_at(p, "t15c_mkt_fresh", fresh, Some("success")).await;
+        seed_massive_at(p, "t15c_mkt_stale", stale, Some("success")).await;
+        seed_massive_at(p, "t15c_mkt_never", None, None).await;
+        let failed_late = seed_massive_at(p, "t15c_mkt_failed_late", stale, Some("failed")).await;
+        attempt_at(
+            p,
+            failed_late,
+            thursday_slot + chrono::Duration::minutes(10),
+        )
+        .await;
+        let failed_early = seed_massive_at(p, "t15c_mkt_failed_early", stale, Some("failed")).await;
+        attempt_at(
+            p,
+            failed_early,
+            thursday_slot - chrono::Duration::minutes(1),
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Massive], 100);
+
+        // Saturday, Easter Sunday and Monday morning: the weekend and the holiday add no slot.
+        for now in [
+            "2026-04-04T16:00:00Z",
+            "2026-04-05T16:00:00Z",
+            "2026-04-07T15:29:00Z",
+        ] {
+            exec(p, "DELETE FROM crawl_queue").await;
+            s.tick_at(utc(now)).await.unwrap();
+            assert_eq!(
+                queued_series(p).await,
+                set(&[
+                    "MASSIVE/t15c_mkt_failed_early",
+                    "MASSIVE/t15c_mkt_never",
+                    "MASSIVE/t15c_mkt_stale",
+                ]),
+                "{now}"
+            );
+        }
+
+        // Monday's slot: every series is due, the failed one retried once more.
+        exec(p, "DELETE FROM crawl_queue").await;
+        s.tick_at(utc("2026-04-07T15:30:00Z")).await.unwrap();
+        assert_eq!(
+            queued_series(p).await,
+            set(&[
+                "MASSIVE/t15c_mkt_failed_early",
+                "MASSIVE/t15c_mkt_failed_late",
+                "MASSIVE/t15c_mkt_fresh",
+                "MASSIVE/t15c_mkt_never",
+                "MASSIVE/t15c_mkt_stale",
+            ])
+        );
+    }
+
+    /// Hurricane Sandy closed the NYSE on 29 and 30 October 2012: a series refreshed after
+    /// Friday the 26th's slot isn't due until Wednesday the 31st's (Thursday morning).
+    #[tokio::test]
+    async fn massive_series_wait_out_unscheduled_closures() {
+        // As a build with the crawl_massive licence flag on would (it is off in every profile).
+        let _unlocked = crate::licence::testing::unlock(SourceId::Massive);
+        let Some(db) = db().await else { return };
+        let p = &db.pool;
+        set_enabled(p, SourceId::Massive, true).await;
+        // Friday's slot: Saturday 27 October 11:30 EDT.
+        seed_massive_at(
+            p,
+            "t15c_mkt_sandy",
+            Some(utc("2012-10-27T16:00:00Z")),
+            Some("success"),
+        )
+        .await;
+        let s = scheduler(p, &[SourceId::Massive], 100);
+        for now in [
+            "2012-10-30T16:00:00Z",
+            "2012-10-31T16:00:00Z",
+            "2012-11-01T15:29:00Z",
+        ] {
+            s.tick_at(utc(now)).await.unwrap();
+            assert!(queued_series(p).await.is_empty(), "{now}");
+        }
+        s.tick_at(utc("2012-11-01T15:30:00Z")).await.unwrap();
+        assert_eq!(queued_series(p).await, set(&["MASSIVE/t15c_mkt_sandy"]));
     }
 }

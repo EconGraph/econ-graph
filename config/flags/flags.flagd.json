@@ -100,6 +100,16 @@
         "owner": "ECO-182",
         "remove_by": "unscheduled"
       }
+    },
+    "crawl_massive": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "build",
+        "owner": "ECO-206",
+        "remove_by": "unscheduled"
+      }
     }
   }
 }

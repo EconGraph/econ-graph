@@ -1,0 +1,1 @@
+{"queryCount":5,"resultsCount":5,"adjusted":false,"results":[{"T":"AAPL","v":58414460,"vw":184.94

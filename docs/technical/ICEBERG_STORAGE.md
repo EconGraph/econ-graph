@@ -196,3 +196,53 @@ database. It verifies that missing disposable intent, generic database fallback,
 mismatches and paused or production-labelled targets cause no fixture writes; that pause refusal
 precedes pending migration work; and that an injected final receipt failure rolls back source,
 dataset, series and catalog metadata together.
+
+## Dataset sizing: Massive `stock_price_daily`
+
+Massive, a market data vendor, supplies daily bars for the S&P 500 constituents (ECO-871,
+ECO-208). The dataset is defined in `backend/crates/econ-graph-crawler/data/datasets/massive.toml`
+and built by `sources/massive/dataset.rs`. There is one series per share class and field
+(`open`, `high`, `low`, `close`, `volume`, `vwap`), keyed `{share_class_figi}:{field}`. Prices
+are unadjusted.
+
+| Quantity | Rows |
+| --- | --- |
+| Series | about 500 share classes × 6 fields = 3,000 |
+| One trading day | about 3,000 logical rows |
+| One year | about 500 × 6 × 252 = 756,000 logical rows |
+| One series, one year | 252 rows; 20 years is about 5,000 |
+| Vendor corrections | one extra row per corrected field and day; expected to be rare |
+
+Re-fetching a day appends a row only for a field whose value changed (the crawler compares
+each point with the stored one, as it does for the World Bank), so the logical size grows with
+trading days, not with fetches.
+
+Budgets checked against this dataset:
+
+- **Reads (`ICEBERG_MAX_SCAN_ROWS`, default 100,000).** Every API read is one series, pruned to
+  its partition: a full 20-year history is about 5,000 rows, well inside the default. A read of
+  the whole dataset is not, after about 33 trading days (3,000 × 33 = 99,000 rows). Only
+  maintenance reads a whole dataset.
+- **Writes.** `prepare_append_conn` rejects a batch above `ICEBERG_MAX_SCAN_ROWS`. A daily
+  publication is 6 series at a time and far below it. A backfill must commit at most about 33
+  trading days of all tickers per batch, or fewer.
+- **Physical amplification.** Until observations stop being shadowed in PostgreSQL, each
+  publication mirrors the whole stored history of its series again. A series with H stored rows
+  adds H physical rows per fetch, so the dataset grows by about 3,000 × H physical rows per
+  trading day: about 756,000 a day after one year of history. Compaction must keep up.
+- **Compaction (`ICEBERG_COMPACTION_MAX_ROWS`, CronJob `--max-rows 100000`).** The dry run
+  (`timeseries maintenance --max-rows N`) only plans, so it passes for any positive N. Applying
+  it does not fit this dataset: `prepare_compaction` rewrites the whole dataset in one batch,
+  bounded by both `--max-rows` and `ICEBERG_MAX_SCAN_ROWS`. Past about 33 trading days of data
+  the compaction is refused, and the maintenance run stops with an error for every dataset after
+  it. Raising both budgets to the dataset size (756,000 rows after a year, millions after a
+  backfill) also needs more than the 256 MiB query memory and the CronJob's 1 GiB limit. Do not
+  turn on `TIMESERIES_MAINTENANCE_APPLY` for this dataset until compaction is bounded per series
+  partition rather than per dataset. ECO-875 tracks both this and the mirror's full-history
+  re-append; it blocks a production run of this dataset.
+
+The integration test `sources::massive::dataset::tests::stock_price_daily_round_trips_through_iceberg`
+publishes one week for three share classes (89 rows), reads every series back exactly with
+`IcebergStore` in all, latest, original and as-of modes and from a pinned snapshot, keeps both
+revisions of a corrected close, plans maintenance, refuses a compaction budget one row short
+and compacts within a budget that covers the dataset.

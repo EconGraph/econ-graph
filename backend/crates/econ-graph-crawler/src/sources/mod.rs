@@ -64,6 +64,9 @@ pub fn default_registry() -> AdapterRegistry {
     registry.register(std::sync::Arc::new(fhfa::FhfaAdapter::default()));
     registry.register(std::sync::Arc::new(wto::WtoAdapter::default()));
     registry.register(std::sync::Arc::new(boc::BocAdapter::default()));
+    registry.register(std::sync::Arc::new(
+        massive::adapter::MassiveAdapter::default(),
+    ));
     // Development only: hardcoded catalogs without live integrations.
     #[cfg(flag_static_catalogs)]
     for adapter in static_catalogs::StaticCatalogAdapter::all() {
@@ -94,6 +97,9 @@ pub fn registry_at(base_url: &str) -> AdapterRegistry {
     registry.register(std::sync::Arc::new(fhfa::FhfaAdapter::new(base_url)));
     registry.register(std::sync::Arc::new(wto::WtoAdapter::new(base_url)));
     registry.register(std::sync::Arc::new(boc::BocAdapter::new(base_url)));
+    registry.register(std::sync::Arc::new(massive::adapter::MassiveAdapter::new(
+        base_url,
+    )));
     for adapter in static_catalogs::StaticCatalogAdapter::all() {
         registry.register(std::sync::Arc::new(adapter));
     }
@@ -122,6 +128,7 @@ mod tests {
                 SourceId::Boc,
                 SourceId::Wto,
                 SourceId::Fhfa,
+                SourceId::Massive,
             ]
         );
     }
@@ -150,6 +157,17 @@ mod tests {
             ..ApiKeys::default()
         });
         assert_eq!(with.ids(), default_registry().ids());
+        assert!(
+            with.get(SourceId::Massive).is_some(),
+            "Massive is kept with MASSIVE_API_KEY set"
+        );
+        // Each skipped source is dropped by its own key only.
+        let wto_only = registry_for_keys(&ApiKeys {
+            wto: Some("k".into()),
+            ..ApiKeys::default()
+        });
+        assert!(wto_only.get(SourceId::Wto).is_some());
+        assert!(wto_only.get(SourceId::Massive).is_none());
         for &s in SKIPPED_WITHOUT_KEY {
             assert!(
                 crate::cli::api_key_env_var(s).is_some(),
