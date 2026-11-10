@@ -13,7 +13,7 @@
 --     vintage: revision_date, is_original_release) and fetch validators;
 --   - the series_metadata rows of the kept series, and the datasets that the
 --     kept series and metadata rows belong to;
---   - every row of data_sources and countries (reference tables);
+--   - every row of data_sources (a reference table);
 --   - every row of the app tables, when they share this database
 --     (APP_DATABASE=shared), and the migration bookkeeping.
 -- Every other table is emptied, and large objects nothing references any
@@ -60,7 +60,7 @@ DO $$
 DECLARE
     filtered constant text[] := ARRAY['economic_series', 'data_points', 'series_fetch_validators',
                                       'series_metadata', 'datasets'];
-    whole constant text[] := ARRAY['data_sources', 'countries', '__diesel_schema_migrations',
+    whole constant text[] := ARRAY['data_sources', '__diesel_schema_migrations',
         -- the app tables (backend/migrations/app)
         'users', 'user_sessions', 'chart_annotations', 'annotation_comments', 'chart_collaborators',
         'user_data_source_preferences', 'audit_logs', 'security_events', 'financial_annotations',

@@ -28,7 +28,16 @@ def inventory(plane):
     def created(pattern):
         return list(dict.fromkeys(re.findall(pattern, every, re.M)))
 
-    return (created(r'^CREATE TABLE (\w+) '),
+    # A later migration may drop a table an earlier one created (e.g. the global-analysis tables,
+    # ECO-898). Replay creates and drops in migration order, so a dropped table leaves the
+    # inventory and a table created again afterwards comes back.
+    live = {}
+    for statement, name in re.findall(r'^(CREATE TABLE|DROP TABLE(?: IF EXISTS)?) (\w+)', every, re.M):
+        if statement == 'CREATE TABLE':
+            live[name] = None
+        else:
+            live.pop(name, None)
+    return (list(live),
             created(r'^CREATE TYPE (\w+) AS ENUM'),
             {p.name.split('_', 1)[0].replace('-', '') for p in directory.iterdir() if p.is_dir()},
             content)
