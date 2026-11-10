@@ -56,6 +56,7 @@ const ROUTE_URLS: Record<string, (request: APIRequestContext) => Promise<string[
   '/about': async () => ['/about'],
   '/global': async () => ['/global'],
   '/privacy': async () => ['/privacy'],
+  '/terms': async () => ['/terms'],
   // Behind the build_canary flag (docs/build-flags.md), off in release: the route isn't
   // rendered, so this crawls whatever the app shows instead (the catch-all), which is the
   // point — a flagged-off route should 404 cleanly, not break.

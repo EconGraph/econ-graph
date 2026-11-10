@@ -7,6 +7,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import Header from './components/layout/Header';
 import Sidebar from './components/layout/Sidebar';
 import SuspendedAccountBanner from './components/layout/SuspendedAccountBanner';
+import SiteFooter from './components/layout/SiteFooter';
 import Dashboard from './pages/Dashboard';
 import SeriesExplorer from './pages/SeriesExplorer';
 import SeriesDetail from './pages/SeriesDetail';
@@ -14,6 +15,7 @@ import DataSources from './pages/DataSources';
 import About from './pages/About';
 import GlobalAnalysis from './pages/GlobalAnalysis';
 import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfUse from './pages/TermsOfUse';
 import NotFound from './pages/NotFound';
 import AuthCallback from './pages/AuthCallback';
 import { CALLBACK_PATH } from './auth/oidcConfig';
@@ -66,51 +68,56 @@ function App() {
 
           <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-          {/* Main content area */}
+          {/* Main content area, then the footer below it */}
           <Box
-            component='main'
             sx={{
               flexGrow: 1,
+              display: 'flex',
+              flexDirection: 'column',
               pt: { xs: 7, sm: 8 }, // Account for header height
               pl: { sm: sidebarOpen ? `${SIDEBAR_WIDTH}px` : 0 }, // Account for sidebar when open
               transition: 'padding-left 0.3s ease',
             }}
           >
-            <Container maxWidth='xl' sx={{ py: 3 }}>
-              <SuspendedAccountBanner />
-              <Routes>
-                {/* REQUIREMENT: Function similarly to FRED but with modern UX */}
-                <Route path='/' element={<Dashboard />} />
-                <Route path='/explore' element={<SeriesExplorer />} />
-                <Route path='/series/:id' element={<SeriesDetail />} />
-                <Route path='/sources' element={<DataSources />} />
-                <Route path='/about' element={<About />} />
-                <Route path='/global' element={<GlobalAnalysis />} />
-                <Route path='/privacy' element={<PrivacyPolicy />} />
-                <Route path={CALLBACK_PATH} element={<AuthCallback />} />
-                {FlagCanary && (
-                  <Route
-                    path='/flags/canary'
-                    element={
-                      <Suspense fallback={null}>
-                        <FlagCanary />
-                      </Suspense>
-                    }
-                  />
-                )}
-                {CompanyResearch && (
-                  <Route
-                    path='/companies/:cik?'
-                    element={
-                      <Suspense fallback={null}>
-                        <CompanyResearch />
-                      </Suspense>
-                    }
-                  />
-                )}
-                <Route path='*' element={<NotFound />} />
-              </Routes>
-            </Container>
+            <Box component='main' sx={{ flexGrow: 1 }}>
+              <Container maxWidth='xl' sx={{ py: 3 }}>
+                <SuspendedAccountBanner />
+                <Routes>
+                  {/* REQUIREMENT: Function similarly to FRED but with modern UX */}
+                  <Route path='/' element={<Dashboard />} />
+                  <Route path='/explore' element={<SeriesExplorer />} />
+                  <Route path='/series/:id' element={<SeriesDetail />} />
+                  <Route path='/sources' element={<DataSources />} />
+                  <Route path='/about' element={<About />} />
+                  <Route path='/global' element={<GlobalAnalysis />} />
+                  <Route path='/privacy' element={<PrivacyPolicy />} />
+                  <Route path='/terms' element={<TermsOfUse />} />
+                  <Route path={CALLBACK_PATH} element={<AuthCallback />} />
+                  {FlagCanary && (
+                    <Route
+                      path='/flags/canary'
+                      element={
+                        <Suspense fallback={null}>
+                          <FlagCanary />
+                        </Suspense>
+                      }
+                    />
+                  )}
+                  {CompanyResearch && (
+                    <Route
+                      path='/companies/:cik?'
+                      element={
+                        <Suspense fallback={null}>
+                          <CompanyResearch />
+                        </Suspense>
+                      }
+                    />
+                  )}
+                  <Route path='*' element={<NotFound />} />
+                </Routes>
+              </Container>
+            </Box>
+            <SiteFooter />
           </Box>
         </Box>
       </ThemeProvider>

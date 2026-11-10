@@ -166,7 +166,8 @@ it does not verify the deployed data or sign-in.
 ## What the suite covers
 
 - `smoke.spec.ts`: the home page loads, the seeded series of the public sources
-  are reachable through the frontend's `/graphql` proxy, and explore search
+  are reachable through the frontend's `/graphql` proxy, every page's footer
+  links to the Terms of Use and the link resolves (ECO-881), and explore search
   finds one.
 - `catalog-access.spec.ts`: FRED is readable by admins only
   ([catalog access](../../../../config/keycloak/README.md#catalog-access-including-anonymous-visitors)).
