@@ -294,6 +294,9 @@ fi
 if kc get crd backendtrafficpolicies.gateway.envoyproxy.io >/dev/null 2>&1; then
     run kubectl delete -f k8s/manifests/gateway/routes/ratelimit-policies.yaml --ignore-not-found=true
 fi
+if kc get crd httproutefilters.gateway.envoyproxy.io >/dev/null 2>&1; then
+    run kubectl -n "${NAMESPACE}" delete httproutefilter -l econgraph.io/public-host=true --ignore-not-found=true
+fi
 for manifest in frontend-service frontend-deployment \
     admin-frontend-service admin-frontend-deployment backend-service \
     backend-deployment chart-api-service chart-api-deployment; do

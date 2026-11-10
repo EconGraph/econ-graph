@@ -9,7 +9,9 @@ names and HTTPS on the alternate name redirect to that host, retaining path and
 query. The redirects are permanent (301) to the apex, and to www.HOST only when
 MAIN_HOST_PERMANENT names it (scripts/deploy/switch-main-host.sh --finalize);
 otherwise they are temporary (302), so a rollback is not undone by redirects that
-browsers and Cloudflare have cached. Localhost routes and the in-cluster JWKS URL remain unchanged.
+browsers and Cloudflare have cached. On the public host, /admin, /api/admin and /playground
+(and everything under them) get a 404 from the gateway (HTTPRoute econ-graph-public-withheld
+and HTTPRouteFilter econ-graph-not-found). Localhost routes and the in-cluster JWKS URL remain unchanged.
 Keycloak and backend share the canonical issuer; public CORS allows both names
 and http://localhost. Tests: scripts/deploy/test-render-public-host.sh.
 """
@@ -27,11 +29,16 @@ HOST_RE = re.compile(
 )
 PUBLIC_LABEL = "econgraph.io/public-host"
 # Paths served on localhost only, never on the public host (prefix match).
+# The public copies leave out any match on them, but the routes match / and
+# /api, which cover them, so WITHHELD_ROUTE also answers them with a 404 on
+# the public host: a PathPrefix longer than / and /api wins over both.
 LOCAL_ONLY_PATHS = ("/admin", "/api/admin", "/playground")
 REALM = "econ-graph"
 GATEWAY = {"name": "econ-graph-gateway", "namespace": "econ-graph-gateway"}
 REDIRECT_ROUTE = "econ-graph-public-redirect"
 WWW_REDIRECT_ROUTE = "econ-graph-www-redirect"
+WITHHELD_ROUTE = "econ-graph-public-withheld"
+NOT_FOUND_FILTER = "econ-graph-not-found"
 
 
 def env_values(host):
@@ -150,6 +157,55 @@ def redirect_routes(namespace, host, main_host):
     ]
 
 
+def not_found_filter(namespace):
+    """Envoy Gateway's direct response: a plain 404, with no backend behind it."""
+    return {
+        "apiVersion": "gateway.envoyproxy.io/v1alpha1",
+        "kind": "HTTPRouteFilter",
+        "metadata": {"name": NOT_FOUND_FILTER, "namespace": namespace, "labels": {PUBLIC_LABEL: "true"}},
+        "spec": {
+            "directResponse": {
+                "contentType": "text/plain",
+                "statusCode": 404,
+                "body": {"type": "Inline", "inline": "Not Found\n"},
+            }
+        },
+    }
+
+
+def withheld_route(namespace, main_host):
+    """LOCAL_ONLY_PATHS on the public host get a 404 from the gateway itself.
+
+    Gateway API precedence: across the routes on one listener and host name, the
+    longest matching PathPrefix wins, so /api/admin/... comes here, not to the
+    backend route's /api, and /admin and /playground not to the frontend's /.
+    """
+    return {
+        "apiVersion": "gateway.networking.k8s.io/v1",
+        "kind": "HTTPRoute",
+        "metadata": {"name": WITHHELD_ROUTE, "namespace": namespace, "labels": {PUBLIC_LABEL: "true"}},
+        "spec": {
+            "parentRefs": [dict(GATEWAY, sectionName="https")],
+            "hostnames": [main_host],
+            "rules": [
+                {
+                    "matches": [{"path": {"type": "PathPrefix", "value": p}} for p in LOCAL_ONLY_PATHS],
+                    "filters": [
+                        {
+                            "type": "ExtensionRef",
+                            "extensionRef": {
+                                "group": "gateway.envoyproxy.io",
+                                "kind": "HTTPRouteFilter",
+                                "name": NOT_FOUND_FILTER,
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+
 def add_public_targets(doc):
     """A BackendTrafficPolicy also applies to the public copies of its routes."""
     refs = doc.setdefault("spec", {}).setdefault("targetRefs", [])
@@ -180,6 +236,8 @@ def render(doc, host, main_host, present=()):
                     route for route in redirect_routes(meta.get("namespace"), host, main_host)
                     if route["metadata"]["name"] == meta["name"]
                 )]
+            if meta.get("name") == WITHHELD_ROUTE:
+                return [withheld_route(meta.get("namespace"), main_host)]
             doc["spec"]["hostnames"] = [main_host]
             return [doc]
         if f"{meta.get('name')}-public" in present:
@@ -228,9 +286,16 @@ def main(argv):
             docs.extend(d for d in yaml.safe_load_all(stream) if d)
     routes = [d for d in docs if d.get("kind") == "HTTPRoute"]
     present = {(d.get("metadata") or {}).get("name") for d in routes}
+    filters = {(d.get("metadata") or {}).get("name") for d in docs if d.get("kind") == "HTTPRouteFilter"}
     out = [r for d in docs for r in render(d, host, main_host, present)]
-    if routes and REDIRECT_ROUTE not in present:
-        out.extend(redirect_routes(routes[0]["metadata"].get("namespace"), host, main_host))
+    if routes:
+        namespace = routes[0]["metadata"].get("namespace")
+        if REDIRECT_ROUTE not in present:
+            out.extend(redirect_routes(namespace, host, main_host))
+        if NOT_FOUND_FILTER not in filters:
+            out.append(not_found_filter(namespace))
+        if WITHHELD_ROUTE not in present:
+            out.append(withheld_route(namespace, main_host))
     yaml.safe_dump_all(out, sys.stdout, sort_keys=False, default_flow_style=False)
     return 0
 

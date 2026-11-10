@@ -126,8 +126,21 @@ code="$(req api GET /api/no-such-endpoint)"
 if [ "$code" = 404 ] && ! is_html api; then pass "/api/... -> backend (404 from the backend, not the frontend's page)"; else fail "/api/... -> backend: got $code"; fi
 code="$(req auth GET /auth/login)"
 if [ "$code" = 404 ] && ! is_html auth; then pass "/auth/... -> backend (404 from the backend)"; else fail "/auth/... -> backend: got $code"; fi
-code="$(req playground GET /playground)"
-if is_frontend_page playground "$code"; then pass "/playground -> the frontend's page, not the backend"; else fail "/playground: expected the frontend's page, got $code"; fi
+if [ "$ROUTE_HOST" = localhost ]; then
+    code="$(req playground GET /playground)"
+    if is_frontend_page playground "$code"; then pass "/playground -> the frontend's page, not the backend"; else fail "/playground: expected the frontend's page, got $code"; fi
+else
+    # The public host withholds these (render-public-host.py's econ-graph-public-withheld):
+    # the gateway answers 404 itself, before the frontend's / or the backend's /api.
+    for p in /playground /admin /api/admin /api/admin/anything; do
+        code="$(req withheld GET "$p")"
+        if [ "$code" = 404 ] && grep -qx 'Not Found' "$WORK/withheld.body"; then
+            pass "$p -> 404 from the gateway (withheld on the public host)"
+        else
+            fail "$p: expected the gateway's 404, got $code $(head -c 200 "$WORK/withheld.body")"
+        fi
+    done
+fi
 
 # econ-graph-graphql
 code="$(req gql POST /graphql "${GQL[@]}")"

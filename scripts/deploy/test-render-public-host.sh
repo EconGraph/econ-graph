@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Tests for scripts/deploy/render-public-host.py against the committed manifests:
 # every localhost HTTPRoute gains a separate -public copy for the public host (listener
-# https only, without the admin and debug paths; localhost stays as it was), the rate
+# https only; localhost stays as it was), /admin, /api/admin and /playground and every path
+# under them get a 404 on the public host by Gateway API precedence over / and /api (and
+# would not without the withheld route), the rate
 # limits cover the copies, plain http and the alternate name redirect to https://MAIN_HOST
 # (302 to www until MAIN_HOST_PERMANENT names it, then 301; always 301 to the apex), Keycloak's
 # hostname and the backend's issuer agree on https://<host>/idp/realms/econ-graph, the
@@ -49,6 +51,35 @@ def redirect(name):
     return route(name)["spec"]["rules"][0]["filters"][0]["requestRedirect"]
 def targets(name):
     return [t["name"] for t in docs[("BackendTrafficPolicy", name)]["spec"]["targetRefs"]]
+def serve(host, section, path):
+    # What the gateway does with a request, by the Gateway API precedence across all the
+    # routes on one listener and host name: an Exact match beats any PathPrefix, a longer
+    # PathPrefix beats a shorter one, and a PathPrefix matches whole path segments. Returns
+    # the status of a direct response or redirect, or "<route>:<Services>" for a backend.
+    best = None
+    for (k, n), d in docs.items():
+        if k != "HTTPRoute" or host not in d["spec"].get("hostnames", []) or section not in sections(n):
+            continue
+        for rule in d["spec"].get("rules") or []:
+            for m in rule.get("matches") or [{}]:
+                p = m.get("path") or {"type": "PathPrefix", "value": "/"}
+                value = p["value"]
+                if p.get("type", "PathPrefix") == "Exact":
+                    rank = (1, len(value)) if path == value else None
+                else:
+                    pre = value.rstrip("/")
+                    rank = (0, len(pre)) if path == pre or path.startswith(pre + "/") else None
+                if rank and (best is None or rank > best[0]):
+                    best = (rank, n, rule)
+    if best is None:
+        return None
+    _, n, rule = best
+    for f in rule.get("filters") or []:
+        if f["type"] == "ExtensionRef" and f["extensionRef"]["kind"] == "HTTPRouteFilter":
+            return docs[("HTTPRouteFilter", f["extensionRef"]["name"])]["spec"]["directResponse"]["statusCode"]
+        if f["type"] == "RequestRedirect":
+            return f["requestRedirect"].get("statusCode", 302)
+    return n + ":" + ",".join(b["name"] for b in rule.get("backendRefs") or [])
 sys.exit(0 if eval(sys.argv[1]) else 1)
 ' "$expr" <<<"$rendered" || fail "$name"
 }
@@ -79,8 +110,39 @@ for r in econ-graph-frontend econ-graph-backend econ-graph-graphql econ-graph-da
 done
 check "the rate limits apply on the public host too" \
   "targets('econ-graph-graphql-ratelimit') == ['econ-graph-graphql', 'econ-graph-graphql-public'] and targets('econ-graph-data-graphql-ratelimit') == ['econ-graph-data-graphql', 'econ-graph-data-graphql-public']"
-check "the public host leaves out the admin and debug paths" \
+check "the public copies match no admin or debug path of their own" \
   "not any(p == x or p.startswith(x + '/') for r in ('econ-graph-frontend-public', 'econ-graph-backend-public') for p in paths(r) for x in ('/admin', '/api/admin', '/playground')) and '/api' in paths('econ-graph-backend-public')"
+# The public copies still match / and /api, which cover the admin and debug paths, so
+# leaving matches out withholds nothing: a separate route answers them with a 404.
+check "econ-graph-public-withheld serves www.econgraph.com only, on listener https only, labelled for cleanup" \
+  "hosts('econ-graph-public-withheld') == ['www.econgraph.com'] and sections('econ-graph-public-withheld') == ['https'] and route('econ-graph-public-withheld')['metadata']['labels'] == {'econgraph.io/public-host': 'true'}"
+check "econ-graph-public-withheld matches the three prefixes and sends them to no backend" \
+  "[(m['path']['type'], m['path']['value']) for r in route('econ-graph-public-withheld')['spec']['rules'] for m in r['matches']] == [('PathPrefix', '/admin'), ('PathPrefix', '/api/admin'), ('PathPrefix', '/playground')] and not any(r.get('backendRefs') for r in route('econ-graph-public-withheld')['spec']['rules'])"
+check "HTTPRouteFilter econ-graph-not-found is a direct 404 response, labelled for cleanup" \
+  "docs[('HTTPRouteFilter', 'econ-graph-not-found')]['spec']['directResponse']['statusCode'] == 404 and docs[('HTTPRouteFilter', 'econ-graph-not-found')]['metadata']['labels'] == {'econgraph.io/public-host': 'true'}"
+# What a request gets, by the Gateway API's precedence over every rendered route (serve,
+# above). It proves the rendered routes say so, not that Envoy Gateway does it:
+# scripts/deploy/test-gateway-routes.sh checks a running gateway.
+for p in /api/admin/anything /api/admin /api/admin/ /admin /admin/users /playground /playground/x; do
+  check "on the public host, $p gets a 404 from the gateway" \
+    "serve('www.econgraph.com', 'https', '$p') == 404"
+done
+check "on the public host, /api/administrator and /api/series still reach the backend" \
+  "serve('www.econgraph.com', 'https', '/api/administrator') == serve('www.econgraph.com', 'https', '/api/series') == 'econ-graph-backend-public:econ-graph-backend-service'"
+check "on the public host, /, /administer and /playgrounds still reach the frontend" \
+  "{serve('www.econgraph.com', 'https', p) for p in ('/', '/administer', '/playgrounds')} == {'econ-graph-frontend-public:econ-graph-frontend-service'}"
+check "on localhost, /api/admin/anything still reaches the backend and /admin the frontend" \
+  "serve('localhost', 'http', '/api/admin/anything') == 'econ-graph-backend:econ-graph-backend-service' and serve('localhost', 'http', '/admin') == 'econ-graph-frontend:econ-graph-frontend-service'"
+# Without the withheld route the same checks must fail, or they prove nothing.
+with_withheld="$rendered"
+rendered="$(python3 -c '
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(sys.stdin) if d and d["metadata"]["name"] != "econ-graph-public-withheld"]
+yaml.safe_dump_all(docs, sys.stdout, sort_keys=False)
+' <<<"$with_withheld")"
+check "without econ-graph-public-withheld, /api/admin/anything would reach the backend (so the 404 check is not vacuous)" \
+  "serve('www.econgraph.com', 'https', '/api/admin/anything') == 'econ-graph-backend-public:econ-graph-backend-service'"
+rendered="$with_withheld"
 check "the public Keycloak route serves only the econ-graph realm and its resources" \
   "paths('econ-graph-idp-public') == ['/idp/realms/econ-graph', '/idp/resources']"
 check "plain http for the host and www redirects temporarily to https://www.econgraph.com" \
@@ -88,7 +150,7 @@ check "plain http for the host and www redirects temporarily to https://www.econ
 check "https for the apex redirects temporarily to https://www.econgraph.com" \
   "hosts('econ-graph-www-redirect') == ['econgraph.com'] and sections('econ-graph-www-redirect') == ['https'] and redirect('econ-graph-www-redirect') == {'scheme': 'https', 'hostname': 'www.econgraph.com', 'statusCode': 302}"
 check "every route rule sets X-Forwarded-For to the address the gateway settled on" \
-  "all(any(f['type'] == 'RequestHeaderModifier' and {'name': 'X-Forwarded-For', 'value': '%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%'} in f['requestHeaderModifier'].get('set', []) for f in r.get('filters', [])) for (k, n), d in docs.items() if k == 'HTTPRoute' and not n.endswith('-redirect') for r in d['spec']['rules'])"
+  "all(any(f['type'] == 'RequestHeaderModifier' and {'name': 'X-Forwarded-For', 'value': '%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%'} in f['requestHeaderModifier'].get('set', []) for f in r.get('filters', [])) for (k, n), d in docs.items() if k == 'HTTPRoute' and not n.endswith('-redirect') and n != 'econ-graph-public-withheld' for r in d['spec']['rules'])"
 check "KC_HOSTNAME is the https public URL" \
   "env('Deployment', 'keycloak', 'keycloak', 'KC_HOSTNAME') == 'https://www.econgraph.com/idp'"
 check "the admin console stays on the port-forward" \
@@ -193,7 +255,7 @@ check "rollback retains both CORS origins" \
 # The same generated manifests can also be switched back and forward safely.
 rendered="$(MAIN_HOST=econgraph.com "$render" econgraph.com - <<<"$forward")"
 check "rerendering to the apex keeps routes and issuer together" \
-  "hosts('econ-graph-idp-public') == ['econgraph.com'] and hosts('econ-graph-www-redirect') == ['www.econgraph.com'] and env('Deployment', 'keycloak', 'keycloak', 'KC_HOSTNAME') == 'https://econgraph.com/idp'"
+  "hosts('econ-graph-idp-public') == ['econgraph.com'] and hosts('econ-graph-public-withheld') == ['econgraph.com'] and serve('econgraph.com', 'https', '/api/admin/anything') == 404 and hosts('econ-graph-www-redirect') == ['www.econgraph.com'] and env('Deployment', 'keycloak', 'keycloak', 'KC_HOSTNAME') == 'https://econgraph.com/idp'"
 [ "$("$render" econgraph.com - <<<"$rendered")" = "$forward" ] || fail "forward/rollback rendered manifests did not round-trip"
 rendered="$forward"
 

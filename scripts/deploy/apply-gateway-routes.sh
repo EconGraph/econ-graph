@@ -10,6 +10,7 @@
 #     from ClusterIssuer GATEWAY_TLS_ISSUER) and its rate-limit bursts
 #     (k8s/manifests/gateway/gateway-https.yaml);
 #   - the public copies of the routes and redirects to MAIN_HOST (default www.PUBLIC_HOST),
+#     the 404 for the localhost-only paths (/admin, /api/admin, /playground),
 #     and the rate limits on them (scripts/deploy/render-public-host.py).
 # Without one, all of that is removed. The localhost routes are applied either
 # way.
@@ -176,6 +177,9 @@ else
     echo "==> No public host: localhost routes only"
     run_kc apply -f "$ROUTES_DIR/"
     run_kc -n econ-graph delete httproute -l "${PUBLIC_LABEL}=true" --ignore-not-found
+    if kc get crd httproutefilters.gateway.envoyproxy.io >/dev/null 2>&1; then
+        run_kc -n econ-graph delete httproutefilter -l "${PUBLIC_LABEL}=true" --ignore-not-found
+    fi
     if kc -n econ-graph-gateway get gateway econ-graph-gateway \
         -o jsonpath='{.spec.listeners[*].name}' 2>/dev/null | grep -qw https; then
         # The manager's empty part removes the listener it applied.
