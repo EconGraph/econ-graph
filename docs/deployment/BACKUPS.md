@@ -573,9 +573,9 @@ The channels are in `~/.config/econgraph/notify.env`, mode 600. The webhook
 URLs are credentials, so the file is never committed:
 
 ```sh
-NOTIFY_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...   # a Slack incoming webhook
+NOTIFY_SLACK_WEBHOOK_URL='<a Slack incoming webhook URL>'
 NOTIFY_COMMAND='mail -s "econgraph backup" someone@example.com'  # or any command; the message is on stdin
-NOTIFY_HEARTBEAT_URL=https://hc-ping.com/<uuid>                  # period 1 hour, grace about 2 hours
+NOTIFY_HEARTBEAT_URL='<the ping URL of a dead-man switch check>'  # period 1 hour, grace about 2 hours
 ```
 
 Set at least one of `NOTIFY_SLACK_WEBHOOK_URL` and `NOTIFY_COMMAND`. With neither,

@@ -11,12 +11,12 @@
 # failed or stale backup to a person. The channels come from
 # ~/.config/econgraph/notify.env (mode 600: it holds webhook URLs, which are
 # credentials; never commit it). Set at least one of the first two:
-#   NOTIFY_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+#   NOTIFY_SLACK_WEBHOOK_URL=<Slack incoming webhook URL>
 #       a Slack incoming webhook (anything that takes Slack's {"text": ...} JSON)
 #   NOTIFY_COMMAND='mail -s "econgraph backup" someone@example.com'
 #       run by bash, with the message on stdin
 # and, so that a host that is down, asleep or whose timers stopped is noticed too:
-#   NOTIFY_HEARTBEAT_URL=https://hc-ping.com/<uuid>
+#   NOTIFY_HEARTBEAT_URL=<the ping URL of a dead-man switch check>
 #       a dead-man's switch (healthchecks.io or similar) that alerts when the
 #       hourly pings stop; set its period to 1 hour and its grace to about 2.
 #
