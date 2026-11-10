@@ -161,3 +161,34 @@ pub async fn latest_at_config(
     }
     crate::encoding::from_batches(&batches)
 }
+
+/// The newest observation date at one immutable snapshot with a non-NULL value, looking only at
+/// observations dated on or after `since`; `None` when there are none. Used for a source's
+/// freshness: `since` bounds the scan and the commit dedup to recent rows, so this stays cheap on
+/// a large table. Filtering on date before the dedup is safe because an observation ID's date
+/// never changes (the ID names one series, date and revision).
+pub async fn latest_date_at_config(
+    config: &crate::StorageConfig,
+    pointer: &crate::TablePointer,
+    since: chrono::NaiveDate,
+) -> Result<Option<chrono::NaiveDate>> {
+    use arrow_array::{Array, Date32Array};
+    use std::sync::Arc;
+    let table = crate::SqlCatalog::load_at_config(config, pointer).await?;
+    let ctx = context()?;
+    let provider =
+        iceberg_datafusion::IcebergStaticTableProvider::try_new_from_table(table).await?;
+    ctx.register_table("observations", Arc::new(provider))?;
+    let sql = format!("SELECT MAX(date) AS latest FROM (SELECT date, value, row_number() OVER(PARTITION BY id ORDER BY _commit_generation DESC) AS commit_rank FROM observations WHERE date >= DATE '{since}') WHERE commit_rank=1 AND value IS NOT NULL");
+    let batches = ctx.sql(&sql).await?.collect().await?;
+    let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).context("epoch")?;
+    let Some(batch) = batches.iter().find(|b| b.num_rows() > 0) else {
+        return Ok(None);
+    };
+    let dates = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<Date32Array>()
+        .context("latest date type")?;
+    Ok((!dates.is_null(0)).then(|| epoch + chrono::Duration::days(i64::from(dates.value(0)))))
+}

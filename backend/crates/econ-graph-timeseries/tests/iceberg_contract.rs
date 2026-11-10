@@ -218,6 +218,24 @@ async fn real_iceberg_roundtrip_parity_upserts_conflicts_and_atomicity() -> Resu
         encoding::canonical_rows(&catalog.read_rows(&prepared.next).await?)?,
         encoding::canonical_rows(&rows)?
     );
+    // Freshness: the newest non-NULL date, only among dates on or after `since`.
+    let day = |m| NaiveDate::from_ymd_opt(2020, m, 1).unwrap();
+    for (since, latest) in [
+        (day(1), Some(day(3))),
+        (day(3), Some(day(3))),
+        (day(4), None),
+    ] {
+        assert_eq!(
+            econ_graph_timeseries::query::latest_date_at_config(
+                &catalog.config,
+                &prepared.next,
+                since
+            )
+            .await?,
+            latest,
+            "since {since}"
+        );
+    }
     assert!(
         SqlCatalog::read_series_at_config(
             &catalog.config,

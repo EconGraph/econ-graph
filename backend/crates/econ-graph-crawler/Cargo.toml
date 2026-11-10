@@ -51,6 +51,7 @@ tracing-subscriber.workspace = true
 
 # Date/Time
 chrono.workspace = true
+chrono-tz.workspace = true
 
 # UUID
 uuid.workspace = true

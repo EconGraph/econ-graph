@@ -75,6 +75,7 @@ pub mod coverage;
 pub mod dataset;
 pub mod discovery_run;
 pub mod error;
+pub mod freshness;
 pub mod http;
 pub mod licence;
 pub mod lifecycle;
