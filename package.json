@@ -1,7 +1,7 @@
 {
   "dependencies": {
     "playwright": "^1.55.0",
-    "puppeteer": "^24.19.0"
+    "puppeteer": "^25.17.0"
   },
   "engines": {
     "node": ">=26.0.0 <27"

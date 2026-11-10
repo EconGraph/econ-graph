@@ -55,7 +55,10 @@ export default defineConfig(({ command }) => ({
   // Development server configuration
   server: {
     port: 3000,
-    host: true, // Allow external connections
+    // Loopback only: the dev server serves source files and has had advisories that
+    // matter only when it is reachable from other machines (GHSA-p4f5-76q4-ffq7).
+    // Set VITE_DEV_HOST=0.0.0.0 to open it to the network on purpose.
+    host: process.env.VITE_DEV_HOST || 'localhost',
     proxy,
   },
 

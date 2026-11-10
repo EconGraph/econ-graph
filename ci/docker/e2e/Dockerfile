@@ -1,7 +1,7 @@
 # E2E Test Container with Pre-installed Browsers
 # This container has Playwright browsers pre-installed to speed up E2E test execution
 
-FROM node:26-trixie
+FROM node:26.13.0-trixie@sha256:438603bbb5cda404b9416f0b5c8026f61501ab911760d861ec28c36b5d675725
 
 # Install system dependencies for Playwright
 RUN apt-get update && apt-get install -y \

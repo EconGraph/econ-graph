@@ -210,7 +210,7 @@ The privacy policy at `https://econgraph.com/privacy` covers either provider, an
 `https://econgraph.com/privacy#account-deletion` gives the data-deletion instructions a
 Meta app links to. A Meta app for this realm uses domain `econgraph.com` and redirect
 URI `https://econgraph.com/idp/realms/econ-graph/broker/facebook/endpoint`
-([Keycloak Facebook provider setup](https://www.keycloak.org/docs/26.8.1/server_admin/#_facebook)).
+([Keycloak Facebook provider setup](https://www.keycloak.org/docs/26.8.2/server_admin/#_facebook)).
 There is no Facebook deletion callback: the instructions explain how to request
 account deletion. The backend serves no `/auth/*` routes; sign-in goes through Keycloak.
 

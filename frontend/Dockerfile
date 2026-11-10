@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for EconGraph Frontend
-FROM node:26-alpine AS builder
+FROM node:26.13.0-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS builder
 
 # Set working directory
 WORKDIR /app
@@ -52,7 +52,7 @@ RUN if [ -z "$(echo "$VITE_OIDC_ISSUER" | tr -d '[:space:]')" ] && [ "$VITE_OIDC
     && npm run build
 
 # Production stage
-FROM nginx:1.30-alpine
+FROM nginx:1.30.6-alpine@sha256:583b7f2fce1cdb8da5ad5c39ebd3c33b98b87d493190e548bdee1fa8c619c311
 
 # Copy built application from builder stage (Vite outputs to dist)
 COPY --from=builder /app/dist /usr/share/nginx/html

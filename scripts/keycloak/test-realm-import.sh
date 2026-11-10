@@ -49,8 +49,8 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 PREVIOUS_RELEASE="${PREVIOUS_RELEASE:-v4.0.1}"
-KC_TAG=quay.io/keycloak/keycloak:26.8.1
-KC_IMAGE="$KC_TAG@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b"
+KC_TAG=quay.io/keycloak/keycloak:26.8.2
+KC_IMAGE="$KC_TAG@sha256:723b1d6e254c0fc96d5cffec860c7e0744d6a3277822b865bb538cf891575e41"
 CLI_TAG=adorsys/keycloak-config-cli:6.5.1-26.5.5
 CLI_IMAGE="$CLI_TAG@sha256:0955d98c8a341898b7aa177477edf8a1e90569ae50bbe7598141c1270b773274"
 ADMIN="admin"
@@ -66,7 +66,7 @@ check_images() { # MANIFEST IMAGE
     found="$(sed -n 's/^ *image: *//p' "$REPO/$1" | { grep -F "${2%%:*}" || true; } | sort -u)"
     [ "$found" = "$2" ] || { echo "$1 runs '${found:-nothing}', not $2; update this script" >&2; exit 1; }
 }
-check_images k8s/manifests/keycloak/deployment.yaml "$KC_TAG"
+check_images k8s/manifests/keycloak/deployment.yaml "$KC_IMAGE"
 check_images k8s/manifests/keycloak/realm-import-job.yaml "$CLI_TAG"
 
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}"

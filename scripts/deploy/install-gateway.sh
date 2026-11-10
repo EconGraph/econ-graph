@@ -42,7 +42,7 @@
 # checked against pinned SHA-256 sums; bump all three together.
 #
 # Version matrix (https://gateway.envoyproxy.io/news/releases/matrix/):
-#   Envoy Gateway v1.9.2: built with Gateway API v1.6.1, Envoy Proxy 1.39.x,
+#   Envoy Gateway v1.9.3: built with Gateway API v1.6.1, Envoy Proxy 1.39.x,
 #   Kubernetes v1.33 to v1.36, supported until 2027-02-14. The Gateway API
 #   CRDs are the newest v1.6 patch, v1.6.3 (patch releases of a Gateway API
 #   minor only fix the CRDs).
@@ -50,13 +50,13 @@
 set -euo pipefail
 
 GATEWAY_API_VERSION="v1.6.3"
-ENVOY_GATEWAY_VERSION="v1.9.2"
+ENVOY_GATEWAY_VERSION="v1.9.3"
 GATEWAY_API_URL="https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/standard-install.yaml"
 GATEWAY_API_SHA256="356c2b8e286a964dc20995435659ad1095386329974793af10bbfe3eff977fe5"
 EG_CRDS_URL="https://github.com/envoyproxy/gateway/releases/download/${ENVOY_GATEWAY_VERSION}/envoy-gateway-crds.yaml"
 EG_CRDS_SHA256="b339119f8f3a4046688fc96837b4129553f42c9998976913ef9dff25694d85cc"
 EG_INSTALL_URL="https://github.com/envoyproxy/gateway/releases/download/${ENVOY_GATEWAY_VERSION}/install.yaml"
-EG_INSTALL_SHA256="0412a72907e57ff9b73c56a7bf6df5190bf0f6e4f8bb4bba34e38630bbab5778"
+EG_INSTALL_SHA256="ac89b0b564e52c97c97a3f8b4d82bb594a0fbc810431fb2e6ffd91702aabebfb"
 
 FIELD_MANAGER="econ-graph-install-gateway"
 

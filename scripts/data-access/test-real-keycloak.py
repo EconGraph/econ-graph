@@ -25,9 +25,9 @@ import urllib.request
 import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
-# Verified against the official 26.8.1 OCI index. Keep aligned with docker-compose.yml.
+# Verified against the official 26.8.2 OCI index. Keep aligned with docker-compose.yml.
 # https://www.keycloak.org/2026/10/keycloak-2681-released
-KC_IMAGE = "quay.io/keycloak/keycloak:26.8.1@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b"
+KC_IMAGE = "quay.io/keycloak/keycloak:26.8.2@sha256:723b1d6e254c0fc96d5cffec860c7e0744d6a3277822b865bb538cf891575e41"
 OWNER_LABEL = "econgraph.independent-access.owner"
 
 
@@ -351,11 +351,11 @@ def main():
         args.backend.is_file() and args.crawler.is_file()
     ), "build backend and crawler binaries before running this explicit integration test"
     pinned = re.search(
-        r"image: (quay.io/keycloak/keycloak:[\d.]+)",
+        r"image: (quay.io/keycloak/keycloak:\S+)",
         (ROOT / "docker-compose.yml").read_text(),
     ).group(1)
     assert (
-        KC_IMAGE.split("@")[0] == pinned
+        KC_IMAGE == pinned
     ), "update the test's verified immutable image to the repository Keycloak pin"
     lab = Lab()
     with tempfile.TemporaryDirectory(prefix=lab.owner + "-") as directory:
