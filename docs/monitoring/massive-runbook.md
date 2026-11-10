@@ -126,10 +126,11 @@ namespace matcher names the branch namespace. The production rules ignore branch
 - `MassiveApiKeyRejected`: set `massive-api-key` to a wrong value and restart the worker. The
   alert fires on the worker's next Massive request, which may be the next day's refresh. To
   make one now, enqueue a fetch for the worker:
-  `kubectl -n <namespace> exec deploy/crawler-worker -- /app/crawler enqueue --source MASSIVE --series 0000320193:close`.
-  `crawler fetch --source MASSIVE --series 0000320193:close` shows the rejection at once, but
+  `kubectl -n <namespace> exec deploy/crawler-worker -- /app/crawler enqueue --source MASSIVE --series <share_class_figi>:close`.
+  `crawler fetch --source MASSIVE --series <share_class_figi>:close` shows the rejection at once, but
   it runs in its own process, which Prometheus doesn't scrape, so it doesn't fire the alert.
-  Restore the key afterwards. The alert keeps firing for 24 hours.
+  Massive series ids are `{share_class_figi}:{field}`; take one from the source's discovered
+  series. Restore the key afterwards. The alert keeps firing for 24 hours.
 - `MassiveDataStale`: with the source running, scale the worker to 0 replicas past a trading
   day's slot, then back to 1 with the scheduler disabled (`CRAWLER_SCHEDULER=false`). The lag
   gauge reports 1, and the alert fires 6 hours later. Re-enable the scheduler to clear it.
