@@ -110,8 +110,8 @@ Find the error with `kubectl -n econ-graph logs job/<name>`. Common causes are t
 above), the vendor's rate limits, and disk space on the host object store (the disk alerts
 from ECO-867). Fix the cause and create a new Job as above.
 
-A backfill Job started while `MASSIVE_API_KEY` is unset gets stuck before it starts, rather
-than failing (#834 fixes this). Install the key first.
+A backfill Job started while `MASSIVE_API_KEY` is unset fails the run at once with outcome
+`failure`, and `MassiveBackfillFailed` fires. Install the key first.
 
 Massive's paid plans have only a soft limit of about 100 requests a second, so a 429 from
 Massive is likely a vendor fault rather than the crawler being too fast. Check Massive's status
