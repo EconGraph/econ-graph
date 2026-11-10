@@ -42,9 +42,12 @@ const CLOSES: [&str; 3] = ["187.4321", "188.0107", "186.9953"];
 const DAYS: [(u32, u32); 3] = [(7, 1), (7, 2), (7, 3)];
 /// The series' external id: `{share_class_figi}:{field}`.
 const EXTERNAL_ID: &str = "BBG001S5N8V8:close";
-/// A word only the Massive series' title contains, for search suggestions.
+/// An id that exists nowhere: a denied series or dataset must be answered exactly as this one.
+const MISSING: Uuid = Uuid::from_u128(0x6d61_7373_6976_6500_0000_0000_0000_0001);
+/// A word only the Massive series' title starts with: suggestions complete title prefixes.
 const TITLE_WORD: &str = "Tickeraccessaapl";
 
+/// Runs [`run`] in a child process with the Iceberg observation backend selected.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn massive_data_needs_its_role_on_every_read_path() {
     if std::env::var(CHILD).is_err() {
@@ -86,6 +89,7 @@ struct Seeded {
 }
 
 impl Seeded {
+    /// The Massive ids, names, dates and prices no unauthorized response may contain.
     fn leaks(&self) -> Vec<String> {
         let mut leaks = vec![
             self.source.id.to_string(),
@@ -112,6 +116,7 @@ impl Seeded {
     }
 }
 
+/// Seed the data, start the services, and read every path as every caller.
 async fn run() {
     let app_db = ScratchDatabase::create("massive_access_app");
     let data_db = ScratchDatabase::create("massive_access_data");
@@ -317,7 +322,7 @@ async fn seed(data: &DatabasePool) -> Seeded {
         r#"INSERT INTO economic_series (id, source_id, dataset_id, external_id, title, frequency,
                units, start_date, end_date, dimensions)
            VALUES ('{series}', '{massive}', '{dataset}', '{EXTERNAL_ID}',
-               'Accesstest {TITLE_WORD} close', 'Daily', 'USD', '2019-07-01', '2019-07-03',
+               '{TITLE_WORD} Accesstest close', 'Daily', 'USD', '2019-07-01', '2019-07-03',
                '{{"ticker":"AAPL","exchange":"XNAS","currency":"USD","field":"close"}}');
            INSERT INTO datasets (id, source_id, code, name) VALUES ('{bea_dataset}', '{bea_id}',
                'massive_access_control', 'Control');
@@ -445,6 +450,7 @@ fn anonymous_scope() -> Vec<Role> {
         .collect()
 }
 
+/// A spawned HTTP server, stopped when dropped.
 struct Server(tokio::task::JoinHandle<()>);
 impl Drop for Server {
     fn drop(&mut self) {
@@ -452,6 +458,7 @@ impl Drop for Server {
     }
 }
 
+/// Serve `plane` on a free local port, verifying tokens with `verifier`.
 fn serve(
     app: &AppPool,
     data: &DatabasePool,
@@ -522,6 +529,7 @@ fn serve_data_plane(issuer: &TestIssuer, app: &AppPool, data: &DatabasePool) -> 
     serve(app, data, verifier, ServicePlane::Data)
 }
 
+/// POST `query` to `url`'s `/graphql`, with `token` as the bearer token if given.
 async fn post(url: &str, token: Option<&str>, query: &str) -> (u16, Value) {
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
     let mut request = client
@@ -539,9 +547,12 @@ async fn post(url: &str, token: Option<&str>, query: &str) -> (u16, Value) {
 struct Reads {
     listing: Value,
     cross_section: Value,
+    /// The same cross section of a dataset that doesn't exist, which a denial must match.
+    missing_cross_section: Value,
     data_source: Value,
 }
 
+/// Read every series and observation root on `url` as the holder of `token`.
 async fn graphql_reads(url: &str, token: Option<&str>, s: &Seeded) -> Reads {
     let listing = format!(
         r#"{{ dataSources {{ id name seriesCount series {{ totalCount nodes {{ id }} }} }}
@@ -566,27 +577,40 @@ async fn graphql_reads(url: &str, token: Option<&str>, s: &Seeded) -> Reads {
         name = s.source.name,
         prefix = &TITLE_WORD[..8],
     );
-    let cross_section = format!(
-        r#"{{ crossSection(datasetId: "{}", across: "ticker", latest: true,
-            filter: [{{dimension: "exchange", value: "XNAS"}}, {{dimension: "currency", value: "USD"}},
-                     {{dimension: "field", value: "close"}}]) {{ key date value }} }}"#,
-        s.dataset
-    );
+    let cross_section = |dataset: Uuid| {
+        format!(
+            r#"{{ crossSection(datasetId: "{dataset}", across: "ticker", latest: true,
+                filter: [{{dimension: "exchange", value: "XNAS"}}, {{dimension: "currency", value: "USD"}},
+                         {{dimension: "field", value: "close"}}]) {{ key date value }} }}"#
+        )
+    };
     let data_source = format!(r#"{{ dataSource(id: "{}") {{ id name }} }}"#, s.source.id);
     let mut answers = Vec::new();
-    for query in [listing, cross_section, data_source] {
+    for query in [
+        listing,
+        cross_section(s.dataset),
+        cross_section(MISSING),
+        data_source,
+    ] {
         let (status, body) = post(url, token, &query).await;
         assert_eq!(status, 200, "{url}: {body}");
         answers.push(body);
     }
-    let [listing, cross_section, data_source] = answers.try_into().unwrap();
+    let [listing, cross_section, missing_cross_section, data_source] = answers.try_into().unwrap();
     Reads {
         listing,
         cross_section,
+        missing_cross_section,
         data_source,
     }
 }
 
+/// `answer` with the id the caller asked for replaced, since an answer may echo the request.
+fn requested(answer: &Value, id: Uuid) -> Value {
+    serde_json::from_str(&answer.to_string().replace(&id.to_string(), "<requested>")).unwrap()
+}
+
+/// The `id` of each object in a JSON list.
 fn ids(list: &Value) -> Vec<String> {
     list.as_array()
         .unwrap_or_else(|| panic!("not a list: {list}"))
@@ -595,6 +619,7 @@ fn ids(list: &Value) -> Vec<String> {
         .collect()
 }
 
+/// Fail unless the GraphQL reads show no Massive data, while the control series is readable.
 fn assert_hidden_reads(who: &str, path: &str, reads: &Reads, s: &Seeded) {
     let listing = &reads.listing;
     assert!(listing.get("errors").is_none(), "{who} {path}: {listing}");
@@ -622,14 +647,15 @@ fn assert_hidden_reads(who: &str, path: &str, reads: &Reads, s: &Seeded) {
     assert_eq!(d["seriesData"]["totalCount"], 0, "{who} {path}");
     s.assert_hidden(who, &format!("{path} listing"), listing);
 
-    // A cross section of the dataset answers as for a dataset that doesn't exist: no entries.
-    let entries = &reads.cross_section["data"]["crossSection"];
-    assert!(
-        entries.is_null() || entries == &json!([]),
-        "{who} {path}: {}",
-        reads.cross_section
+    // A cross section of the dataset answers exactly as for a dataset that doesn't exist, whose
+    // error names the requested id and nothing else.
+    let denied = requested(&reads.cross_section, s.dataset);
+    assert_eq!(
+        denied,
+        requested(&reads.missing_cross_section, MISSING),
+        "{who} {path}: crossSection"
     );
-    s.assert_hidden(who, &format!("{path} crossSection"), &reads.cross_section);
+    s.assert_hidden(who, &format!("{path} crossSection"), &denied);
     // The source itself is refused by id, as for every restricted catalog.
     assert_eq!(
         reads.data_source["errors"][0]["extensions"]["code"], "FORBIDDEN",
@@ -639,6 +665,7 @@ fn assert_hidden_reads(who: &str, path: &str, reads: &Reads, s: &Seeded) {
     s.assert_hidden(who, &format!("{path} dataSource"), &reads.data_source);
 }
 
+/// Fail unless the GraphQL reads show the Massive series, its observations and its counts.
 fn assert_shown_reads(who: &str, path: &str, reads: &Reads, s: &Seeded) {
     let listing = &reads.listing;
     assert!(listing.get("errors").is_none(), "{who} {path}: {listing}");
@@ -731,10 +758,15 @@ struct McpReads {
     search: Value,
     series_data: Value,
     metadata: Value,
+    /// `get_series_data` and `get_series_metadata` for a series that doesn't exist, which a
+    /// denial must match.
+    missing_series_data: Value,
+    missing_metadata: Value,
     data_sources: Value,
     catalog: Value,
 }
 
+/// Call every MCP data tool and resource with `context` as the caller.
 async fn mcp_reads(
     context: GraphQLContext,
     app: &AppPool,
@@ -748,7 +780,18 @@ async fn mcp_reads(
         Err(error) => json!({ "error": error.to_string() }),
     };
     let series = json!({ "series_id": s.series.to_string() });
+    let missing = json!({ "series_id": MISSING.to_string() });
     McpReads {
+        missing_series_data: answer(
+            server
+                .handle_tool_call("get_series_data", missing.clone())
+                .await,
+        ),
+        missing_metadata: answer(
+            server
+                .handle_tool_call("get_series_metadata", missing)
+                .await,
+        ),
         search: answer(
             server
                 .handle_tool_call(
@@ -768,11 +811,25 @@ async fn mcp_reads(
     }
 }
 
+/// Fail unless the MCP answers show no Massive data, while the control series is found.
 fn assert_hidden_mcp(who: &str, tools: &McpReads, s: &Seeded) {
+    // Asked for the Massive series, the tools answer exactly as for a series that doesn't exist.
+    let series_data = requested(&tools.series_data, s.series);
+    let metadata = requested(&tools.metadata, s.series);
+    assert_eq!(
+        series_data,
+        requested(&tools.missing_series_data, MISSING),
+        "{who}: MCP get_series_data"
+    );
+    assert_eq!(
+        metadata,
+        requested(&tools.missing_metadata, MISSING),
+        "{who}: MCP get_series_metadata"
+    );
     for (path, value) in [
         ("MCP search_economic_series", &tools.search),
-        ("MCP get_series_data", &tools.series_data),
-        ("MCP get_series_metadata", &tools.metadata),
+        ("MCP get_series_data", &series_data),
+        ("MCP get_series_metadata", &metadata),
         ("MCP data sources", &tools.data_sources),
         ("MCP series catalog", &tools.catalog),
     ] {
@@ -791,6 +848,7 @@ fn assert_hidden_mcp(who: &str, tools: &McpReads, s: &Seeded) {
     );
 }
 
+/// Fail unless the MCP answers show the Massive series and its observations.
 fn assert_shown_mcp(tools: &McpReads, s: &Seeded) {
     let series = s.series.to_string();
     assert!(
