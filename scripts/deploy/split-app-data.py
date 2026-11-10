@@ -23,27 +23,48 @@ UNMIGRATED = ('. If the source has not run every data migration of this checkout
               '`crawler migrate` against it, and try again.')
 
 
+# The statement forms inventory() follows. Any other line that creates, drops or renames a
+# table (indented, lower case, schema-qualified, quoted, several tables in one DROP, a RENAME)
+# is refused rather than guessed at, so the inventory never silently disagrees with the schema.
+TABLE_STATEMENT = re.compile(r'^\s*(CREATE\s+TABLE|DROP\s+TABLE|ALTER\s+TABLE\b.*\bRENAME)\b', re.I)
+CREATE_TABLE = re.compile(r'^CREATE TABLE (?:IF NOT EXISTS )?(\w+) ')
+DROP_TABLE = re.compile(r'^DROP TABLE (?:IF EXISTS )?(\w+);\s*$')
+
+
 def inventory(plane):
-    """Read the table/type inventories every checked-in migration of the plane creates (the
-    baseline and any later migration), all migration versions, and the baseline's SQL."""
+    """Read the plane's tables, enum types, migration versions and baseline SQL.
+
+    The tables are those the checked-in migrations (the baseline and any later one) leave:
+    `CREATE TABLE [IF NOT EXISTS] name` and `DROP TABLE [IF EXISTS] name;` (one unquoted,
+    unqualified table, at the start of a line) are replayed in migration order, so a dropped
+    table is excluded and a table created again afterwards is included. Any other statement
+    that creates, drops or renames a table raises RuntimeError: review this tool before using
+    a checkout whose migrations need it."""
     directory = ROOT / 'backend/migrations' / plane
     baseline = next(directory.glob('*baseline/up.sql'))
     content = baseline.read_text()
-    every = '\n'.join(p.read_text() for p in sorted(directory.glob('*/up.sql')))
+    migrations = sorted(directory.glob('*/up.sql'))
+    every = '\n'.join(p.read_text() for p in migrations)
 
     def created(pattern):
         return list(dict.fromkeys(re.findall(pattern, every, re.M)))
 
-    # A later migration may drop a table an earlier one created (e.g. the global-analysis tables,
-    # ECO-898). Replay creates and drops in migration order, so a dropped table leaves the
-    # inventory and a table created again afterwards comes back. The CREATE pattern is the one
-    # used before drops were followed, so with no DROP TABLE the result is unchanged.
     live = {}
-    for create, drop in re.findall(r'^(?:CREATE TABLE (\w+) |DROP TABLE (?:IF EXISTS )?(\w+))', every, re.M):
-        if create:
-            live[create] = None
-        else:
-            live.pop(drop, None)
+    for path in migrations:
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            if not TABLE_STATEMENT.match(line):
+                continue
+            create, drop = CREATE_TABLE.match(line), DROP_TABLE.match(line)
+            if create:
+                live[create.group(1)] = None
+            elif drop:
+                live.pop(drop.group(1), None)
+            else:
+                raise RuntimeError(
+                    f'{path.parent.name}/up.sql:{number}: this table statement is not one the '
+                    'conversion inventory follows (only `CREATE TABLE [IF NOT EXISTS] name (` and '
+                    '`DROP TABLE [IF EXISTS] name;` for one unquoted, unqualified table at the start '
+                    'of a line). Review scripts/deploy/split-app-data.py before using this checkout.')
     return (list(live),
             created(r'^CREATE TYPE (\w+) AS ENUM'),
             {p.name.split('_', 1)[0].replace('-', '') for p in directory.iterdir() if p.is_dir()},

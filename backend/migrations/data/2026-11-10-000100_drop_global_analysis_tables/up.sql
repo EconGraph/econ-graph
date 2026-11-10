@@ -17,10 +17,21 @@
 -- change, so to bring the feature back you must also revert the code (the ECO-898
 -- global-analysis PR).
 --
--- Locking: nothing reads or writes these tables. lock_timeout still bounds the wait, so a
--- stray session can't stall the crawler-migrate Job.
+-- Locking: nothing should read or write these tables, but the migration still locks all eight
+-- in ACCESS EXCLUSIVE mode before the guard, so no row can be added between the guard's check
+-- and the DROPs. The lock step is bounded like 2026-10-25-000100's: lock_timeout caps each lock
+-- and statement_timeout caps the whole LOCK TABLE at about 10 seconds. If another session holds
+-- a table, the migration fails with nothing changed and crawler-migrate can simply be rerun.
+-- Once the locks are held, statement_timeout is set to 0 (no limit) for the rest.
 
 SET LOCAL lock_timeout = '10s';
+SET LOCAL statement_timeout = '10s';
+
+LOCK TABLE countries, global_economic_indicators, global_indicator_data, country_correlations,
+    trade_relationships, global_economic_events, event_country_impacts, leading_indicators
+    IN ACCESS EXCLUSIVE MODE;
+
+SET LOCAL statement_timeout = 0;
 
 DO $$
 DECLARE

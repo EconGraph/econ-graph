@@ -342,8 +342,15 @@ The services are names in a private libpq service file (`PGSERVICEFILE`) with pa
 a mode-0600 password file, never on the command line; `pg_dump` and `pg_restore` on `PATH`
 must match the server's major version. The script refuses unknown or missing tables (run `crawler migrate` on a source that is
 behind the checkout first), a partial split, unknown migration versions, column differences in name, type or nullability,
-unrelated rows in the app database, and a run without `--writers-stopped`. Later
-migrations that add or rename tables require reviewing this tool before use.
+unrelated rows in the app database, and a run without `--writers-stopped`.
+
+The script takes each plane's tables from the checkout's migrations. It follows only
+`CREATE TABLE [IF NOT EXISTS] name (` and `DROP TABLE [IF EXISTS] name;`, for one unquoted,
+unqualified table at the start of a line, replayed in migration order: a dropped table is
+left out, and one created again later is back in. Any other statement that creates, drops
+or renames a table (indented, lower case, schema-qualified, quoted, several tables or
+`CASCADE` in one `DROP`, any `ALTER TABLE ... RENAME`) makes it stop with the file and line,
+before it connects. A migration that needs such a form requires reviewing this tool first.
 
 ## Synthetic engineering checks
 
