@@ -16,6 +16,9 @@ pub struct ParsedCompanyFacts {
     pub cik: String,
     pub name: String,
     pub facts: Vec<CompanyFact>,
+    /// Revision keys reported twice in this archive with different value, filed date or form.
+    /// Neither row is loaded; the store records both as a conflict.
+    pub duplicates: Vec<(CompanyFact, CompanyFact)>,
 }
 
 /// Parse JSON using serde_json's arbitrary_precision feature before constructing BigDecimal.
@@ -30,6 +33,7 @@ pub fn parse_companyfacts(bytes: &[u8]) -> Result<ParsedCompanyFacts> {
         .and_then(Value::as_object)
         .context("missing facts map")?;
     let mut facts: BTreeMap<String, CompanyFact> = BTreeMap::new();
+    let mut duplicates = BTreeMap::new();
     for (taxonomy, concepts) in taxonomies {
         for (concept, data) in concepts.as_object().context("invalid concepts map")? {
             let units = data
@@ -85,11 +89,9 @@ pub fn parse_companyfacts(bytes: &[u8]) -> Result<ParsedCompanyFacts> {
                             || old.filed != fact.filed
                             || old.form != fact.form
                         {
-                            bail!(
-                                "conflicting facts within accession {} for {}",
-                                fact.accession,
-                                concept
-                            );
+                            // The source contradicts itself; quarantine the key, not the run.
+                            duplicates.entry(key).or_insert_with(|| (old.clone(), fact));
+                            continue;
                         }
                         // SEC can repeat the same fact with different FY/FP/frame annotations.
                         // Keep deterministic metadata without splitting the economic identity.
@@ -103,10 +105,14 @@ pub fn parse_companyfacts(bytes: &[u8]) -> Result<ParsedCompanyFacts> {
             }
         }
     }
+    for key in duplicates.keys() {
+        facts.remove(key);
+    }
     Ok(ParsedCompanyFacts {
         cik,
         name,
         facts: facts.into_values().collect(),
+        duplicates: duplicates.into_values().collect(),
     })
 }
 
@@ -131,7 +137,7 @@ fn date(s: &str) -> Result<NaiveDate> {
     Ok(NaiveDate::parse_from_str(s, "%Y-%m-%d")?)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmissionFiling {
     pub cik: String,
     pub accession: String,
@@ -152,6 +158,8 @@ pub struct ParsedSubmissions {
     pub entity_type: Option<String>,
     pub filings: Vec<SubmissionFiling>,
     pub historical_files: Vec<String>,
+    /// Accessions listed twice with different metadata; neither row is loaded.
+    pub duplicates: Vec<(SubmissionFiling, SubmissionFiling)>,
 }
 
 pub fn parse_submissions(bytes: &[u8], expected_cik: &str) -> Result<ParsedSubmissions> {
@@ -191,6 +199,7 @@ pub fn parse_submissions(bytes: &[u8], expected_cik: &str) -> Result<ParsedSubmi
         entity_type: optional_text(&root, "entityType")?,
         filings: recent,
         historical_files,
+        duplicates: Vec::new(),
     })
 }
 

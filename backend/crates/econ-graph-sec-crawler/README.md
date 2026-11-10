@@ -115,8 +115,11 @@ CRCs before writing, and parses one company at a time through a bounded channel.
 limit each ZIP to 16 GiB, each JSON member to 128 MiB, total decompressed bytes per archive
 to 128 GiB and members to one million. These are capacity limits, not claims about current
 SEC payload sizes. Allow 32 GiB staging space plus database growth; the compressed archives
-are never buffered in RAM. The monitor rejects upstream Last-Modified timestamps older than
-24 hours. SEC publishes at approximately 03:00 ET; the optional schedule runs at 09:00 UTC.
+are never buffered in RAM. Each download is tried three times (30 s and 60 s apart, or the
+server's Retry-After up to ten minutes) on connection failures, 5xx and throttling. A
+Last-Modified older than 24 hours no longer fails the load: the run records `archive_stale`,
+and the freshness monitor still rejects it. SEC publishes at approximately 03:00 ET; the
+optional schedule runs at 09:00 UTC.
 
 Issuer discovery also reads submissions-only companies with XBRL filings, including custom-concept
 issuers absent from companyfacts. Their company and filing metadata are retained without invented
@@ -124,11 +127,38 @@ standard facts. Submissions-only non-XBRL issuers are excluded. A whole run with
 facts or filings fails and cannot establish source freshness.
 
 Each company's metadata, all available submissions-history chunks and facts commit in one
-transaction. Repeated loads preserve IDs and accession-specific revisions. A changed value
-under an already stored accession fails instead of silently replacing evidence. An interrupted
-run can leave earlier companies committed, but never marks the global run successful. Rerun
-both archives from the beginning; no byte-range resume or destructive replacement is needed.
-The dedicated database connection releases its advisory lock even after process termination.
+transaction. Repeated loads preserve IDs and accession-specific revisions and write nothing
+for unchanged rows (`company_fact_load_runs.fact_rows_written` and `filing_rows_written` count
+what a run wrote). A company whose archive entries hash to the digest recorded at its last
+clean load (`company_fact_company_digests`, from a successful run) is skipped without being
+parsed. Labels and descriptions are stored once per concept in `company_fact_concepts`.
+`companies` fields are trimmed and clipped to their column widths, as the raw crawler does.
+
+A stored fact or filing is never replaced. When the source reports a different value, filed
+date or form for a stored fact (or a different filed date, form or report date for a filing),
+or lists one revision key twice with different values, the load records it in
+`company_fact_conflicts`, leaves the stored row unchanged, loads the rest of the company and
+continues. The run finishes `succeeded_with_conflicts` with `conflicts_count`, and that
+company is checked again on every run while the conflict is open. An operator resolves it:
+
+```bash
+sec-companyfacts-ingest --list-conflicts open
+sec-companyfacts-ingest --accept-conflict <id> --operator <name> [--note <why>]
+sec-companyfacts-ingest --reject-conflict <id> --operator <name> [--note <why>]
+```
+
+Accepting stores the source value as the next revision in `company_fact_revisions` (or
+`company_fact_filing_revisions`); revision 1 stays in `company_facts`, and later loads compare
+with the newest accepted revision. Rejecting keeps the stored value and stops counting the
+proposal. Contradictory rows within one archive can only be rejected. Company research reads
+still return revision 1; exposing accepted corrections there needs an ADR decision.
+
+An interrupted run can leave earlier companies committed, but never marks the global run
+successful. Rerun both archives from the beginning; no byte-range resume or destructive
+replacement is needed. The dedicated database connection releases its advisory lock even
+after process termination. crawler-worker exports the newest run's outcome as
+`crawler_companyfacts_*` gauges; platform/observability/rules-crawler.yaml alerts on failed
+runs, more than 25 conflicts, open conflicts for a day and no success in 36 hours.
 
 For operator-staged archives, run `sec-companyfacts-ingest --companyfacts-zip /path/companyfacts.zip
 --submissions-zip /path/submissions.zip`. This explicit offline mode checks ZIP integrity but

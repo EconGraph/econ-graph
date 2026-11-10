@@ -72,10 +72,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p econ-graph-sec-crawler --lib companyfacts -- --test-threads=1
-          recovery=companyfacts::tests::database_repeat_load_failed_run_and_recovery
-          cargo test --locked -p econ-graph-sec-crawler --lib "$recovery" -- --exact --ignored --test-threads=1 | tee "$RUNNER_TEMP/companyfacts-recovery.log"
-          grep -Fq "test $recovery ... ok" "$RUNNER_TEMP/companyfacts-recovery.log"
-          grep -Fq 'test result: ok. 1 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/companyfacts-recovery.log"
+          # Database tests: repeat loads write nothing, conflicts are quarantined, operator
+          # corrections become revisions, archive staleness is recorded (ECO-890).
+          cargo test --locked -p econ-graph-sec-crawler --lib companyfacts::tests::database_ -- --ignored --test-threads=1 | tee "$RUNNER_TEMP/companyfacts-recovery.log"
+          for t in database_repeat_load_failed_run_and_recovery database_changed_fact_is_quarantined_and_later_companies_load \
+                   database_operator_accepts_correction_as_new_revision database_archive_staleness_is_recorded_not_fatal; do
+            grep -Fq "test companyfacts::tests::$t ... ok" "$RUNNER_TEMP/companyfacts-recovery.log"
+          done
+          grep -Fq 'test result: ok. 4 passed; 0 failed; 0 ignored;' "$RUNNER_TEMP/companyfacts-recovery.log"
       - name: Verify enabled company APIs and notes
         working-directory: backend
         # Change only the crate build profile; global RUSTFLAGS would rebuild every dependency.

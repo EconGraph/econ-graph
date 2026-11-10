@@ -888,7 +888,7 @@ mod tests {
     }
 
     /// The tables of each set, as listed in docs/development/MIGRATIONS.md.
-    const DATA_TABLES: [&str; 39] = [
+    const DATA_TABLES: [&str; 44] = [
         "data_sources",
         "datasets",
         "economic_series",
@@ -920,6 +920,11 @@ mod tests {
         "company_facts",
         "company_fact_filings",
         "company_fact_load_runs",
+        "company_fact_concepts",
+        "company_fact_conflicts",
+        "company_fact_revisions",
+        "company_fact_filing_revisions",
+        "company_fact_company_digests",
         "financial_statements",
         "financial_line_items",
         "financial_ratios",

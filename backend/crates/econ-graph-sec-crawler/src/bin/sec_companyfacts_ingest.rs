@@ -25,6 +25,22 @@ struct Cli {
     /// Print up to 30 recorded runs for the release evidence gate; never synthesizes nights.
     #[arg(long, conflicts_with = "companyfacts_zip")]
     evidence: bool,
+    /// Print up to 1000 conflicts with this status (open, accepted or rejected) and exit.
+    #[arg(long, value_name = "STATUS", conflicts_with_all = ["companyfacts_zip", "check_freshness", "evidence"])]
+    list_conflicts: Option<String>,
+    /// Accept an open fact or filing conflict as a new revision of the stored row. The stored
+    /// row is not changed. Requires --operator.
+    #[arg(long, value_name = "ID", requires = "operator", conflicts_with_all = ["companyfacts_zip", "check_freshness", "evidence", "list_conflicts", "reject_conflict"])]
+    accept_conflict: Option<uuid::Uuid>,
+    /// Reject an open conflict: keep the stored row and stop counting the proposal.
+    #[arg(long, value_name = "ID", requires = "operator", conflicts_with_all = ["companyfacts_zip", "check_freshness", "evidence", "list_conflicts"])]
+    reject_conflict: Option<uuid::Uuid>,
+    /// Who resolves the conflict; recorded with the decision.
+    #[arg(long)]
+    operator: Option<String>,
+    /// Why; recorded with the decision.
+    #[arg(long, requires = "operator")]
+    note: Option<String>,
 }
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -33,7 +49,31 @@ async fn main() -> Result<()> {
         .init();
     let cli = Cli::parse();
     let database_url = econ_graph_core::config::data_database_url()?;
-    if cli.check_freshness || cli.evidence {
+    if cli.list_conflicts.is_some()
+        || cli.accept_conflict.is_some()
+        || cli.reject_conflict.is_some()
+    {
+        use diesel_async::AsyncConnection;
+        let mut conn = diesel_async::AsyncPgConnection::establish(&database_url).await?;
+        let operator = cli.operator.as_deref().unwrap_or_default();
+        if let Some(status) = cli.list_conflicts {
+            let conflicts = store::list_conflicts(&mut conn, &status).await?;
+            println!("{}", serde_json::to_string_pretty(&conflicts)?);
+        } else if let Some(id) = cli.accept_conflict {
+            let revision =
+                store::accept_conflict(&mut conn, id, operator, cli.note.as_deref()).await?;
+            println!(
+                "{}",
+                serde_json::json!({"conflict": id, "status": "accepted", "revision_id": revision})
+            );
+        } else if let Some(id) = cli.reject_conflict {
+            store::reject_conflict(&mut conn, id, operator, cli.note.as_deref()).await?;
+            println!(
+                "{}",
+                serde_json::json!({"conflict": id, "status": "rejected"})
+            );
+        }
+    } else if cli.check_freshness || cli.evidence {
         let pool = DataPool(econ_graph_core::database::create_pool(&database_url).await?);
         let runs = store::load_evidence(&pool).await?;
         if cli.check_freshness {
