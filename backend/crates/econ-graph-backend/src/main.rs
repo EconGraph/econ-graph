@@ -33,6 +33,8 @@ mod databases_tests;
 #[cfg(test)]
 mod independent_data_tests;
 mod integration_tests;
+#[cfg(test)]
+mod massive_access_tests;
 #[cfg(flag_mcp)]
 mod mcp_routes;
 mod metrics;
