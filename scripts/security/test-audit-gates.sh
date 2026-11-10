@@ -53,7 +53,8 @@ if [ "${SKIP_CARGO_AUDIT:-}" = 1 ]; then
     echo "skipped: cargo audit (SKIP_CARGO_AUDIT=1)"
     exit 0
 fi
-if cargo audit --file "$WORK/cargo/Cargo.lock" >"$WORK/audit.log" 2>&1; then
+# From backend/, so cargo audit reads backend/.cargo/audit.toml, the ignore list the gate uses.
+if (cd "$REPO/backend" && cargo audit --file "$WORK/cargo/Cargo.lock") >"$WORK/audit.log" 2>&1; then
     cat "$WORK/audit.log"; fail "cargo audit passed a lockfile with smallvec 1.6.0"
 fi
 grep -q 'RUSTSEC-2021-0003' "$WORK/audit.log" || { cat "$WORK/audit.log"; fail "cargo audit failed for another reason"; }

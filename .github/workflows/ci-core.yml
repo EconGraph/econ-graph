@@ -169,6 +169,12 @@ jobs:
             - 'chart-api-service/package.json'
             - 'chart-api-service/package-lock.json'
             - 'chart-api-service/scripts/npm-audit-allowlist.json'
+            - 'frontend/dev-server/package.json'
+            - 'frontend/dev-server/package-lock.json'
+            - 'frontend/dev-server/scripts/npm-audit-allowlist.json'
+            - 'package.json'
+            - 'package-lock.json'
+            - 'scripts/npm-audit-allowlist.json'
             - 'scripts/security/**'
           # Docker Build Test builds the whole backend and frontend inside the
           # image, so a dependency or toolchain bump can break it with no
@@ -1835,7 +1841,16 @@ jobs:
       run: node ../frontend/scripts/check-npm-audit.mjs . --allowlist scripts/npm-audit-allowlist.json
       working-directory: chart-api-service
 
+    - name: Run dev-server and root npm security audits
+      # frontend/dev-server is installed into the e2e images; the root package
+      # holds the demo-tools browser automation. Lockfile only, as above.
+      run: |
+        node frontend/scripts/check-npm-audit.mjs frontend/dev-server --allowlist frontend/dev-server/scripts/npm-audit-allowlist.json
+        node frontend/scripts/check-npm-audit.mjs . --allowlist scripts/npm-audit-allowlist.json
+
     - name: Check the audits fail on a known-vulnerable dependency
+      # Also on a run where a real audit above already failed.
+      if: ${{ !cancelled() }}
       # cargo audit and cargo deny are installed above.
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"

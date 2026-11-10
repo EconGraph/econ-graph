@@ -92,8 +92,10 @@ branch. To unblock it:
    exists, add an entry with a reason and a review date to the audit allowlist
    (Rust: both `backend/.cargo/audit.toml` and `[advisories].ignore` in
    `backend/deny.toml`; npm: `frontend/scripts/npm-audit-allowlist.json`,
-   `admin-frontend/scripts/npm-audit-allowlist.json` or
-   `chart-api-service/scripts/npm-audit-allowlist.json`). An npm entry also names
+   `admin-frontend/scripts/npm-audit-allowlist.json`,
+   `chart-api-service/scripts/npm-audit-allowlist.json`,
+   `frontend/dev-server/scripts/npm-audit-allowlist.json`, or
+   `scripts/npm-audit-allowlist.json` for the root package). An npm entry also names
    the installed `versions` it excuses (an exact version or a range of `<`,
    `<=`, `>`, `>=` comparators and `||`), and optionally the lockfile `paths` of
    those copies; any other copy of the package still fails the audit, and so

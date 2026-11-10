@@ -25,9 +25,9 @@ for (const file of files) {
   }
   if (file.includes('Dockerfile')) {
     for (const match of readFileSync(file, 'utf8').matchAll(/^FROM node:([^\s]+)/gmi)) {
-      // node:26-alpine, or an exact node:26.13.0-alpine@sha256:... pin.
-      if (!new RegExp(`^${major}(\\.\\d+){0,2}-`).test(match[1])) {
-        errors.push(`${file}: node:${match[1]} differs from .nvmrc`);
+      // An exact pin: node:26.13.0-alpine@sha256:<digest>.
+      if (!new RegExp(`^${major}\\.\\d+\\.\\d+-[^@\\s]+@sha256:[0-9a-f]{64}$`).test(match[1])) {
+        errors.push(`${file}: node:${match[1]} is not node:${major}.x.y-<variant>@sha256:<digest> (.nvmrc is ${major})`);
       }
     }
   }

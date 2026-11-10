@@ -17,9 +17,9 @@
 # this one after the Keycloak Deployment and waits for it to complete.
 #
 # keycloak-config-cli is pinned to its newest release, 6.5.1. Its newest build is
-# against Keycloak 26.5.5; it uses only the admin REST API, and it applies this realm
-# to Keycloak 26.8.1 (fresh, and upgraded from 26.7.4) with a second run changing
-# nothing. On a Keycloak image bump, check it against the new version and move to a
+# against Keycloak 26.5.5; it uses only the admin REST API. It applied this realm to
+# Keycloak 26.8.1 (fresh, and upgraded from 26.7.4), and applies it to a fresh 26.8.2
+# (scripts/keycloak/test-realm-import.sh), with a second run changing nothing. On a Keycloak image bump, check it against the new version and move to a
 # newer release when one exists.
 apiVersion: batch/v1
 kind: Job

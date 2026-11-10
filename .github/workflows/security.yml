@@ -69,8 +69,12 @@ jobs:
         node frontend/scripts/check-npm-audit.mjs frontend
         node frontend/scripts/check-npm-audit.mjs admin-frontend --allowlist admin-frontend/scripts/npm-audit-allowlist.json
         node frontend/scripts/check-npm-audit.mjs chart-api-service --allowlist chart-api-service/scripts/npm-audit-allowlist.json
+        node frontend/scripts/check-npm-audit.mjs frontend/dev-server --allowlist frontend/dev-server/scripts/npm-audit-allowlist.json
+        node frontend/scripts/check-npm-audit.mjs . --allowlist scripts/npm-audit-allowlist.json
 
     - name: Check the audits fail on a known-vulnerable dependency
+      # Also on a run where a real audit above already failed.
+      if: ${{ !cancelled() }}
       run: scripts/security/test-audit-gates.sh
 
   report-audit-failure:

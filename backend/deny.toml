@@ -79,7 +79,7 @@ ignore = [
     { id = "RUSTSEC-2026-0440", reason = "astral-tokio-tar: dev-only, via testcontainers 0.27; never in a release binary" },
     { id = "RUSTSEC-2025-0012", reason = "backoff 0.4: econ-graph-sec-crawler retry helper; replace with a maintained crate (no vulnerability)" },
     { id = "RUSTSEC-2024-0384", reason = "instant 0.1: only via backoff 0.4 (econ-graph-sec-crawler); goes with backoff" },
-    { id = "RUSTSEC-2024-0436", reason = "paste: build-time proc-macro via datafusion 53; no runtime code" },
+    { id = "RUSTSEC-2024-0436", reason = "paste: build-time proc-macro via datafusion 53 and parquet 58; no runtime code" },
     #"a-crate-that-is-yanked@0.1.1", # you can also ignore yanked crate versions if you wish
     #{ crate = "a-crate-that-is-yanked@0.1.1", reason = "you can specify why you are ignoring the yanked crate" },
 ]

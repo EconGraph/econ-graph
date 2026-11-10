@@ -130,10 +130,16 @@ All notable changes to EconGraph are documented here. The format follows
   Gateway is v1.9.3, and its proxy image is set to Envoy `distroless-v1.39.6` by digest: the
   release's default image still trusts the compromised eMudhra intermediate CAs. Vite is 8.3.7
   in both frontends (GHSA-p4f5-76q4-ffq7), and the frontend dev server listens on localhost
-  unless `VITE_DEV_HOST` says otherwise. The Node (26.13.0) and nginx (1.30.6) base images are
-  pinned by version and digest.
+  unless `VITE_DEV_HOST` says otherwise (`vite preview` follows it). The Node (26.13.0) and
+  nginx (1.30.6) base images are pinned by version and digest.
+- Upgrading Keycloak migrates its database, and rolling back means restoring it. Take a backup
+  with `scripts/deploy/backup-keycloak-db.sh` before deploying 26.8.2; to go back to 26.8.1,
+  restore that backup with `scripts/deploy/restore-keycloak-db.sh`. Admin REST API tokens now
+  need the `kc-admin-api` audience; the migration adds it to `admin-cli`, which every repository
+  script and keycloak-config-cli use.
 - The nightly dependency audit fails instead of only uploading a report, adds `cargo deny`
-  advisories and `chart-api-service`, and opens an issue when it fails. A self-test shows each
+  advisories, `chart-api-service`, `frontend/dev-server` and the root package, and opens an
+  issue when it fails. A self-test shows each
   audit fails on a known-vulnerable dependency.
 
 ## [4.0.1] - 2026-10-30

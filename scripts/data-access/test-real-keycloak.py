@@ -351,11 +351,11 @@ def main():
         args.backend.is_file() and args.crawler.is_file()
     ), "build backend and crawler binaries before running this explicit integration test"
     pinned = re.search(
-        r"image: (quay.io/keycloak/keycloak:[\d.]+)",
+        r"image: (quay.io/keycloak/keycloak:\S+)",
         (ROOT / "docker-compose.yml").read_text(),
     ).group(1)
     assert (
-        KC_IMAGE.split("@")[0] == pinned
+        KC_IMAGE == pinned
     ), "update the test's verified immutable image to the repository Keycloak pin"
     lab = Lab()
     with tempfile.TemporaryDirectory(prefix=lab.owner + "-") as directory:

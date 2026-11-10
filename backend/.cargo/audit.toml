@@ -20,4 +20,11 @@ ignore = [
     #
     # Remove this once async-graphql 8.0 is released and warp is upgraded to 0.4.
     "RUSTSEC-2026-0258",
+
+    # Unmaintained, no known vulnerability; reasons in backend/deny.toml.
+    # cargo audit only warns on these, but the lists are kept in step.
+    "RUSTSEC-2026-0440", # astral-tokio-tar (dev-only, testcontainers)
+    "RUSTSEC-2025-0012", # backoff (econ-graph-sec-crawler)
+    "RUSTSEC-2024-0384", # instant (via backoff)
+    "RUSTSEC-2024-0436", # paste (build-time proc-macro)
 ]
