@@ -44,6 +44,8 @@ const CATALOG_ROLES_NOT_PUBLIC: &[Role] = &[
     Role::CatalogIloRead,
     // Company research requires sign-in; no default anonymous grant.
     Role::CatalogSecRead,
+    // Licensed market data; granted to nobody by default.
+    Role::CatalogMassiveMarketDataRead,
 ];
 
 /// Catalog roles deliberately left out of the anonymous reader's scope mapping. Anonymous

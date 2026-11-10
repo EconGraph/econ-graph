@@ -101,6 +101,9 @@ role_catalog! {
 
     /// Read structured SEC company research.
     CatalogSecRead => "catalog.sec:read",
+    /// Read Massive (a market data vendor) daily stock prices. Licensed data: granted to nobody
+    /// by default.
+    CatalogMassiveMarketDataRead => "catalog.massive_market_data:read",
 
     // Collaboration
     /// Create an annotation on a series.
@@ -175,6 +178,7 @@ impl Role {
             "UN Statistics Division" => Some(Self::CatalogUnstatsRead),
             "International Labour Organization (ILO)" => Some(Self::CatalogIloRead),
             "SEC EDGAR" => Some(Self::CatalogSecRead),
+            "Massive (market data vendor)" => Some(Self::CatalogMassiveMarketDataRead),
             _ => None,
         }
     }

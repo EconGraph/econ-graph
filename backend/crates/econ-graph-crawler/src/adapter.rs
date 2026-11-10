@@ -35,10 +35,13 @@ pub struct ApiKeys {
     pub census: Option<String>,
     /// WTO Timeseries API subscription key (`WTO_API_KEY`).
     pub wto: Option<String>,
+    /// Massive, a market data vendor (`MASSIVE_API_KEY`).
+    pub massive: Option<String>,
 }
 
 impl ApiKeys {
-    /// Reads `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY` and `WTO_API_KEY`.
+    /// Reads `FRED_API_KEY`, `BLS_API_KEY`, `BEA_API_KEY`, `CENSUS_API_KEY`, `WTO_API_KEY` and
+    /// `MASSIVE_API_KEY`.
     /// Unset, empty or whitespace-only variables become `None`; values are trimmed.
     pub fn from_env() -> Self {
         Self::from_lookup(|name| std::env::var(name).ok())
@@ -56,6 +59,7 @@ impl ApiKeys {
             bea: get("BEA_API_KEY"),
             census: get("CENSUS_API_KEY"),
             wto: get("WTO_API_KEY"),
+            massive: get("MASSIVE_API_KEY"),
         }
     }
 
@@ -67,6 +71,7 @@ impl ApiKeys {
             SourceId::Bea => self.bea.as_deref(),
             SourceId::Census => self.census.as_deref(),
             SourceId::Wto => self.wto.as_deref(),
+            SourceId::Massive => self.massive.as_deref(),
             _ => None,
         }
     }
@@ -81,6 +86,7 @@ impl fmt::Debug for ApiKeys {
             .field("bea", &r(&self.bea))
             .field("census", &r(&self.census))
             .field("wto", &r(&self.wto))
+            .field("massive", &r(&self.massive))
             .finish()
     }
 }
@@ -664,6 +670,7 @@ mod tests {
             "BLS_API_KEY" => Some("   ".into()),
             "BEA_API_KEY" => Some(String::new()),
             "WTO_API_KEY" => Some("wto-key\n".into()),
+            "MASSIVE_API_KEY" => Some(" massive-key ".into()),
             _ => None,
         });
         assert_eq!(keys.fred.as_deref(), Some("abc"));
@@ -672,6 +679,7 @@ mod tests {
         assert_eq!(keys.census, None);
         assert_eq!(keys.get(SourceId::Fred), Some("abc"));
         assert_eq!(keys.get(SourceId::Wto), Some("wto-key"));
+        assert_eq!(keys.get(SourceId::Massive), Some("massive-key"));
         assert_eq!(keys.get(SourceId::Sec), None);
     }
 
@@ -680,11 +688,13 @@ mod tests {
         let keys = ApiKeys {
             fred: Some("supersecret".into()),
             wto: Some("wtosecret".into()),
+            massive: Some("massivesecret".into()),
             ..ApiKeys::default()
         };
         let s = format!("{keys:?}");
         assert!(!s.contains("supersecret"));
         assert!(!s.contains("wtosecret"));
+        assert!(!s.contains("massivesecret"));
         assert!(s.contains("<redacted>"));
     }
 }

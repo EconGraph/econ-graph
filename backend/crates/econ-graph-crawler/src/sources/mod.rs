@@ -20,6 +20,7 @@ pub mod boc;
 pub mod census;
 pub mod fhfa;
 pub mod fred;
+pub mod massive;
 pub mod static_catalogs;
 pub mod world_bank;
 pub mod wto;
@@ -29,7 +30,7 @@ pub mod wto;
 /// rather than jobs that can only fail. For sources that cannot be used at all without a key and
 /// whose key a deployment may not have yet. Other keyed sources (FRED, BEA, Census) stay
 /// registered without their key, so their failed jobs and coverage alerts flag the gap.
-pub const SKIPPED_WITHOUT_KEY: &[SourceId] = &[SourceId::Wto];
+pub const SKIPPED_WITHOUT_KEY: &[SourceId] = &[SourceId::Wto, SourceId::Massive];
 
 /// [`default_registry`] minus the [`SKIPPED_WITHOUT_KEY`] sources whose key `keys` lacks, each
 /// logged as skipped with the environment variable that would enable it. The crawler worker's
@@ -131,6 +132,10 @@ mod tests {
     fn registry_for_keys_skips_keyless_optional_sources() {
         let none = registry_for_keys(&ApiKeys::default());
         assert!(none.get(SourceId::Wto).is_none());
+        assert!(none.get(SourceId::Massive).is_none());
+        // Massive has no adapter registered yet, so the line above holds regardless; this
+        // asserts the skip itself.
+        assert!(SKIPPED_WITHOUT_KEY.contains(&SourceId::Massive));
         assert!(
             none.get(SourceId::Fred).is_some(),
             "FRED is kept without its key"
@@ -141,6 +146,7 @@ mod tests {
         );
         let with = registry_for_keys(&ApiKeys {
             wto: Some("k".into()),
+            massive: Some("k".into()),
             ..ApiKeys::default()
         });
         assert_eq!(with.ids(), default_registry().ids());

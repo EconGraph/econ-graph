@@ -258,6 +258,13 @@
         {
           "name": "catalog.sec:read",
           "description": "Read structured SEC company research"
+        },
+        {
+          "name": "catalog.massive_market_data:read",
+          "description": "Read Massive (market data vendor) daily stock prices",
+          "attributes": {
+            "econgraph.never-granted": ["true"]
+          }
         }
       ]
     }

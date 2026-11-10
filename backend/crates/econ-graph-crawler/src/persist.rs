@@ -144,6 +144,7 @@ pub fn data_source_template(source: SourceId) -> NewDataSource {
         SourceId::Ilo => DataSource::ilo(),
         SourceId::Wto => DataSource::wto(),
         SourceId::Fhfa => DataSource::fhfa(),
+        SourceId::Massive => DataSource::massive(),
         // Seeded by the initial migration; there is no core constructor for it.
         SourceId::Sec => NewDataSource {
             name: "SEC EDGAR".to_string(),

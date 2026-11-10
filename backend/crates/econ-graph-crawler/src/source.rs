@@ -73,11 +73,17 @@ pub enum SourceId {
     /// U.S. Securities and Exchange Commission (EDGAR). `"SEC"`
     #[serde(rename = "SEC")]
     Sec,
+    /// Massive, a market data vendor: daily stock prices. `"MASSIVE"`
+    ///
+    /// The data is licensed, so it is readable only with the
+    /// `catalog.massive_market_data:read` role, which is granted to nobody by default.
+    #[serde(rename = "MASSIVE")]
+    Massive,
 }
 
 impl SourceId {
     /// Every source, in declaration order.
-    pub const ALL: [SourceId; 18] = [
+    pub const ALL: [SourceId; 19] = [
         SourceId::Fred,
         SourceId::Bls,
         SourceId::Bea,
@@ -96,6 +102,7 @@ impl SourceId {
         SourceId::Wto,
         SourceId::Fhfa,
         SourceId::Sec,
+        SourceId::Massive,
     ];
 
     /// Canonical upper-snake-case name, as stored in `crawl_queue.source`.
@@ -119,6 +126,7 @@ impl SourceId {
             SourceId::Wto => "WTO",
             SourceId::Fhfa => "FHFA",
             SourceId::Sec => "SEC",
+            SourceId::Massive => "MASSIVE",
         }
     }
 }

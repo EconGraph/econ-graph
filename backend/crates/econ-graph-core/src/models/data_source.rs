@@ -302,6 +302,29 @@ impl DataSource {
         }
     }
 
+    /// Create the Massive (a market data vendor) source: daily stock prices.
+    ///
+    /// The data is licensed. Its catalog role is granted to nobody by default, so the series
+    /// are readable only by callers an operator grants `catalog.massive_market_data:read`.
+    pub fn massive() -> NewDataSource {
+        NewDataSource {
+            name: "Massive (market data vendor)".to_string(),
+            description: Some("Daily unadjusted stock prices from Massive".to_string()),
+            base_url: "https://api.massive.com".to_string(),
+            // Every request needs the subscription's API key.
+            api_key_required: true,
+            // The crawler's politeness rate (`SourcePolicy::default_for`). The paid plan has no
+            // hard request limit.
+            rate_limit_per_minute: 300,
+            is_visible: true,
+            is_enabled: true,
+            requires_admin_approval: false,
+            crawl_frequency_hours: 24,
+            api_documentation_url: Some("https://massive.com/docs".to_string()),
+            api_key_name: Some("MASSIVE_API_KEY".to_string()),
+        }
+    }
+
     /// Create Bank of Japan (BoJ) source
     pub fn boj() -> NewDataSource {
         NewDataSource {

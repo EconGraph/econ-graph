@@ -64,6 +64,12 @@ impl SourcePolicy {
     /// for the time-series data endpoints (`/data`, `/data_count`). Every WTO request is held to
     /// that strictest limit, 1/s with no burst and one at a time, which also keeps the hourly
     /// total at 3,600. The key is required: the API answers 401 without one.
+    ///
+    /// Massive, a market data vendor: we assume a paid plan, which has no hard request limit
+    /// (Massive asks clients to stay under about 100 requests a second). 300/min with two in
+    /// flight is our own politeness setting, not a vendor limit. The key is required. Prices are
+    /// refreshed daily, after each trading day, and the lookback re-fetches the last week for
+    /// late corrections.
     pub fn default_for(source: SourceId) -> Self {
         let base = SourcePolicy {
             requests_per_second: 1.0,
@@ -123,6 +129,14 @@ impl SourcePolicy {
                 needs_api_key: true,
                 ..base
             },
+            SourceId::Massive => SourcePolicy {
+                requests_per_second: 300.0 / 60.0,
+                burst: 5,
+                max_concurrency: 2,
+                needs_api_key: true,
+                revision_lookback: DAY * 7,
+                ..base
+            },
             _ => base,
         }
     }
@@ -171,6 +185,16 @@ mod tests {
             per_minute(&SourcePolicy::default_for(SourceId::Census)),
             40.0
         );
+    }
+
+    /// The `data_sources` row states the rate the crawler actually uses.
+    #[test]
+    fn massive_template_rate_is_the_policy_rate() {
+        let template = crate::persist::data_source_template(SourceId::Massive);
+        let policy = SourcePolicy::default_for(SourceId::Massive);
+        let policy_per_minute = (policy.requests_per_second * 60.0).round() as i32;
+        assert_eq!(template.rate_limit_per_minute, policy_per_minute);
+        assert_eq!(policy.max_concurrency, 2);
     }
 
     #[test]
@@ -238,6 +262,7 @@ mod tests {
         assert!(SourcePolicy::default_for(SourceId::Bea).needs_api_key);
         assert!(SourcePolicy::default_for(SourceId::Census).needs_api_key);
         assert!(SourcePolicy::default_for(SourceId::Wto).needs_api_key);
+        assert!(SourcePolicy::default_for(SourceId::Massive).needs_api_key);
         assert!(!SourcePolicy::default_for(SourceId::Bls).needs_api_key);
     }
 
