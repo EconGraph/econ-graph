@@ -121,6 +121,96 @@ def check_catalog_reads_are_plain(realm, get, prefix, api_id):
                            "roles in Keycloak before deploying: " + ", ".join(live))
 
 
+# An econ-graph-api role whose realm-file definition carries this attribute, set to ["true"],
+# is granted to nobody: no composite (admin and super_admin included), user, group, or client or
+# client scope mapping. The realm file is the one list of them; the Rust tests,
+# catalog-access.py and the dev-readonly overlay read the same attribute.
+NEVER_GRANTED = "econgraph.never-granted"
+
+
+def never_granted_roles(realm):
+    """The econ-graph-api roles the realm file marks never granted."""
+    return {role["name"] for role in (realm.get("roles") or {}).get("client", {}).get(API_CLIENT, [])
+            if (role.get("attributes") or {}).get(NEVER_GRANTED) == ["true"]}
+
+
+def declared_never_granted(realm, marked):
+    """Where the realm file grants a marked role: composites, users, groups, scope mappings."""
+    found = []
+    roles = realm.get("roles") or {}
+    for kind, owner, defined in ([("realm role", None, roles.get("realm") or [])] +
+                                 [("client role", c, rs or []) for c, rs in (roles.get("client") or {}).items()]):
+        for role in defined:
+            edges = ((role.get("composites") or {}).get("client") or {}).get(API_CLIENT) or []
+            found += ["%s %s%s (composite) grants %s" % (kind, owner + "/" if owner else "", role["name"], n)
+                      for n in edges if n in marked]
+    for user in realm.get("users") or []:
+        found += ["user %s grants %s" % (user.get("username"), n)
+                  for n in (user.get("clientRoles") or {}).get(API_CLIENT, []) if n in marked]
+    pending = list(realm.get("groups") or [])
+    while pending:
+        group = pending.pop()
+        found += ["group %s grants %s" % (group.get("path") or group.get("name"), n)
+                  for n in (group.get("clientRoles") or {}).get(API_CLIENT, []) if n in marked]
+        pending += group.get("subGroups") or []
+    for entry in (realm.get("clientScopeMappings") or {}).get(API_CLIENT, []):
+        target = "client " + entry["client"] if "client" in entry else "client scope " + str(entry.get("clientScope"))
+        found += ["%s scope mapping admits %s" % (target, n) for n in entry.get("roles", []) if n in marked]
+    return found
+
+
+def live_never_granted(get, prefix, api_id, marked):
+    """Where the live realm grants a marked role: a composite (realm or client role), a user or
+    group mapped to it directly, or a client or client scope's scope mapping. Every other path to
+    it, such as a user in a group or holding a composite, passes through one of these."""
+    found = []
+    def edges(path, label):
+        return ["%s (composite) grants %s" % (label, r["name"]) for r in required(get(path))
+                if r.get("clientRole") and r.get("containerId") == api_id and r["name"] in marked]
+    for role in required(get(prefix + "/roles?briefRepresentation=false")):
+        if role.get("composite"):
+            found += edges(prefix + "/roles/" + urllib.parse.quote(role["name"], safe="") + "/composites",
+                           "realm role " + role["name"])
+    clients = required(get(prefix + "/clients"))
+    for client in clients:
+        base = prefix + "/clients/" + client["id"]
+        for role in required(get(base + "/roles?briefRepresentation=false")):
+            if role.get("composite"):
+                found += edges(base + "/roles/" + urllib.parse.quote(role["name"], safe="") + "/composites",
+                               "client role %s/%s" % (client["clientId"], role["name"]))
+        found += ["client %s scope mapping admits %s" % (client["clientId"], r["name"])
+                  for r in required(get(base + "/scope-mappings/clients/" + api_id)) if r["name"] in marked]
+    for scope in required(get(prefix + "/client-scopes")):
+        found += ["client scope %s scope mapping admits %s" % (scope["name"], r["name"]) for r in required(
+            get(prefix + "/client-scopes/" + scope["id"] + "/scope-mappings/clients/" + api_id)) if r["name"] in marked]
+    for name in sorted(marked):
+        role_path = prefix + "/clients/" + api_id + "/roles/" + urllib.parse.quote(name, safe="")
+        # A role the import has yet to create has no holders; None (404) means exactly that.
+        found += ["user %s holds %s" % (u.get("username"), name) for u in get(role_path + "/users") or []]
+        found += ["group %s holds %s" % (g.get("path") or g.get("name"), name) for g in get(role_path + "/groups") or []]
+    return found
+
+
+def check_never_granted(realm, get, prefix, api_id):
+    """Refuse the deploy when the realm file, or the live realm when API_ID is known, grants a
+    role the realm file marks never granted. Nothing is carried forward: the import stops here."""
+    marked = never_granted_roles(realm)
+    if not marked:
+        return
+    found = declared_never_granted(realm, marked)
+    if found:
+        raise RuntimeError("The realm file grants roles it marks %s, which nobody may hold; the "
+                           "deploy stopped before the import, so nothing was imported. Remove these "
+                           "grants: %s" % (NEVER_GRANTED, "; ".join(found)))
+    found = live_never_granted(get, prefix, api_id, marked) if api_id else []
+    if found:
+        raise RuntimeError("Keycloak grants roles the realm file marks %s, which nobody may hold; "
+                           "the deploy stopped before the import, so nothing was imported. Remove "
+                           "these grants in Keycloak and deploy again (granting one on purpose is a "
+                           "code change: config/keycloak/README.md, Never-granted catalogs): %s"
+                           % (NEVER_GRANTED, "; ".join(found)))
+
+
 def warn(message):
     """Report on stderr; stdout carries the merged import."""
     print("warning: " + message, file=sys.stderr)
@@ -361,6 +451,7 @@ def merge_catalog_policy(realm, get):
             check_public_declaration(role)
     prefix = "/admin/realms/" + urllib.parse.quote(realm["realm"], safe="")
     check_catalog_reads_are_plain(realm, get, prefix, None)
+    check_never_granted(realm, get, prefix, None)
     observed = get(prefix)
     observed_attrs = (observed or {}).get("attributes") or {}
     attributes = dict(observed_attrs)
@@ -406,6 +497,7 @@ def merge_catalog_policy(realm, get):
     api_clients = required(get(prefix + "/clients?clientId=" + API_CLIENT))
     api_id = api_clients[0]["id"] if api_clients else None
     check_catalog_reads_are_plain(realm, get, prefix, api_id)
+    check_never_granted(realm, get, prefix, api_id)
     deleted_roles = roles_config_cli_deletes(realm, observed_attrs, API_CLIENT)
 
     # Keep catalog-specific edges on managed composites. Their non-catalog behavior

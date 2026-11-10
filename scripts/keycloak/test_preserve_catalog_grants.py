@@ -48,9 +48,13 @@ class CatalogPolicyTests(unittest.TestCase):
             self.state[path + "/composites"] = []
 
     def get(self, path):
-        """The fake Keycloak: a composite listing not set by a test is the direct one."""
+        """The fake Keycloak: a composite listing not set by a test is the direct one, and a
+        role listing, composites listing or scope mapping not set by a test is empty."""
         if path not in self.state and path.endswith("/composite"):
             path = path[:-len("/composite")]
+        if path not in self.state and path.endswith(("?briefRepresentation=false", "/composites",
+                                                     "/scope-mappings/clients/api")):
+            return []
         return copy.deepcopy(self.state.get(path))
 
     def merge(self):
@@ -720,6 +724,79 @@ class CatalogPolicyTests(unittest.TestCase):
             {"client": "partner-x", "clientScope": "basic", "roles": ["api:mcp"]})
         with self.assertRaises(RuntimeError):
             self.merge()
+
+    # Never-granted roles: the realm file marks them, and nothing may grant them.
+    MASSIVE = "catalog.massive_market_data:read"
+
+    def test_the_shipped_realm_marks_massive_never_granted_and_deploys(self):
+        self.assertEqual(preserve.never_granted_roles(self.realm), {self.MASSIVE})
+        self.merge()
+        self.state[self.prefix] = None
+        self.merge()
+
+    def test_a_realm_file_granting_a_never_granted_role_to_admin_fails_the_deploy(self):
+        self.role(self.realm, "admin")["composites"]["client"]["econ-graph-api"].append(self.MASSIVE)
+        for observed in ({"attributes": {preserve.INITIALIZED: "true"}}, None):
+            self.state[self.prefix] = observed
+            with self.assertRaises(RuntimeError) as raised:
+                self.merge()
+            self.assertIn("realm role admin (composite) grants " + self.MASSIVE, str(raised.exception))
+
+    def test_a_realm_file_granting_a_never_granted_role_any_other_way_fails_the_deploy(self):
+        realm = self.realm
+        realm["users"][0].setdefault("clientRoles", {})["econ-graph-api"] = [self.MASSIVE]
+        realm["groups"] = [{"name": "staff", "path": "/staff", "subGroups": [
+            {"name": "desk", "path": "/staff/desk", "clientRoles": {"econ-graph-api": [self.MASSIVE]}}]}]
+        realm["clientScopeMappings"]["econ-graph-api"].append({"clientScope": "basic", "roles": [self.MASSIVE]})
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        for path in ("user service-account-econgraph-anonymous grants", "group /staff/desk grants",
+                     "client scope basic scope mapping admits"):
+            self.assertIn(path + " " + self.MASSIVE, str(raised.exception))
+
+    def test_a_live_grant_of_a_never_granted_role_on_admin_fails_before_the_import(self):
+        # The live realm has it on admin and the realm file doesn't, so the import would carry
+        # it forward. The deploy stops instead, naming it, before config-cli changes anything.
+        self.state[self.prefix + "/roles?briefRepresentation=false"] = [
+            {"name": "admin", "composite": True}, {"name": "user", "composite": True}]
+        self.state[self.prefix + "/roles/admin/composites"] = [
+            {"name": "catalog.fred:read", "clientRole": True, "containerId": "api"},
+            {"name": self.MASSIVE, "clientRole": True, "containerId": "api"}]
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        message = str(raised.exception)
+        self.assertIn("realm role admin (composite) grants " + self.MASSIVE, message)
+        self.assertIn("nothing was imported", message)
+        self.assertNotIn("catalog.fred:read", message)
+
+    def test_a_live_never_granted_role_held_any_other_way_fails_the_deploy(self):
+        role = self.prefix + "/clients/api/roles/" + preserve.urllib.parse.quote(self.MASSIVE, safe="")
+        edge = {"name": self.MASSIVE, "clientRole": True, "containerId": "api"}
+        for path, value, shown in [
+            (role + "/users", [{"username": "grace"}], "user grace holds"),
+            (role + "/groups", [{"name": "desk", "path": "/staff/desk"}], "group /staff/desk holds"),
+            (self.prefix + "/clients/anon/scope-mappings/clients/api", [edge],
+             "client econgraph-anonymous scope mapping admits"),
+        ]:
+            saved = self.state.get(path)
+            self.state[path] = value
+            with self.assertRaises(RuntimeError) as raised:
+                self.merge()
+            self.assertIn(shown + " " + self.MASSIVE, str(raised.exception))
+            self.state[path] = saved
+        self.state[self.prefix + "/client-scopes"] = [{"id": "s1", "name": "extra"}]
+        self.state[self.prefix + "/client-scopes/s1/scope-mappings/clients/api"] = [edge]
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn("client scope extra scope mapping admits " + self.MASSIVE, str(raised.exception))
+        self.state[self.prefix + "/client-scopes/s1/scope-mappings/clients/api"] = []
+        self.state[self.prefix + "/clients/api/roles?briefRepresentation=false"].append(
+            {"name": "catalog-bundle", "composite": True})
+        self.state[self.prefix + "/clients/api/roles/catalog-bundle/composites"] = [edge]
+        with self.assertRaises(RuntimeError) as raised:
+            self.merge()
+        self.assertIn("client role econ-graph-api/catalog-bundle (composite) grants " + self.MASSIVE,
+                      str(raised.exception))
 
     def test_missing_relations_or_failed_api_never_fall_back_to_defaults(self):
         self.state[self.prefix + "/roles/catalog-public/composites"] = None

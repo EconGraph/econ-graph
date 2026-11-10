@@ -779,6 +779,7 @@ jobs:
         scripts/keycloak/test-check-keycloak-roles.sh
         scripts/keycloak/test-render-realm.sh
         python3 scripts/keycloak/test_preserve_catalog_grants.py
+        python3 scripts/keycloak/test_catalog_access.py
         scripts/check-keycloak-roles
 
     - name: Check the catalog-access operator script against stubs

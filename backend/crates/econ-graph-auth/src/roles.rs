@@ -187,6 +187,14 @@ impl Role {
     pub fn is_staff(self) -> bool {
         self.as_str().starts_with("admin.")
     }
+
+    /// Whether this role is granted to nobody, admins included. The realm file marks the same
+    /// roles with the `econgraph.never-granted` attribute, which the deploy enforces; the
+    /// `restricted_catalog_roles` tests keep the two in step. See config/keycloak/README.md,
+    /// "Never-granted catalogs", for granting one on purpose.
+    pub fn is_never_granted(self) -> bool {
+        matches!(self, Self::CatalogMassiveMarketDataRead)
+    }
 }
 
 /// The catalog's wire names, one per line, for comparing against the Keycloak realm export.

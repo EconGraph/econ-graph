@@ -24,6 +24,7 @@ def load(name, path):
 
 proxy = load("proxy", ROOT / "scripts/data-access/dev-data-proxy.py")
 realm = load("realm", ROOT / "scripts/keycloak/independent-data-realm.py")
+preserve = load("preserve", ROOT / "scripts/keycloak/preserve-catalog-grants.py")
 
 
 class AccessTests(unittest.TestCase):
@@ -42,6 +43,13 @@ class AccessTests(unittest.TestCase):
         scope = next(m for m in rendered["clientScopeMappings"]["econ-graph-api"] if m["client"] == client["clientId"])
         self.assertTrue(scope["roles"])
         self.assertTrue(all(r.startswith("catalog.") and r.endswith(":read") for r in scope["roles"]))
+        # A dev-readonly token carries only roles its scope admits, so a user signed in through
+        # it holds no never-granted role whatever they are granted.
+        self.assertNotIn("catalog.massive_market_data:read", scope["roles"])
+        self.assertIn("catalog.fred:read", scope["roles"])
+        marked = preserve.never_granted_roles(original)
+        self.assertIn("catalog.massive_market_data:read", marked)
+        self.assertEqual(preserve.declared_never_granted(rendered, marked), [])
         web = next(c for c in rendered["clients"] if c["clientId"] == "econ-graph-web")
         self.assertEqual({m["config"]["included.client.audience"] for m in web["protocolMappers"] if m["protocolMapper"] == "oidc-audience-mapper"}, {"econ-graph-api", "econ-graph-data"})
         with self.assertRaises(ValueError):

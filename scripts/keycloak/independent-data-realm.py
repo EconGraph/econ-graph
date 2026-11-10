@@ -39,8 +39,11 @@ def render(realm):
         "defaultClientScopes": ["basic", "profile", "email"], "optionalClientScopes": [],
         "protocolMappers": [copy.deepcopy(audience), roles],
     })
+    # Every catalog read except those the realm file marks never granted, which no token may
+    # carry (preserve-catalog-grants.py refuses a scope mapping of one).
     catalog_roles = [r["name"] for r in realm["roles"]["client"]["econ-graph-api"]
-                     if r["name"].startswith("catalog.") and r["name"].endswith(":read")]
+                     if r["name"].startswith("catalog.") and r["name"].endswith(":read")
+                     and (r.get("attributes") or {}).get("econgraph.never-granted") != ["true"]]
     if not catalog_roles:
         raise ValueError("realm has no catalog read roles")
     realm.setdefault("clientScopeMappings", {}).setdefault("econ-graph-api", []).append({
