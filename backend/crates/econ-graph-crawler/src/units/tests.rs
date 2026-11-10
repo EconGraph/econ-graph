@@ -173,6 +173,8 @@ fn world_bank_phrases() {
             Some(unit(UnitKind::PercentChange, Scale::Units)),
         ),
         ("current US$", Some(money(Some("USD"), Scale::Units))),
+        ("USD", Some(money(Some("USD"), Scale::Units))),
+        ("Shares", Some(unit(UnitKind::Count, Scale::Units))),
         (
             "constant 2015 US$",
             Some(constant(Some("USD"), Scale::Units, Some(2015))),
