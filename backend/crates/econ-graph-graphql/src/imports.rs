@@ -32,10 +32,6 @@ pub use econ_graph_core::{
         // Chart annotations
         ChartAnnotation,
         ChartCollaborator,
-        // Global analysis
-        Country,
-        CountryImpactDetail,
-        CountryWithEconomicData,
         DataPoint,
         DataQueryParams,
         DataSource,
@@ -43,9 +39,6 @@ pub use econ_graph_core::{
         DataTransformation,
         // Core data models
         EconomicSeries,
-        EventCountryImpact,
-        GlobalEconomicEvent,
-        GlobalEventWithImpacts,
         // User management
         NewUser,
         // Search ordering
@@ -56,7 +49,6 @@ pub use econ_graph_core::{
         // Search and discovery
         SeriesSearchResult,
         SuggestionType,
-        TradePartner,
         User,
     },
     search,
@@ -68,7 +60,6 @@ pub use econ_graph_core::models;
 // Services crate imports
 pub use econ_graph_services::services::{
     collaboration_service::{CollaborationService, PermissionLevel},
-    global_analysis_service::GlobalAnalysisService,
     queue_service,
     // Core services
     search_service::SearchService,

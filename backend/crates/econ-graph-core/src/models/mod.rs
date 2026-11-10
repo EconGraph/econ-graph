@@ -17,7 +17,6 @@ pub mod financial_line_item;
 #[cfg(feature = "financial-ratios")]
 pub mod financial_ratios;
 pub mod financial_statement;
-pub mod global_analysis;
 pub mod observation;
 pub mod search;
 
@@ -48,7 +47,6 @@ pub use financial_line_item::*;
 #[cfg(feature = "financial-ratios")]
 pub use financial_ratios::*;
 pub use financial_statement::*;
-pub use global_analysis::*;
 pub use observation::*;
 pub use search::*;
 

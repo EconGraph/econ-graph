@@ -888,7 +888,7 @@ mod tests {
     }
 
     /// The tables of each set, as listed in docs/development/MIGRATIONS.md.
-    const DATA_TABLES: [&str; 39] = [
+    const DATA_TABLES: [&str; 31] = [
         "data_sources",
         "datasets",
         "economic_series",
@@ -908,14 +908,6 @@ mod tests {
         "catalog_reference_snapshots",
         "discovery_runs",
         "discovery_run_chunks",
-        "countries",
-        "global_economic_indicators",
-        "global_indicator_data",
-        "country_correlations",
-        "trade_relationships",
-        "global_economic_events",
-        "event_country_impacts",
-        "leading_indicators",
         "companies",
         "company_facts",
         "company_fact_filings",

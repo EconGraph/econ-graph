@@ -2,8 +2,8 @@
 
 ## How observation values are stored
 
-`data_points.value` and `global_indicator_data.value` are unconstrained PostgreSQL `NUMERIC`:
-each value is stored exactly as the source published it, with every digit and the source's own
+`data_points.value` is unconstrained PostgreSQL `NUMERIC`. (So was the legacy
+`global_indicator_data.value` until migration `2026-11-10-000100` dropped that table.) Each value is stored exactly as the source published it, with every digit and the source's own
 scale (`1.50` stays `1.50`). The path from the source to the user keeps those digits:
 
 - **Ingestion.** Every adapter parses value text with
