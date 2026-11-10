@@ -476,11 +476,11 @@ How the scripts use the marker:
   running there keeps running until `--unmark` or a deploy with `PUBLIC_HOST=` (empty).
 - `create-secrets.sh` refuses to write `CLOUDFLARE_TUNNEL_TOKEN` (or
   `--prompt-tunnel-token`, before it prompts) into a cluster that is not marked.
-- The check and every kubectl call of `deploy.sh`, the deploy
-  library and `create-secrets.sh` use the same binary, `${KUBECTL:-kubectl}`, on one
-  context: `deploy.sh` and `set-crawler-keys.sh` set `KUBECTL` to the kind cluster's own
-  kubectl (`scripts/deploy/lib/kind-env.sh`) and pin `kind-econ-graph`. Each replaces any `CLUSTER_ROLE_CONTEXT` in the
-  environment, and scripts they start inherit the pin; `create-secrets.sh` follows an
+- The check and every kubectl call of `deploy.sh`, the deploy library and
+  `create-secrets.sh` use the same binary, `${KUBECTL:-kubectl}`, on one context:
+  `deploy.sh` and `set-crawler-keys.sh` set `KUBECTL` to the kind cluster's own kubectl
+  (`scripts/deploy/lib/kind-env.sh`) and pin `kind-econ-graph`. Each replaces any
+  `CLUSTER_ROLE_CONTEXT` in the environment, and scripts they start inherit the pin; `create-secrets.sh` follows an
   inherited one only while it is its kubectl's current context. So the check and the
   writes it allows cannot reach different clusters.
 - If the cluster cannot be asked (kube-system or the marker unreadable), it counts as not

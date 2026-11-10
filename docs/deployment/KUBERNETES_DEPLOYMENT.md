@@ -409,7 +409,7 @@ Monitoring uses StatefulSet `grafana`, Deployment `prometheus` and DaemonSet `pr
 use the matching workload kind when restarting and checking status. Treat database and
 Keycloak version changes as upgrades with backup requirements.
 
-Use the [MicroK8s procedure](MICROK8S_DEPLOYMENT.md) for that platform.
+On MicroK8s, use the [MicroK8s procedure](MICROK8S_DEPLOYMENT.md).
 
 Review workload requests and limits against node capacity and observed usage before
 resizing. `kubectl top pods -n econ-graph` requires a working metrics-server. The backend

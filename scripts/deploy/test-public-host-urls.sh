@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Tests for check_public_host_urls in scripts/deploy/lib/public-host.sh, offline: a stub curl first on PATH answers with
-# canned statuses and redirect URLs, so nothing reaches the network.
+# Tests for check_public_host_urls in scripts/deploy/lib/public-host.sh, offline: a stub
+# curl first on PATH answers with canned statuses and redirect URLs, so nothing reaches the
+# network.
 #   - https://MAIN answering 200 or 302 is accessible, anything else is not;
 #   - with MAIN the apex, www.HOST passes only with a 301 to https://HOST with the path
 #     and query kept and no port (check-public-site.sh's rule); a 200, a 308, a port or a
