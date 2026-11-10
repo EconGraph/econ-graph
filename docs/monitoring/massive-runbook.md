@@ -69,8 +69,9 @@ The lag gauge counts the trading days after the newest stored day whose refresh 
 America/New_York on the next calendar day) has passed, on the NYSE calendar. Weekends,
 holidays and unscheduled closures have no slot, so they don't raise it, and the rule needs no
 headroom for them. The worker recomputes the gauge from storage at startup and on its coverage
-interval. Expect the alert after the key is first installed if no bars are stored by 6 hours
-after the next slot; it clears once the backfill and the daily refresh have caught up.
+interval. Until data is stored (none in the last 45 days, or no table yet) the lag is 260, its
+cap, so the alert fires 6 hours after the key is first installed unless the backfill has
+stored recent bars by then. It clears once the backfill and the daily refresh have caught up.
 
 Check `MassiveApiKeyRejected` and the per-source alerts for MASSIVE first. Then look for
 failed jobs with `SELECT series_id, kind, error_message FROM crawl_queue WHERE source =
