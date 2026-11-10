@@ -16,7 +16,8 @@ reads it through catalog-public. Each option takes one role and may repeat. Each
 runs only when needed, so a second run changes nothing. Grants are added before any is
 removed, so a failure part way leaves admins their access; there is no rollback, and
 running the same command again finishes the change. With --dry-run it reads Keycloak and prints what it would change, and changes
-nothing. It refuses when the realm, the role or a composite is missing. It prints role and
+nothing. It refuses when the realm, the role or a composite is missing, and refuses
+--admin-only and --make-public for a role the realm file marks never granted. It prints role and
 composite names only, never a credential, token or response body.
 """
 import json
@@ -33,6 +34,8 @@ ANONYMOUS_CLIENT = "econgraph-anonymous"
 PUBLIC_ROLE = "catalog-public"
 ADMIN_ROLE = "admin"
 CATALOG_READ = re.compile(r"^catalog\.[a-z0-9_]+:read$")
+# The realm file marks a role granted to nobody with this attribute (preserve-catalog-grants.py).
+NEVER_GRANTED = "econgraph.never-granted"
 
 
 class Refused(Exception):
@@ -82,9 +85,10 @@ def q(name):
     return urllib.parse.quote(name, safe="")
 
 
-def check_role(kc, role_name):
+def check_role(kc, role_name, mode="withdraw"):
     """The API client's id and the role, refusing when the realm, client, role or a
-    composite this script edits is missing."""
+    composite this script edits is missing, or when MODE would grant a role marked never
+    granted."""
     if kc.call("GET", "", missing_ok=True) is None:
         raise Refused("realm %s does not exist" % REALM)
     api = kc.call("GET", "/clients?clientId=" + q(API_CLIENT))
@@ -94,6 +98,11 @@ def check_role(kc, role_name):
     role = kc.call("GET", "/clients/%s/roles/%s" % (api_id, q(role_name)), missing_ok=True)
     if role is None:
         raise Refused("%s has no role %s" % (API_CLIENT, role_name))
+    # Any value counts, failing closed; the deploy refuses a value other than ["true"].
+    if mode != "withdraw" and NEVER_GRANTED in (role.get("attributes") or {}):
+        raise Refused("%s is never granted (realm file attribute %s), not to admins and not to the "
+                      "public; granting it is a code change first, see config/keycloak/README.md, "
+                      "Never-granted catalogs" % (role_name, NEVER_GRANTED))
     for composite in (PUBLIC_ROLE, ADMIN_ROLE):
         if kc.call("GET", "/roles/" + q(composite), missing_ok=True) is None:
             raise Refused("realm role %s does not exist" % composite)
@@ -103,7 +112,7 @@ def check_role(kc, role_name):
 def plan_and_apply(kc, role_name, mode, dry_run, out):
     """Print each change for one role and, unless dry_run, make it. mode is "admin-only",
     "withdraw" or "public". Returns the number of changes."""
-    api_id, role = check_role(kc, role_name)
+    api_id, role = check_role(kc, role_name, mode)
     anonymous = kc.call("GET", "/clients?clientId=" + q(ANONYMOUS_CLIENT))
 
     def holds(path):
@@ -238,8 +247,8 @@ def main(argv):
     try:
         kc = Keycloak(os.environ["KEYCLOAK_URL"], os.environ["KEYCLOAK_USER"], os.environ["KEYCLOAK_PASSWORD"])
         # Check every role before changing any, so a typo in the second changes nothing.
-        for _, role_name in pairs:
-            check_role(kc, role_name)
+        for mode, role_name in pairs:
+            check_role(kc, role_name, mode)
         for mode, role_name in pairs:
             plan_and_apply(kc, role_name, mode, dry_run, lambda line: print(line, flush=True))
         if dry_run:

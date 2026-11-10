@@ -486,6 +486,44 @@ scripts/keycloak/set-catalog-access.sh --context kind-econ-graph --make-public c
 When a catalog's default access changes for good, change the realm file to match, so a new
 realm starts the same way.
 
+### Never-granted catalogs
+
+Some catalogs are granted to nobody, admins included, until a decision says otherwise.
+Today that is `catalog.massive_market_data:read`, the data from Massive, a market data vendor.
+Its role definition in the realm file carries the attribute `"econgraph.never-granted": ["true"]`,
+and that attribute is the list: the Rust tests (which also check it against
+`Role::is_never_granted`), `catalog-access.py`, `preserve-catalog-grants.py` and the
+dev-readonly overlay all read it. While a role is marked:
+
+- `set-catalog-access.sh --admin-only` and `--make-public` refuse it, changing nothing.
+  `--withdraw` still works.
+- Every deploy stops if the realm file or the live realm grants it through a composite (a realm
+  or client role, `admin` and `super_admin` included), a user, a group, or a client's or client
+  scope's scope mapping. The check runs in the realm import Job's first step, before
+  keycloak-config-cli, so nothing was imported: remove the grants it names in Keycloak and
+  deploy again.
+- The dev-readonly client's automatic catalog scope leaves it out, so no dev-readonly token
+  carries it.
+
+To grant one on purpose later:
+
+1. Change the code in one PR: remove the attribute from the role in
+   `config/keycloak/econ-graph-realm.json`, and remove the role from `Role::is_never_granted` in
+   `backend/crates/econ-graph-auth/src/roles.rs` (the `restricted_catalog_roles` tests fail if the
+   two disagree). Update the tests that name it.
+2. Deploy that change. If the live role still carries the attribute afterwards (the next step
+   refuses), delete it in the Keycloak admin console: client `econ-graph-api`, Roles, the role,
+   Attributes.
+3. Grant it the way the decision says, for example to admins:
+
+   ```bash
+   scripts/keycloak/set-catalog-access.sh --context kind-econ-graph --dry-run --admin-only catalog.massive_market_data:read
+   scripts/keycloak/set-catalog-access.sh --context kind-econ-graph --admin-only catalog.massive_market_data:read
+   ```
+
+   or to a single user or group, in the Keycloak admin console (Role mapping, client
+   `econ-graph-api`). The dev-readonly client admits it from the next deploy.
+
 ### Separate and shared data planes
 
 For requests to the same GraphQL endpoint, the browser sends the signed-in user's token.
