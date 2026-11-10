@@ -10,7 +10,7 @@
  * failing, so the PR that fixes a control doesn't have to touch this file. Keep it as short as possible.
  */
 export interface AllowlistEntry {
-  /** The route's `path` as App.tsx writes it (e.g. '/series/:id'), or 'layout' for the header and sidebar. */
+  /** The route's `path` as App.tsx writes it (e.g. '/series/:id'), or 'layout' for the header, sidebar and footer. */
   route: string;
   role: 'link' | 'button' | 'tab' | 'checkbox' | 'switch' | 'combobox';
   /** The control's accessible name, exactly. */

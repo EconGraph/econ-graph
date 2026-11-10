@@ -21,10 +21,13 @@ describe('App accessibility', () => {
       try {
         expect(await screen.findByRole('main')).toBeVisible();
         expect(screen.getAllByRole('heading').length).toBeGreaterThan(0);
-        // ECO-881: the shared footer links to the terms on every page.
-        expect(
-          within(screen.getByRole('contentinfo')).getByRole('link', { name: 'Terms of Use' })
-        ).toHaveAttribute('href', '/terms');
+        // ECO-881: the shared footer links to the privacy policy and the terms on every page.
+        const footer = within(screen.getByRole('contentinfo'));
+        expect(footer.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute(
+          'href',
+          '/privacy'
+        );
+        expect(footer.getByRole('link', { name: 'Terms of Use' })).toHaveAttribute('href', '/terms');
         await auditPage(path.slice(1));
       } finally {
         unmount();

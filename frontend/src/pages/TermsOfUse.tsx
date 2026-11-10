@@ -18,44 +18,64 @@ import { Gavel } from '@mui/icons-material';
 const LAST_UPDATED = 'November 10, 2026';
 const REPOSITORY_URL = 'https://github.com/EconGraph/econ-graph';
 const WORLD_BANK_TERMS_URL = 'https://www.worldbank.org/ext/en/legal/terms-conditions/datasets';
-const FRED_TERMS_URL = 'https://fred.stlouisfed.org/docs/api/terms_of_use.html';
+export const FRED_TERMS_URL = 'https://fred.stlouisfed.org/docs/api/terms_of_use.html';
+/** FRED's required notice, quoted from its API terms (source_notices.rs). */
+export const FRED_NOTICE =
+  'This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.';
 
-interface PublicSource {
+export interface PublicSource {
+  /** The source's catalog code, as in its `catalog.<code>:read` role. */
+  catalog: string;
   name: string;
-  /** The notice EconGraph shows with the source's data, quoted from its terms. */
+  /**
+   * The notice EconGraph shows with the source's data (source_notices.rs). Most are quoted from
+   * the source's terms; World Bank's is EconGraph's own wording of the attribution rule.
+   */
   notice: string;
-  /** What anyone who reuses the data must do. */
+  /** Whether `notice` quotes the source's terms, and so is shown in quotation marks. */
+  noticeIsQuote: boolean;
+  /** What anyone who reuses the data must do, or what the source suggests. */
   duties: React.ReactNode[];
   termsUrl: string;
 }
 
-const PUBLIC_SOURCES: PublicSource[] = [
+/**
+ * The sources the `catalog-public` role makes public. The only list on the page: adding or
+ * removing a source here is all the text needs, including for FRED (see "Other sources").
+ */
+export const PUBLIC_SOURCES: PublicSource[] = [
   {
+    catalog: 'bls',
     name: 'U.S. Bureau of Labor Statistics (BLS)',
     notice:
       'BLS.gov cannot vouch for the data or analyses derived from these data after the data have been retrieved from BLS.gov.',
+    noticeIsQuote: true,
     duties: [
       'Cite the U.S. Bureau of Labor Statistics as the source.',
-      'Give the date the data were retrieved from BLS. The series page and its CSV show it.',
+      'Give the date the data were retrieved from BLS, where known. The series page and its CSV show it, or say that it was not recorded.',
       'Include the notice above.',
       'Do not use the BLS logo.',
     ],
     termsUrl: 'https://www.bls.gov/developers/termsOfService.htm',
   },
   {
+    catalog: 'bea',
     name: 'U.S. Bureau of Economic Analysis (BEA)',
     notice:
       'This product uses the Bureau of Economic Analysis (BEA) Data API but is not endorsed or certified by BEA.',
+    noticeIsQuote: true,
     duties: [
-      'Cite "Source: U.S. Bureau of Economic Analysis".',
+      'Credit BEA as the source. BEA suggests "Source: U.S. Bureau of Economic Analysis".',
       'Do not use the BEA name or logo to suggest that BEA endorses you or your work.',
     ],
     termsUrl: 'https://apps.bea.gov/API/_pdf/bea_api_tos.pdf',
   },
   {
+    catalog: 'census',
     name: 'U.S. Census Bureau',
     notice:
       'This product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau.',
+    noticeIsQuote: true,
     duties: [
       'Cite the Census Bureau as the source of the original data only, not of anything you derived from it.',
       'Do not suggest that the Census Bureau endorses you or your work.',
@@ -64,35 +84,42 @@ const PUBLIC_SOURCES: PublicSource[] = [
     termsUrl: 'https://www.census.gov/data/developers/about/terms-of-service.html',
   },
   {
+    catalog: 'fhfa',
     name: 'Federal Housing Finance Agency (FHFA)',
     notice: 'This product uses FHFA Data but is neither endorsed nor certified by FHFA.',
+    noticeIsQuote: true,
     duties: [
-      'Cite "Source: FHFA HPI®", with the index type where you know it.',
-      'Keep the ® in "FHFA HPI®" and "FHFA House Price Index®". They are registered trademarks. Do not rename the indexes.',
+      'Credit FHFA as the source. FHFA suggests at least "Source: FHFA HPI®" or "Source: FHFA House Price Index®", ideally with the index type and seasonal adjustment.',
+      '"FHFA HPI®" and "FHFA House Price Index®" are registered trademarks. Keep the ®, and do not rename the indexes.',
       'Do not suggest that FHFA endorses you or your work.',
     ],
     termsUrl: 'https://www.fhfa.gov/about/fhfa-policies/api-terms-of-service',
   },
   {
+    catalog: 'world_bank',
     name: 'The World Bank (World Development Indicators)',
     notice:
       'World Bank data are licensed under CC BY 4.0. Anyone who reuses them must attribute The World Bank and its data providers in the format "The World Bank: Dataset name: Data source (if known)", as the World Bank\'s dataset terms of use require.',
+    noticeIsQuote: false,
     duties: [
-      'Attribute the data as "The World Bank: Dataset name: Data source (if known)", for example "The World Bank: World Development Indicators".',
+      'Attribute the data to The World Bank and its data providers in the format "The World Bank: Dataset name: Data source (if known)". For World Development Indicators that is "The World Bank: World Development Indicators:" followed by the indicator\'s data source. The World Bank gives the data source in its metadata for each indicator.',
+      "If an indicator's World Bank metadata names a different licence, that licence applies, not CC BY 4.0.",
       'Say when you have changed the values, as CC BY 4.0 requires.',
       <>
         When you share the data, pass the same attribution requirement on to the people you share it
-        with. You can do this by linking the{' '}
+        with, and give the licence. You can do both by linking the{' '}
         <Link href={WORLD_BANK_TERMS_URL} target='_blank' rel='noopener noreferrer'>
           World Bank dataset terms of use
         </Link>
-        .
+        , which state the CC BY 4.0 licence.
       </>,
-      'Do not use the World Bank name or logo, or suggest that the World Bank endorses you or your work.',
+      'Do not use the World Bank logo, or use its name to suggest that the World Bank sponsors or endorses you or your work. Using the name in the attribution above is required.',
     ],
     termsUrl: WORLD_BANK_TERMS_URL,
   },
 ];
+
+const fredIsPublic = PUBLIC_SOURCES.some(source => source.catalog === 'fred');
 
 const bodyText = { color: 'text.secondary', marginBottom: '16px' } as const;
 
@@ -131,8 +158,8 @@ const TermsOfUse: React.FC = () => {
         </Typography>
         <Typography variant='body2' sx={bodyText}>
           These conditions apply wherever you reuse the data: on a page, in a chart, or in data you
-          share from a CSV download, a JSON download or a GraphQL response. They summarise each
-          source&apos;s terms. Where the two differ, the source&apos;s terms apply.
+          share from a download or a GraphQL response. They summarise each source&apos;s terms.
+          Where the two differ, the source&apos;s terms apply.
         </Typography>
         {PUBLIC_SOURCES.map(source => (
           <Box key={source.name} sx={{ mb: 3 }}>
@@ -140,7 +167,8 @@ const TermsOfUse: React.FC = () => {
               {source.name}
             </Typography>
             <Typography variant='body2' sx={{ mb: 1 }}>
-              Notice: &ldquo;{source.notice}&rdquo;
+              EconGraph shows this notice with the data:{' '}
+              {source.noticeIsQuote ? <>&ldquo;{source.notice}&rdquo;</> : source.notice}
             </Typography>
             <List dense sx={{ listStyleType: 'disc', pl: 3 }}>
               {source.duties.map((duty, index) => (
@@ -177,17 +205,17 @@ const TermsOfUse: React.FC = () => {
           FRED data
         </Typography>
         <Typography variant='body2' sx={bodyText}>
-          Where EconGraph shows data from FRED®, Federal Reserve Bank of St. Louis: &ldquo;This
-          product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of
-          St. Louis.&rdquo;
+          Where EconGraph shows FRED® data, it shows this notice: &ldquo;{FRED_NOTICE}&rdquo;
         </Typography>
         <Typography variant='body2' sx={bodyText}>
           If you use FRED data, you are bound by the{' '}
           <Link href={FRED_TERMS_URL} target='_blank' rel='noopener noreferrer'>
             FRED® API Terms of Use
           </Link>
-          . They limit storing, republishing and commercial use of FRED data. EconGraph does not
-          license FRED data to you.
+          . Under those terms, you need the prior written permission of the Federal Reserve Bank of
+          St. Louis to store or cache FRED data, add it to a database, republish or display it on a
+          website, or use it commercially. Series that third parties own also need their
+          owner&apos;s permission.
         </Typography>
       </Paper>
 
@@ -204,6 +232,8 @@ const TermsOfUse: React.FC = () => {
           Data from any source not listed under the public sources above is restricted. EconGraph
           does not license it for reuse, even if you can see it. That source&apos;s own terms decide
           what you may do with it.
+          {!fredIsPublic &&
+            ' FRED is not one of the public sources, and EconGraph does not license FRED data for reuse.'}
         </Typography>
       </Paper>
 
@@ -217,10 +247,13 @@ const TermsOfUse: React.FC = () => {
           Using the API and downloads
         </Typography>
         <Typography variant='body2' sx={bodyText}>
-          The GraphQL API and the CSV and JSON downloads carry the same data, under the same source
-          terms, as the pages. A series CSV includes its source&apos;s citation, notice and terms
-          link. Keep them with the data when you share it. In GraphQL, each data source&apos;s
-          notice is in its <code>notice</code> field.
+          Data from the GraphQL API and the downloads is under the same source terms as the pages.
+          The CSV download on a series page includes the source&apos;s citation, notice and terms
+          link, and for BLS the retrieval date. Keep them with the data when you share it. The CSV
+          and JSON downloads of search results hold series details only, not values or notices. In
+          GraphQL, each data source&apos;s <code>notice</code> field is an object with its{' '}
+          <code>citation</code>, <code>notice</code>, <code>termsUrl</code> and{' '}
+          <code>retrievalDateRequired</code>.
         </Typography>
         <List dense sx={{ listStyleType: 'disc', pl: 3 }}>
           <ListItem sx={{ display: 'list-item', py: 0 }}>
@@ -265,7 +298,10 @@ const TermsOfUse: React.FC = () => {
         <Typography variant='body2' sx={{ color: 'text.secondary' }}>
           We may update these terms. The date above tells you when they last changed. To ask about
           them, open an issue in the project repository at{' '}
-          <Link href={REPOSITORY_URL}>{REPOSITORY_URL}</Link>.
+          <Link href={REPOSITORY_URL} target='_blank' rel='noopener noreferrer'>
+            {REPOSITORY_URL}
+          </Link>
+          .
         </Typography>
         <Divider sx={{ my: 2 }} />
         <Typography variant='caption' sx={{ color: 'text.secondary' }}>
