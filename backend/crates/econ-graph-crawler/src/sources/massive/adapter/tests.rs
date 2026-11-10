@@ -523,10 +523,8 @@ async fn without_a_key_the_worker_skips_massive_once_and_enqueues_nothing() {
 /// nothing for it: a key alone never starts crawling.
 #[tokio::test]
 async fn with_a_key_but_the_licence_flag_off_massive_is_not_crawled() {
-    assert!(
-        !cfg!(flag_crawl_massive),
-        "crawl_massive is off in every profile"
-    );
+    // crawl_massive is off in every profile.
+    assert!(!crate::licence::allows(SourceId::Massive));
     let keys = crate::testkit::test_keys();
     assert!(keys.massive.is_some());
     let keyed = crate::sources::registry_for_keys(&keys);
