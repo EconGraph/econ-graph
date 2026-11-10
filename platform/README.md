@@ -47,7 +47,7 @@ Required encrypted inputs are:
 | econ-graph | econ-graph-secrets | app-database-url and data-database-url using the corresponding CNPG `*-rw` endpoint and matching credentials |
 | econ-graph | econ-graph-keycloak | existing admin-username/admin-password/db-password/anonymous-client-secret contract; db-password matches CNPG Keycloak role; optional social client credentials |
 | econ-graph | app-backup-s3, data-backup-s3, keycloak-backup-s3 | ACCESS_KEY_ID, ACCESS_SECRET_KEY; independently scoped backup buckets |
-| econ-graph | crawler-api-keys | existing optional fred-api-key/bls-api-key/bea-api-key/census-api-key |
+| econ-graph | crawler-api-keys | existing optional fred-api-key/bls-api-key/bea-api-key/census-api-key; optional massive-api-key (Massive, a market data vendor; without it the worker skips the source, see [Massive runbook](../docs/monitoring/massive-runbook.md)) |
 | monitoring | grafana-admin | admin-user, admin-password |
 | monitoring | loki-objectstore | AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY; logs/rules/admin buckets only |
 | monitoring | alertmanager-receivers | slack-webhook-url (Slack incoming webhook), watchdog-url (healthchecks.io ping URL); see [Alert delivery](#alert-delivery) |

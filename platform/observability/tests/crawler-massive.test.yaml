@@ -1,0 +1,372 @@
+# promtool unit tests for the Massive alerts (group crawler.massive, ECO-871), and for the
+# existing per-source crawler alerts firing for source="MASSIVE" (crawler_type "massive").
+# Massive is a market data vendor. Branch-namespace series must never fire a primary alert.
+# Run by ../check-rules.sh.
+rule_files:
+  - econgraph-crawler.yml
+
+evaluation_interval: 1m
+
+tests:
+  # A fresh pod whose first Massive request is rejected: the counter appears at 1, which
+  # `increase` alone would miss. It fires at once and, with no further rejection, keeps firing
+  # for 24 hours (the source pauses after auth errors and refreshes once a trading day). The
+  # same series in a branch namespace fires nothing.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_source_auth_rejections_total{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '_x2 1x340'
+      - series: 'crawler_source_auth_rejections_total{namespace="econ-graph-br-test", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '_x2 1+1x340'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: MassiveApiKeyRejected
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: MassiveApiKeyRejected
+        exp_alerts: &massive_key_rejected
+          - exp_labels:
+              severity: warning
+              source: MASSIVE
+            exp_annotations:
+              summary: Massive rejected the API key
+              description: Massive answered HTTP 401, or 403 not entitled, so no daily bars are being fetched. The key was revoked or rotated, or the subscription lapsed or was downgraded (a 403 for a date outside the plan window is not counted here). The alert keeps firing for 24 hours after the last rejection, since the source pauses after repeated auth errors and refreshes once a trading day; resolving does not mean the key works, only that no rejection was seen for 24 hours. Check the subscription on the Massive dashboard, then install the current key as massive-api-key in Secret crawler-api-keys and restart crawler-worker (Massive runbook, docs/monitoring/massive-runbook.md).
+      - eval_time: 23h
+        alertname: MassiveApiKeyRejected
+        exp_alerts: *massive_key_rejected
+      - eval_time: 25h
+        alertname: MassiveApiKeyRejected
+        exp_alerts: []
+
+  # A long-running pod: a counter that stays at 0 fires nothing; rejections from 20m on fire.
+  - interval: 1m
+    input_series:
+      - series: 'crawler_source_auth_rejections_total{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: MassiveApiKeyRejected
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'crawler_source_auth_rejections_total{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '0x20 1+1x20'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: MassiveApiKeyRejected
+        exp_alerts: *massive_key_rejected
+
+  # An old counter (its rejections, at the start of the series, stopped firing after 24h15m)
+  # does not look new after a failed scrape (a stale marker at 25h) or after a 6-minute scrape
+  # gap (a Prometheus restart at 25h).
+  - interval: 1m
+    input_series:
+      - series: 'crawler_source_auth_rejections_total{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '1x1499 stale 1x60'
+    alert_rule_test:
+      - eval_time: 24h50m
+        alertname: MassiveApiKeyRejected
+        exp_alerts: []
+      - eval_time: 25h20m
+        alertname: MassiveApiKeyRejected
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'crawler_source_auth_rejections_total{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '3x1500 _x6 3x40'
+    alert_rule_test:
+      - eval_time: 25h20m
+        alertname: MassiveApiKeyRejected
+        exp_alerts: []
+
+  # A normal weekend, Friday close to Monday close, sampled every 5 minutes: no trading day passes
+  # its slot without being stored, so the lag stays 0 and nothing fires.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_source_observation_lag_trading_days{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '0x870'
+      - series: 'crawler_coverage_series_discovered{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '3000x870'
+    alert_rule_test:
+      - eval_time: 72h
+        alertname: MassiveDataStale
+        exp_alerts: []
+
+  # A Good Friday weekend, Thursday close to Tuesday close: four days without a slot, lag 0,
+  # nothing fires.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_source_observation_lag_trading_days{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '0x1160'
+      - series: 'crawler_coverage_series_discovered{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '3000x1160'
+    alert_rule_test:
+      - eval_time: 96h
+        alertname: MassiveDataStale
+        exp_alerts: []
+
+  # A missed Monday refresh: the lag goes to 1 at the slot (2h into the series) and stays;
+  # the alert fires 6 hours later. The branch's lag of 3 all along fires nothing.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_source_observation_lag_trading_days{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '0x24 1x120'
+      - series: 'crawler_coverage_series_discovered{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '3000x150'
+      - series: 'crawler_source_observation_lag_trading_days{namespace="econ-graph-br-test", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '3x150'
+      - series: 'crawler_coverage_series_discovered{namespace="econ-graph-br-test", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '3000x150'
+    alert_rule_test:
+      - eval_time: 7h45m
+        alertname: MassiveDataStale
+        exp_alerts: []
+      - eval_time: 8h15m
+        alertname: MassiveDataStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: MASSIVE
+            exp_annotations:
+              summary: Massive daily bars are behind, or their lag gauge is missing
+              description: For 6 hours either at least one trading day's Massive bars have not been stored after its refresh slot (crawler_source_observation_lag_trading_days{source="MASSIVE"} is 1 or more), or the source runs but exports no lag gauge. Check MassiveApiKeyRejected and the per-source crawler alerts for MASSIVE, failed MASSIVE jobs in crawl_queue, and Massive errors in the crawler-worker log (Massive runbook, docs/monitoring/massive-runbook.md).
+
+  # The bars land 5 hours late: lag 1 for less than 6 hours fires nothing.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_source_observation_lag_trading_days{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '0x24 1x60 0x60'
+      - series: 'crawler_coverage_series_discovered{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '3000x150'
+    alert_rule_test:
+      - eval_time: 10h
+        alertname: MassiveDataStale
+        exp_alerts: []
+
+  # The source runs (coverage gauges exported) but the lag gauge is missing: fires after 6
+  # hours. A branch in the same state fires nothing, and a skipped source exports neither.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_coverage_series_discovered{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '3000x120'
+      - series: 'crawler_coverage_series_discovered{namespace="econ-graph-br-test", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '3000x120'
+    alert_rule_test:
+      - eval_time: 5h45m
+        alertname: MassiveDataStale
+        exp_alerts: []
+      - eval_time: 6h15m
+        alertname: MassiveDataStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: MASSIVE
+            exp_annotations:
+              summary: Massive daily bars are behind, or their lag gauge is missing
+              description: For 6 hours either at least one trading day's Massive bars have not been stored after its refresh slot (crawler_source_observation_lag_trading_days{source="MASSIVE"} is 1 or more), or the source runs but exports no lag gauge. Check MassiveApiKeyRejected and the per-source crawler alerts for MASSIVE, failed MASSIVE jobs in crawl_queue, and Massive errors in the crawler-worker log (Massive runbook, docs/monitoring/massive-runbook.md).
+
+  # A backfill Job pod is first scraped with its failure counter already at 1, at 30m, and
+  # its series ends with the pod 15 minutes later. The alert fires for a day after the run.
+  # Another pod's successful run and a branch pod's failure fire nothing.
+  - interval: 5m
+    input_series:
+      - series: 'crawler_backfill_runs_total{namespace="econ-graph", source="MASSIVE", outcome="failure", pod="massive-backfill-a-1"}'
+        values: '_x6 1x3'
+      - series: 'crawler_backfill_runs_total{namespace="econ-graph", source="MASSIVE", outcome="success", pod="massive-backfill-b-1"}'
+        values: '_x12 0 1x3'
+      - series: 'crawler_backfill_runs_total{namespace="econ-graph-br-test", source="MASSIVE", outcome="failure", pod="massive-backfill-c-1"}'
+        values: '_x6 1x3'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: MassiveBackfillFailed
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: MassiveBackfillFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: MASSIVE
+            exp_annotations:
+              summary: A Massive backfill run failed
+              description: A Massive historical backfill run ended with outcome failure, or a massive-backfill Job failed, in the last day; crawler_backfill_days_remaining{source="MASSIVE"} shows how much history is still to load. Find the error in the Job pod log (`kubectl -n econ-graph logs job/<name>`; key, rate limit, or object store disk space), fix it and create a new Job from CronJob massive-backfill (Massive runbook, docs/monitoring/massive-runbook.md).
+      - eval_time: 25h
+        alertname: MassiveBackfillFailed
+        exp_alerts: []
+      - eval_time: 20h
+        alertname: MassiveBackfillFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: MASSIVE
+            exp_annotations:
+              summary: A Massive backfill run failed
+              description: A Massive historical backfill run ended with outcome failure, or a massive-backfill Job failed, in the last day; crawler_backfill_days_remaining{source="MASSIVE"} shows how much history is still to load. Find the error in the Job pod log (`kubectl -n econ-graph logs job/<name>`; key, rate limit, or object store disk space), fix it and create a new Job from CronJob massive-backfill (Massive runbook, docs/monitoring/massive-runbook.md).
+      - eval_time: 28h
+        alertname: MassiveBackfillFailed
+        exp_alerts: []
+
+  # A Job pod whose failure counter goes from 0 to 1 when its run fails, at 5h: fires through
+  # the next day, then clears.
+  - interval: 1h
+    input_series:
+      - series: 'crawler_backfill_runs_total{namespace="econ-graph", source="MASSIVE", outcome="failure", pod="massive-backfill-a-1"}'
+        values: '0x4 1x40'
+    alert_rule_test:
+      - eval_time: 6h
+        alertname: MassiveBackfillFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: MASSIVE
+            exp_annotations:
+              summary: A Massive backfill run failed
+              description: A Massive historical backfill run ended with outcome failure, or a massive-backfill Job failed, in the last day; crawler_backfill_days_remaining{source="MASSIVE"} shows how much history is still to load. Find the error in the Job pod log (`kubectl -n econ-graph logs job/<name>`; key, rate limit, or object store disk space), fix it and create a new Job from CronJob massive-backfill (Massive runbook, docs/monitoring/massive-runbook.md).
+      - eval_time: 31h
+        alertname: MassiveBackfillFailed
+        exp_alerts: []
+
+  # A massive-backfill Job that failed without reporting (crashed or evicted) at 30m fires
+  # through kube-state-metrics for a day after it became failed, while the Job object still
+  # exists. A failed Job in a branch namespace fires nothing.
+  - interval: 5m
+    input_series:
+      - series: 'kube_job_status_failed{namespace="econ-graph", job_name="massive-backfill-202611090000"}'
+        values: '0x6 1x400'
+      - series: 'kube_job_status_failed{namespace="econ-graph-br-test", job_name="massive-backfill-202611090000"}'
+        values: '0x6 1x400'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MassiveBackfillFailed
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: MassiveBackfillFailed
+        exp_alerts: &massive_backfill_failed
+          - exp_labels:
+              severity: warning
+              source: MASSIVE
+            exp_annotations:
+              summary: A Massive backfill run failed
+              description: A Massive historical backfill run ended with outcome failure, or a massive-backfill Job failed, in the last day; crawler_backfill_days_remaining{source="MASSIVE"} shows how much history is still to load. Find the error in the Job pod log (`kubectl -n econ-graph logs job/<name>`; key, rate limit, or object store disk space), fix it and create a new Job from CronJob massive-backfill (Massive runbook, docs/monitoring/massive-runbook.md).
+      - eval_time: 24h
+        alertname: MassiveBackfillFailed
+        exp_alerts: *massive_backfill_failed
+      - eval_time: 25h
+        alertname: MassiveBackfillFailed
+        exp_alerts: []
+
+  # Jobs that fail 24 hours after creation, when activeDeadlineSeconds (86400) passes: one
+  # whose run was still going (DeadlineExceeded), and one whose pod never started
+  # (CreateContainerConfigError, so it reports nothing) until the deadline. Both fire for a
+  # day from the failure, not from creation.
+  - interval: 5m
+    input_series:
+      - series: 'kube_job_status_failed{namespace="econ-graph", job_name="massive-backfill-202611090000"}'
+        values: '0x288 1x300'
+      - series: 'kube_job_status_active{namespace="econ-graph", job_name="massive-backfill-202611090000"}'
+        values: '1x288 0x300'
+      - series: 'kube_job_status_failed{namespace="econ-graph", job_name="massive-backfill-202611090100"}'
+        values: '_x12 0x288 1x288'
+      - series: 'kube_job_status_active{namespace="econ-graph", job_name="massive-backfill-202611090100"}'
+        values: '_x12 1x288 0x288'
+    alert_rule_test:
+      - eval_time: 23h
+        alertname: MassiveBackfillFailed
+        exp_alerts: []
+      - eval_time: 24h10m
+        alertname: MassiveBackfillFailed
+        exp_alerts: *massive_backfill_failed
+      - eval_time: 48h
+        alertname: MassiveBackfillFailed
+        exp_alerts: *massive_backfill_failed
+      - eval_time: 49h30m
+        alertname: MassiveBackfillFailed
+        exp_alerts: []
+
+  # The existing per-source alerts cover Massive with no change.
+  - interval: 1m
+    input_series:
+      - series: 'crawler_queue_failed_24h{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '60x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CrawlerSourceFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: MASSIVE
+            exp_annotations:
+              summary: Source MASSIVE has 60 failed jobs in 24h
+              description: More than 50 crawl_queue items for MASSIVE became failed in the last 24 hours; check crawl_queue.error_message for that source (bad ids, auth, or upstream format change).
+
+  - interval: 1m
+    input_series:
+      - series: 'crawler_last_failure_timestamp_seconds{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '600x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CrawlerCrawlFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: MASSIVE
+            exp_annotations:
+              summary: A MASSIVE crawl job failed in the last hour
+              description: A crawl_queue job for MASSIVE ended in status failed. Find it with `SELECT series_id, kind, error_message FROM crawl_queue WHERE source = 'MASSIVE' AND status = 'failed' ORDER BY COALESCE(finished_at, updated_at) DESC LIMIT 20`.
+
+  - interval: 5m
+    input_series:
+      - series: 'crawler_coverage_ratio{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '0.5x90'
+    alert_rule_test:
+      - eval_time: 7h
+        alertname: CrawlerCoverageLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: MASSIVE
+            exp_annotations:
+              summary: Coverage for MASSIVE is 50% (target 95%)
+              description: Fewer than 95% of the series discovered for MASSIVE have data. Run `crawler coverage` for the numbers and check crawl_queue.error_message for that source.
+
+  - interval: 5m
+    input_series:
+      - series: 'crawler_coverage_series_overdue{namespace="econ-graph", source="MASSIVE", pod="crawler-worker-1"}'
+        values: '3x12'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: CrawlerSourceNotRefreshed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: MASSIVE
+            exp_annotations:
+              summary: 3 MASSIVE series not refreshed within twice their interval
+              description: MASSIVE has series whose last successful crawl is older than twice their refresh interval (scheduler disabled or behind, source paused, or refreshes failing). `crawler coverage` shows the oldest successful crawl.
+
+  - interval: 1m
+    input_series:
+      - series: 'econgraph_crawler_requests_total{namespace="econ-graph", crawler_type="massive"}'
+        values: '0+100x40'
+      - series: 'econgraph_crawler_errors_total{namespace="econ-graph", crawler_type="massive"}'
+        values: '0+10x40'
+      - series: 'econgraph_crawler_rate_limit_hits_total{namespace="econ-graph", crawler_type="massive"}'
+        values: '0+60x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CrawlerHighErrorRateBySource
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              crawler_type: massive
+            exp_annotations:
+              summary: High crawler error rate (>5%) for source massive
+              description: Error rate is above 5% for 10 minutes for source massive.
+      - eval_time: 35m
+        alertname: CrawlerFrequentRateLimitHitsBySource
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              crawler_type: massive
+            exp_annotations:
+              summary: Frequent 429 rate limit hits for massive
+              description: Rate limit hits are frequent for source massive; its SourcePolicy rate may be too high (or more than one worker replica is running). Massive's paid plan has only a soft limit of about 100 requests/s, so a 429 is likely a vendor fault; check Massive's status page, and whether a massive-backfill Job is running as a second caller, before lowering the rate.
