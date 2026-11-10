@@ -47,7 +47,8 @@
 #      kubeconfig's cluster is the one the control-plane container reports (its
 #      kube-system UID).
 #   4. Loads TAG's release images with the candidate's load-release-images.sh
-#      (--cluster NAME, which verifies the GHCR digests and revision labels); a fresh
+#      (--cluster NAME, which verifies the GHCR digests and revision labels and, for a
+#      candidate from ECO-896 on, each image's signed build provenance with gh); a fresh
 #      cluster has no previous images to keep, so --allow-missing-nodes.
 #   5. Restores the dump's databases and saved Secrets with the candidate's
 #      restore-kind-databases.sh (APP_DATABASE=shared when the dump has no app
@@ -89,6 +90,10 @@
 #
 # Needs: git, python3 with PyYAML, btrfs-progs, the rootful Docker daemon
 # (ECONGRAPH_DOCKER_HOST, default unix:///var/run/docker.sock) and `docker login ghcr.io`.
+# For a candidate that has scripts/release/verify-image-provenance.sh (ECO-896 on), also gh,
+# logged in (gh auth login, or GH_TOKEN): checked before anything changes. The candidate's
+# scripts see the operator's gh config (GH_CONFIG_DIR) and GH_TOKEN, as they see
+# DOCKER_CONFIG, and nothing else of the operator's environment.
 # Exit status: 0 done; 1 a step failed; 2 usage; 3 refused.
 set -euo pipefail
 
@@ -96,6 +101,9 @@ SCRIPT_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 QA_ROOT="${ECONGRAPH_QA_ROOT:-$HOME/econgraph-qa}"
 REAL_HOME="$HOME"
 REAL_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+# gh's config, where gh itself looks for it; the candidate's scripts get it by name, since
+# their HOME and XDG_CONFIG_HOME are inside the QA directory.
+QA_GH_CONFIG_DIR="${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}"
 export DOCKER_HOST="${ECONGRAPH_DOCKER_HOST:-unix:///var/run/docker.sock}"
 unset DOCKER_CONTEXT
 # Production's cluster names; a QA environment never takes or touches them.
@@ -273,6 +281,7 @@ rc() {
             KUBECTL="$QA_KUBECTL" KUBECONFIG="$QA_KUBECONFIG" \
             DOCKER_HOST="$DOCKER_HOST" ECONGRAPH_DOCKER_HOST="$DOCKER_HOST" \
             HOME="${QA_DIR}/home" DOCKER_CONFIG="${DOCKER_CONFIG:-${REAL_HOME}/.docker}" \
+            GH_CONFIG_DIR="$QA_GH_CONFIG_DIR" ${GH_TOKEN:+"GH_TOKEN=$GH_TOKEN"} \
             XDG_DATA_HOME="$REAL_DATA_HOME" XDG_CACHE_HOME="${QA_DIR}/cache" \
             XDG_CONFIG_HOME="${QA_DIR}/home/.config" XDG_STATE_HOME="${QA_DIR}/home/.local/state" \
             KIND_CLUSTER="$NAME" ECONGRAPH_SCRATCH_STORAGE="$STORAGE" \
@@ -380,6 +389,14 @@ for required in scripts/deploy/recreate-kind-cluster.sh scripts/deploy/load-rele
     git -C "$SCRIPT_REPO" cat-file -e "${COMMIT}:${required}" 2>/dev/null ||
         refuse "${TAG} has no ${required}; this script deploys release candidates from v4.1"
 done
+# The candidate's load-release-images.sh checks each image's provenance with gh (ECO-896):
+# without a logged-in gh it would stop after the cluster exists.
+if git -C "$SCRIPT_REPO" cat-file -e "${COMMIT}:scripts/release/verify-image-provenance.sh" 2>/dev/null; then
+    command -v gh >/dev/null 2>&1 ||
+        refuse "${TAG}'s load-release-images.sh checks image provenance with gh; install gh"
+    GH_CONFIG_DIR="$QA_GH_CONFIG_DIR" gh auth status >/dev/null 2>&1 ||
+        refuse "gh is not logged in (gh auth login, or GH_TOKEN); ${TAG}'s load-release-images.sh needs it to check image provenance"
+fi
 
 if cluster_exists; then
     refuse_production_marker

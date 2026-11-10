@@ -59,7 +59,8 @@ reads_stdin = prog == 'kubectl' and ('-i' in args or args[-2:] == ['-f', '-'])
 stdin = sys.stdin.read() if reads_stdin and not sys.stdin.isatty() else ''
 keep = ('HOME', 'KIND_CLUSTER', 'ECONGRAPH_SCRATCH_STORAGE', 'XDG_CACHE_HOME', 'ECONGRAPH_BACKUP_ROOT',
         'ECONGRAPH_RELEASES_DIR', 'ECONGRAPH_DEPLOY_ENV', 'PUBLIC_HOST', 'APP_DATABASE', 'DOCKER_HOST',
-        'FRED_API_KEY', 'KUBECONFIG', 'KUBECTL', 'TMPDIR', 'CLOUDFLARE_TUNNEL_TOKEN', 'DRY_RUN', 'NAMESPACE')
+        'FRED_API_KEY', 'KUBECONFIG', 'KUBECTL', 'TMPDIR', 'CLOUDFLARE_TUNNEL_TOKEN', 'DRY_RUN', 'NAMESPACE',
+        'GH_CONFIG_DIR', 'GH_TOKEN')
 with open(CONFIG['calls'], 'a') as log:
     log.write(json.dumps({'prog': prog, 'args': args, 'cwd': os.getcwd(),
                           'env': {k: os.environ.get(k) for k in keep}, 'stdin': stdin}) + '\n')
@@ -184,6 +185,9 @@ elif prog in ('load-release-images.sh',):
         state.setdefault('daemon_images', {})[image] = 'sha256:candidate'
     save()
     code = state.get('load_status', 3)
+elif prog == 'gh':
+    # Only `gh auth status`: logged in unless the state says otherwise.
+    code = 0 if args[:2] == ['auth', 'status'] and state.get('gh_logged_in', True) else 1
 elif prog == 'deploy.sh':
     import yaml
     docs = [d for d in yaml.safe_load_all(open('k8s/manifests/crawler-worker.yaml')) if d]
@@ -215,7 +219,7 @@ class DeployRcToQaTest(unittest.TestCase):
             'state': str(self.state), 'calls': str(self.calls), 'name': NAME,
             'production_keycloak': PRODUCTION_KEYCLOAK, 'local_images': LOCAL_IMAGES}))
         stub.chmod(0o755)
-        for prog in ('docker', 'kind', 'btrfs'):
+        for prog in ('docker', 'kind', 'btrfs', 'gh'):
             (self.bin / prog).symlink_to(stub)
         self.data_home = self.work / 'data'
         kind_dir = self.data_home / 'econgraph/bin'
@@ -280,8 +284,10 @@ class DeployRcToQaTest(unittest.TestCase):
         env = dict(os.environ, PATH=f'{self.bin}{os.pathsep}{os.environ["PATH"]}',
                    ECONGRAPH_QA_ROOT=str(self.qa_root), XDG_DATA_HOME=str(self.data_home),
                    FRED_API_KEY='production-fred-key', CLOUDFLARE_TUNNEL_TOKEN='production-tunnel-token',
-                   DRY_RUN='false', NAMESPACE='econ-graph-prod', KUBECONFIG=str(self.work / 'operator-kubeconfig'))
+                   DRY_RUN='false', NAMESPACE='econ-graph-prod', KUBECONFIG=str(self.work / 'operator-kubeconfig'),
+                   GH_CONFIG_DIR=str(self.work / 'gh-config'))
         env.pop('ECONGRAPH_DOCKER_HOST', None)
+        env.pop('GH_TOKEN', None)
         env.update(extra)
         return env
 
@@ -300,6 +306,9 @@ class DeployRcToQaTest(unittest.TestCase):
         for call in self.logged():
             if call['prog'] == 'btrfs-subvolume-uuid.py':
                 self.assertEqual(call['args'][0], '--check')
+                continue
+            if call['prog'] == 'gh':
+                self.assertEqual(call['args'], ['auth', 'status'], call)
                 continue
             self.assertEqual(call['prog'], 'docker', call)
             self.assertIn(call['args'][0], ('ps', 'exec', 'info'), call)
@@ -360,6 +369,30 @@ class DeployRcToQaTest(unittest.TestCase):
         result = self.deploy('--tag', 'v4.0.1-rc.2', '--dump-dir', str(self.dump))
         self.assertEqual(result.returncode, 3, result.stdout)
         self.assertIn('has no scripts/deploy/restore-kind-databases.sh', result.stdout)
+
+    def test_a_candidate_that_checks_provenance_needs_gh_logged_in(self):
+        # ECO-896: a candidate with verify-image-provenance.sh runs gh in load-release-images.sh.
+        git = ['git', '-C', str(self.repo), '-c', 'user.name=t', '-c', 'user.email=t@t']
+        target = self.repo / 'scripts/release/verify-image-provenance.sh'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / 'scripts/release/verify-image-provenance.sh', target)
+        run(git + ['add', '-A'])
+        run(git + ['commit', '-q', '-m', 'provenance'])
+        run(git + ['tag', 'v4.2.0-rc.1'])
+        run(git + ['push', '-q', 'origin', '--tags'])
+        self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}, 'gh_logged_in': False})
+        result = self.deploy('--tag', 'v4.2.0-rc.1', '--dump-dir', str(self.dump), '--name', NAME)
+        self.assert_refused(result, 'gh is not logged in')
+        self.assertFalse((self.qa_root / NAME).exists())
+        self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}})
+        result = self.deploy('--tag', 'v4.2.0-rc.1', '--dump-dir', str(self.dump), '--name', NAME, '--dry-run')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(['auth', 'status'], [c['args'] for c in self.logged() if c['prog'] == 'gh'])
+
+    def test_a_candidate_without_the_provenance_check_never_runs_gh(self):
+        result = self.deploy('--tag', TAG, '--dump-dir', str(self.dump), '--dry-run')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(any(c['prog'] == 'gh' for c in self.logged()))
 
     def test_dry_run_creates_nothing(self):
         result = self.deploy('--tag', TAG, '--dump-dir', str(self.dump), '--dry-run')
@@ -441,6 +474,9 @@ class DeployRcToQaTest(unittest.TestCase):
             self.assertEqual(env['KUBECONFIG'], str(qa / f'cache/econgraph/kubeconfig-{NAME}'))
             self.assertEqual(env['KUBECTL'], str(qa / 'cache/econgraph/bin/kubectl'))
             self.assertEqual(env['DOCKER_HOST'], 'unix:///var/run/docker.sock')
+            # gh's config by name (the candidate's HOME is the QA directory's); no GH_TOKEN when unset.
+            self.assertEqual(env['GH_CONFIG_DIR'], str(self.work / 'gh-config'))
+            self.assertIsNone(env['GH_TOKEN'])
         # The candidate's deploy never starts a crawler.
         self.assertEqual(state['deployed_crawler_replicas'], 0)
         self.assertEqual(rc[1]['args'], ['--tag', TAG, '--cluster', NAME, '--allow-missing-nodes'])

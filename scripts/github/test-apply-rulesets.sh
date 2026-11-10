@@ -186,10 +186,11 @@ expect_refusal() {
 
 # What MERGE_QUEUE.md describes, computed from the live main ruleset before
 # any release ruleset exists: the reference for the first apply. The release
-# ruleset has no merge queue and no Lint workflows check.
+# ruleset has no merge queue and no Lint workflows check, and has a creation rule.
 jq 'map(select(.type != "merge_queue"))
     | (.[] | select(.type == "required_status_checks") | .parameters.required_status_checks) |=
-      map(select(.context != "Lint workflows"))' "$rules" >"$WORK/release-new-rules.json"
+      map(select(.context != "Lint workflows"))
+    | . + [{type: "creation"}]' "$rules" >"$WORK/release-new-rules.json"
 jq --slurpfile new "$rules" '{name, target, enforcement, conditions, bypass_actors,
       rules: ([.rules[] | select(.type as $t | [$new[0][].type] | index($t) | not)] + $new[0])}' \
     <<<"$live_main" >"$WORK/doc-main.json"
@@ -263,6 +264,15 @@ if jq -e '[.rules[].type] | (index("merge_queue") | not) and index("deletion")
 else
     fail "first apply: merge_queue rules" "$(jq -c '.rules | map(.type)' "$release_file")"
 fi
+# Only the bypass actors create a release branch (ECO-896); main gets no creation rule.
+if jq -e '[.rules[].type] | index("creation")' "$release_file" >/dev/null &&
+    ! jq -e '[.rules[].type] | index("creation")' "$STUB_STATE/rulesets/8429203.json" >/dev/null &&
+    jq -e '.bypass_actors == [{"actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]' \
+        "$release_file" >/dev/null; then
+    ok "first apply: release branches have a creation rule, bypassed by org admins; main has none"
+else
+    fail "first apply: release creation rule" "$(jq -c '{rules: [.rules[].type], bypass_actors}' "$release_file")"
+fi
 # Every live field of main is still there, unchanged.
 if jq -e --argjson live "$live_main" '
     . as $now
@@ -277,7 +287,10 @@ fi
 
 tag_file="$(tag_files)"
 if [ "$(wc -w <<<"$tag_file" | tr -d ' ')" = 1 ]; then
-    same_ruleset "first apply: the tag ruleset is tag-ruleset.json" "$tag_rules" "$tag_file"
+    # The file's bypass actors and main's live ones (here the same org admins).
+    jq --argjson main "$live_main" '.bypass_actors += $main.bypass_actors | .bypass_actors |= unique' \
+        "$tag_rules" >"$WORK/doc-tag.json"
+    same_ruleset "first apply: the tag ruleset is tag-ruleset.json plus main's bypass actors" "$WORK/doc-tag.json" "$tag_file"
 else
     fail "first apply: one tag ruleset" "$tag_file"
 fi
@@ -285,8 +298,9 @@ fi
 if jq -e '.target == "tag" and .enforcement == "active"
           and (.conditions.ref_name.include | sort) == ["refs/tags/train-*", "refs/tags/v*"]
           and ([.rules[].type] | sort) == ["creation", "deletion", "non_fast_forward", "update"]
-          and all(.bypass_actors[]; .actor_type == "OrganizationAdmin"
-                  or (.actor_type == "RepositoryRole" and .actor_id == 5))' "$tag_rules" >/dev/null; then
+          and all(.rules[]; has("parameters") | not)
+          and .bypass_actors == [{"actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]' \
+    "$tag_rules" >/dev/null; then
     ok "tag-ruleset.json protects v* and train-* tags, bypassed only by admins"
 else
     fail "tag-ruleset.json" "$(jq -c . "$tag_rules")"

@@ -29,19 +29,30 @@ changes the release must not ship.
 ## During QA
 
 The [Release Images workflow](../../.github/workflows/release.yml) builds release candidate
-images for the backend, crawler-worker and frontend. Trigger it with GitHub's **Run workflow**
-button (`workflow_dispatch`), setting its `ref` input to the release branch or the candidate's
-commit SHA, or push a `vX.Y.Z-rc.N` Git tag on the candidate commit. With no `ref` input, a
-dispatched run builds the ref selected in the workflow UI. The resulting images receive
-`sha-<full-commit-SHA>` image tags; an RC Git tag push also gives the images that RC tag.
-QA deploys these images and records the tested commit SHA.
+images for the backend, crawler-worker, frontend and chart-api. Push a `vX.Y.Z-rc.N` Git tag
+on the candidate commit, or start it with GitHub's **Run workflow** button
+(`workflow_dispatch`) from the release branch: a manual run builds the head of the branch it is
+started from and has no input to pick another commit. To build an older commit, push an rc tag
+on it. The resulting images receive `sha-<full-commit-SHA>` image tags; an RC Git tag push also
+gives the images that RC tag. QA deploys these images and records the tested commit SHA.
 
-The workflow builds only reviewed commits: a manual run must be started from `main` or a
-`release/*` branch, and the commit it builds (or the commit an rc tag points at) must be on
-`origin/main` or an `origin/release/<name>` branch. Anything else fails before building. Each
-image gets a signed build provenance attestation, and the deploy side
+The workflow builds only reviewed commits (ECO-896): a manual run must be started from `main`
+or a `release/<name>` branch, and the commit must be on `origin/main` or an
+`origin/release/<name>` branch. Anything else fails before building. Each image gets a signed
+build provenance attestation for its commit, and the deploy side
 (`scripts/deploy/load-release-images.sh`) refuses an image without one. Release builds use no
-BuildKit cache. See the header of the workflow for the details (ECO-896).
+BuildKit cache. See the header of the workflow for the details.
+
+For an rc tag push, the workflow file that runs is the tagged commit's own, so its checks are
+defense in depth. The real control is the tag ruleset, which lets only admins push `v*` and
+`train-*` tags. It is in the repository but takes effect only once an admin applies it:
+
+1. Before relying on it for a release, run `scripts/github/apply-rulesets.sh --dry-run`
+   against GitHub, check the diff, and apply it (see [Merge queue](MERGE_QUEUE.md)).
+
+Release candidates for v4.2.0 and later must be built after ECO-896 merges; images built before
+it have no attestation (see [Release images](../deployment/RELEASE_IMAGES.md)).
+The QA and deploy hosts need `gh`, logged in, for the provenance check.
 
 [Core CI](../../.github/workflows/ci-core.yml) and
 [Release E2E](../../.github/workflows/release-e2e.yml) accept pull requests into any branch,

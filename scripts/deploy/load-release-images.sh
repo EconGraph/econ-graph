@@ -33,10 +33,14 @@
 #      crawler-worker,frontend,chart-api}:sha-<full commit>, and :<tag> on the same
 #      digest. Both must resolve to one digest on GHCR, and that digest must
 #      carry a signed build provenance attestation from release.yml run on
-#      main, a release/* branch or an rc tag
+#      main, a release/<name> branch or an rc tag, for the tag's commit
 #      (scripts/release/verify-image-provenance.sh, which needs gh logged in);
 #      an image without one, or signed by anything else, stops the script
-#      before anything is pulled, in a dry run too.
+#      before anything is pulled, in a dry run too. When the check cannot
+#      run (gh not logged in, a GitHub or registry error) the script says so
+#      and stops: re-run once that is fixed. Images built before ECO-896
+#      have no attestation, so this script refuses every v4.0/v4.1 image: load
+#      an old tag with that tag's own checkout of this script.
 #   3. Decide what to keep for each image: the image its Deployment's running
 #      pods use now (with none running, the one the manifests' name points at on
 #      the nodes). When an earlier load of the same tag is on record, its first
@@ -168,11 +172,16 @@ for name in "${RI_NAMES[@]}"; do
     echo "  ${SHA_REF[$name]}"
     echo "    = ${repo}:${TAG} = ${PIN_REF[$name]} -> ${LOCAL[$name]}"
 done
-# Signed by release.yml from a reviewed ref, or nothing is pulled.
+# Signed by release.yml from a reviewed ref, for this commit, or nothing is pulled.
 pin_refs=()
 for name in "${RI_NAMES[@]}"; do pin_refs+=("${PIN_REF[$name]}"); done
-"$PROJECT_ROOT/scripts/release/verify-image-provenance.sh" "${pin_refs[@]}" ||
-    ri_die "an image of ${TAG} has no valid release provenance; refusing"
+provenance_rc=0
+"$PROJECT_ROOT/scripts/release/verify-image-provenance.sh" --commit "$COMMIT" "${pin_refs[@]}" || provenance_rc=$?
+case "$provenance_rc" in
+    0) ;;
+    3) ri_die "the provenance check of ${TAG}'s images could not run (gh not logged in, or a GitHub or registry error; see above); fix that and re-run. Nothing about the images is known yet" ;;
+    *) ri_die "an image of ${TAG} has no valid release provenance for ${COMMIT}; refusing" ;;
+esac
 
 # 3. What to keep, and every check, before anything changes.
 FIRST_RECORD="$(ri_first_record "$TAG")"

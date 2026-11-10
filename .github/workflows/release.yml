@@ -17,11 +17,20 @@ name: Release Images
 #   main: see docs/development/RELEASE_PROCESS.md for when tags get pushed.
 #
 # Provenance (ECO-896):
-# - Only reviewed commits are built or published: the commit must be on
-#   origin/main or an origin/release/<name> branch, which rulesets keep
-#   PR-only (scripts/release/check-release-ref.sh), and a manual run must be
-#   started from main or a release branch. Both are checked before anything
-#   is built.
+# - A run builds exactly the commit it runs from (github.sha), with that
+#   commit's own copy of this file: there is no input that picks another
+#   commit, so the checks below always run from the tree they check, and the
+#   attestation's source commit is the commit that was built. To build an
+#   older commit, push an rc tag on it (tag.sh / an admin) or dispatch from a
+#   release/* branch whose head is that commit.
+# - A manual run must be started from main or a release/<name> branch, which
+#   rulesets keep PR-only, and the commit must be on origin/main or an
+#   origin/release/<name> branch (scripts/release/check-release-ref.sh). Both
+#   are checked before anything is built. For an rc tag push the real control
+#   is the tag ruleset (scripts/github/tag-ruleset.json, applied with
+#   apply-rulesets.sh): only an admin can push the tag, and the workflow file
+#   that runs is the tagged commit's own, so the in-workflow check is defense
+#   in depth there, not the guarantee.
 # - Each built image gets a Sigstore-signed SLSA build provenance attestation
 #   (actions/attest-build-provenance, keyless through the run's OIDC token)
 #   before its sha tag exists, so a sha tag always names an attested image.
@@ -46,11 +55,9 @@ name: Release Images
 # state to go on, which can't tell a successful rc build from a failed one.
 
 on:
+  # No inputs: a manual run builds the head of the branch it is started from
+  # (see "Provenance" above for why there is no `ref` input).
   workflow_dispatch:
-    inputs:
-      ref:
-        description: 'Commit or branch to build as a release candidate (defaults to the ref this is run on)'
-        required: false
   push:
     tags:
       - 'v*.*.*'
@@ -95,7 +102,8 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
-        ref: ${{ github.event.inputs.ref || github.ref }}
+        # github.sha, the commit this run's workflow file came from: the
+        # default, never another ref.
         # Every branch with full history, so check-release-ref.sh can tell
         # whether the commit is on main or a release branch.
         fetch-depth: 0
@@ -115,7 +123,7 @@ jobs:
 
     # Before anything is built. A manual run uses the workflow file of the
     # branch it is started from, so it must be started from main or a release
-    # branch; whatever ref it then builds, and the commit an rc tag points at,
+    # branch, and the commit (the same one, for a dispatch or an rc tag push)
     # must be on one of them.
     - name: Refuse a commit that is not on main or a release branch
       env:
@@ -124,23 +132,26 @@ jobs:
         set -euo pipefail
         if [ "${EVENT_NAME}" = workflow_dispatch ] &&
             ! [[ "${GITHUB_REF}" =~ ^refs/heads/(main|release/[^/]+)$ ]]; then
-          echo "release.yml: started from ${GITHUB_REF}; start release builds from main or a release/* branch (the ref input picks the commit)." >&2
+          echo "release.yml: started from ${GITHUB_REF}; start release builds from main or a release/* branch, or push an rc tag." >&2
           exit 1
         fi
-        scripts/release/check-release-ref.sh HEAD
+        head="$(git rev-parse HEAD)"
+        if [ "${head}" != "${GITHUB_SHA}" ]; then
+          echo "release.yml: checked out ${head}, not this run's commit ${GITHUB_SHA}; refusing." >&2
+          exit 1
+        fi
+        scripts/release/check-release-ref.sh "${GITHUB_SHA}"
 
     - name: Set lowercase image owner
       id: owner
       run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
-    # Resolve the sha ourselves instead of using github.sha: on a
-    # workflow_dispatch with a `ref` input, github.sha is the commit the
-    # workflow run started *from*, not the one `actions/checkout` above just
-    # checked out (which honors `ref`). This is also what the publish job
-    # resolves against.
+    # The run's own commit: what was checked out (checked above) and what the
+    # attestation records as the source. The publish job resolves against the
+    # same sha.
     - name: Resolve commit SHA
       id: sha
-      run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      run: echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
@@ -158,8 +169,10 @@ jobs:
     # already exists - the publish job treats it as "what QA tested", and the
     # whole point of retagging-not-rebuilding is to avoid that drifting. An
     # existing image is adopted only with valid provenance from this workflow
-    # (see the header); without it the run fails, and the image has to be
-    # looked at and its package version deleted by hand before a re-run.
+    # for this commit (see the header). verify-image-provenance.sh exits 1
+    # when the image has no valid provenance (look at it, delete its package
+    # version, re-run) and 3 when the check itself could not run (gh, API or
+    # registry trouble: just re-run).
     - name: Check which images already have this commit's sha tag
       id: check
       env:
@@ -173,8 +186,14 @@ jobs:
           key="$(echo "${image}" | tr '-' '_')"
           if inspect_err="$(docker buildx imagetools inspect "${ref}" 2>&1 >/dev/null)"; then
             digest="$(docker buildx imagetools inspect "${ref}" --format '{{json .Manifest}}' | jq -r '.digest')"
-            if ! scripts/release/verify-image-provenance.sh "${REGISTRY}/${owner}/${image}@${digest}"; then
-              echo "release.yml: ${ref} (${digest}) already exists but was not built by this workflow from a reviewed ref; refusing to adopt or overwrite it. Find out where it came from, delete that package version, and re-run." >&2
+            verify_rc=0
+            scripts/release/verify-image-provenance.sh --commit "${{ steps.sha.outputs.sha }}" \
+              "${REGISTRY}/${owner}/${image}@${digest}" || verify_rc=$?
+            if [ "${verify_rc}" -eq 3 ]; then
+              echo "release.yml: the provenance check of ${ref} (${digest}) could not run (see above); re-run this workflow first. Nothing was adopted or overwritten." >&2
+              exit 1
+            elif [ "${verify_rc}" -ne 0 ]; then
+              echo "release.yml: ${ref} (${digest}) already exists but has no valid provenance from this workflow for this commit; refusing to adopt or overwrite it. Find out where it came from, delete that package version, and re-run." >&2
               exit 1
             fi
             echo "${ref} already exists with release provenance; will not rebuild it."
@@ -347,7 +366,7 @@ jobs:
           # Empty: the image already existed and was adopted above.
           [ -n "${digest}" ] || continue
           src="${REGISTRY}/${owner}/${image}@${digest}"
-          scripts/release/verify-image-provenance.sh "${src}"
+          scripts/release/verify-image-provenance.sh --commit "${{ steps.sha.outputs.sha }}" "${src}"
           echo "Tagging ${src} as ${sha_tag}"
           docker buildx imagetools create -t "${REGISTRY}/${owner}/${image}:${sha_tag}" "${src}"
         done
@@ -471,7 +490,7 @@ jobs:
           fi
           # Never promote an image this workflow did not build from a
           # reviewed ref (see the header).
-          scripts/release/verify-image-provenance.sh "${REGISTRY}/${owner}/${image}@${digest}"
+          scripts/release/verify-image-provenance.sh --commit "${GITHUB_SHA}" "${REGISTRY}/${owner}/${image}@${digest}"
           key="$(echo "${image}" | tr '-' '_')"
           echo "${key}=${digest}" >> "$GITHUB_OUTPUT"
         done

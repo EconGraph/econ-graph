@@ -10,10 +10,13 @@
 #     refs/heads/release/*: main's live `non_fast_forward` and `pull_request`
 #     rules and `bypass_actors`, plus the same rules without the
 #     `Lint workflows` check and without the merge queue (GitHub refuses a
-#     merge queue on a ruleset whose branch pattern has a wildcard);
+#     merge queue on a ruleset whose branch pattern has a wildcard), and a
+#     `creation` rule: only the bypass actors can create a release/* branch,
+#     since release.yml and verify-image-provenance.sh trust every one
+#     (ECO-896);
 #   - create, or update, the tag ruleset in tag-ruleset.json (`release tags
-#     by admins only`): only the bypass actors (organization and repository
-#     admins) may create, move or delete v* and train-* tags, so release.yml
+#     by admins only`), with main's live `bypass_actors` added to the file's:
+#     only they may create, move or delete v* and train-* tags, so release.yml
 #     only ever sees release tags an admin pushed (ECO-896).
 #
 # Usage: scripts/github/apply-rulesets.sh [--dry-run] [--yes]
@@ -215,11 +218,13 @@ fi
 # No merge queue on the release ruleset: GitHub rejects (HTTP 422) a merge
 # queue on a ruleset whose branch name pattern has a wildcard, and
 # refs/heads/release/* has one. Release branches stay protected (PR, checks,
-# no force push, no deletion) and merge without a queue.
+# no force push, no deletion) and merge without a queue. `creation` restricts
+# who can cut one to the bypass actors.
 jq --arg skip "$RELEASE_SKIPPED_CHECK" '
   map(select(.type != "merge_queue"))
   | (.[] | select(.type == "required_status_checks") | .parameters.required_status_checks) |=
-    map(select(.context != $skip))' "$RULES_FILE" >"$work/release-new-rules.json"
+    map(select(.context != $skip))
+  | . + [{type: "creation"}]' "$RULES_FILE" >"$work/release-new-rules.json"
 
 jq "$JQ_LIB"' writable | .rules |= merge_rules($new[0])' \
     --slurpfile new "$RULES_FILE" "$work/main-live.json" >"$work/main-desired.json"
@@ -240,17 +245,19 @@ jq -n "$JQ_LIB"'
     --slurpfile new "$work/release-new-rules.json" >"$work/release-desired.json"
 
 # The tag ruleset: tag-ruleset.json as it is when none exists; otherwise the
-# live one with the file's enforcement, its refs and bypass actors added, and
-# its rules merged in.
+# live one with the file's enforcement, its refs added, and its rules merged
+# in. Either way main's live bypass actors are added to the file's, so the
+# actor ids are ones GitHub already accepted.
 jq -n "$JQ_LIB"'
   $file[0] as $f
   | ($live[0] | if . == null then $f | writable else writable end)
   | .enforcement = $f.enforcement
   | .conditions.ref_name.include |= ((. // []) as $i | $i + [$f.conditions.ref_name.include[] | select(. as $r | $i | index($r) | not)])
   | .conditions.ref_name.exclude |= (. // [])
-  | .bypass_actors |= union_actors($f.bypass_actors)
+  | .bypass_actors |= union_actors($f.bypass_actors + $main[0].bypass_actors)
   | .rules |= merge_rules($f.rules)' \
-    --slurpfile file "$TAG_FILE" --slurpfile live "$work/tag-live.json" >"$work/tag-desired.json"
+    --slurpfile file "$TAG_FILE" --slurpfile live "$work/tag-live.json" \
+    --slurpfile main "$work/main-live.json" >"$work/tag-desired.json"
 
 # --- Diff --------------------------------------------------------------------
 

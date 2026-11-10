@@ -127,6 +127,27 @@ class ReleaseArtifactsTest(unittest.TestCase):
                 if 'imagetools create' in step.get('run', '') or step.get('uses', '').startswith(
                         ('docker/build-push-action@', 'actions/attest-build-provenance@')):
                     self.assertGreater(i, guard, step['name'])
+        # ECO-896 review: the build must be the run's own commit. A `ref` input (or a
+        # checkout of any other ref) would run the guard from the tree it checks and
+        # attest main's sha for another commit's image.
+        text = (ROOT / '.github/workflows/release.yml').read_text()
+        triggers = self.workflow.get('on', self.workflow.get(True))
+        self.assertFalse((triggers['workflow_dispatch'] or {}).get('inputs'), 'workflow_dispatch has inputs')
+        self.assertNotRegex(text, r'(github\.event\.)?inputs\.')
+        for job_name, job in jobs.items():
+            checkout, = [step for step in job['steps'] if step.get('uses', '').startswith('actions/checkout@')]
+            self.assertNotIn('ref', checkout['with'], job_name)
+        guard, = [s for s in jobs['build']['steps']
+                  if s.get('name') == 'Refuse a commit that is not on main or a release branch']
+        self.assertIn('"${head}" != "${GITHUB_SHA}"', guard['run'])
+        self.assertIn('check-release-ref.sh "${GITHUB_SHA}"', guard['run'])
+        sha, = [s for s in jobs['build']['steps'] if s.get('id') == 'sha']
+        self.assertEqual(sha['run'], 'echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"')
+        # Every provenance check pins the commit (gh attestation verify --source-digest).
+        calls = re.findall(r'^\s+scripts/release/verify-image-provenance\.sh\b.*$', text, re.M)
+        self.assertEqual(len(calls), 3)
+        for call in calls:
+            self.assertIn('--commit', call, call)
         check, = [s for s in self.steps if s.get('id') == 'check']
         self.assertIn('scripts/release/verify-image-provenance.sh', check['run'])
         digests, = [s for s in self.steps if s.get('id') == 'digests']

@@ -54,7 +54,7 @@ Then, in order, stopping at the first failure:
 | Step | Runs | See |
 | --- | --- | --- |
 | backup | `backup-postgres-now.sh --context kind-NAME`: the nightly backup Job, now | [PostgreSQL backups](POSTGRES_BACKUP_RESTORE.md) |
-| load | `load-release-images.sh --tag TAG --cluster NAME` | [Release images](RELEASE_IMAGES.md) |
+| load | `load-release-images.sh --tag TAG --cluster NAME` (needs `gh` logged in for the provenance check, ECO-896) | [Release images](RELEASE_IMAGES.md) |
 | keycloak | `backup-keycloak-db.sh --context kind-NAME`: a verified dump of Keycloak's database | the script's header |
 | precheck | `precheck-db-migration.sh --stop-crawler` | the script's header |
 | deploy | `deploy.sh`, with `PUBLIC_HOST` from the deploy config | [k8s/README.md](../../k8s/README.md) |

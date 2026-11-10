@@ -9,12 +9,11 @@
     }
   },
   "bypass_actors": [
-    { "actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always" },
-    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
+    { "actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always" }
   ],
   "rules": [
     { "type": "creation" },
-    { "type": "update", "parameters": { "update_allows_fetch_and_merge": false } },
+    { "type": "update" },
     { "type": "deletion" },
     { "type": "non_fast_forward" }
   ]
