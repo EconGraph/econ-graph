@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Delete and recreate the kind cluster `econ-graph` from
-# terraform/k8s/kind-config.yaml (ports 80/443/3000/8080, and the worker that
+# terraform/k8s/kind-config.yaml (ports 80/443 on 127.0.0.1, and the worker that
 # bind-mounts the host Postgres subvolumes), on the rootful Docker daemon
 # (scripts/deploy/lib/kind-env.sh; override with ECONGRAPH_DOCKER_HOST), then
 # install the gateway.
@@ -296,8 +296,7 @@ install_gateway
 check_restart_on_boot
 
 log "Kind cluster recreated"
-echo "  Frontend: http://localhost:3000   Backend: http://localhost:8080"
-echo "  HTTP: http://localhost:80          HTTPS: https://localhost:443"
+echo "  Gateway, on this host only (127.0.0.1): http://localhost   https://localhost"
 # The new cluster has a new kube-system UID, so an earlier production marker no
 # longer counts (scripts/deploy/lib/cluster-role.sh), and the restore only
 # brings the tunnel token back into a marked cluster.
