@@ -39,11 +39,11 @@ The Cursor slash commands are optional helpers defined in this repository:
 - [`/pr-ready`](../.cursor/commands/pr-ready.md) pushes the current branch and ensures an open PR; it does not curate the description.
 - [`/pr-checks`](../.cursor/commands/pr-checks.md) watches checks, and [`/ci-latest`](../.cursor/commands/ci-latest.md) lists recent runs.
 
-Apply the standards above when supplying helper arguments or reviewing generated text. Outside Cursor, use available noninteractive Git and GitHub tools. For example, with an authorized push and the GitHub CLI available, use `gh pr create --title 'doc: clarify developer standards' --body-file /tmp/pr-body.md`, `gh pr checks --watch`, and `gh run list --branch BRANCH`. If a needed tool or permission is unavailable, use another authorized interface or report the specific blocker.
+Apply the standards above when supplying helper arguments or reviewing generated text. Outside Cursor, use available noninteractive Git and GitHub tools. For example, with the GitHub CLI available and a push to your own branch, use `gh pr create --title 'doc: clarify developer standards' --body-file /tmp/pr-body.md`, `gh pr checks --watch`, and `gh run list --branch BRANCH`. If a needed tool or permission is unavailable, report the specific blocker. Don't work around it with a tool or permission Joe hasn't given you (see [AGENTS.md](../AGENTS.md)).
 
-Implementation work is complete only after a PR exists, CI is green for its latest commit, and all CodeRabbit and other automated review findings have been addressed. Fix findings you agree with; for disagreements, post the technical reasoning and resolve the thread when appropriate. Mark the PR ready when it is ready for review. Do not declare completion while checks or automated reviews remain pending, and do not merge without authorization.
+Implementation work is complete only after a PR exists, CI is green for its latest commit, and all CodeRabbit and other automated review findings have been addressed. Fix findings you agree with; for disagreements, post the technical reasoning and resolve the thread when appropriate. Mark the PR ready when it is ready for review. Do not declare completion while checks or automated reviews remain pending, and do not merge without Joe telling you to in the session (see [AGENTS.md](../AGENTS.md)).
 
-Version numbers move forward. Follow [Semantic Versioning](https://semver.org/) and the existing release series: the [backend workspace](../backend/Cargo.toml) declares version `4.0.0`. Change versions or tags only as part of the authorized [release process](../docs/development/RELEASE_PROCESS.md).
+Version numbers move forward. Follow [Semantic Versioning](https://semver.org/) and the existing release series: the [backend workspace](../backend/Cargo.toml) declares version `4.0.0`. Change versions only as part of the [release process](../docs/development/RELEASE_PROCESS.md). Tags need Joe (see [AGENTS.md](../AGENTS.md)).
 
 ## Features, tests, and database isolation
 
@@ -101,7 +101,7 @@ When the maintainer questions an approach, explain the reasoning and consult the
 3. Reproduce the failure locally where feasible. If the full scenario is hard to reason about, create a smaller reproduction or disposable proof of concept to test a specific assumption. Predict what evidence would confirm or reject the hypothesis.
 4. Make a focused change supported by that evidence. One hypothesis can require several files; avoid unrelated changes that obscure which behavior mattered.
 5. Rerun the original failing scenario and affected tests. A small reproduction supports diagnosis but does not establish that the original scenario now works. Check related callers when shared functionality changes.
-6. Push within the authorized workflow and confirm CI on the latest PR commit. Address automated findings and repeat the affected verification after changes. Report what passed and any specific limits; do not infer success from a plausible patch or partial results.
+6. Push to your PR branch and confirm CI on the latest PR commit. Address automated findings and repeat the affected verification after changes. Report what passed and any specific limits; do not infer success from a plausible patch or partial results.
 
 If local reproduction is infeasible, identify the missing prerequisite and use authorized CI or another suitable disposable environment to run the failing scenario. Keep the verification gap explicit until that run completes. Persist while experiments produce new evidence. If investigation stops producing evidence, summarize what is known, failed hypotheses, and the specific information needed before asking for help.
 
