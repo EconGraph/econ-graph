@@ -238,12 +238,19 @@ class ProbeTests(unittest.TestCase):
                 return b'{"errors": [{"message": "no"}]}'
 
         original = gates.urllib.request.urlopen
-        gates.urllib.request.urlopen = lambda *a, **k: Response()
         try:
-            record = gates.request_once('https://x.invalid/graphql', '{}', 1, None, True)
+            for body in (b'{"errors": [{"message": "no"}]}', b'[]', b'not json', b'{}'):
+                Response.read = lambda self, body=body: body
+                gates.urllib.request.urlopen = lambda *a, **k: Response()
+                self.assertFalse(gates.request_once('https://x.invalid/graphql', '{}', 1, None, True)['success'], body)
+
+            def truncated(self):  # the connection closed before Content-Length bytes arrived
+                raise gates.http.client.IncompleteRead(b'{"da', 20)
+            Response.read = truncated
+            gates.urllib.request.urlopen = lambda *a, **k: Response()
+            self.assertFalse(gates.request_once('https://x.invalid/graphql', '{}', 1, None, True)['success'])
         finally:
             gates.urllib.request.urlopen = original
-        self.assertFalse(record['success'])
 
     def test_rejects_non_http_url(self):
         args = SimpleNamespace(url='file:///etc/passwd', json_body=None)

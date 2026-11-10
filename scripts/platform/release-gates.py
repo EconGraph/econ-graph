@@ -14,6 +14,7 @@ Each check prints a JSON report, writes it to --report when given, and exits 1 o
 """
 import argparse
 import datetime as dt
+import http.client
 import importlib.util
 import json
 import os
@@ -240,12 +241,13 @@ def request_once(url, body, timeout, context, graphql):
             record['status'] = response.status
             success = 200 <= response.status < 300
             if success and graphql:
-                errors = json.loads(payload).get('errors')
-                if errors:
+                answer = json.loads(payload)
+                if not isinstance(answer, dict) or answer.get('errors') or 'data' not in answer:
                     success, record['error'] = False, 'GraphQL errors in response'
     except urllib.error.HTTPError as error:
         record['status'], success, record['error'] = error.code, False, f'HTTP {error.code}'
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, http.client.HTTPException) as error:
+        # Connection failures, timeouts, TLS errors, truncated or non-JSON bodies all count as failed requests.
         success, record['error'] = False, type(error).__name__
     record['completed_at'] = dt.datetime.now(dt.timezone.utc).isoformat()
     record['success'] = success
