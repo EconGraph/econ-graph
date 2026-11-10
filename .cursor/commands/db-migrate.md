@@ -11,7 +11,7 @@ Apply pending migrations for one explicitly selected plane from `backend/`.
 /db-migrate data database_url=MIGRATION_DATABASE_URL
 ```
 
-Ask Joe before you migrate a live database: any database in a live cluster. It needs his say-so. A live cluster is any cluster you did not create yourself for this task; `kind-econ-graph` is production. See [AGENTS.md](../../AGENTS.md).
+Ask Joe before you migrate a live database: any database you did not create for this task. On a live database this is an operator step: propose the exact commands, and Joe or an operator runs them with the operator scripts. See [AGENTS.md](../../AGENTS.md).
 
 Ask for the plane if it is missing. Use existing connection configuration; never request, inspect, or display credential values. The override example names an environment variable already configured by the operator, not a literal URL.
 

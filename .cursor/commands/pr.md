@@ -48,7 +48,7 @@ Follow [AGENTS.md](../../AGENTS.md) and the [repository conventions](https://lin
 - Validate the change with appropriate checks. Add or update unit, integration, or end-to-end tests when behavior changes; documentation changes need relevant documentation checks. Do not bypass pre-commit.
 - Update documentation and workflows when the behavior they describe changes.
 - Mark finished work ready for review; CodeRabbit skips drafts. On an update that omits `draft`, preserve its state and use an explicit readiness operation when appropriate.
-- Watch CI and address automated review comments before considering the PR complete. [Docs Checks](../../.github/workflows/docs-checks.yml) runs on every PR. [Core CI](../../.github/workflows/ci-core.yml) skips a PR only when every changed path matches its exclusions; Markdown under `.cursor/` still triggers Core CI. Get two independent reviews; reviewers work from the code, not your summary. Merge only when Joe has approved the PR on GitHub and has told you to merge it in this session; see [AGENTS.md](../../AGENTS.md).
+- Watch CI and address automated review comments before considering the PR complete. [Docs Checks](../../.github/workflows/docs-checks.yml) runs on every PR. [Core CI](../../.github/workflows/ci-core.yml) skips a PR only when every changed path matches its exclusions; Markdown under `.cursor/` still triggers Core CI. Get two independent reviews; reviewers work from the code, not your summary. Merge only when Joe tells you to in this session, or leave the merge to Joe; see [AGENTS.md](../../AGENTS.md).
 
 ## Helper commands
 

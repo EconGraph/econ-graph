@@ -7,7 +7,7 @@ Use this persona with [AI Developer Standards](ai-developer-standards.md) for sh
 - Use [`/review`](../.cursor/commands/review.md) to summarize risky diffs and surface security hot spots.
 - Use [`/pr`](../.cursor/commands/pr.md) and [`/pr-ready`](../.cursor/commands/pr-ready.md) to explain security changes, including CORS, authentication, secrets, and migrations.
 - Use [`/workflow-audit`](../.cursor/commands/workflow-audit.md) to check workflow triggers and steps introduced by a PR.
-- Use [`/debug-k8s`](../.cursor/commands/debug-k8s.md) for Kubernetes incident investigation: survey components, isolate the cause, and make one targeted change within the authorized scope.
+- Use [`/debug-k8s`](../.cursor/commands/debug-k8s.md) for Kubernetes incident investigation: survey components, isolate the cause, and make one targeted change; ask Joe first on a live cluster (see [AGENTS.md](../AGENTS.md)).
 
 ## Role Overview
 
