@@ -87,3 +87,137 @@ tests:
   - eval_time: 95m
     alertname: SecCompanyfactsLoadFailed
     exp_alerts: []
+# crawler_companyfacts_* gauges carry the PodMonitor econgraph-crawler target labels.
+- name: A failed load in company_fact_load_runs alerts while the CronJob is enabled
+  interval: 1m
+  input_series:
+  - series: crawler_companyfacts_last_run_failed{namespace="econ-graph",pod="crawler-worker-7d9f",container="crawler-worker",endpoint="metrics",instance="10.42.0.17:9102",job="monitoring/econgraph-crawler"}
+    values: '1+0x30'
+  - series: kube_cronjob_spec_suspend{namespace="econ-graph",cronjob="sec-companyfacts-ingest"}
+    values: '0+0x30'
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: SecCompanyfactsLoadRunFailed
+    exp_alerts: []
+  - eval_time: 15m
+    alertname: SecCompanyfactsLoadRunFailed
+    exp_alerts:
+    - exp_labels:
+        namespace: econ-graph
+        severity: warning
+      exp_annotations:
+        summary: The newest SEC companyfacts load failed or did not finish
+        description: The newest row in company_fact_load_runs is failed, or still running after the 8-hour Job deadline (the process was killed). Its error column says why. Conflicting source values do not fail a load; rerunning is safe because unchanged rows are not written.
+- name: A suspended ingest CronJob does not alert on old load runs
+  interval: 1m
+  input_series:
+  - series: crawler_companyfacts_last_run_failed{namespace="econ-graph",pod="crawler-worker-7d9f",container="crawler-worker",endpoint="metrics",instance="10.42.0.17:9102",job="monitoring/econgraph-crawler"}
+    values: '1+0x100'
+  - series: crawler_companyfacts_last_run_conflicts{namespace="econ-graph",pod="crawler-worker-7d9f",container="crawler-worker",endpoint="metrics",instance="10.42.0.17:9102",job="monitoring/econgraph-crawler"}
+    values: '500+0x100'
+  - series: kube_cronjob_spec_suspend{namespace="econ-graph",cronjob="sec-companyfacts-ingest"}
+    values: '1+0x100'
+  alert_rule_test:
+  - eval_time: 90m
+    alertname: SecCompanyfactsLoadRunFailed
+    exp_alerts: []
+  - eval_time: 90m
+    alertname: SecCompanyfactsConflicts
+    exp_alerts: []
+  - eval_time: 90m
+    alertname: SecCompanyfactsNoRecentSuccess
+    exp_alerts: []
+- name: Conflicts above the threshold alert once, across a worker pod restart
+  interval: 1m
+  input_series:
+  - series: crawler_companyfacts_last_run_conflicts{namespace="econ-graph",pod="crawler-worker-7d9f",container="crawler-worker",endpoint="metrics",instance="10.42.0.17:9102",job="monitoring/econgraph-crawler"}
+    values: '30+0x10 _x20'
+  - series: crawler_companyfacts_last_run_conflicts{namespace="econ-graph",pod="crawler-worker-5c2a",container="crawler-worker",endpoint="metrics",instance="10.42.0.23:9102",job="monitoring/econgraph-crawler"}
+    values: '_x8 30+0x22'
+  - series: kube_cronjob_spec_suspend{namespace="econ-graph",cronjob="sec-companyfacts-ingest"}
+    values: '0+0x30'
+  alert_rule_test:
+  - eval_time: 9m
+    alertname: SecCompanyfactsConflicts
+    exp_alerts:
+    - exp_labels:
+        namespace: econ-graph
+        severity: warning
+      exp_annotations:
+        summary: SEC companyfacts load quarantined 30 conflicting source values
+        description: More than 25 source facts or filings differed from the stored evidence in the newest load. Stored rows were left unchanged. This many usually means a systematic change (SEC reprocessing, or a loader identity change), not individual corrections. List them with sec-companyfacts-ingest --list-conflicts open, then --accept-conflict or --reject-conflict each with --operator.
+- name: A few conflicts stay below the threshold but are reported after a day
+  interval: 1m
+  input_series:
+  - series: crawler_companyfacts_last_run_conflicts{namespace="econ-graph",pod="crawler-worker-7d9f",container="crawler-worker",endpoint="metrics",instance="10.42.0.17:9102",job="monitoring/econgraph-crawler"}
+    values: '3+0x1600'
+  - series: crawler_companyfacts_open_conflicts{namespace="econ-graph",pod="crawler-worker-7d9f",container="crawler-worker",endpoint="metrics",instance="10.42.0.17:9102",job="monitoring/econgraph-crawler"}
+    values: '3+0x1600'
+  - series: kube_cronjob_spec_suspend{namespace="econ-graph",cronjob="sec-companyfacts-ingest"}
+    values: '0+0x1600'
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: SecCompanyfactsConflicts
+    exp_alerts: []
+  - eval_time: 23h
+    alertname: SecCompanyfactsConflictsOpen
+    exp_alerts: []
+  - eval_time: 25h
+    alertname: SecCompanyfactsConflictsOpen
+    exp_alerts:
+    - exp_labels:
+        namespace: econ-graph
+        severity: info
+      exp_annotations:
+        summary: 3 SEC companyfacts conflicts await an operator decision
+        description: Source corrections stay quarantined, and the stored values stay as they are, until an operator accepts each as a new revision or rejects it. sec-companyfacts-ingest --list-conflicts open lists them.
+- name: The last successful load older than 36 hours alerts
+  interval: 1m
+  input_series:
+  # Success completed at t=0 (Unix 0 in promtool time).
+  - series: crawler_companyfacts_last_success_timestamp_seconds{namespace="econ-graph",pod="crawler-worker-7d9f",container="crawler-worker",endpoint="metrics",instance="10.42.0.17:9102",job="monitoring/econgraph-crawler"}
+    values: '0+0x2300'
+  - series: kube_cronjob_spec_suspend{namespace="econ-graph",cronjob="sec-companyfacts-ingest"}
+    values: '0+0x2300'
+  alert_rule_test:
+  - eval_time: 35h
+    alertname: SecCompanyfactsNoRecentSuccess
+    exp_alerts: []
+  - eval_time: 37h
+    alertname: SecCompanyfactsNoRecentSuccess
+    exp_alerts:
+    - exp_labels:
+        namespace: econ-graph
+        cronjob: sec-companyfacts-ingest
+        severity: warning
+      exp_annotations:
+        summary: No successful SEC companyfacts load in 36 hours
+        description: The ingest CronJob is enabled but company_fact_load_runs has no successful downloaded load completed in the last 36 hours (or crawler-worker is not reporting crawler_companyfacts_* gauges). Check SecCompanyfactsLoadRunFailed, the Job logs and company_fact_load_runs.
+- name: A success within 36 hours does not alert
+  interval: 1m
+  input_series:
+  # Each nightly success moves the timestamp forward; here it tracks the clock 20h behind.
+  - series: crawler_companyfacts_last_success_timestamp_seconds{namespace="econ-graph",pod="crawler-worker-7d9f",container="crawler-worker",endpoint="metrics",instance="10.42.0.17:9102",job="monitoring/econgraph-crawler"}
+    values: '-72000+60x2300'
+  - series: kube_cronjob_spec_suspend{namespace="econ-graph",cronjob="sec-companyfacts-ingest"}
+    values: '0+0x2300'
+  alert_rule_test:
+  - eval_time: 37h
+    alertname: SecCompanyfactsNoRecentSuccess
+    exp_alerts: []
+- name: An enabled CronJob without the worker's gauges alerts
+  interval: 1m
+  input_series:
+  - series: kube_cronjob_spec_suspend{namespace="econ-graph",cronjob="sec-companyfacts-ingest"}
+    values: '0+0x30'
+  alert_rule_test:
+  - eval_time: 16m
+    alertname: SecCompanyfactsNoRecentSuccess
+    exp_alerts:
+    - exp_labels:
+        namespace: econ-graph
+        cronjob: sec-companyfacts-ingest
+        severity: warning
+      exp_annotations:
+        summary: No successful SEC companyfacts load in 36 hours
+        description: The ingest CronJob is enabled but company_fact_load_runs has no successful downloaded load completed in the last 36 hours (or crawler-worker is not reporting crawler_companyfacts_* gauges). Check SecCompanyfactsLoadRunFailed, the Job logs and company_fact_load_runs.

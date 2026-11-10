@@ -17,7 +17,8 @@
 //! (`crawler_discovery_run_*`, `crawler_discovery_last_complete_run_timestamp_seconds`) of the
 //! enabled sources whose adapter discovers in chunks every interval, and [`coverage_gauge_loop`] the
 //! coverage gauges from [`econ_graph_crawler::coverage::crawl_coverage`] (a heavier query, so on a
-//! longer interval).
+//! longer interval) and the SEC companyfacts load gauges (`crawler_companyfacts_*`) from
+//! [`econ_graph_sec_crawler::companyfacts::store::gauge_snapshot`].
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -32,6 +33,7 @@ use econ_graph_crawler::coverage::{crawl_coverage, SourceCoverage};
 use econ_graph_crawler::discovery_run::{alerting_run_progress, DiscoveryRunProgress};
 use econ_graph_crawler::status::{crawler_status, CrawlerStatusSnapshot};
 use econ_graph_crawler::SourceId;
+use econ_graph_metrics::crawler::companyfacts::{CompanyfactsMetrics, COMPANYFACTS_METRICS};
 use econ_graph_metrics::crawler::discovery_runs::{
     CrawlerDiscoveryRunMetrics, CRAWLER_DISCOVERY_RUN_METRICS,
 };
@@ -66,6 +68,7 @@ pub fn init_metrics() {
     let _ = &*CRAWLER_COVERAGE_METRICS;
     let _ = &*CRAWLER_SCHEDULER_METRICS;
     let _ = &*CRAWLER_DISCOVERY_RUN_METRICS;
+    let _ = &*COMPANYFACTS_METRICS;
     econ_graph_crawler::units::init_metrics();
 }
 
@@ -248,6 +251,41 @@ pub fn apply_coverage(
     *known = current;
 }
 
+/// Sets the companyfacts gauges in `m` from `s`. Timestamps are 0 when there is no such run.
+pub fn apply_companyfacts(
+    m: &CompanyfactsMetrics,
+    s: &econ_graph_sec_crawler::companyfacts::store::GaugeSnapshot,
+) {
+    m.last_run_timestamp_seconds
+        .set(s.last_run_at.map_or(0.0, unix_secs));
+    m.last_run_failed.set(i64::from(s.last_run_failed));
+    m.last_run_conflicts.set(s.last_run_conflicts);
+    m.last_run_rows_written
+        .with_label_values(&["company_facts"])
+        .set(s.last_run_fact_rows_written);
+    m.last_run_rows_written
+        .with_label_values(&["company_fact_filings"])
+        .set(s.last_run_filing_rows_written);
+    m.last_run_archive_stale
+        .set(i64::from(s.last_run_archive_stale));
+    m.last_success_timestamp_seconds
+        .set(s.last_success_at.map_or(0.0, unix_secs));
+    m.open_conflicts.set(s.open_conflicts);
+}
+
+/// Reads the companyfacts load runs and updates the gauges in `m`, then records the refresh
+/// time. On error the gauges keep their previous values.
+pub async fn update_companyfacts_gauges(
+    pool: &DatabasePool,
+    m: &CompanyfactsMetrics,
+) -> econ_graph_sec_crawler::Result<()> {
+    let snapshot = econ_graph_sec_crawler::companyfacts::store::gauge_snapshot(pool).await?;
+    apply_companyfacts(m, &snapshot);
+    m.last_refresh_timestamp_seconds
+        .set(unix_secs(chrono::Utc::now()));
+    Ok(())
+}
+
 /// Reads coverage for `sources` and updates the gauges in `m`, then records the refresh time.
 /// On error the gauges keep their previous values; the unchanged refresh time shows they're
 /// stale.
@@ -362,6 +400,9 @@ pub async fn coverage_gauge_loop(
         }
         if let Err(e) = econ_graph_crawler::lifecycle::refresh_metrics(&pool, &sources).await {
             tracing::warn!(error = %e, "updating catalog lifecycle gauges failed");
+        }
+        if let Err(e) = update_companyfacts_gauges(&pool, &COMPANYFACTS_METRICS).await {
+            tracing::warn!(error = %e, "updating companyfacts gauges failed");
         }
         tokio::select! {
             _ = tokio::time::sleep(interval) => {}
@@ -680,6 +721,46 @@ mod tests {
 
     /// The newest run's chunk counts and activity, and the last complete run (else the oldest
     /// run's start), per source; a source with no runs left drops out.
+    #[test]
+    fn companyfacts_gauges_follow_the_snapshot() {
+        use econ_graph_sec_crawler::companyfacts::store::GaugeSnapshot;
+        let m = CompanyfactsMetrics::new(&Registry::new()).unwrap();
+        let at = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        apply_companyfacts(
+            &m,
+            &GaugeSnapshot {
+                last_run_at: Some(at),
+                last_run_failed: false,
+                last_run_conflicts: 2,
+                last_run_fact_rows_written: 40,
+                last_run_filing_rows_written: 3,
+                last_run_archive_stale: true,
+                last_success_at: Some(at),
+                open_conflicts: 5,
+            },
+        );
+        assert_eq!(m.last_run_conflicts.get(), 2);
+        assert_eq!(
+            m.last_run_rows_written
+                .with_label_values(&["company_facts"])
+                .get(),
+            40
+        );
+        assert_eq!(
+            m.last_run_rows_written
+                .with_label_values(&["company_fact_filings"])
+                .get(),
+            3
+        );
+        assert_eq!(m.last_run_archive_stale.get(), 1);
+        assert_eq!(m.open_conflicts.get(), 5);
+        assert!((m.last_success_timestamp_seconds.get() - 1_700_000_000.0).abs() < 1e-3);
+        // No run yet: timestamps fall to 0 so "last success older than 36h" still fires.
+        apply_companyfacts(&m, &GaugeSnapshot::default());
+        assert_eq!(m.last_success_timestamp_seconds.get(), 0.0);
+        assert_eq!(m.last_run_failed.get(), 0);
+    }
+
     #[test]
     fn discovery_run_gauges_set_and_removed() {
         let registry = Registry::new();

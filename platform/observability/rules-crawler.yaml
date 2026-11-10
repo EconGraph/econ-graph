@@ -425,3 +425,39 @@ spec:
       annotations:
         summary: SEC companyfacts freshness checks are failing or missing
         description: The enabled freshness check has not passed within 30 minutes. It requires a verified downloaded success within 24 hours and rejects running loads older than eight hours. Staged imports do not establish freshness. Inspect its Job logs and company_fact_load_runs.
+    # The gauges below are crawler-worker's crawler_companyfacts_* (econ-graph-metrics
+    # src/crawler/companyfacts.rs), read back from company_fact_load_runs and
+    # company_fact_conflicts. Every rule is gated on the ingest CronJob being enabled, so the
+    # suspended job and staged test loads do not alert. max by (namespace) keeps the alert's
+    # labels stable across worker pod restarts.
+    - alert: SecCompanyfactsLoadRunFailed
+      expr: (max by (namespace) (crawler_companyfacts_last_run_failed{namespace="econ-graph"}) == 1) and on(namespace) (kube_cronjob_spec_suspend{namespace="econ-graph", cronjob="sec-companyfacts-ingest"} == 0)
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: The newest SEC companyfacts load failed or did not finish
+        description: The newest row in company_fact_load_runs is failed, or still running after the 8-hour Job deadline (the process was killed). Its error column says why. Conflicting source values do not fail a load; rerunning is safe because unchanged rows are not written.
+    - alert: SecCompanyfactsConflicts
+      expr: (max by (namespace) (crawler_companyfacts_last_run_conflicts{namespace="econ-graph"}) > 25) and on(namespace) (kube_cronjob_spec_suspend{namespace="econ-graph", cronjob="sec-companyfacts-ingest"} == 0)
+      labels:
+        severity: warning
+      annotations:
+        summary: SEC companyfacts load quarantined {{ $value }} conflicting source values
+        description: More than 25 source facts or filings differed from the stored evidence in the newest load. Stored rows were left unchanged. This many usually means a systematic change (SEC reprocessing, or a loader identity change), not individual corrections. List them with sec-companyfacts-ingest --list-conflicts open, then --accept-conflict or --reject-conflict each with --operator.
+    - alert: SecCompanyfactsConflictsOpen
+      expr: (max by (namespace) (crawler_companyfacts_open_conflicts{namespace="econ-graph"}) > 0) and on(namespace) (kube_cronjob_spec_suspend{namespace="econ-graph", cronjob="sec-companyfacts-ingest"} == 0)
+      for: 24h
+      labels:
+        severity: info
+      annotations:
+        summary: '{{ $value }} SEC companyfacts conflicts await an operator decision'
+        description: Source corrections stay quarantined, and the stored values stay as they are, until an operator accepts each as a new revision or rejects it. sec-companyfacts-ingest --list-conflicts open lists them.
+    - alert: SecCompanyfactsNoRecentSuccess
+      expr: (kube_cronjob_spec_suspend{namespace="econ-graph", cronjob="sec-companyfacts-ingest"} == 0) unless on(namespace) (max by (namespace) (crawler_companyfacts_last_success_timestamp_seconds{namespace="econ-graph"}) > time() - 36 * 3600)
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: No successful SEC companyfacts load in 36 hours
+        description: The ingest CronJob is enabled but company_fact_load_runs has no successful downloaded load completed in the last 36 hours (or crawler-worker is not reporting crawler_companyfacts_* gauges). Check SecCompanyfactsLoadRunFailed, the Job logs and company_fact_load_runs.
