@@ -510,13 +510,64 @@ async fn without_a_key_the_worker_skips_massive_once_and_enqueues_nothing() {
         "{text}"
     );
 
-    // The scheduler (DB-backed; skipped without DATABASE_URL) is built from that registry.
-    let Some((url, _guard)) = crate::testkit::lock_test_db("massive-no-key").await else {
-        return;
-    };
+    // The worker's registry also passes the licence gate; the scheduler is built from it.
+    let registry = crate::licence::ungated_registry(registry);
+    assert_eq!(
+        massive_jobs_after_a_tick(registry.ids()).await,
+        db_set().then_some(0)
+    );
+}
+
+/// With `MASSIVE_API_KEY` set but the `crawl_massive` licence flag off (as in every profile),
+/// the worker's registry leaves Massive out, and even a scheduler handed Massive enqueues
+/// nothing for it: a key alone never starts crawling.
+#[tokio::test]
+async fn with_a_key_but_the_licence_flag_off_massive_is_not_crawled() {
+    assert!(
+        !cfg!(flag_crawl_massive),
+        "crawl_massive is off in every profile"
+    );
+    let keys = crate::testkit::test_keys();
+    assert!(keys.massive.is_some());
+    let keyed = crate::sources::registry_for_keys(&keys);
+    assert!(keyed.get(SourceId::Massive).is_some());
+    let worker = crate::licence::ungated_registry(keyed.clone());
+    assert!(worker.get(SourceId::Massive).is_none());
+    assert!(worker.get(SourceId::Fred).is_some());
+    // The scheduler applies the gate itself too.
+    assert_eq!(
+        massive_jobs_after_a_tick(keyed.ids()).await,
+        db_set().then_some(0)
+    );
+}
+
+/// With the key set and the licence flag on, the worker's registry has Massive; the flag
+/// without the key is not enough.
+#[test]
+fn with_a_key_and_the_licence_flag_on_massive_is_registered() {
+    let _unlocked = crate::licence::testing::unlock(SourceId::Massive);
+    let worker = crate::licence::ungated_registry(crate::sources::registry_for_keys(
+        &crate::testkit::test_keys(),
+    ));
+    assert!(worker.get(SourceId::Massive).is_some());
+    let keyless = crate::licence::ungated_registry(crate::sources::registry_for_keys(&ApiKeys {
+        massive: None,
+        ..crate::testkit::test_keys()
+    }));
+    assert!(keyless.get(SourceId::Massive).is_none());
+}
+
+fn db_set() -> bool {
+    std::env::var_os("DATABASE_URL").is_some()
+}
+
+/// `MASSIVE` jobs in an emptied queue after one scheduler tick over `sources`. `None` without a
+/// database (`DATABASE_URL` unset).
+async fn massive_jobs_after_a_tick(sources: Vec<SourceId>) -> Option<i64> {
+    use diesel_async::RunQueryDsl;
+    let (url, _guard) = crate::testkit::lock_test_db("massive-gate").await?;
     let pool = econ_graph_core::create_pool(&url).await.expect("pool");
     {
-        use diesel_async::RunQueryDsl;
         let mut conn = pool.get().await.unwrap();
         diesel::sql_query("DELETE FROM crawl_queue")
             .execute(&mut conn)
@@ -525,23 +576,22 @@ async fn without_a_key_the_worker_skips_massive_once_and_enqueues_nothing() {
     }
     let scheduler = crate::scheduler::RefreshScheduler::new(
         pool.clone(),
-        registry.ids(),
+        sources,
         crate::scheduler::SchedulerConfig::default(),
     );
     scheduler.tick().await.unwrap();
-    let mut conn = pool.get().await.unwrap();
     #[derive(diesel::QueryableByName)]
     struct Count {
         #[diesel(sql_type = diesel::sql_types::BigInt)]
         n: i64,
     }
-    use diesel_async::RunQueryDsl;
+    let mut conn = pool.get().await.unwrap();
     let massive: Count =
         diesel::sql_query("SELECT count(*) AS n FROM crawl_queue WHERE source = 'MASSIVE'")
             .get_result(&mut conn)
             .await
             .unwrap();
-    assert_eq!(massive.n, 0);
+    Some(massive.n)
 }
 
 /// Captures formatted log lines for one closure.

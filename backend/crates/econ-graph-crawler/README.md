@@ -172,8 +172,10 @@ maintainer has not decided to download. Sources whose terms restrict them are no
 FRED and WTO are downloaded and stored, and their catalogs are hidden from users through
 Keycloak catalog roles instead. The Bank of Canada, whose terms allow reuse with conditions, is
 downloaded and hidden the same way until those conditions are met, so it is not gated either. The gate covers IMF, which the maintainer decided not to
-download, and SNB, BOJ and UN_STATS, which have restrictive or unclear terms, no adapter and no
-decision to download them. Each gated source has a `crawl_<source>` build flag in
+download, SNB, BOJ and UN_STATS, which have restrictive or unclear terms, no adapter and no
+decision to download them, and MASSIVE (Massive, a market data vendor), whose individual plan
+doesn't licence EconGraph's use: it has an adapter, but crawling needs both this flag and
+`MASSIVE_API_KEY`, so setting the key alone crawls nothing. Each gated source has a `crawl_<source>` build flag in
 [`flags.flagd.json`](../../../config/flags/flags.flagd.json), off in both the `release` and
 `dev` profiles:
 
@@ -183,6 +185,7 @@ decision to download them. Each gated source has a `crawl_<source>` build flag i
 | BOJ | `crawl_boj` | Reproduction for commercial purposes needs the Bank's prior permission | [ECO-743](https://linear.app/econgraph/issue/ECO-743) |
 | SNB | `crawl_snb` | Use is permitted for non-commercial purposes only | [ECO-742](https://linear.app/econgraph/issue/ECO-742) |
 | UN_STATS | `crawl_un_stats` | The SDG Global Database states no terms; the generic UN terms allow personal, non-commercial use only | [ECO-182](https://linear.app/econgraph/issue/ECO-182) |
+| MASSIVE | `crawl_massive` | Massive (a market data vendor)'s individual plan does not licence EconGraph to store or show its data. Crawling needs this flag and `MASSIVE_API_KEY` | [ECO-206](https://linear.app/econgraph/issue/ECO-206) |
 
 The restrictions come from the
 [data source terms of use](https://linear.app/econgraph/document/data-source-terms-of-use-42433ce643db)
