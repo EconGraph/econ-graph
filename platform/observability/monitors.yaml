@@ -86,6 +86,25 @@ spec:
   - port: metrics
     interval: 30s
 ---
+# Massive backfill Job pods (ECO-871): one run per pod, created from the suspended CronJob
+# massive-backfill. Each serves crawler_backfill_* on `metrics` while it runs and for 120s
+# after, so the final crawler_backfill_runs_total is scraped (MassiveBackfillFailed).
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: econgraph-massive-backfill
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+    - econ-graph
+  selector:
+    matchLabels:
+      app: massive-backfill
+  podMetricsEndpoints:
+  - port: metrics
+    interval: 30s
+---
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:

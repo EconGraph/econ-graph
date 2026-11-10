@@ -54,7 +54,7 @@ per-source crawler alerts (`CrawlerSourceFailing`, `CrawlerCrawlFailed`, `Crawle
 |---|---|
 | `MassiveApiKeyRejected` | Massive answered 401, or a "not entitled" 403, in the last 15 minutes |
 | `MassiveDataStale` | `crawler_source_observation_lag_trading_days{source="MASSIVE"}` has been 1 or more for 6 hours, or the source runs but exports no lag gauge |
-| `MassiveBackfillFailed` | A backfill run ended with outcome `failure` in the last day |
+| `MassiveBackfillFailed` | A backfill run ended with outcome `failure`, or a `massive-backfill-*` Job failed, in the last day |
 
 ### MassiveApiKeyRejected
 
@@ -82,11 +82,18 @@ itself is stuck.
 
 ### MassiveBackfillFailed
 
+The backfill runs as a Job created from the suspended CronJob `massive-backfill`
+([ECO-214](https://linear.app/econgraph/issue/ECO-214)), one run per pod. PodMonitor
+`econgraph-massive-backfill` scrapes the pod's `crawler_backfill_*` metrics while it runs and
+for 120 seconds after. The alert fires for a day after a run reports outcome `failure`, or
+after a Job named `massive-backfill-*` fails without reporting (a crash, OOM or eviction, seen
+through kube-state-metrics). Name each Job with that prefix, for example
+`kubectl -n econ-graph create job --from=cronjob/massive-backfill massive-backfill-$(date +%Y%m%d%H%M)`.
+
 `crawler_backfill_days_remaining{source="MASSIVE"}` shows how much history is left to load.
-Find the error in the crawler-worker log. Common causes are the key (see above), the vendor's
-rate limits, and disk space on the host object store (the disk alerts from ECO-867). Fix the
-cause and rerun the backfill ([ECO-214](https://linear.app/econgraph/issue/ECO-214)). The
-alert clears a day after the last failed run.
+Find the error with `kubectl -n econ-graph logs job/<name>`. Common causes are the key (see
+above), the vendor's rate limits, and disk space on the host object store (the disk alerts
+from ECO-867). Fix the cause and create a new Job as above.
 
 A 429 from Massive on a paid plan is a vendor fault, not a sign that the crawler is too fast.
 Check Massive's status page before lowering the source's rate.
@@ -101,8 +108,8 @@ namespace matcher names the branch namespace. The production rules ignore branch
 - `MassiveDataStale`: with the source running, scale the worker to 0 replicas past a trading
   day's slot, then back to 1 with the scheduler disabled (`CRAWLER_SCHEDULER=false`). The lag
   gauge reports 1, and the alert fires 6 hours later. Re-enable the scheduler to clear it.
-- `MassiveBackfillFailed`: run a backfill with a wrong key. The run fails, and the alert
-  fires at the next evaluation.
+- `MassiveBackfillFailed`: create a backfill Job while the key is wrong. The run fails, and
+  the alert fires once its final metrics are scraped.
 
 The rule tests in
 [crawler-massive.test.yaml](../../platform/observability/tests/crawler-massive.test.yaml) cover

@@ -144,21 +144,22 @@ tests:
               summary: Massive daily bars are behind, or their lag gauge is missing
               description: For 6 hours either at least one trading day's Massive bars have not been stored after its refresh slot (crawler_source_observation_lag_trading_days{source="MASSIVE"} is 1 or more), or the source runs but exports no lag gauge. Check MassiveApiKeyRejected and the per-source crawler alerts for MASSIVE, failed MASSIVE jobs in crawl_queue, and Massive errors in the crawler-worker log (Massive runbook, docs/monitoring/massive-runbook.md).
 
-  # A backfill run in a new process fails: the failure counter appears at 1 and fires for a
-  # day. Successful runs and a branch's failures fire nothing.
-  - interval: 1h
+  # A backfill Job pod is first scraped with its failure counter already at 1, at 30m, and
+  # its series ends with the pod 15 minutes later. The alert fires for a day after the run.
+  # Another pod's successful run and a branch pod's failure fire nothing.
+  - interval: 5m
     input_series:
-      - series: 'crawler_backfill_runs_total{namespace="econ-graph", source="MASSIVE", outcome="failure", pod="crawler-worker-1"}'
-        values: '_x2 1x30'
-      - series: 'crawler_backfill_runs_total{namespace="econ-graph", source="MASSIVE", outcome="success", pod="crawler-worker-1"}'
-        values: '0+1x32'
-      - series: 'crawler_backfill_runs_total{namespace="econ-graph-br-test", source="MASSIVE", outcome="failure", pod="crawler-worker-1"}'
-        values: '0+1x32'
+      - series: 'crawler_backfill_runs_total{namespace="econ-graph", source="MASSIVE", outcome="failure", pod="massive-backfill-a-1"}'
+        values: '_x6 1x3'
+      - series: 'crawler_backfill_runs_total{namespace="econ-graph", source="MASSIVE", outcome="success", pod="massive-backfill-b-1"}'
+        values: '_x12 0 1x3'
+      - series: 'crawler_backfill_runs_total{namespace="econ-graph-br-test", source="MASSIVE", outcome="failure", pod="massive-backfill-c-1"}'
+        values: '_x6 1x3'
     alert_rule_test:
-      - eval_time: 1h
+      - eval_time: 25m
         alertname: MassiveBackfillFailed
         exp_alerts: []
-      - eval_time: 3h
+      - eval_time: 40m
         alertname: MassiveBackfillFailed
         exp_alerts:
           - exp_labels:
@@ -166,12 +167,25 @@ tests:
               source: MASSIVE
             exp_annotations:
               summary: A Massive backfill run failed
-              description: A Massive historical backfill run ended with outcome failure in the last day; crawler_backfill_days_remaining{source="MASSIVE"} shows how much history is still to load. Find the error in the crawler-worker log (key, rate limit, or object store disk space), fix it and rerun the backfill (Massive runbook, docs/monitoring/massive-runbook.md).
+              description: A Massive historical backfill run ended with outcome failure, or a massive-backfill Job failed, in the last day; crawler_backfill_days_remaining{source="MASSIVE"} shows how much history is still to load. Find the error in the Job pod log (`kubectl -n econ-graph logs job/<name>`; key, rate limit, or object store disk space), fix it and create a new Job from CronJob massive-backfill (Massive runbook, docs/monitoring/massive-runbook.md).
+      - eval_time: 25h
+        alertname: MassiveBackfillFailed
+        exp_alerts: []
+      - eval_time: 20h
+        alertname: MassiveBackfillFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: MASSIVE
+            exp_annotations:
+              summary: A Massive backfill run failed
+              description: A Massive historical backfill run ended with outcome failure, or a massive-backfill Job failed, in the last day; crawler_backfill_days_remaining{source="MASSIVE"} shows how much history is still to load. Find the error in the Job pod log (`kubectl -n econ-graph logs job/<name>`; key, rate limit, or object store disk space), fix it and create a new Job from CronJob massive-backfill (Massive runbook, docs/monitoring/massive-runbook.md).
       - eval_time: 28h
         alertname: MassiveBackfillFailed
         exp_alerts: []
 
-  # A long-running worker's backfill fails at 5h: fires through the next day, then clears.
+  # A Job pod whose failure counter goes from 0 to 1 when its run fails, at 5h: fires through
+  # the next day, then clears.
   - interval: 1h
     input_series:
       - series: 'crawler_backfill_runs_total{namespace="econ-graph", source="MASSIVE", outcome="failure", pod="crawler-worker-1"}'
@@ -185,8 +199,42 @@ tests:
               source: MASSIVE
             exp_annotations:
               summary: A Massive backfill run failed
-              description: A Massive historical backfill run ended with outcome failure in the last day; crawler_backfill_days_remaining{source="MASSIVE"} shows how much history is still to load. Find the error in the crawler-worker log (key, rate limit, or object store disk space), fix it and rerun the backfill (Massive runbook, docs/monitoring/massive-runbook.md).
+              description: A Massive historical backfill run ended with outcome failure, or a massive-backfill Job failed, in the last day; crawler_backfill_days_remaining{source="MASSIVE"} shows how much history is still to load. Find the error in the Job pod log (`kubectl -n econ-graph logs job/<name>`; key, rate limit, or object store disk space), fix it and create a new Job from CronJob massive-backfill (Massive runbook, docs/monitoring/massive-runbook.md).
       - eval_time: 31h
+        alertname: MassiveBackfillFailed
+        exp_alerts: []
+
+  # A massive-backfill Job that failed without reporting (crashed or evicted) fires through
+  # kube-state-metrics for a day after it was created. A failed Job created more than a day
+  # ago, and a failed Job in a branch namespace, fire nothing.
+  - interval: 5m
+    input_series:
+      - series: 'kube_job_status_failed{namespace="econ-graph", job_name="massive-backfill-20261109"}'
+        values: '0x6 1x400'
+      - series: 'kube_job_created{namespace="econ-graph", job_name="massive-backfill-20261109"}'
+        values: '600x406'
+      - series: 'kube_job_status_failed{namespace="econ-graph", job_name="massive-backfill-20261101"}'
+        values: '1x406'
+      - series: 'kube_job_created{namespace="econ-graph", job_name="massive-backfill-20261101"}'
+        values: '-172800x406'
+      - series: 'kube_job_status_failed{namespace="econ-graph-br-test", job_name="massive-backfill-20261109"}'
+        values: '1x406'
+      - series: 'kube_job_created{namespace="econ-graph-br-test", job_name="massive-backfill-20261109"}'
+        values: '0x406'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MassiveBackfillFailed
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: MassiveBackfillFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              source: MASSIVE
+            exp_annotations:
+              summary: A Massive backfill run failed
+              description: A Massive historical backfill run ended with outcome failure, or a massive-backfill Job failed, in the last day; crawler_backfill_days_remaining{source="MASSIVE"} shows how much history is still to load. Find the error in the Job pod log (`kubectl -n econ-graph logs job/<name>`; key, rate limit, or object store disk space), fix it and create a new Job from CronJob massive-backfill (Massive runbook, docs/monitoring/massive-runbook.md).
+      - eval_time: 25h
         alertname: MassiveBackfillFailed
         exp_alerts: []
 
