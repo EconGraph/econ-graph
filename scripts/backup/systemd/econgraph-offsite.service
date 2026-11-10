@@ -4,6 +4,7 @@ Documentation=file://%h/src/econ-graph/docs/deployment/BACKUPS.md
 # Only meaningful once ~/.config/econgraph/restic.env exists. Without it the
 # unit is skipped, not failed; check-freshness.sh reports the off-site copy as
 # not configured (NOTCONF), or fails with OFFSITE_REQUIRED=1.
+ConditionPathExists=%h/.config/econgraph/restic.env
 OnFailure=econgraph-notify@%N.service
 # Restart=on-failure below retries every 5 minutes. Four starts within 3 hours
 # is the limit: the fifth leaves the unit failed. With RestartMode=direct

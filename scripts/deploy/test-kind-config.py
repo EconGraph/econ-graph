@@ -75,8 +75,8 @@ class KindConfigTests(unittest.TestCase):
 
     def test_outputs_advertise_no_unpublished_port(self):
         for path in (MAIN_TF, OUTPUTS_TF):
-            for url in re.findall(r'https?://localhost(?::(\d+))?', path.read_text()):
-                self.assertIn(url, ('', '80', '443'), f'{path.name} advertises localhost:{url}')
+            for host, port in re.findall(r'https?://(localhost|127\.0\.0\.1)(?::(\d+))?', path.read_text()):
+                self.assertIn(port, ('', '80', '443'), f'{path.name} advertises {host}:{port}')
 
 
 if __name__ == '__main__':

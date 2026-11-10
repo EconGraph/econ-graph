@@ -130,9 +130,18 @@ FAKE_JOURNAL_FILE="${tmp}/journal.changed" KEEP_STATE=1 run_notify "a change in 
     "notified:" failure econgraph-backup-freshness
 grep -qF "MISSING restore_drill" "${STUB_LOG}" && pass "... with the new failure" || fail "the change: $(cat "${STUB_LOG}")"
 state="${ECONGRAPH_STATE_DIR}/notify-econgraph-backup-freshness.service.last"
-sed -i.bak "s/^sent_epoch=.*/sent_epoch=$(( $(date +%s) - 25 * 3600 ))/" "${state}"
-FAKE_JOURNAL_FILE="${tmp}/journal.changed" KEEP_STATE=1 run_notify "the same failure after a day is sent as a reminder" 0 \
+sed -i.bak "s/^sent_epoch=.*/sent_epoch=$(( $(date +%s) - 22 * 3600 ))/" "${state}"
+FAKE_JOURNAL_FILE="${tmp}/journal.changed" KEEP_STATE=1 run_notify "the same failure 22h later is not sent yet" 0 \
+    "already reported" failure econgraph-backup-freshness
+# A daily unit whose timer jitters fails again a little under 24h later: still a reminder.
+sed -i.bak "s/^sent_epoch=.*/sent_epoch=$(( $(date +%s) - 23 * 3600 - 50 * 60 ))/" "${state}"
+FAKE_JOURNAL_FILE="${tmp}/journal.changed" KEEP_STATE=1 run_notify "the same failure 23h50m later is sent as a reminder" 0 \
     "failed (still failing; reminder)" failure econgraph-backup-freshness
+# Without details, every failure of a unit has the same signature: always sent.
+: >"${tmp}/journal.empty"
+FAKE_JOURNAL_FILE="${tmp}/journal.empty" run_notify "a failure without details is sent" 0 "notified:" failure econgraph-dump
+FAKE_JOURNAL_FILE="${tmp}/journal.empty" KEEP_STATE=1 run_notify "... and so is the next one, at once" 0 "notified:" \
+    failure econgraph-dump
 KEEP_STATE=1 run_notify "ok forgets the unit's last failure" 0 "" ok econgraph-backup-freshness
 [[ ! -e "${state}" ]] && pass "... so its next failure is sent at once" || fail "ok left ${state}"
 KEEP_STATE=1 run_notify "the next failure after a success is sent" 0 "notified:" failure econgraph-backup-freshness
@@ -198,6 +207,9 @@ in_section "${offsite}" Unit 'StartLimitBurst=4' && in_section "${offsite}" Unit
     in_section "${offsite}" Service 'Restart=on-failure' && in_section "${offsite}" Service 'RestartMode=direct' &&
     pass "the off-site retries end in one failed unit ([Unit] StartLimit*, [Service] RestartMode=direct)" ||
     fail "econgraph-offsite.service: StartLimit* must be in [Unit], Restart= and RestartMode=direct in [Service]"
+in_section "${offsite}" Unit 'ConditionPathExists=%h/.config/econgraph/restic.env' &&
+    pass "without restic.env the off-site unit is skipped, not failed" ||
+    fail "econgraph-offsite.service has no [Unit] ConditionPathExists= on restic.env"
 # The checks themselves must fail when a setting is in the wrong section.
 printf '[Unit]\nDescription=x\n[Service]\nOnFailure=econgraph-notify@%%N.service\n' >"${tmp}/misplaced.service"
 in_section "${tmp}/misplaced.service" Unit 'OnFailure=econgraph-notify@%N.service' &&

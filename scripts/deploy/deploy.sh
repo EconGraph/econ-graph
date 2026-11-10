@@ -242,7 +242,10 @@ live_backup_recipient="$(kubectl -n econ-graph get cronjob postgres-backup --ign
 live_backup_recipient_ok=false
 [[ "$live_backup_recipient" =~ ^age1[0-9a-z]+$ ]] && live_backup_recipient_ok=true
 if ! backup_recipient_load && [ "$live_backup_recipient_ok" = true ]; then
-  echo "   No BACKUP_AGE_RECIPIENT in this shell; reusing the live CronJob's public recipient."
+  if [ -n "${BACKUP_AGE_RECIPIENT:-}" ]; then
+    echo "   This shell's BACKUP_AGE_RECIPIENT is not a well-formed public age1 recipient; ignoring it."
+  fi
+  echo "   No well-formed recipient in this shell; reusing the live CronJob's public recipient."
   BACKUP_AGE_RECIPIENT="$live_backup_recipient"
 fi
 if [[ "${BACKUP_AGE_RECIPIENT:-}" =~ ^age1[0-9a-z]+$ ]] && backup_recipient_proven "$BACKUP_AGE_RECIPIENT"; then

@@ -128,12 +128,16 @@ case "${cmd}" in
             [[ "${last_sent}" =~ ^[0-9]+$ ]] || last_sent=0
         fi
         now="$(date +%s)"
-        if [[ "${signature}" == "${last_signature}" ]] && (( now - last_sent < NOTIFY_REMIND_HOURS * 3600 )); then
+        # Without details every failure of the unit looks the same, so it is always
+        # sent. The reminder allows an hour of slack, so a daily unit whose timer
+        # jitters still reminds daily, not every second day.
+        if [[ -n "${details}" && "${signature}" == "${last_signature}" ]] &&
+            (( now - last_sent < NOTIFY_REMIND_HOURS * 3600 - 3600 )); then
             log "${unit} failed as it did at $(date -u -d "@${last_sent}" +%Y-%m-%dT%H:%MZ), already reported; reminder after ${NOTIFY_REMIND_HOURS}h"
             exit 0
         fi
         reminder=""
-        [[ "${signature}" == "${last_signature}" ]] && reminder=" (still failing; reminder)"
+        [[ -n "${details}" && "${signature}" == "${last_signature}" ]] && reminder=" (still failing; reminder)"
         send "econgraph backup: ${unit} failed${reminder} on $(hostname) at $(date -u +%Y-%m-%dT%H:%MZ).
 ${details:+${details}
 }Check: journalctl --user -u ${unit} (docs/deployment/BACKUPS.md)"
