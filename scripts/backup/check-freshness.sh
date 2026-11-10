@@ -9,12 +9,21 @@
 #   - the newest copy on the backup pool (from the status file that
 #     backup-snapshots.sh writes; skipped while the pool is not mounted),
 #   - the newest VERIFIED dump directory under BACKUP_ROOT,
+#   - the newest off-site copy (ECONGRAPH_STATE_DIR/offsite.last, written by
+#     offsite-restic.sh backup), once ~/.config/econgraph/restic.env exists.
+#     Without it the off-site copy is reported as not configured (NOTCONF) and
+#     does not fail the check, unless OFFSITE_REQUIRED=1,
 #   - the newest passing restore drill (ECONGRAPH_STATE_DIR/restore-drill.last).
 #
 # Space: nothing is ever deleted automatically, so usage only grows. Fails
-# when free space on the /home btrfs filesystem or on the backup pool drops
-# below its threshold, and reports the size of the local snapshots, the
-# dumps directory and the backup pool's snapshots.
+# when free space on the /home btrfs filesystem, on the filesystem holding
+# BACKUP_ROOT (the dumps) or on the backup pool drops below its threshold,
+# and reports the size of the local snapshots, the dumps directory and the
+# backup pool's snapshots.
+#
+# A failing check is what reaches a person: econgraph-backup-freshness.service
+# runs hourly, and its OnFailure= runs notify.sh (docs/deployment/BACKUPS.md,
+# "Notifications").
 #
 # Usage: check-freshness.sh [--skip-snapshots] [--textfile FILE]
 #
@@ -22,8 +31,11 @@
 #   SNAPSHOT_MAX_AGE_HOURS  (default 3)    snapshots are hourly
 #   POOL_COPY_MAX_AGE_HOURS (default 3)    copied to the pool in the same run
 #   DUMP_MAX_AGE_HOURS      (default 26)   dumps run nightly
+#   OFFSITE_MAX_AGE_HOURS   (default 26)   the off-site copy runs nightly
+#   OFFSITE_REQUIRED        (default 0)    1: no restic.env fails the check
 #   DRILL_MAX_AGE_HOURS     (default 192)  the drill runs weekly
 #   HOME_MIN_FREE_PCT       (default 15)   /home filesystem (data + snapshots)
+#   DUMPS_MIN_FREE_PCT      (default 15)   filesystem holding BACKUP_ROOT
 #   POOL_MIN_FREE_PCT       (default 15)   backup pool
 #
 # --skip-snapshots (or FRESHNESS_SKIP_SNAPSHOTS=1 in backup.env) is for the
@@ -31,7 +43,7 @@
 # --textfile writes Prometheus metrics in node_exporter textfile format
 # (written atomically). Nothing scrapes it yet: the repo's monitoring stack
 # (k8s/monitoring) has no node_exporter or Pushgateway, so this is a hook
-# for when one is added.
+# for when one is added. The exit status is what notifies.
 
 set -euo pipefail
 
@@ -42,8 +54,12 @@ SNAPSHOT_MAX_AGE_HOURS="${SNAPSHOT_MAX_AGE_HOURS:-3}"
 DUMP_MAX_AGE_HOURS="${DUMP_MAX_AGE_HOURS:-26}"
 DRILL_MAX_AGE_HOURS="${DRILL_MAX_AGE_HOURS:-192}"
 POOL_COPY_MAX_AGE_HOURS="${POOL_COPY_MAX_AGE_HOURS:-3}"
+OFFSITE_MAX_AGE_HOURS="${OFFSITE_MAX_AGE_HOURS:-26}"
+OFFSITE_REQUIRED="${OFFSITE_REQUIRED:-0}"
 HOME_MIN_FREE_PCT="${HOME_MIN_FREE_PCT:-15}"
+DUMPS_MIN_FREE_PCT="${DUMPS_MIN_FREE_PCT:-15}"
 POOL_MIN_FREE_PCT="${POOL_MIN_FREE_PCT:-15}"
+RESTIC_ENV="${RESTIC_ENV:-${ECONGRAPH_CONFIG_DIR}/restic.env}"
 POOL_MOUNT="${POOL_MOUNT:-/srv/econgraph-backups}"
 HOST_STATE_DIR="${HOST_STATE_DIR:-/var/lib/econgraph}"
 
@@ -53,7 +69,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --skip-snapshots) skip_snapshots=1; shift ;;
         --textfile) textfile="$2"; shift 2 ;;
-        -h|--help) sed -n '2,35p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,/^$/p' "$0"; exit 0 ;;
         *) die "unknown argument: $1" ;;
     esac
 done
@@ -122,6 +138,26 @@ if [[ -n "${dump_dir}" ]]; then
 fi
 check dump "${dump_epoch}" "${DUMP_MAX_AGE_HOURS}" "newest verified dump ${dump_dir:-under ${BACKUP_ROOT}}"
 
+# The off-site copy: offsite-restic.sh backup records each success. Whether
+# there is one at all is the maintainer's decision (ECO-835), so a missing
+# restic.env is reported, not failed, unless OFFSITE_REQUIRED=1.
+if [[ -f "${RESTIC_ENV}" ]]; then
+    metrics+=("econgraph_backup_offsite_configured 1")
+    offsite_epoch=""
+    if [[ -f "${ECONGRAPH_STATE_DIR}/offsite.last" ]]; then
+        offsite_epoch="$(sed -n 's/^passed_epoch=//p' "${ECONGRAPH_STATE_DIR}/offsite.last" | tail -n 1)"
+        [[ "${offsite_epoch}" =~ ^[0-9]+$ ]] || offsite_epoch=""
+    fi
+    check offsite "${offsite_epoch}" "${OFFSITE_MAX_AGE_HOURS}" "newest off-site copy (offsite-restic.sh backup)"
+elif [[ "${OFFSITE_REQUIRED}" == 1 ]]; then
+    metrics+=("econgraph_backup_offsite_configured 0")
+    echo "MISSING offsite: not configured (no ${RESTIC_ENV}), and OFFSITE_REQUIRED=1"
+    failed=1
+else
+    metrics+=("econgraph_backup_offsite_configured 0")
+    echo "NOTCONF offsite: not configured (no ${RESTIC_ENV}); the dumps have no off-site copy"
+fi
+
 drill_epoch=""
 if [[ -f "${ECONGRAPH_STATE_DIR}/restore-drill.last" ]]; then
     drill_epoch="$(sed -n 's/^passed_epoch=//p' "${ECONGRAPH_STATE_DIR}/restore-drill.last")"
@@ -178,6 +214,11 @@ check_space() {
 space_path="${SNAPSHOT_DIR}"
 [[ -d "${space_path}" ]] || space_path="${HOME}"
 check_space home_fs "${space_path}" "${HOME_MIN_FREE_PCT}"
+# The dumps are never pruned. They are on the backup pool once it is mounted
+# (then this is the pool's filesystem again), otherwise in $HOME.
+if [[ -d "${BACKUP_ROOT}" ]]; then
+    check_space dumps "${BACKUP_ROOT}" "${DUMPS_MIN_FREE_PCT}"
+fi
 if mountpoint -q "${POOL_MOUNT}"; then
     check_space backup_pool "${POOL_MOUNT}" "${POOL_MIN_FREE_PCT}"
 fi
@@ -222,6 +263,8 @@ if [[ -n "${textfile}" ]]; then
         echo "# TYPE econgraph_backup_free_ratio gauge"
         echo "# HELP econgraph_backup_size_bytes Disk used by snapshots or dumps."
         echo "# TYPE econgraph_backup_size_bytes gauge"
+        echo "# HELP econgraph_backup_offsite_configured 1 if ~/.config/econgraph/restic.env exists."
+        echo "# TYPE econgraph_backup_offsite_configured gauge"
         printf '%s\n' "${metrics[@]}"
     } >"${textfile}.tmp"
     mv "${textfile}.tmp" "${textfile}"

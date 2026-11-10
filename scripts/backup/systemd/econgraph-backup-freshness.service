@@ -1,7 +1,14 @@
 [Unit]
-Description=econ-graph backup freshness check (snapshots, dumps, restore drill)
+Description=econ-graph backup freshness check (snapshots, dumps, off-site copy, restore drill, space)
 Documentation=file://%h/src/econ-graph/docs/deployment/BACKUPS.md
+# A stale or missing backup, or low space, fails the check, and the failure
+# is what reaches a person (notify.sh failure).
+OnFailure=econgraph-notify@%N.service
 
 [Service]
 Type=oneshot
 ExecStart=%h/.local/lib/econgraph-backup/check-freshness.sh --textfile %h/.local/state/econgraph/backup-freshness.prom
+# Only after a passing check: the dead-man's switch (NOTIFY_HEARTBEAT_URL) alerts
+# when these pings stop, which also covers a host that is down or timers that
+# stopped. "-": a failed ping is logged but does not fail the check.
+ExecStartPost=-%h/.local/lib/econgraph-backup/notify.sh heartbeat

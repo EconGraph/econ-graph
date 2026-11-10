@@ -26,6 +26,8 @@ export ECONGRAPH_CONFIG_DIR="${tmp}/config"
 export BACKUP_ROOT="${tmp}/dumps"
 export KEYCLOAK_BACKUP_ROOT="${tmp}/upgrade-dumps"
 export STUB_LOG="${tmp}/restic.log"
+# Where offsite-restic.sh backup records a success (never the operator's own state).
+export ECONGRAPH_STATE_DIR="${tmp}/state"
 export PATH="${tmp}/bin:${PATH}"
 
 # expect <exit code> <text the output must contain> <args...>
@@ -84,6 +86,29 @@ if grep -qF -e "$KEYCLOAK_BACKUP_ROOT/incomplete" -e "$KEYCLOAK_BACKUP_ROOT/unpu
     echo "FAIL offsite backup included an incomplete upgrade payload"
     failures=$((failures + 1))
 fi
+# A successful backup is recorded for check-freshness.sh; a failed one is not.
+recorded="$(sed -n 's/^passed_epoch=//p' "$ECONGRAPH_STATE_DIR/offsite.last" 2>/dev/null || true)"
+if [[ "$recorded" =~ ^[0-9]+$ ]] && (( $(date +%s) - recorded < 60 )); then
+    echo "ok   offsite-restic.sh backup records its success in offsite.last"
+else
+    echo "FAIL offsite-restic.sh backup did not record its success: '$recorded'"
+    failures=$((failures + 1))
+fi
+echo "passed_epoch=1" >"$ECONGRAPH_STATE_DIR/offsite.last"
+# shellcheck disable=SC2016 # the stub's $ expand when it runs, not here
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"${STUB_LOG}"\nexit 1\n' >"${tmp}/bin/restic"
+if "${script}" backup </dev/null >/dev/null 2>&1; then
+    echo "FAIL offsite-restic.sh backup succeeded although restic failed"
+    failures=$((failures + 1))
+fi
+if [[ "$(cat "$ECONGRAPH_STATE_DIR/offsite.last")" == "passed_epoch=1" ]]; then
+    echo "ok   a failed restic backup records nothing"
+else
+    echo "FAIL a failed restic backup changed offsite.last: $(cat "$ECONGRAPH_STATE_DIR/offsite.last")"
+    failures=$((failures + 1))
+fi
+# shellcheck disable=SC2016
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"${STUB_LOG}"\n' >"${tmp}/bin/restic"
 
 # An explicitly configured missing root must not silently omit upgrade backups.
 KEYCLOAK_BACKUP_ROOT="$tmp/missing-upgrade-root" expect 1 "configured Keycloak backup root is missing" backup

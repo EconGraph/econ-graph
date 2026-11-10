@@ -4,7 +4,9 @@
 # Usage: offsite-restic.sh backup|check|snapshots|init|restic <args...>
 #
 #   backup     restic backup of the verified dump directories. Nothing is
-#              ever forgotten or pruned: the repository only grows.
+#              ever forgotten or pruned: the repository only grows. A
+#              success is recorded in ECONGRAPH_STATE_DIR/offsite.last for
+#              check-freshness.sh.
 #   check      restic check --read-data-subset=5% (spot-reads pack files)
 #   snapshots  list restic snapshots
 #   init       create the repository (once)
@@ -103,6 +105,10 @@ case "${cmd}" in
         mapfile -t dirs < <(printf '%s\n' "$listing" | sort -u)
         log "restic backup of ${#dirs[@]} verified dump dir(s) to ${RESTIC_REPOSITORY}"
         restic backup --tag econgraph-dumps --host "$(hostname)" "${dirs[@]}"
+        # For check-freshness.sh: only a backup that succeeded gets here.
+        mkdir -p "${ECONGRAPH_STATE_DIR}"
+        printf 'passed_epoch=%s\ndirs=%s\n' "$(date +%s)" "${#dirs[@]}" >"${ECONGRAPH_STATE_DIR}/offsite.last.tmp"
+        mv "${ECONGRAPH_STATE_DIR}/offsite.last.tmp" "${ECONGRAPH_STATE_DIR}/offsite.last"
         ;;
     check)
         restic check --read-data-subset="${RESTIC_CHECK_SUBSET:-5%}"

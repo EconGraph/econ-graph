@@ -11,14 +11,20 @@
 #   econgraph-backup-freshness.timer  hourly
 #   econgraph-offsite.timer           daily 10:45 UTC, only if
 #                                     ~/.config/econgraph/restic.env exists
+# Every backup service has OnFailure=econgraph-notify@%N.service, which runs
+# notify.sh: it tells a person through the channels in
+# ~/.config/econgraph/notify.env (docs/deployment/BACKUPS.md, "Notifications").
+# Without that file a failure reaches nobody; the installer says so.
 #
 # User timers keep running after logout only with lingering enabled
-# (`loginctl show-user "$USER" -p Linger` must say Linger=yes; it does on
-# threadripper).
+# (`loginctl show-user "$USER" -p Linger` must say Linger=yes). If it is off,
+# the installer runs `loginctl enable-linger` for this user (polkit usually
+# lets a user do that for themselves); if lingering is still off it stops
+# with an error, before installing anything, unless --allow-no-linger is given.
 #
 # Re-run after merging changes to these scripts. Safe to re-run.
 #
-# Usage: install-user-units.sh [--dry-run] [--no-enable]
+# Usage: install-user-units.sh [--dry-run] [--no-enable] [--allow-no-linger]
 
 set -euo pipefail
 
@@ -26,13 +32,17 @@ SRC_DIR="$(dirname "$(readlink -f "$0")")"
 LIB_DIR="${HOME}/.local/lib/econgraph-backup"
 UNIT_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
 
+CONFIG_DIR="${ECONGRAPH_CONFIG_DIR:-${HOME}/.config/econgraph}"
+
 DRY_RUN="false"
 ENABLE="true"
+ALLOW_NO_LINGER="false"
 for arg in "$@"; do
     case "$arg" in
         --dry-run|-n) DRY_RUN="true" ;;
         --no-enable) ENABLE="false" ;;
-        *) echo "usage: $0 [--dry-run] [--no-enable]" >&2; exit 2 ;;
+        --allow-no-linger) ALLOW_NO_LINGER="true" ;;
+        *) echo "usage: $0 [--dry-run] [--no-enable] [--allow-no-linger]" >&2; exit 2 ;;
     esac
 done
 
@@ -48,10 +58,28 @@ if [ "$(id -u)" -eq 0 ]; then
     exit 1
 fi
 
-linger="$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || echo unknown)"
+user="$(id -un)"
+linger_state() { loginctl show-user "$user" -p Linger --value 2>/dev/null || echo unknown; }
+linger="$(linger_state)"
 if [ "$linger" != "yes" ]; then
-    echo "warning: Linger=$linger; the timers only run while $(id -un) is logged in." >&2
-    echo "         Enabling lingering needs root (loginctl enable-linger $(id -un))." >&2
+    echo "Linger=$linger: the timers would stop whenever $user logs out; enabling lingering"
+    run loginctl enable-linger "$user" || true
+    [ "$DRY_RUN" = "true" ] || linger="$(linger_state)"
+fi
+if [ "$linger" != "yes" ] && [ "$DRY_RUN" = "false" ]; then
+    if [ "$ALLOW_NO_LINGER" = "true" ]; then
+        echo "warning: Linger=$linger; the timers only run while $user is logged in (--allow-no-linger)." >&2
+    else
+        echo "error: Linger=$linger, and loginctl enable-linger $user did not turn it on: the backup timers" >&2
+        echo "       would stop whenever $user logs out. Run 'sudo loginctl enable-linger $user' and re-run," >&2
+        echo "       or pass --allow-no-linger to install anyway. Nothing was installed." >&2
+        exit 1
+    fi
+fi
+if [ ! -f "$CONFIG_DIR/notify.env" ]; then
+    echo "warning: no $CONFIG_DIR/notify.env: a failed or stale backup will reach nobody." >&2
+    echo "         Set NOTIFY_SLACK_WEBHOOK_URL or NOTIFY_COMMAND (and NOTIFY_HEARTBEAT_URL) there," >&2
+    echo "         mode 600, then run $LIB_DIR/notify.sh test (docs/deployment/BACKUPS.md, \"Notifications\")." >&2
 fi
 
 run mkdir -p "$LIB_DIR" "$UNIT_DIR"

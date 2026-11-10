@@ -493,9 +493,12 @@ done
 unset ECONGRAPH_TEST_ROOT FAKE_ROOT SUDO_USER
 
 echo "== check-freshness.sh: the status file's failures and run_epoch"
+# RESTIC_ENV: the off-site configuration file the check looks for (absent until a test
+# creates it).
 export SNAPSHOT_DIR="${tmp}/fresh/snapshots" BACKUP_ROOT="${tmp}/fresh/dumps" \
     ECONGRAPH_STATE_DIR="${tmp}/fresh/state" HOST_STATE_DIR="${tmp}/fresh/host-state" \
-    POOL_MOUNT="${tmp}/fresh/pool" HOME_MIN_FREE_PCT=0 POOL_MIN_FREE_PCT=0
+    POOL_MOUNT="${tmp}/fresh/pool" HOME_MIN_FREE_PCT=0 POOL_MIN_FREE_PCT=0 DUMPS_MIN_FREE_PCT=0 \
+    RESTIC_ENV="${tmp}/fresh/restic.env"
 now_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "${SNAPSHOT_DIR}/data-plane.${now_stamp}" "${SNAPSHOT_DIR}/app-prod.${now_stamp}" \
     "${BACKUP_ROOT}/${now_stamp}" "${ECONGRAPH_STATE_DIR}" "${HOST_STATE_DIR}" "${POOL_MOUNT}"
@@ -514,7 +517,26 @@ run_script "check-freshness fails a status file that stopped updating" 1 "STALE 
 rm -f "${status}"
 run_script "check-freshness fails a missing status file" 1 "MISSING snapshot_run" "${freshness}"
 run_script "check-freshness --skip-snapshots skips the run check" 0 "BACKUP CHECK OK" "${freshness}" --skip-snapshots
-unset SNAPSHOT_DIR BACKUP_ROOT ECONGRAPH_STATE_DIR HOST_STATE_DIR POOL_MOUNT HOME_MIN_FREE_PCT POOL_MIN_FREE_PCT
+
+echo "== check-freshness.sh: the off-site copy and the dumps' filesystem"
+write_status "$(date +%s)" 0
+run_script "check-freshness reports an off-site copy that is not configured, without failing" 0 \
+    "NOTCONF offsite" "${freshness}"
+OFFSITE_REQUIRED=1 run_script "... and fails it with OFFSITE_REQUIRED=1" 1 "MISSING offsite" "${freshness}"
+: >"${RESTIC_ENV}"
+run_script "check-freshness fails a configured off-site copy that never succeeded" 1 "MISSING offsite" "${freshness}"
+echo "passed_epoch=$(( $(date +%s) - 30 * 3600 ))" >"${ECONGRAPH_STATE_DIR}/offsite.last"
+run_script "check-freshness fails a stale off-site copy" 1 "STALE   offsite" "${freshness}"
+echo "passed_epoch=$(date +%s)" >"${ECONGRAPH_STATE_DIR}/offsite.last"
+run_script "check-freshness passes a fresh off-site copy" 0 "OK      offsite" "${freshness}"
+check "... and records it as configured in the textfile" bash -c \
+    "'${freshness}' --textfile '${tmp}/fresh/metrics.prom' >/dev/null 2>&1; grep -qx 'econgraph_backup_offsite_configured 1' '${tmp}/fresh/metrics.prom'"
+run_script "check-freshness checks the dumps' filesystem" 0 "OK      dumps" "${freshness}"
+DUMPS_MIN_FREE_PCT=101 run_script "check-freshness fails when the dumps' filesystem is low on space" 1 \
+    "LOWSPACE dumps" "${freshness}"
+rm -f "${RESTIC_ENV}" "${ECONGRAPH_STATE_DIR}/offsite.last"
+unset SNAPSHOT_DIR BACKUP_ROOT ECONGRAPH_STATE_DIR HOST_STATE_DIR POOL_MOUNT HOME_MIN_FREE_PCT POOL_MIN_FREE_PCT \
+    DUMPS_MIN_FREE_PCT RESTIC_ENV
 
 echo "== restore-dump.sh: one resolved path, and a Ready pod"
 dumps="${tmp}/dumps"

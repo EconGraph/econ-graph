@@ -247,6 +247,7 @@ space drops below a threshold, and reports how big the backups are:
 | Check | Default | Variable |
 |---|---|---|
 | free space on the `/home` filesystem (live data and local snapshots) | at least 15% | `HOME_MIN_FREE_PCT` |
+| free space on the filesystem holding the dumps (`BACKUP_ROOT`: the backup pool once mounted, else `$HOME`) | at least 15% | `DUMPS_MIN_FREE_PCT` |
 | free space on the backup pool (when mounted) | at least 15% | `POOL_MIN_FREE_PCT` |
 | size of `/srv/econgraph/snapshots`, of the dumps directory and of `/srv/econgraph-backups/snapshots` | reported (`SIZE` lines and metrics), no threshold | |
 
@@ -301,11 +302,19 @@ scripts/backup/install-user-units.sh          # --dry-run to preview
 It copies the scripts to `~/.local/lib/econgraph-backup/` (the timers run
 that reviewed copy, not whatever branch the checkout has), installs the
 units into `~/.config/systemd/user/`, and enables the dump, drill and
-freshness timers; the off-site timer only once `restic.env` exists. User
-timers need lingering to run while the operator is logged out. Check
-`loginctl show-user "$USER" -p Linger` before installation; it must report
-`Linger=yes`. If it does not, enable lingering with
-`sudo loginctl enable-linger "$USER"`.
+freshness timers; the off-site timer only once `restic.env` exists. It also
+installs `econgraph-notify@.service`, which every backup service names in
+`OnFailure=` ([Notifications](#notifications)), and warns when
+`~/.config/econgraph/notify.env` is missing, because a failure then reaches nobody.
+
+User timers stop when the operator logs out unless lingering is on. When
+`loginctl show-user "$USER" -p Linger` does not report `Linger=yes`, the installer
+runs `loginctl enable-linger "$USER"` (polkit normally lets users enable it for
+themselves). If lingering is still off, it stops with an error before installing
+anything. Run `sudo loginctl enable-linger "$USER"` and re-run it, or pass
+`--allow-no-linger` to install timers that run only while the operator is logged in.
+The heartbeat ([Notifications](#notifications)) catches timers that stopped
+anyway.
 
 Until the root hourly timer is installed, put `FRESHNESS_SKIP_SNAPSHOTS=1`
 in `~/.config/econgraph/backup.env`, or the hourly freshness check fails on
@@ -518,7 +527,13 @@ missing or stale, or if space is low ([Space alerts](#space-alerts)):
 | last hourly `backup-snapshots.sh` run, which must also have had no failures | 3h | `SNAPSHOT_MAX_AGE_HOURS` |
 | newest snapshot copied to the backup pool (when mounted), and the last copy didn't fail | 3h | `POOL_COPY_MAX_AGE_HOURS` |
 | newest `VERIFIED` dump | 26h | `DUMP_MAX_AGE_HOURS` |
+| newest off-site copy (`~/.local/state/econgraph/offsite.last`, written by each successful `offsite-restic.sh backup`), once `restic.env` exists | 26h | `OFFSITE_MAX_AGE_HOURS` |
 | newest passing drill | 192h (8 days) | `DRILL_MAX_AGE_HOURS` |
+
+Without `~/.config/econgraph/restic.env` there is no off-site copy, and the check
+prints `NOTCONF offsite` and does not fail on it, because whether to have one is
+still the maintainer's decision ([Off-site](#off-site)). With `OFFSITE_REQUIRED=1`
+in `backup.env`, a missing `restic.env` fails the check too.
 
 Snapshot ages come from the snapshot names, since reading btrfs creation
 times needs root. The backup pool's snapshot directory is root-only, so its
@@ -526,11 +541,58 @@ state comes from `/var/lib/econgraph/backup-snapshots.status`, written by
 the root hourly job. `--textfile FILE` also writes
 `econgraph_backup_last_success_timestamp_seconds`, `econgraph_backup_fresh`,
 `econgraph_backup_free_bytes`, `econgraph_backup_free_ratio` and
-`econgraph_backup_size_bytes` in node_exporter textfile format (the timer
-writes `~/.local/state/econgraph/backup-freshness.prom`). The checked-in
+`econgraph_backup_size_bytes` and `econgraph_backup_offsite_configured` in
+node_exporter textfile format (the timer writes
+`~/.local/state/econgraph/backup-freshness.prom`). The checked-in
 [monitoring setup](../../k8s/monitoring) has Prometheus but
 no node_exporter or Pushgateway to collect it, and the in-cluster Prometheus
-cannot see host files. These metrics do not produce alerts in that setup.
+cannot see host files, so these metrics produce no alerts. What reaches a person
+is the check's exit status: [Notifications](#notifications).
+
+## Notifications
+
+There is no Alertmanager on the kind host. A failed backup unit is what tells a
+person:
+
+- Every backup service (`econgraph-dump`, `econgraph-offsite`,
+  `econgraph-backup-freshness`, `econgraph-restore-drill`) has
+  `OnFailure=econgraph-notify@%N.service`. That unit runs
+  `notify.sh failure <unit>`, which sends one message naming the unit and the host,
+  with the failed run's `STALE`, `MISSING`, `LOWSPACE` and `ERROR` lines from the journal.
+- The hourly freshness check fails on a stale or missing dump, off-site copy,
+  snapshot or drill, and on low space, so each of those sends a message every
+  hour until it is fixed.
+- The off-site unit retries every 5 minutes; after four starts within 3 hours it
+  stays failed, which sends the message.
+- After every passing freshness check, `notify.sh heartbeat` pings a dead-man's
+  switch. When the host is down, the operator's timers have stopped (lingering off),
+  or the check itself cannot run, the pings stop and the switch alerts. Nothing on the
+  host can report its own absence.
+
+The channels are in `~/.config/econgraph/notify.env`, mode 600. The webhook
+URLs are credentials, so the file is never committed:
+
+```sh
+NOTIFY_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...   # a Slack incoming webhook
+NOTIFY_COMMAND='mail -s "econgraph backup" someone@example.com'  # or any command; the message is on stdin
+NOTIFY_HEARTBEAT_URL=https://hc-ping.com/<uuid>                  # period 1 hour, grace about 2 hours
+```
+
+Set at least one of `NOTIFY_SLACK_WEBHOOK_URL` and `NOTIFY_COMMAND`. With neither,
+or when none of them delivers, the notify unit fails, so the failure stays visible
+in `systemctl --user --failed` and `journalctl --user -u 'econgraph-notify@*'`.
+The platform's alerts (ECO-868) use a Slack receiver and a healthchecks.io
+dead-man's switch. The same workspace and service can serve here, with a separate
+webhook and check for this host.
+
+Check the path end to end once `notify.env` is in place:
+
+```sh
+~/.local/lib/econgraph-backup/notify.sh test     # one test message per channel
+# A forced failure through the real OnFailure= chain:
+systemd-run --user --wait -p OnFailure=econgraph-notify@forced-failure.service false
+journalctl --user -u econgraph-notify@forced-failure.service
+```
 
 ## Off-site
 
@@ -891,6 +953,11 @@ on threadripper. The CronJob remains an independent copy, with these limits:
   the volume automatically reusable. See [Reattaching a retained volume](POSTGRES_BACKUP_RESTORE.md#reattaching-a-retained-volume).
 - The CronJob has no restore drill or freshness check, and the checked-in
   monitoring setup has no alert for its Job.
+- Its `encrypt` container needs the same public age recipient as the host dumps.
+  `deploy.sh` fills it in from `BACKUP_AGE_RECIPIENT` (environment or
+  `backup.env`), and without one applies no CronJob and removes an existing one,
+  because every run would fail
+  ([Encryption setup](POSTGRES_BACKUP_RESTORE.md#encryption-setup)).
 
 Export useful dumps before removing cluster storage or retiring the CronJob.
 Do not rely on deleting a PVC to preserve or remove its files without checking
@@ -966,7 +1033,7 @@ loginctl show-user "$USER" -p Linger
 
 The installers do not install packages. Supply missing tools before using
 the corresponding scripts. User timers need `Linger=yes` to run after
-logout; enabling it requires sudo as described in [Timers and installation](#timers-and-installation).
+logout; the installer enables it, or stops, as described in [Timers and installation](#timers-and-installation).
 Group membership and socket permissions must permit the operator to use the
 rootful daemon. This privilege gives root-level host access, even though
 dumps, drills, freshness checks, off-site copies, branch clones and
