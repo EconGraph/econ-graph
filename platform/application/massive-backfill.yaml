@@ -6,7 +6,8 @@
 #
 # Rerunning after a failure resumes the unfinished run without writing anything twice. The
 # pod serves /metrics on 9102 (crawler_backfill_days_remaining, crawler_backfill_runs_total)
-# and keeps serving for two minutes after the run so the outcome is scraped.
+# and keeps serving for two minutes after the run so the outcome is scraped. Keep the
+# massive-backfill- Job name prefix: the MassiveBackfillFailed alert matches on it.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -39,6 +40,9 @@ spec:
         spec:
           restartPolicy: Never
           automountServiceAccountToken: false
+          # On SIGTERM (deadline, eviction) the run counts a failure and serves it for the
+          # 120 s linger before exiting.
+          terminationGracePeriodSeconds: 150
           containers:
           - name: massive-backfill
             image: ${CRAWLER_IMAGE}
@@ -66,11 +70,14 @@ spec:
               value: info
             - name: CRAWLER_METRICS_ADDR
               value: 0.0.0.0:9102
+            # Optional, so a missing key fails the run at once with a clear message and a
+            # failure outcome, instead of a pod stuck in CreateContainerConfigError.
             - name: MASSIVE_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: crawler-api-keys
                   key: massive-api-key
+                  optional: true
             - name: TIMESERIES_BACKEND
               value: iceberg
             # ICEBERG_WAREHOUSE, TIMESERIES_TARGET_ID and the object store credentials.

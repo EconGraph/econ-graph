@@ -77,6 +77,7 @@ use crate::sources::massive::backfill as massive_backfill;
 use crate::sources::massive::symbols as massive_symbols;
 use crate::status::{crawler_status, CrawlerStatusSnapshot};
 use crate::CrawlError;
+use econ_graph_metrics::crawler::CRAWLER_SOURCE_HEALTH_METRICS;
 
 /// `series_id` stored for `discover_catalog` jobs (one per source).
 pub const CATALOG_SERIES_ID: &str = "catalog";
@@ -861,9 +862,24 @@ impl Cli {
                     Some(addr) => Some(massive_backfill::serve_metrics(addr).await?),
                     None => None,
                 };
-                let result =
-                    massive_backfill_run(pool.0, &options, requests_per_second, symbols.as_deref())
-                        .await;
+                // A pod killed by its deadline or an eviction gets SIGTERM: the run stops (its
+                // open transaction rolls back), the failure is counted and the linger below still
+                // serves it to Prometheus.
+                let run =
+                    massive_backfill_run(pool.0, &options, requests_per_second, symbols.as_deref());
+                let result = tokio::select! {
+                    result = run => result,
+                    () = sigterm() => {
+                        CRAWLER_SOURCE_HEALTH_METRICS
+                            .record_backfill_run(SourceId::Massive.as_str(), false);
+                        Err(anyhow!(
+                            "terminated (SIGTERM) before the backfill finished; rerun it to resume"
+                        ))
+                    }
+                };
+                if let Err(e) = &result {
+                    tracing::error!(error = %format!("{e:#}"), "Massive backfill failed");
+                }
                 if let Some((addr, task)) = metrics {
                     if metrics_linger_secs > 0 {
                         tracing::info!(%addr, metrics_linger_secs, "serving final metrics");
@@ -1210,20 +1226,60 @@ fn massive_symbols(path: Option<&Path>) -> anyhow::Result<massive_symbols::Symbo
         .with_context(|| format!("loading the Massive symbol table {}", path.display()))
 }
 
-/// Runs `crawler massive-backfill` with a request budget of its own.
+/// Resolves on SIGTERM (never, where there are no Unix signals or the handler can't be set).
+async fn sigterm() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        if let Ok(mut term) = signal(SignalKind::terminate()) {
+            term.recv().await;
+            return;
+        }
+    }
+    std::future::pending::<()>().await;
+}
+
+/// Runs `crawler massive-backfill` with a request budget of its own. A setup failure (no API key,
+/// no symbol table) fails at once and counts as a failed run, as a failure of the run itself does.
 async fn massive_backfill_run(
     pool: DatabasePool,
     options: &massive_backfill::BackfillOptions,
     requests_per_second: f64,
     symbols: Option<&Path>,
 ) -> anyhow::Result<massive_backfill::BackfillReport> {
-    let symbols = massive_symbols(symbols)?;
+    let setup = massive_backfill_setup(&pool, requests_per_second, symbols);
+    let (symbols, client, catalog) = match setup {
+        Ok(setup) => setup,
+        Err(e) => {
+            CRAWLER_SOURCE_HEALTH_METRICS.record_backfill_run(SourceId::Massive.as_str(), false);
+            return Err(e);
+        }
+    };
+    massive_backfill::run(&pool, &catalog, &client, &symbols, options).await
+}
+
+/// The symbol table, client and catalog for a backfill run.
+fn massive_backfill_setup(
+    pool: &DatabasePool,
+    requests_per_second: f64,
+    symbols: Option<&Path>,
+) -> anyhow::Result<(
+    massive_symbols::SymbolTable,
+    crate::sources::massive::client::MassiveClient,
+    econ_graph_timeseries::SqlCatalog,
+)> {
     let key_var = api_key_env_var(SourceId::Massive).expect("Massive has an API key");
     let key = std::env::var(key_var)
         .ok()
         .map(|k| k.trim().to_string())
         .filter(|k| !k.is_empty())
-        .ok_or_else(|| anyhow!("{key_var} is not set"))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "{key_var} is not set: the backfill needs the Massive API key (Secret \
+                 crawler-api-keys, key massive-api-key)"
+            )
+        })?;
+    let symbols = massive_symbols(symbols)?;
     let mut policies = worker_policies(&default_registry());
     let policy = policies
         .get(&SourceId::Massive)
@@ -1246,7 +1302,7 @@ async fn massive_backfill_run(
         pool.clone(),
         econ_graph_timeseries::StorageConfig::from_env()?,
     );
-    massive_backfill::run(&pool, &catalog, &client, &symbols, options).await
+    Ok((symbols, client, catalog))
 }
 
 /// Runs `crawler massive-backfill-estimate`.

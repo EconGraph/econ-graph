@@ -45,14 +45,16 @@ pub struct StorageModel {
 }
 
 /// The writer's storage, measured by `measured_storage_model_matches_the_writer` with a fake
-/// random-walk price series. Re-measure after changing the Iceberg schema or writer settings.
+/// price series (CI, 2026-11-10): ten tickers, one year, written once per ticker (5 commits, 60
+/// files) and once per date (12 commits, 720 files), fitted from the two. Re-measure after
+/// changing the Iceberg schema or writer settings.
 pub const MEASURED: StorageModel = StorageModel {
-    data_bytes_per_row: 70.0,
-    data_file_overhead_bytes: 4_000.0,
-    commit_overhead_bytes: 8_000.0,
-    manifest_bytes_per_file: 400.0,
-    metadata_base_bytes: 6_000.0,
-    metadata_bytes_per_snapshot: 600.0,
+    data_bytes_per_row: 63.5,
+    data_file_overhead_bytes: 5_475.0,
+    commit_overhead_bytes: 6_520.0,
+    manifest_bytes_per_file: 786.0,
+    metadata_base_bytes: 3_400.0,
+    metadata_bytes_per_snapshot: 911.0,
 };
 
 /// What to estimate.
