@@ -42,7 +42,6 @@ live in [Linear](https://linear.app/econgraph).
 
 - **[Kubernetes Deployment](../k8s/README.md)** - Cluster setup, configuration and deployment
 - **[Deployment Restart](./deployment/DEPLOYMENT_RESTART.md)** - Deployment restart procedures
-- **[K8s Restart Commands](./deployment/K8S_RESTART_COMMANDS.md)** - Kubernetes restart commands
 - **[Chart API Service](./deployment/CHART_API_SERVICE.md)** - Chart API service deployment
 
 ### 💻 [Development Documentation](./development/)

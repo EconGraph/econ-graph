@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# The grep pattern for restart-k8s-rollout.sh is meant literally.
-# shellcheck disable=SC2016
-# Tests for check_public_host_urls in scripts/deploy/lib/public-host.sh (the URL summary at
-# the end of restart-k8s-rollout.sh), offline: a stub curl first on PATH answers with
+# Tests for check_public_host_urls in scripts/deploy/lib/public-host.sh, offline: a stub curl first on PATH answers with
 # canned statuses and redirect URLs, so nothing reaches the network.
 #   - https://MAIN answering 200 or 302 is accessible, anything else is not;
 #   - with MAIN the apex, www.HOST passes only with a 301 to https://HOST with the path
@@ -10,8 +7,7 @@
 #     dropped query fails;
 #   - with MAIN www.HOST (the default), HOST passes only with a 302 to https://www.HOST,
 #     or a 301 once MAIN_HOST_PERMANENT names www.HOST; the other code fails;
-#   - the host is the one given, never a hard-coded econgraph.com;
-#   - restart-k8s-rollout.sh uses it, with PUBLIC_HOST and MAIN_HOST, and names no host itself.
+#   - the host is the one given, never a hard-coded econgraph.com.
 #
 # Usage: scripts/deploy/test-public-host-urls.sh
 set -euo pipefail
@@ -116,13 +112,6 @@ run 200 302 "$WWW_TARGET" example.org www.example.org www.example.org
 has "Expected a 301 to $WWW_TARGET, got HTTP 302" "and a 302 then fails"
 run 200 302 'https://example.org/series/smoke-check?from=alternate' example.org www.example.org
 has "Expected a 302 to $WWW_TARGET" "a redirect back to the apex fails when www is the main host"
-
-restart="$ROOT/scripts/deploy/restart-k8s-rollout.sh"
-if grep -q 'check_public_host_urls "\$PUBLIC_HOST" "\$MAIN_HOST"' "$restart" && ! grep -q 'econgraph\.com' "$restart"; then
-    ok "restart-k8s-rollout.sh checks PUBLIC_HOST and MAIN_HOST and names no host itself"
-else
-    bad "restart-k8s-rollout.sh: no check_public_host_urls \"\$PUBLIC_HOST\" \"\$MAIN_HOST\", or a hard-coded econgraph.com"
-fi
 
 if [ "$failures" -eq 0 ]; then
     echo "all passed"

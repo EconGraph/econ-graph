@@ -374,7 +374,7 @@ jobs:
     # manifests through render-public-host.py and lib/public-host.sh; check the
     # rendering against the manifests, the library and the cut-over's rollback
     # NetworkPolicy step against a stub kubectl, and check-public-site.sh's main-host
-    # redirect and CORS checks and restart-k8s-rollout.sh's URL summary against a stub
+    # redirect and CORS checks and lib/public-host.sh's URL summary against a stub
     # curl.
     - name: Check the public-host rendering
       run: |

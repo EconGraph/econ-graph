@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Offline tests that scripts/deploy/deploy.sh and restart-k8s-rollout.sh keep their temporary
-# files to themselves, so two runs on one host (production's deploy and a QA cluster's, say)
-# never share one:
-#   - neither script, nor any library it sources, names a fixed /tmp path; temporary files
+# Offline tests that scripts/deploy/deploy.sh keeps its temporary files to itself, so two
+# runs on one host (production's deploy and a QA cluster's, say) never share one:
+#   - neither the script nor any library it sources names a fixed /tmp path; temporary files
 #     come from mktemp under ${TMPDIR:-/tmp};
-#   - each script's Grafana dashboards block (run on its own, with a stub kubectl and yq)
+#   - the script's Grafana dashboards block (run on its own, with a stub kubectl and yq)
 #     builds its ConfigMap in a file of its own under TMPDIR with both dashboards, applies
 #     it, and removes it, also when the apply fails (the exit cleanup). deploy.sh's runs with
 #     kind-env.sh's own add_exit_cleanup and must keep an earlier exit cleanup that holds a
@@ -18,7 +17,6 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEPLOY="$ROOT/scripts/deploy/deploy.sh"
-RESTART="$ROOT/scripts/deploy/restart-k8s-rollout.sh"
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 # Everything this test writes is under its own scratch directory, TMPDIR included.
@@ -30,17 +28,15 @@ failures=0
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; failures=$((failures + 1)); }
 
-# 1. No fixed /tmp path in either script or what it sources.
-for script in "$DEPLOY" "$RESTART"; do
-    files=("$script")
-    while read -r lib; do files+=("$ROOT/scripts/deploy/$lib"); done < <(grep -o 'lib/[a-z_-]*\.sh' "$script" | sort -u)
-    fixed="$(grep -Hn '/tmp/' "${files[@]}" | grep -v '\${TMPDIR:-/tmp}' || true)"
-    if [ -z "$fixed" ]; then
-        ok "$(basename "$script") and its libraries name no fixed /tmp path"
-    else
-        bad "fixed /tmp paths: ${fixed}"
-    fi
-done
+# 1. No fixed /tmp path in the script or what it sources.
+files=("$DEPLOY")
+while read -r lib; do files+=("$ROOT/scripts/deploy/$lib"); done < <(grep -o 'lib/[a-z_-]*\.sh' "$DEPLOY" | sort -u)
+fixed="$(grep -Hn '/tmp/' "${files[@]}" | grep -v '\${TMPDIR:-/tmp}' || true)"
+if [ -z "$fixed" ]; then
+    ok "deploy.sh and its libraries name no fixed /tmp path"
+else
+    bad "fixed /tmp paths: ${fixed}"
+fi
 
 # 2. add_exit_cleanup, as kind-env.sh has it, chains cleanups that hold quotes, in order.
 cleanup_function="$(awk '/^add_exit_cleanup\(\) \{$/,/^\}$/' "$ROOT/scripts/deploy/lib/kind-env.sh")"
@@ -180,8 +176,6 @@ check_block() {
 
 check_block deploy.sh "$DEPLOY" '# Configure Grafana dashboards' \
     '# Wait for monitoring stack to be ready' true
-check_block restart-k8s-rollout.sh "$RESTART" '# Ensure Grafana dashboards are properly configured' \
-    '# Wait for all pods to be ready (including monitoring components)' false
 
 if [ "$failures" -eq 0 ]; then
     echo "deploy temporary files: all passed"

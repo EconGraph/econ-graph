@@ -17,7 +17,7 @@
 #     before anything is applied, and a failed or empty lookup stops it without touching
 #     cloudflared;
 #   - every kubectl call goes to $KUBECTL (never the kubectl on PATH) on one pinned context;
-#   - deploy.sh and restart-k8s-rollout.sh leave cloudflared.yaml to apply_cloudflared,
+#   - deploy.sh leaves cloudflared.yaml to apply_cloudflared,
 #     and no script applies it or the whole k8s/manifests directory itself.
 # And, with the same stubbed cluster:
 #   - scripts/deploy/create-secrets.sh writes the tunnel token only into a marked cluster,
@@ -622,8 +622,8 @@ if PUBLIC_HOST='' STUB_NO_CONTEXT=1 run_lib public_host_init; then
   fail "public_host_init went on without a current context"
 fi
 # A CLUSTER_ROLE_CONTEXT inherited from the environment (another cluster's) does not
-# redirect a deploy: cluster_role_use_context replaces it, as deploy.sh and
-# restart-k8s-rollout.sh do, and their kubectl wrapper sends their own calls through kc.
+# redirect a deploy: cluster_role_use_context replaces it, as deploy.sh does, and its
+# kubectl wrapper sends its own calls through kc.
 PUBLIC_HOST='' STUB_SECRET=1 run_lib 'export CLUSTER_ROLE_CONTEXT=prod-elsewhere
   cluster_role_use_context kind-test; kubectl() { kc "$@"; }
   public_host_init; apply_public_edge; apply_cloudflared; kubectl get nodes' ||
@@ -648,22 +648,17 @@ timeout 20 env -u KUBECTL CLUSTER_ROLE_CONTEXT=ctx bash -c \
 : >"$path_log"
 
 # --- static: who applies cloudflared.yaml ----------------------------------------------
-for script in scripts/deploy/deploy.sh scripts/deploy/restart-k8s-rollout.sh; do
-  grep -q '^apply_cloudflared$' "$script" || fail "$script does not call apply_cloudflared"
-done
-grep -q 'cloudflared.yaml) continue' scripts/deploy/restart-k8s-rollout.sh ||
-  fail "restart-k8s-rollout.sh does not skip cloudflared.yaml in its manifest loop"
-# Both pin their context and send every kubectl call through kc before the first deploy step.
-for script in scripts/deploy/deploy.sh scripts/deploy/restart-k8s-rollout.sh; do
-  pin="$(grep -n '^if ! cluster_role_use_context ' "$script" | cut -d: -f1 || true)"
-  wrap="$(grep -nF 'kubectl() { kc "$@"; }' "$script" | cut -d: -f1 || true)"
-  init="$(grep -n '^public_host_init$' "$script" | cut -d: -f1 || true)"
-  first="$(grep -nE '^[^#]*\bkubectl (apply|get|wait|delete|patch|rollout|scale|create)' "$script" | head -1 | cut -d: -f1 || true)"
-  if ! { [ -n "$pin" ] && [ -n "$wrap" ] && [ "$pin" -lt "$wrap" ] && [ "$wrap" -lt "$init" ] &&
-    { [ -z "$first" ] || [ "$wrap" -lt "$first" ]; }; }; then
-    fail "$script does not pin its context and wrap kubectl before using it (pin $pin, wrap $wrap, init $init, first call $first)"
-  fi
-done
+grep -q '^apply_cloudflared$' scripts/deploy/deploy.sh || fail "deploy.sh does not call apply_cloudflared"
+# deploy.sh pins its context and sends every kubectl call through kc before the first deploy step.
+script=scripts/deploy/deploy.sh
+pin="$(grep -n '^if ! cluster_role_use_context ' "$script" | cut -d: -f1 || true)"
+wrap="$(grep -nF 'kubectl() { kc "$@"; }' "$script" | cut -d: -f1 || true)"
+init="$(grep -n '^public_host_init$' "$script" | cut -d: -f1 || true)"
+first="$(grep -nE '^[^#]*\bkubectl (apply|get|wait|delete|patch|rollout|scale|create)' "$script" | head -1 | cut -d: -f1 || true)"
+if ! { [ -n "$pin" ] && [ -n "$wrap" ] && [ "$pin" -lt "$wrap" ] && [ "$wrap" -lt "$init" ] &&
+  { [ -z "$first" ] || [ "$wrap" -lt "$first" ]; }; }; then
+  fail "$script does not pin its context and wrap kubectl before using it (pin $pin, wrap $wrap, init $init, first call $first)"
+fi
 # deploy.sh pins the kind kubectl that ensure_kind_kubectl set up (lib/kind-env.sh), not
 # whatever KUBECTL or PATH says: on a host where kubectl is another cluster's wrapper.
 kubectl_line="$(grep -n '^export KUBECTL="${ECONGRAPH_KUBE_DIR:-${ECONGRAPH_CACHE}}/bin/kubectl"$' scripts/deploy/deploy.sh | cut -d: -f1 || true)"
@@ -675,13 +670,6 @@ if ! { [ -n "$kubectl_line" ] && [ -n "$ensure_line" ] && [ -n "$pin_line" ] &&
 fi
 grep -q '^unset CLUSTER_ROLE_CONTEXT$' scripts/deploy/mark-production-cluster.sh ||
   fail "mark-production-cluster.sh does not drop an inherited CLUSTER_ROLE_CONTEXT"
-# restart-k8s-rollout.sh binds plain kubectl to the kubeconfig it wrote from MicroK8s,
-# not a KUBECTL or KUBECONFIG from the environment, before it pins microk8s.
-bind_line="$(grep -n '^export KUBECTL=kubectl KUBECONFIG="$HOME/.kube/config"$' scripts/deploy/restart-k8s-rollout.sh | cut -d: -f1 || true)"
-pin_line="$(grep -n '^if ! cluster_role_use_context microk8s' scripts/deploy/restart-k8s-rollout.sh | cut -d: -f1 || true)"
-if ! { [ -n "$bind_line" ] && [ -n "$pin_line" ] && [ "$bind_line" -lt "$pin_line" ]; }; then
-  fail "restart-k8s-rollout.sh does not bind its kubectl and kubeconfig before pinning microk8s"
-fi
 # Nothing else applies cloudflared.yaml, the whole k8s/manifests directory (which would
 # stop the connector on production, since the manifest is committed with 0 replicas), or
 # k8s/ recursively or through kustomize.

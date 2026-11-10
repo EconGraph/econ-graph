@@ -37,7 +37,7 @@ CLUSTER_ROLE_DRY_RUN=false
 
 # kubectl, as ${KUBECTL:-kubectl}, on the pinned context once there is one.
 # `command` runs the binary even where a script wraps kubectl in a function
-# that calls kc (deploy.sh, restart-k8s-rollout.sh).
+# that calls kc (deploy.sh).
 kc() {
     if [ "${CLUSTER_ROLE_DRY_RUN:-false}" = true ]; then
         echo "[dry-run] kubectl${CLUSTER_ROLE_CONTEXT:+ --context ${CLUSTER_ROLE_CONTEXT}} $*" >&2
@@ -125,7 +125,7 @@ cluster_role_pin_context() {
     export CLUSTER_ROLE_CONTEXT
 }
 
-# For the top-level scripts (deploy.sh, restart-k8s-rollout.sh): make CONTEXT
+# For the top-level scripts (deploy.sh): make CONTEXT
 # the current context of ${KUBECTL:-kubectl} and pin it. A CLUSTER_ROLE_CONTEXT
 # inherited from the environment is replaced, never followed: it must not send
 # the check and the writes to another cluster than the one the script deploys.

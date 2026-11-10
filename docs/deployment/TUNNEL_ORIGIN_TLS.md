@@ -50,8 +50,8 @@ KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin/kubec
   --for=condition=Ready certificate/econ-graph-tls --timeout=120s
 ```
 
-With issuer `econ-graph-origin-ca`, `apply-gateway-routes.sh` (and so `deploy.sh` and
-`restart-k8s-rollout.sh`, which run it) first runs
+With issuer `econ-graph-origin-ca`, `apply-gateway-routes.sh` (and so `deploy.sh`,
+which runs it) first runs
 `stage-tunnel-origin-ca.sh --context <context> --apply`, which is idempotent; if staging
 fails, it stops without changing the certificate. Its `--dry-run` prints that command
 without running it. Later deploys choose the issuer as described below, and stage
@@ -67,11 +67,11 @@ GATEWAY_TLS_ISSUER=econ-graph-origin-ca
 
 With a public host, every deploy chooses the issuer the same way (`tls_issuer_choose` in
 `scripts/deploy/lib/deploy-config.sh`, used by `apply-gateway-routes.sh`, by `deploy.sh`
-and `restart-k8s-rollout.sh` before they apply anything, and by `release-deploy.sh` before
+before it applies anything, and by `release-deploy.sh` before
 any step):
 
-1. `GATEWAY_TLS_ISSUER` in the environment: an explicit choice for `deploy.sh`,
-   `restart-k8s-rollout.sh` and `apply-gateway-routes.sh`, which may change the
+1. `GATEWAY_TLS_ISSUER` in the environment: an explicit choice for `deploy.sh`
+   and `apply-gateway-routes.sh`, which may change the
    certificate's issuer. `release-deploy.sh` refuses an environment value that differs
    from the existing issuer unless `--change-tls-issuer` is given, and with that flag
    passes the environment's value, else the config's line, this way.

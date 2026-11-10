@@ -409,11 +409,7 @@ Monitoring uses StatefulSet `grafana`, Deployment `prometheus` and DaemonSet `pr
 use the matching workload kind when restarting and checking status. Treat database and
 Keycloak version changes as upgrades with backup requirements.
 
-Do not use `restart-k8s-rollout.sh` as a kind restart or bootstrap. It starts MicroK8s,
-replaces `~/.kube/config` with MicroK8s configuration and pins the `microk8s` context.
-It also calls the kind-only builder and attempts to tag the excluded admin image, so it
-is not a self-contained MicroK8s deployment route. Use the
-[MicroK8s procedure](MICROK8S_DEPLOYMENT.md) for that platform.
+Use the [MicroK8s procedure](MICROK8S_DEPLOYMENT.md) for that platform.
 
 Review workload requests and limits against node capacity and observed usage before
 resizing. `kubectl top pods -n econ-graph` requires a working metrics-server. The backend

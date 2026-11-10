@@ -241,8 +241,7 @@ econ-graph/
 Choose the setup guide for your cluster type:
 
 - **MicroK8s**: Follow the [MicroK8s deployment guide](docs/deployment/MICROK8S_DEPLOYMENT.md)
-  for prerequisites, installation, required addons, and deployment with
-  `scripts/deploy/restart-k8s-rollout.sh`. That script targets MicroK8s.
+  for prerequisites, installation and required addons.
 - **kind (Kubernetes in Docker)**: Follow the prerequisites and manual setup in the
   [kind deployment guide](k8s/README.md#prerequisites) to install the pinned kind
   version, create the cluster with Terraform, build images, and deploy with

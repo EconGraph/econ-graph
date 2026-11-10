@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The host's deploy config: a file of NAME=value lines, read and never sourced.
 # release-deploy.sh takes PUBLIC_HOST from it. For a public host, release-deploy.sh,
-# deploy.sh and restart-k8s-rollout.sh (lib/public-host.sh, before anything is
+# deploy.sh (lib/public-host.sh, before anything is
 # applied) and apply-gateway-routes.sh take GATEWAY_TLS_ISSUER from it through
 # tls_issuer_choose.
 #
