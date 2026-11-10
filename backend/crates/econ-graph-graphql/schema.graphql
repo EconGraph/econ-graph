@@ -689,7 +689,9 @@ type DataSourceType {
 	"""
 	notice: SourceNotice
 	"""
-	Fetch all series for this data source using DataLoader
+	One page of this source's series in title order. `first` is 0 to 100 (default 50);
+	`after` is a previous page's `endCursor` (the number of series already read). Any other
+	value is rejected with a `BAD_USER_INPUT` error; a cursor past the end is an empty page.
 	"""
 	series(first: Int! = 50, after: String): SeriesConnection!
 	"""
@@ -887,7 +889,8 @@ type EconomicSeriesType {
 	"""
 	source: DataSourceType
 	"""
-	Fetch the most recent observations, latest revision of each
+	The most recent observations, latest revision of each, newest first. `limit` is at
+	most 10000; a negative or larger value is rejected with a `BAD_USER_INPUT` error.
 	"""
 	recentDataPoints(limit: Int! = 100): [DataPoint!]!
 	"""
@@ -903,7 +906,12 @@ type EconomicSeriesType {
 	"""
 	latestObservation: LatestObservation
 	"""
-	Fetch data points with filters using a custom DataLoader
+	Every observation matching the filter, in date order, optionally transformed.
+	
+	Unpaged, so it answers at most 10000 points: when more match, it fails with a
+	`QUERY_LIMIT_EXCEEDED` error rather than returning part of them. Read longer histories a
+	page at a time with `seriesData`, or narrow `startDate`/`endDate`. Costed as 10000
+	points (see the security guide), so it can't be selected across a long list of series.
 	"""
 	dataPoints(filter: DataFilter, transformation: DataTransformation): [DataPoint!]!
 }
@@ -1197,7 +1205,8 @@ type Query {
 	
 	`source` is a data source id; a value that isn't a UUID is rejected with a
 	`BAD_USER_INPUT` error. `after` must be a nonnegative integer in the i32 range,
-	or it is rejected with the same code. `totalCount` counts every matching series;
+	or it is rejected with the same code, as is a `first` outside 0 to 1000 (default 50).
+	`totalCount` counts every matching series;
 	read the next page with `after` set to the number of series already read.
 	"""
 	searchSeries(query: String!, source: String, frequency: SeriesFrequency, first: Int, after: String): SearchResult!

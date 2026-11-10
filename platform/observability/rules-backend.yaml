@@ -1,0 +1,60 @@
+# Backend memory alerts (ECO-888). One GraphQL request is bounded by cost, field and time
+# limits (backend/crates/econ-graph-graphql/src/graphql/limits.rs); these alerts catch a backend
+# that runs out of memory anyway, from a request the limits did not anticipate or from a leak.
+#
+# Pods: the API backend (econ-graph-backend) and the data plane (econ-graph-data-backend), both
+# container "backend", 512Mi limit. Memory is cAdvisor's working set (what the OOM killer
+# judges) from the kubelet ServiceMonitor; limits, restarts and termination reasons are
+# kube-state-metrics. Both come with kube-prometheus-stack and carry namespace, pod and
+# container labels. GraphQL refusals and request duration are on the econgraph-api dashboard
+# (dashboards/graphql-api.json).
+#
+# Tests: tests/backend.test.yaml, run by check-rules.sh in CI.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: econgraph-backend
+  namespace: monitoring
+  labels:
+    release: monitoring
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  groups:
+  - name: econgraph-backend
+    rules:
+    # Ten minutes above 80% is sustained pressure, not one large response being built: a
+    # 10,000-point page is serialized in well under a second.
+    - alert: EconGraphBackendMemoryHigh
+      expr: |
+        max by (namespace, pod, container) (
+          container_memory_working_set_bytes{namespace="econ-graph", pod=~"econ-graph-(data-)?backend-.+", container="backend"}
+        )
+        /
+        max by (namespace, pod, container) (
+          kube_pod_container_resource_limits{namespace="econ-graph", pod=~"econ-graph-(data-)?backend-.+", container="backend", resource="memory"}
+        )
+        > 0.8
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: A backend pod has used over 80% of its memory limit for 10 minutes
+        description: Backend pod {{ $labels.pod }} has held more than 80% of its memory limit for 10 minutes and is close to being OOM-killed. Check the econgraph-api dashboard for refused and slow GraphQL requests (a costly request pattern shows as rising cost or timeout refusals), then the pod's memory over time for a leak. Raising the limit or lowering MAX_QUERY_COMPLEXITY are the levers.
+
+    # The container's last termination was an OOM kill and it restarted within the last 15
+    # minutes; the restart condition keeps an old OOM kill from firing forever.
+    - alert: EconGraphBackendOOMKilled
+      expr: |
+        max by (namespace, pod, container) (
+          kube_pod_container_status_last_terminated_reason{namespace="econ-graph", pod=~"econ-graph-(data-)?backend-.+", container="backend", reason="OOMKilled"}
+        ) == 1
+        and on (namespace, pod, container)
+        max by (namespace, pod, container) (
+          increase(kube_pod_container_status_restarts_total{namespace="econ-graph", pod=~"econ-graph-(data-)?backend-.+", container="backend"}[15m])
+        ) > 0
+      labels:
+        severity: critical
+      annotations:
+        summary: A backend container was OOM-killed
+        description: Backend pod {{ $labels.pod }} was killed for exceeding its memory limit and restarted; requests it was serving failed. Look at the econgraph-api dashboard and the backend log just before the restart (`kubectl -n econ-graph logs {{ $labels.pod }} -c backend --previous`) for the request that was running.

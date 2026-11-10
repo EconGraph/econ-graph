@@ -14,27 +14,71 @@ The GraphQL backend combines request bounds, optional OIDC authentication, resol
 
 ## Request controls
 
-The HTTP route parses the request, resolves its caller, and passes a per-request `GraphQLContext` to the schema. The schema validates the operation and its limits before executing resolvers. Each protected resolver checks its required role; services then enforce resource access and business rules. Schema extensions sanitize server errors and wait for pending permission-denial writes before returning a normal response.
+The HTTP route parses the request, resolves its caller, and passes a per-request `GraphQLContext` to the schema. The schema validates the operation and its depth, field and cost limits before executing resolvers, and cancels it if it runs past the request timeout. Each protected resolver checks its required role; services then enforce resource access and business rules. Schema extensions sanitize server errors and wait for pending permission-denial writes before returning a normal response.
 
-### Depth and complexity
+### Per-request limits
 
-The [schema builder](../../backend/crates/econ-graph-graphql/src/graphql/schema.rs) applies these bounds to executable schemas:
+One request can ask for a lot of data: a page of series, each with its observations, aliased many times. Four limits bound what one request may make the backend do. They are set in [`graphql/limits.rs`](../../backend/crates/econ-graph-graphql/src/graphql/limits.rs) and applied by the [schema builder](../../backend/crates/econ-graph-graphql/src/graphql/schema.rs) to every schema the backend serves:
 
-| Control | Bound | Purpose and scope |
+| Limit | Bound | When it applies | Error |
+| --- | --- | --- | --- |
+| Depth | 15 levels | Before the request runs | `QUERY_LIMIT_EXCEEDED`, "nested too deep" |
+| Fields | 500 field selections, counting every alias and every expanded fragment spread | Before the request runs | `QUERY_LIMIT_EXCEEDED`, "too many fields" |
+| Cost | 20,000 (see below) | Before the request runs, from the arguments sent | `QUERY_LIMIT_EXCEEDED`, "too complex" |
+| Time | 25 seconds | While the request runs; it is then cancelled | `REQUEST_TIMEOUT` |
+
+The API's database connections also carry a PostgreSQL `statement_timeout` of 20 seconds (`API_STATEMENT_TIMEOUT` in [`database.rs`](../../backend/crates/econ-graph-core/src/database.rs)), so a statement a cancelled request was waiting on stops on the server too. It is set per connection by the API's pools, not on the database role, because the crawler and migrations share the role and run longer statements. The edge's own route timeout is 30 seconds, so the API answers first with an error the client can read.
+
+These are source settings, not environment profiles. Changing one requires a source change and a rebuilt backend.
+
+#### How cost is counted
+
+A field costs 1 plus the cost of its selections, except that a list costs what it can return:
+
+- **Lists of series, companies and users** cost their page size times their selections. `seriesList`, `DataSource.series` and `searchSeries` count `first` (after its default and cap); `dataSources` counts as 25 sources, `datasets` as 100, `crossSection` as 250 entries.
+- **Lists of observations** (`seriesData`, `EconomicSeries.dataPoints`, `EconomicSeries.recentDataPoints`, and `companyFacts`) cost one unit per 25 rows, times their selections plus 4. The 4 stands for reading the row, which costs the same however few of its fields are selected.
+- **Unpaged lists cost their worst case.** `EconomicSeries.dataPoints` returns at most 10,000 points, so it costs as 10,000 points wherever it is selected.
+- **Expensive roots** add 500 whatever they return: `searchSeries`, `searchSuggestions`, `crossSection`, `financialStatement`, `companyRatios`, `companyPeers` (which adds 200 more per peer compared).
+- **Fields that query the database per object** (`EconomicSeries.source`, `EconomicSeries.dataPointCount`, `DataSource.seriesCount`) add 5 each time they are selected.
+
+A document holding several operations is costed by the one the request names: the others, and fragments only they use, are dropped before validation.
+
+What this allows, at 20,000 (the site's figures are measured by `the_sites_own_queries_pass_the_limits`):
+
+| Request | Cost |
+| --- | --- |
+| One 10,000-point page of `seriesData` as the series page and CSV export request it | 5,601 |
+| `seriesList`, 100 series, as the explorer requests them | 2,801 |
+| `searchSeries`, 100 series, as the explorer requests them | 3,001 |
+| Company comparisons (`companyRatios` and 10 `companyPeers`) | 3,277 |
+| `Train3SeriesSubject` in the [data access contract](../api/operations/train3-data.graphql): one series read five ways through `dataPoints` | 17,090 |
+| One series with its full `dataPoints { date value }` | 2,402 |
+| Seven 10,000-point `seriesData` pages of `{ date value }` in one request | 19,607 |
+| Eight such pages | 22,408: refused |
+| `seriesList(pagination: {first: 10}) { nodes { dataPoints { value } } }` | 20,021: refused |
+| `seriesList(pagination: {first: 100}) { nodes { dataPoints { value } } }` | 200,201: refused |
+| `dataSources { series(first: 100) { nodes { dataPoints { value } } } }` | over 5,000,000: refused |
+
+So one request holds at most about 100,000 observations, whatever its shape. A longer history, or several series, is read a page at a time: the site's charts and CSV exports already read `seriesData` in 10,000-point pages until `pageInfo.hasNextPage` is false, one request per page, so a daily series with decades of history (15,000 to 20,000 points) takes two requests.
+
+#### Page arguments
+
+| Field | Page argument | Out of range |
 | --- | --- | --- |
-| Depth | 15 levels | Rejects excessive nesting before execution. |
-| Complexity | 1,000 | Counts one per selected field, excluding `__typename`, and rejects operations whose cost exceeds the bound. |
+| `seriesData` | `first` 0 to 10,000 (default 10,000); `after` a cursor | Negative `first` or a malformed `after`: `BAD_USER_INPUT`. Over 10,000: one page of 10,000, with `pageInfo.hasNextPage`. |
+| `EconomicSeries.dataPoints` | none; returns every matching point, at most 10,000 | More than 10,000 matching points: `QUERY_LIMIT_EXCEEDED`, naming `seriesData`. It never returns part of the history. Narrow `startDate`/`endDate` or page with `seriesData`. |
+| `EconomicSeries.recentDataPoints` | `limit` 0 to 10,000 (default 100) | `BAD_USER_INPUT` |
+| `DataSource.series` | `first` 0 to 100 (default 50); `after` a previous `endCursor` | `BAD_USER_INPUT`. An `after` past the end is an empty page. |
+| `searchSeries` | `first` 0 to 1,000 (default 50); `after` an offset | `BAD_USER_INPUT` |
+| `seriesList` | `pagination.first` 1 to 100 (default 50) | Clamped into range, with `pageInfo` showing the rest. |
 
-The builder uses the constants directly:
+The MCP `search_economic_series` tool takes `limit` 1 to 100 and refuses anything else, so a search never returns fewer results than were asked for without saying so.
 
-```rust
-.limit_depth(MAX_QUERY_DEPTH)
-.limit_complexity(MAX_QUERY_COMPLEXITY)
-```
+#### Monitoring the limits
 
-These are source settings, not environment-specific security profiles. Changing them requires a source change and a rebuilt backend. A limit violation produces a GraphQL error before resolver execution. The schema tests check both rejection above the bounds and acceptance at the complexity boundary.
+The backend exports `econgraph_graphql_rejected_requests_total{reason}`, with `reason` one of `complexity`, `depth`, `fields`, `timeout` and `statement_timeout`, and `econgraph_graphql_request_duration_seconds{outcome}` (`ok` or `error`). The Grafana dashboard **EconGraph API: GraphQL limits** ([`graphql-api.json`](../../platform/observability/dashboards/graphql-api.json)) shows both, with backend memory against its limit. [`rules-backend.yaml`](../../platform/observability/rules-backend.yaml) alerts when a backend pod holds more than 80% of its memory limit for 10 minutes (`EconGraphBackendMemoryHigh`) and when one is OOM-killed (`EconGraphBackendOOMKilled`).
 
-Complexity measures the selection shape, not database work or returned row count. For example, `dataSources { id }` costs two; aliases repeat that cost. A field that loads many records still needs its own bounded pagination and efficient database access. Depth and complexity limits do not establish a request timeout or a request-frequency quota.
+The limits bound one request, not how many a client sends. The edge's per-client request rate limit covers that.
 
 ### POST body size
 
@@ -44,7 +88,7 @@ This bounds the whole body, including variables, rather than just query text. GE
 
 ### Introspection and Playground
 
-Schema introspection is supported. The standard introspection query nests 13 levels, and the depth bound of 15 leaves room for schema tooling; an existing schema test checks that query.
+Schema introspection is supported. The standard introspection query nests 13 levels and holds about 160 fields, so the depth bound of 15 and the field bound of 500 leave room for schema tooling; a test checks that query.
 
 The browser interface at `/playground` is separately disabled unless `ENABLE_GRAPHQL_PLAYGROUND=true`. Disabling that page does not disable `__schema`, `__type`, or `__typename` on `/graphql`. Protect sensitive data through resolver authorization rather than assuming the schema is hidden.
 
@@ -127,7 +171,7 @@ Configure sign-in through these settings in [OidcConfig](../../backend/crates/ec
 
 Malformed OIDC configuration fails at startup. For deployment settings and the public issuer/in-cluster key-fetch relationship, see [Kubernetes deployment](../../k8s/README.md).
 
-The `/graphql` backend route does not provide per-client incoming request quotas, limiter status, or a limiter reset API. The core `RateLimitConfig` concerns outbound FRED/BLS calls and does not throttle GraphQL callers. Operators who need incoming traffic limits must configure and verify them at their deployment's edge. Record the client-identity key, quotas, rejection behavior, and proxy trust assumptions in the deployment's operational configuration; a schema complexity limit cannot replace those controls.
+The `/graphql` backend route does not provide per-client incoming request quotas, limiter status, or a limiter reset API. The core `RateLimitConfig` concerns outbound FRED/BLS calls and does not throttle GraphQL callers. Operators who need incoming traffic limits must configure and verify them at their deployment's edge. Record the client-identity key, quotas, rejection behavior, and proxy trust assumptions in the deployment's operational configuration; the per-request limits cannot replace those controls.
 
 Client attribution also needs deployment configuration. `TRUSTED_PROXIES` defaults to empty, so records use the backend's TCP peer rather than trusting forwarded addresses. Follow [trusted proxy configuration](ADMIN_AUDIT.md#trusted-proxies-in-kubernetes) before using recorded IPs to identify or block a client. Trust only verified proxy addresses or restricted proxy subnets.
 
@@ -163,7 +207,7 @@ Use the [monitoring guide](../monitoring/README.md) to connect collection and al
 
 Use an isolated, authorized environment for behavior checks. The existing source tests provide a starting point; a passing source check alone does not establish deployed routing, proxy trust, or notification delivery.
 
-- Check schema-limit coverage in `graphql/schema.rs`, including standard introspection, excessive depth, and complexity at and above 1,000. Exercise POST body rejection separately from GET URL handling.
+- Check per-request limit coverage in `graphql/request_limits_tests.rs`: standard introspection, depth, the field limit at and above 500, cost at and above 20,000, the data access contract, the worst-case observation requests, the site's own queries (read from the frontend sources) staying under 60% of the cost limit, and the request timeout. Exercise POST body rejection separately from GET URL handling.
 - Check authentication outcomes with sign-in enabled and disabled, invalid tokens, unavailable keys, suspended accounts, and account-load failures. Verify that anonymous fallback cannot acquire signed-in capabilities.
 - For each changed protected resolver, verify both the capability check and its resource-specific access rules. Verify validation at the owning service and that typed server errors reach clients only in sanitized form.
 - Use authorized audit readers to verify event and mutation outcomes. Observe the write-failure metric and logs when persistence fails; do not infer a complete audit trail from a successful response.

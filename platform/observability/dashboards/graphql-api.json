@@ -1,0 +1,173 @@
+{
+  "uid": "econgraph-api",
+  "title": "EconGraph API: GraphQL limits",
+  "description": "GraphQL requests the per-request limits refused or cut short, by reason, and how long requests take (ECO-888; limits in backend/crates/econ-graph-graphql/src/graphql/limits.rs). Backend memory against its limit is the other side of the same risk; its alerts are in rules-backend.yaml.",
+  "tags": [
+    "econgraph",
+    "api",
+    "graphql"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Refused GraphQL requests by reason",
+      "description": "complexity, depth and fields are refused before the request runs; timeout is a request cancelled at 25 seconds; statement_timeout is a database statement cancelled at 20 seconds.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (rate(econgraph_graphql_rejected_requests_total{namespace=\"econ-graph\"}[5m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "GraphQL request duration",
+      "description": "Time to answer /graphql and /data/graphql. Requests are cancelled at 25 seconds; the edge gives up at 30.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(econgraph_graphql_request_duration_seconds_bucket{namespace=\"econ-graph\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(econgraph_graphql_request_duration_seconds_bucket{namespace=\"econ-graph\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(econgraph_graphql_request_duration_seconds_bucket{namespace=\"econ-graph\"}[5m])))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "GraphQL requests by outcome",
+      "description": "ok: answered without errors; error: any error, refusals included.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (rate(econgraph_graphql_request_duration_seconds_count{namespace=\"econ-graph\"}[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Backend memory against its limit",
+      "description": "Working set over the container memory limit. EconGraphBackendMemoryHigh fires after 10 minutes above 0.8.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (pod) (container_memory_working_set_bytes{namespace=\"econ-graph\", container=\"backend\", pod=~\"econ-graph-(data-)?backend-.+\"}) / max by (pod) (kube_pod_container_resource_limits{namespace=\"econ-graph\", container=\"backend\", pod=~\"econ-graph-(data-)?backend-.+\", resource=\"memory\"})",
+          "legendFormat": "{{pod}}"
+        }
+      ]
+    }
+  ]
+}

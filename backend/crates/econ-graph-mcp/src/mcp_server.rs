@@ -6,6 +6,9 @@
 use anyhow::Result;
 use async_graphql::{Request, Variables};
 use econ_graph_services::services::series_service::MAX_SERIES_DATA_PAGE;
+
+/// Most results `search_economic_series` returns at once.
+const MAX_SEARCH_RESULTS: i64 = 100;
 use futures::future;
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -136,7 +139,9 @@ impl EconGraphMcpServer {
                         "limit": {
                             "type": "integer",
                             "description": "Maximum number of results to return",
-                            "default": 10
+                            "default": 10,
+                            "minimum": 1,
+                            "maximum": MAX_SEARCH_RESULTS
                         }
                     },
                     "required": ["query"]
@@ -252,10 +257,16 @@ impl EconGraphMcpServer {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: query"))?;
 
-        let limit = arguments
-            .get("limit")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(10) as i32;
+        // Refused rather than clamped above the cap, so a caller never gets fewer results than
+        // it asked for without being told; the cap keeps the search within the API's
+        // per-request cost limit (ECO-888).
+        let limit = match arguments.get("limit").and_then(|v| v.as_i64()) {
+            None => 10,
+            Some(limit) if (1..=MAX_SEARCH_RESULTS).contains(&limit) => limit as i32,
+            Some(limit) => {
+                anyhow::bail!("limit must be between 1 and {MAX_SEARCH_RESULTS}, got {limit}")
+            }
+        };
 
         let graphql_query = concat!(
             r#"
@@ -1532,6 +1543,34 @@ mod tests {
         let data = result.unwrap();
         assert!(data.get("content").is_some());
         assert!(!data.get("is_error").unwrap().as_bool().unwrap());
+    }
+
+    /// The largest search the tool allows fits the API's per-request cost limit; one more
+    /// result is refused with an error, not quietly cut to the cap.
+    #[tokio::test]
+    #[serial]
+    async fn test_search_economic_series_limit_is_bounded() {
+        let container = TestContainer::new().await;
+        let pool = container.pool();
+        let server = test_server(AppPool(pool.clone()), Some(DataPool(pool.clone())));
+
+        let largest = server
+            .search_economic_series(json!({"query": "GDP", "limit": MAX_SEARCH_RESULTS}))
+            .await;
+        assert!(largest.is_ok(), "{largest:?}");
+
+        for limit in [0, MAX_SEARCH_RESULTS + 1, -1] {
+            let error = server
+                .search_economic_series(json!({"query": "GDP", "limit": limit}))
+                .await
+                .expect_err("an out-of-range limit is refused");
+            assert!(
+                error
+                    .to_string()
+                    .contains("limit must be between 1 and 100"),
+                "{error}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -224,6 +224,9 @@ impl EconomicSeriesType {
     }
 
     /// Fetch the data source using direct database query
+    #[graphql(
+        complexity = "crate::graphql::limits::PER_OBJECT_QUERY_COST.saturating_add(child_complexity)"
+    )]
     async fn source(&self, ctx: &Context<'_>) -> Result<Option<DataSourceType>> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let source_uuid = Uuid::parse_str(&self.source_id)?;
@@ -243,12 +246,22 @@ impl EconomicSeriesType {
         Ok(source.map(|s| s.into()))
     }
 
-    /// Fetch the most recent observations, latest revision of each
+    /// The most recent observations, latest revision of each, newest first. `limit` is at
+    /// most 10000; a negative or larger value is rejected with a `BAD_USER_INPUT` error.
+    #[graphql(
+        complexity = "crate::graphql::limits::observation_cost(crate::graphql::limits::page_rows(Some(limit), 100, crate::graphql::limits::MAX_OBSERVATIONS_PER_PAGE), child_complexity)"
+    )]
     async fn recent_data_points(
         &self,
         ctx: &Context<'_>,
         #[graphql(default = 100)] limit: i32,
     ) -> Result<Vec<DataPointType>> {
+        let max = crate::graphql::limits::MAX_OBSERVATIONS_PER_PAGE;
+        if !usize::try_from(limit).is_ok_and(|limit| limit <= max) {
+            return Err(crate::graphql::errors::bad_user_input(format!(
+                "limit must be between 0 and {max}; read longer histories with seriesData"
+            )));
+        }
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&self.id)?;
 
@@ -277,6 +290,9 @@ impl EconomicSeriesType {
     }
 
     /// Get data point count using direct database query
+    #[graphql(
+        complexity = "crate::graphql::limits::PER_OBJECT_QUERY_COST.saturating_add(child_complexity)"
+    )]
     async fn data_point_count(&self, ctx: &Context<'_>) -> Result<i32> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let series_uuid = Uuid::parse_str(&self.id)?;
@@ -304,7 +320,15 @@ impl EconomicSeriesType {
             .map_err(|_| GraphQLError::new("Failed to load the latest observation"))
     }
 
-    /// Fetch data points with filters using a custom DataLoader
+    /// Every observation matching the filter, in date order, optionally transformed.
+    ///
+    /// Unpaged, so it answers at most 10000 points: when more match, it fails with a
+    /// `QUERY_LIMIT_EXCEEDED` error rather than returning part of them. Read longer histories a
+    /// page at a time with `seriesData`, or narrow `startDate`/`endDate`. Costed as 10000
+    /// points (see the security guide), so it can't be selected across a long list of series.
+    #[graphql(
+        complexity = "crate::graphql::limits::observation_cost(crate::graphql::limits::MAX_OBSERVATIONS_PER_PAGE, child_complexity)"
+    )]
     async fn data_points(
         &self,
         ctx: &Context<'_>,
@@ -341,6 +365,7 @@ impl EconomicSeriesType {
             None,
         );
         use econ_graph_services::services::observation_compatibility::{self, PointsQuery};
+        let max = crate::graphql::limits::MAX_OBSERVATIONS_PER_PAGE;
         let (mut rows, revised) = observation_compatibility::points_batch_with_revised(
             pool,
             &[series_uuid],
@@ -350,11 +375,19 @@ impl EconomicSeriesType {
                 revisions: request.revisions,
                 exclude_synthetic: request.revisions != models::RevisionMode::All,
                 descending: false,
-                limit: None,
+                // One more than the cap, to tell "exactly the cap" from "more".
+                limit: Some(max as i64 + 1),
             },
         )
         .await?;
         let data_points = rows.remove(&series_uuid).unwrap_or_default();
+        if data_points.len() > max {
+            return Err(crate::graphql::limits::too_many_rows(format!(
+                "More than {max} points match, more than dataPoints returns at once. Read them \
+                 a page at a time with seriesData(seriesId, first, after), or narrow \
+                 startDate/endDate."
+            )));
+        }
 
         // Apply transformation if requested
         let data_points = match transformation {
@@ -558,13 +591,28 @@ impl DataSourceType {
         crate::source_notices::notice_for_name(&self.name)
     }
 
-    /// Fetch all series for this data source using DataLoader
+    /// One page of this source's series in title order. `first` is 0 to 100 (default 50);
+    /// `after` is a previous page's `endCursor` (the number of series already read). Any other
+    /// value is rejected with a `BAD_USER_INPUT` error; a cursor past the end is an empty page.
+    #[graphql(
+        complexity = "crate::graphql::limits::list_cost(crate::graphql::limits::page_rows(Some(first), 50, crate::graphql::limits::MAX_SERIES_PER_PAGE), child_complexity)"
+    )]
     async fn series(
         &self,
         ctx: &Context<'_>,
         #[graphql(default = 50)] first: i32,
         after: Option<String>,
     ) -> Result<SeriesConnection> {
+        let max = crate::graphql::limits::MAX_SERIES_PER_PAGE;
+        let limit = usize::try_from(first)
+            .ok()
+            .filter(|first| *first <= max)
+            .ok_or_else(|| {
+                crate::graphql::errors::bad_user_input(format!("first must be between 0 and {max}"))
+            })? as i64;
+        let offset = i64::from(crate::graphql::query::parse_series_cursor(
+            after.as_deref(),
+        )?);
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let source_uuid = Uuid::parse_str(&self.id)?;
         crate::graphql::catalogs::require_source(ctx, source_uuid).await?;
@@ -574,50 +622,47 @@ impl DataSourceType {
         use econ_graph_core::schema::economic_series::dsl;
 
         let mut conn = pool.get().await?;
-        let all_series = dsl::economic_series
+        let total_count = dsl::economic_series
             .filter(dsl::source_id.eq(source_uuid))
             .filter(econ_graph_services::services::series_service::public_series_predicate())
             .filter(dsl::is_active.eq(true))
             .filter(dsl::end_date.is_not_null())
+            .count()
+            .get_result::<i64>(&mut conn)
+            .await?;
+        let series_page = dsl::economic_series
+            .filter(dsl::source_id.eq(source_uuid))
+            .filter(econ_graph_services::services::series_service::public_series_predicate())
+            .filter(dsl::is_active.eq(true))
+            .filter(dsl::end_date.is_not_null())
+            .order_by((dsl::title.asc(), dsl::id.asc()))
+            .limit(limit)
+            .offset(offset)
             .select(models::EconomicSeries::as_select())
             .load::<models::EconomicSeries>(&mut conn)
             .await?;
 
-        // Apply pagination (simplified - in production you'd want cursor-based pagination)
-        let start_index = after
-            .and_then(|cursor| cursor.parse::<usize>().ok())
-            .unwrap_or(0);
-
-        let end_index = (start_index + first as usize).min(all_series.len());
-        let series_page = all_series[start_index..end_index].to_vec();
-
-        let has_next_page = end_index < all_series.len();
-        let has_previous_page = start_index > 0;
-
+        let end_index = offset + series_page.len() as i64;
+        let has_next_page = end_index < total_count;
         Ok(SeriesConnection {
             nodes: series_page
                 .into_iter()
                 .map(EconomicSeriesType::from)
                 .collect(),
-            total_count: all_series.len() as i32,
+            total_count: i32::try_from(total_count).unwrap_or(i32::MAX),
             page_info: PageInfo {
                 has_next_page,
-                has_previous_page,
-                start_cursor: if start_index > 0 {
-                    Some(start_index.to_string())
-                } else {
-                    None
-                },
-                end_cursor: if has_next_page {
-                    Some(end_index.to_string())
-                } else {
-                    None
-                },
+                has_previous_page: offset > 0,
+                start_cursor: (offset > 0).then(|| offset.to_string()),
+                end_cursor: has_next_page.then(|| end_index.to_string()),
             },
         })
     }
 
     /// Get count of active series for this data source
+    #[graphql(
+        complexity = "crate::graphql::limits::PER_OBJECT_QUERY_COST.saturating_add(child_complexity)"
+    )]
     async fn series_count(&self, ctx: &Context<'_>) -> Result<i32> {
         let pool: &DatabasePool = crate::graphql::context::data_pool(ctx)?;
         let source_uuid = Uuid::parse_str(&self.id)?;

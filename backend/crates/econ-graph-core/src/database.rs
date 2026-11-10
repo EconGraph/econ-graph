@@ -86,6 +86,58 @@ pub async fn create_pool_with_size(database_url: &str, max_size: u32) -> AppResu
     Ok(pool)
 }
 
+/// Longest one SQL statement on the API's connections may run before PostgreSQL cancels it
+/// (ECO-888). The GraphQL layer cancels a request at 25 seconds
+/// (`econ_graph_graphql::graphql::limits::REQUEST_TIMEOUT`); a statement it was waiting on
+/// would otherwise keep running on the server after the client got its error.
+pub const API_STATEMENT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Create a pool of at most `max_size` connections, each with PostgreSQL's
+/// `statement_timeout` set to `statement_timeout` (rounded down to milliseconds, at least 1)
+/// for its whole session.
+///
+/// The API's pools use this with [`API_STATEMENT_TIMEOUT`]. It is a session setting rather
+/// than `ALTER ROLE ... SET`, because the API shares its database role with the crawler and
+/// migrations, whose long statements must not be cut short. A statement that needs longer can
+/// still `SET LOCAL statement_timeout` inside its transaction.
+pub async fn create_pool_with_statement_timeout(
+    database_url: &str,
+    max_size: u32,
+    statement_timeout: Duration,
+) -> AppResult<DatabasePool> {
+    use diesel_async::pooled_connection::ManagerConfig;
+    use diesel_async::{AsyncConnection, SimpleAsyncConnection};
+
+    let millis = statement_timeout.as_millis().clamp(1, u128::from(u32::MAX));
+    let mut config = ManagerConfig::<AsyncPgConnection>::default();
+    config.custom_setup = Box::new(move |url| {
+        let url = url.to_string();
+        Box::pin(async move {
+            let mut conn = AsyncPgConnection::establish(&url).await?;
+            conn.batch_execute(&format!("SET statement_timeout = {millis}"))
+                .await
+                .map_err(|e| diesel::ConnectionError::BadConnection(e.to_string()))?;
+            Ok(conn)
+        })
+    });
+    let manager =
+        AsyncDieselConnectionManager::<AsyncPgConnection>::new_with_config(database_url, config);
+
+    let pool = Pool::builder()
+        .max_size(max_size)
+        .connection_timeout(Duration::from_secs(30))
+        .idle_timeout(Some(Duration::from_secs(300)))
+        .build(manager)
+        .await
+        .map_err(|e| AppError::InternalError(format!("Failed to create database pool: {}", e)))?;
+
+    info!(
+        statement_timeout_ms = millis as u64,
+        "Database connection pool created with a statement timeout"
+    );
+    Ok(pool)
+}
+
 /// Test database connectivity
 pub async fn test_connection(pool: &DatabasePool) -> AppResult<()> {
     let mut conn = pool.get().await.map_err(|e| {
@@ -624,6 +676,41 @@ mod tests {
             .get()
             .await
             .expect("Should be able to get connection from pool");
+    }
+
+    /// A pool from `create_pool_with_statement_timeout` has PostgreSQL cancel a statement that
+    /// runs past the timeout, on every connection it opens; a plain pool's statement finishes.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn statement_timeout_pool_cancels_slow_statements() {
+        use diesel_async::SimpleAsyncConnection;
+
+        let container = crate::test_utils::TestContainer::new().await;
+        let url = container.database_url().to_string();
+        let limited = create_pool_with_statement_timeout(&url, 2, Duration::from_millis(200))
+            .await
+            .unwrap();
+        // Two connections at once, so the setting is shown on more than the first one.
+        let (mut first, mut second) = (limited.get().await.unwrap(), limited.get().await.unwrap());
+        for conn in [&mut first, &mut second] {
+            let error = conn
+                .batch_execute("SELECT pg_sleep(2)")
+                .await
+                .expect_err("pg_sleep(2) must be cancelled at 200ms");
+            assert!(
+                error.to_string().contains("statement timeout"),
+                "unexpected error: {error}"
+            );
+        }
+
+        let plain = create_pool_with_size(&url, 1).await.unwrap();
+        plain
+            .get()
+            .await
+            .unwrap()
+            .batch_execute("SELECT pg_sleep(0.3)")
+            .await
+            .expect("a plain pool has no statement timeout");
     }
 
     /// Proves `run_migrations` actually blocks on the advisory lock rather than racing ahead: it
