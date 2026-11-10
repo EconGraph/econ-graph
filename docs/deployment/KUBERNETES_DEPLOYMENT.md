@@ -459,9 +459,11 @@ Expected state on the production host:
   node exporter rule in [Host disk monitoring](HOST_DISK_MONITORING.md). It needs no rule
   for `80`, `443`, `3000` or `8080`, and none is relied on: Docker inserts its own
   NAT rules for published ports, so they bypass ufw's `INPUT` rules. The loopback binding
-  is what keeps the ports local. Docker 28 and later also drop packets that other hosts on
-  the same network segment send to a port published on `127.0.0.1`. On older Docker, add the
-  `DOCKER-USER` rule below as well.
+  is what keeps the ports local, on Docker 28 or later: those versions drop packets that
+  other hosts on the same network segment address to a port published on `127.0.0.1`.
+  Before Docker 28, such a host can still reach the port. Check
+  `docker version --format '{{.Server.Version}}'`. On an older Docker, keep the interim
+  rules below for good (saved, so they survive a reboot), or upgrade Docker.
 
 kind cannot change the port mappings of an existing cluster: Docker fixes them when it
 creates the node container. A cluster created from an older configuration keeps
@@ -469,21 +471,26 @@ publishing `80`, `443`, `3000` and `8080` on every interface until it is recreat
 is an operator step, done in a planned window:
 
 1. Check what the running cluster publishes: `docker port econ-graph-control-plane`.
-2. Until the cluster is recreated, drop outside traffic to those ports in Docker's own
-   chain. `<if>` is the host's external interface. The rule does not survive a reboot
-   or a Docker restart unless it is saved:
+2. Until the cluster is recreated, drop outside traffic to those ports. `<if>` is the
+   host's external interface. Over IPv4, Docker forwards published ports through NAT, so
+   the rule goes in Docker's own `DOCKER-USER` chain. Over IPv6, when the daemon has no
+   IPv6 NAT, `docker-proxy` itself listens on `[::]` (`ss -Hltnp` shows it). That traffic
+   arrives through `INPUT`, which `DOCKER-USER` never sees, so drop it in `INPUT` too.
+   The rules do not survive a reboot or a Docker restart unless they are saved:
 
    ```bash
    sudo iptables -I DOCKER-USER -i <if> -p tcp -m multiport --dports 80,443,3000,8080 -j DROP
    sudo ip6tables -I DOCKER-USER -i <if> -p tcp -m multiport --dports 80,443,3000,8080 -j DROP
+   sudo ip6tables -I INPUT -i <if> -p tcp -m multiport --dports 80,443,3000,8080 -j DROP
    ```
 
 3. Recreate the cluster with `./scripts/deploy/recreate-kind-cluster.sh`, which backs up
    the databases and Secrets, deletes the cluster and creates it from the current
    configuration. The databases live on the host subvolumes and survive it; see
    [Host Storage](HOST_STORAGE.md) for what else it restores. Then redeploy.
-4. Repeat the checks above from the host and from another machine, and remove the
-   interim `DOCKER-USER` rule.
+4. Repeat the checks above from the host and from another machine, over IPv4 and IPv6.
+   On Docker 28 or later, remove the interim rules. On an older Docker, keep them and save
+   them.
 
 ## Remove the application or cluster
 

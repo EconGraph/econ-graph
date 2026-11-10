@@ -18,9 +18,12 @@
 #
 # User timers keep running after logout only with lingering enabled
 # (`loginctl show-user "$USER" -p Linger` must say Linger=yes). If it is off,
-# the installer runs `loginctl enable-linger` for this user (polkit usually
-# lets a user do that for themselves); if lingering is still off it stops
-# with an error, before installing anything, unless --allow-no-linger is given.
+# the installer runs `loginctl --no-ask-password enable-linger` for this user
+# (polkit usually lets a user do that for themselves); if lingering is still
+# off it stops with an error, before installing anything. --allow-no-linger
+# skips both: lingering is left as it is and the units are installed anyway.
+# With restic.env but no recorded off-site run yet, it starts the off-site
+# copy once, so the freshness check has an age to read.
 #
 # Re-run after merging changes to these scripts. Safe to re-run.
 #
@@ -61,9 +64,10 @@ fi
 user="$(id -un)"
 linger_state() { loginctl show-user "$user" -p Linger --value 2>/dev/null || echo unknown; }
 linger="$(linger_state)"
-if [ "$linger" != "yes" ]; then
+if [ "$linger" != "yes" ] && [ "$ALLOW_NO_LINGER" = "false" ]; then
     echo "Linger=$linger: the timers would stop whenever $user logs out; enabling lingering"
-    run loginctl enable-linger "$user" || true
+    # --no-ask-password: polkit either allows it or refuses; never a prompt.
+    run loginctl --no-ask-password enable-linger "$user" || true
     [ "$DRY_RUN" = "true" ] || linger="$(linger_state)"
 fi
 if [ "$linger" != "yes" ] && [ "$DRY_RUN" = "false" ]; then
@@ -114,6 +118,17 @@ if [ "$ENABLE" = "true" ]; then
         echo "= off-site not configured (no ~/.config/econgraph/restic.env); econgraph-offsite.timer left disabled"
     fi
     run systemctl --user enable --now "${timers[@]}"
+    # check-freshness.sh reads the off-site copy's age from offsite.last, which only
+    # offsite-restic.sh backup writes. Without one yet (an off-site copy set up before
+    # it recorded its runs), run it once now rather than leave the check failing until
+    # the next 10:45 UTC run.
+    state_dir="${ECONGRAPH_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/econgraph}"
+    if [ -f "${HOME}/.config/econgraph/restic.env" ] && [ ! -f "$state_dir/offsite.last" ]; then
+        echo "= no off-site run recorded yet ($state_dir/offsite.last); starting econgraph-offsite.service once"
+        run systemctl --user start --no-block econgraph-offsite.service
+    fi
+    echo "= Run $LIB_DIR/check-freshness.sh now: whatever it reports as STALE or MISSING (a restore"
+    echo "  drill older than 8 days, say) is reported to a person from the next hourly check on."
     if [ "$DRY_RUN" = "false" ]; then
         systemctl --user list-timers 'econgraph-*' --no-pager
     fi

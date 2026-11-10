@@ -12,12 +12,12 @@ output "kubectl_context" {
 
 output "frontend_url" {
   description = "Frontend application URL"
-  value       = "http://localhost:3000"
+  value       = "http://localhost"
 }
 
 output "backend_url" {
   description = "Backend API URL"
-  value       = "http://localhost:8080"
+  value       = "http://localhost/api"
 }
 
 output "ingress_url" {

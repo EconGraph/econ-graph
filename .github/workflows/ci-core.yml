@@ -376,11 +376,13 @@ jobs:
     # rendering against the manifests, the library and the cut-over's rollback
     # NetworkPolicy step against a stub kubectl, and check-public-site.sh's main-host
     # redirect and CORS checks and restart-k8s-rollout.sh's URL summary against a stub
-    # curl.
+    # curl; and that the production kind config publishes only 80 and 443 on 127.0.0.1,
+    # as main.tf declares.
     - name: Check the public-host rendering
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-render-public-host.sh
+        python3 scripts/deploy/test-kind-config.py
         scripts/deploy/test-check-public-site.sh
         shellcheck -x scripts/deploy/switch-main-host.sh scripts/deploy/test-switch-main-host.sh
         scripts/deploy/test-switch-main-host.sh

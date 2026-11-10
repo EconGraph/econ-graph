@@ -108,13 +108,21 @@ printf 'BACKUP_AGE_RECIPIENT=AGE-SECRET-KEY-1QQQQ\n' >"$tmp/config/backup.env"
 block="$(sed -n '/^# Deploy PostgreSQL backups$/,/^run_script "\$PROJECT_ROOT\/scripts\/deploy\/protect-postgres-pv.sh"$/p' \
   "${repo_root}/scripts/deploy/deploy.sh")"
 grep -q 'render-backup-cronjob.py' <<<"$block" || fail "deploy.sh's backup block was not found"
-run_block() { # run_block [ENV-RECIPIENT]: the block's kubectl calls, one per line
+run_block() { # run_block [ENV-RECIPIENT [LIVE-RECIPIENT]]: the block's kubectl calls, one per line
   : >"$tmp/kubectl.log"
+  # LIVE: what `kubectl get cronjob postgres-backup` reports as the live recipient
+  # (empty: no CronJob, or one without a recipient).
   env -i PATH="$PATH" HOME="$tmp/home" ECONGRAPH_CONFIG_DIR="$tmp/config" ${1:+BACKUP_AGE_RECIPIENT="$1"} \
-    PROJECT_ROOT="$repo_root" LOG="$tmp/kubectl.log" bash -c '
+    PROJECT_ROOT="$repo_root" LOG="$tmp/kubectl.log" LIVE="${2:-}" bash -c '
 set -e
 cd "$PROJECT_ROOT"
-kubectl() { echo "kubectl $*" >>"$LOG"; if [ "$*" = "apply -f -" ]; then cat >>"$LOG"; fi; }
+kubectl() {
+  echo "kubectl $*" >>"$LOG"
+  case "$*" in
+    "apply -f -") cat >>"$LOG" ;;
+    "-n econ-graph get cronjob postgres-backup "*) printf "%s" "$LIVE" ;;
+  esac
+}
 run_script() { :; }
 eval "$1"
 ' _ "$block" >/dev/null
@@ -136,6 +144,41 @@ if grep -qx 'kubectl -n econ-graph delete cronjob postgres-backup --ignore-not-f
 else
   fail "without a recipient, deploy.sh ran: ${calls}"
 fi
+# A shell without backup.env (another HOME, sudo) must not remove a working CronJob: its
+# live recipient is reused.
+live="age1livelivelivelivelivelivelivelivelivelivelivelivelivelivexyz"
+calls="$(run_block "" "$live")"
+if grep -qx 'kubectl apply -f -' <<<"$calls" && grep -qF "value: ${live}" <<<"$calls" &&
+  ! grep -q 'delete cronjob' <<<"$calls"; then
+  ok "without a recipient here, deploy.sh reapplies the CronJob with its live recipient"
+else
+  fail "without a recipient here and a live one, deploy.sh ran: ${calls}"
+fi
+calls="$(run_block "$recipient" "$live")"
+if grep -qF "value: ${recipient}" <<<"$calls" && ! grep -q 'delete cronjob' <<<"$calls"; then
+  ok "a recipient here wins over the live one"
+else
+  fail "with both recipients, deploy.sh ran: ${calls}"
+fi
+for bad_live in "AGE-SECRET-KEY-1QQQQ" "age1ABC" "not-a-recipient"; do
+  calls="$(run_block "" "$bad_live")"
+  grep -qx 'kubectl -n econ-graph delete cronjob postgres-backup --ignore-not-found' <<<"$calls" &&
+    ! grep -q 'apply -f -' <<<"$calls" ||
+    fail "a live CronJob with recipient '${bad_live}' and none here was not removed: ${calls}"
+done
+# The recipient must pass backup_recipient_proven, like the host dumps' (ECO-718's hook).
+source_line='source "$PROJECT_ROOT/scripts/backup/encryption.sh"'
+unproven_block="${block/"$source_line"/"$source_line"; backup_recipient_proven() { return 1; \}}"
+grep -q 'backup_recipient_proven() { return 1; }$' <<<"$unproven_block" || fail "could not stub backup_recipient_proven"
+saved_block="$block"
+block="$unproven_block"
+calls="$(run_block "$recipient" "$live")"
+if ! grep -q 'apply -f -\|delete cronjob' <<<"$calls"; then
+  ok "an unproven recipient applies nothing and leaves a working CronJob as it is"
+else
+  fail "with an unproven recipient, deploy.sh ran: ${calls}"
+fi
+block="$saved_block"
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures check(s) failed"

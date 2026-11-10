@@ -93,10 +93,13 @@ The CronJob's `encrypt` container needs the maintainer's native `age1...`
 empty. `scripts/deploy/deploy.sh` fills it in with the recipient the host dumps
 already use: `BACKUP_AGE_RECIPIENT` from the environment, else from
 `~/.config/econgraph/backup.env` (see [Backups](BACKUPS.md)), through
-`scripts/deploy/render-backup-cronjob.py`. Without a well-formed recipient,
-`deploy.sh` does not apply the CronJob and removes one an earlier deploy applied,
-since every run would fail; the `postgres-backup-data` PVC and the backups on it
-stay. Check what a deploy did with
+`scripts/deploy/render-backup-cronjob.py`. When the deploy's shell has none (another
+`HOME`, `sudo`, another `ECONGRAPH_CONFIG_DIR`), it reuses the live CronJob's recipient
+if that is well formed. The recipient must also pass `backup_recipient_proven`, as the
+host dumps' does (ECO-718; it accepts every well-formed recipient for now); an unproven
+one changes nothing. Only when neither this shell nor the live CronJob has a well-formed
+recipient does `deploy.sh` skip the CronJob and remove the live one, since every run
+would fail; the `postgres-backup-data` PVC and the backups on it stay. Check what a deploy did with
 `kubectl -n econ-graph get cronjob postgres-backup` and, after the next 08:00 UTC
 run or `scripts/deploy/backup-postgres-now.sh`, `kubectl -n econ-graph get jobs`.
 A malformed or private-key value fails the job; there is no plaintext

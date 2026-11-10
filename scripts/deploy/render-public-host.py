@@ -191,6 +191,20 @@ def withheld_route(namespace, main_host):
                 {
                     "matches": [{"path": {"type": "PathPrefix", "value": p}} for p in LOCAL_ONLY_PATHS],
                     "filters": [
+                        # The backend routes' security headers, on the 404 too.
+                        {
+                            "type": "ResponseHeaderModifier",
+                            "responseHeaderModifier": {
+                                "set": [
+                                    {"name": "X-Content-Type-Options", "value": "nosniff"},
+                                    {"name": "X-Frame-Options", "value": "DENY"},
+                                    {
+                                        "name": "Strict-Transport-Security",
+                                        "value": "max-age=31536000; includeSubDomains; preload",
+                                    },
+                                ]
+                            },
+                        },
                         {
                             "type": "ExtensionRef",
                             "extensionRef": {

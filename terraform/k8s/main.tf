@@ -33,7 +33,9 @@ resource "local_file" "kind_config" {
         # ports. Without listenAddress, kind (Docker) publishes them on every
         # host interface, and anyone who can reach the host gets the site
         # without Cloudflare. Docker-published ports bypass ufw's INPUT rules,
-        # so the binding, not the firewall, keeps them local
+        # so the binding, not the firewall, keeps them local, on Docker 28 or
+        # later; an older Docker lets hosts on the same network segment reach
+        # 127.0.0.1-published ports and needs the DOCKER-USER rules kept
         # (docs/deployment/KUBERNETES_DEPLOYMENT.md, "Host ports and firewall").
         # kind cannot change the mappings of an existing cluster: they take
         # effect when the cluster is next created (recreate-kind-cluster.sh).
@@ -165,7 +167,7 @@ output "cluster_info" {
     context      = "kind-econ-graph"
     kubeconfig   = "~/.kube/config"
     ingress_ip   = "localhost"
-    frontend_url = "http://localhost:3000"
-    backend_url  = "http://localhost:8080"
+    frontend_url = "http://localhost"
+    backend_url  = "http://localhost/api"
   }
 }

@@ -47,6 +47,7 @@ def render(docs, recipient):
 
 
 def main(argv):
+    """Render the manifest named in argv (or the committed one) with argv[1] as recipient."""
     if len(argv) not in (2, 3):
         print("usage: render-backup-cronjob.py RECIPIENT [MANIFEST]", file=sys.stderr)
         return 2

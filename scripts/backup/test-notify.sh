@@ -42,26 +42,35 @@ done
 { echo "curl args: $*"; echo "curl url: ${url}"; echo "curl body: $(cat)"; } >>"${STUB_LOG}"
 exit "${FAKE_CURL_RC:-0}"
 EOF
-# journalctl: the lines of a failed freshness run.
+# journalctl: by unit (-u), the lines of a failed freshness run, or FAKE_JOURNAL_FILE's;
+# by invocation ID, FAKE_INVOCATION_FILE's (nothing without one).
 cat >"${tmp}/bin/journalctl" <<'EOF'
 #!/usr/bin/env bash
 echo "journalctl $*" >>"${STUB_LOG}"
+if [[ " $* " == *" _SYSTEMD_INVOCATION_ID="* ]]; then
+    [[ -z "${FAKE_INVOCATION_FILE:-}" ]] || cat "${FAKE_INVOCATION_FILE}"
+    exit 0
+fi
+if [[ -n "${FAKE_JOURNAL_FILE:-}" ]]; then cat "${FAKE_JOURNAL_FILE}"; exit 0; fi
 printf '%s\n' "OK      dump: newest verified dump is 3h old (limit 26h)" \
     "STALE   offsite: newest off-site copy is 30h old (limit 26h)" \
     "LOWSPACE dumps: 1.0GiB free of 100GiB (1%, minimum 15%)" "BACKUP CHECK FAIL"
 EOF
 chmod +x "${tmp}/bin/curl" "${tmp}/bin/journalctl"
 export PATH="${tmp}/bin:${PATH}"
-# Never read the operator's backup.env or notify.env.
-export ECONGRAPH_CONFIG_DIR="${tmp}/config" HOME="${tmp}/home"
+# Never read the operator's backup.env or notify.env, or write its state.
+export ECONGRAPH_CONFIG_DIR="${tmp}/config" HOME="${tmp}/home" ECONGRAPH_STATE_DIR="${tmp}/state"
+unset MONITOR_INVOCATION_ID
 webhook="https://hooks.slack.test/services/T000/B000/secret-token"
 
 # run_notify <name> <want exit> <text the output must contain> <args...>
+# Forgets earlier reports first, unless KEEP_STATE=1.
 out=""
 run_notify() {
     local name="$1" want="$2" text="$3" status=0
     shift 3
     : >"${STUB_LOG}"
+    [[ "${KEEP_STATE:-}" == 1 ]] || rm -rf "${ECONGRAPH_STATE_DIR}"
     out="$("${notify}" "$@" </dev/null 2>&1)" || status=$?
     if [[ "${status}" -ne "${want}" ]] || ! grep -qF -- "${text}" <<<"${out}"; then
         fail "${name}: want exit ${want} and output containing '${text}', got exit ${status}: ${out}"
@@ -106,6 +115,46 @@ grep -q "journalctl --user -u econgraph-backup-freshness.service" "${STUB_LOG}" 
 grep -qF "STALE   offsite" "${tmp}/command.out" && pass "... and through NOTIFY_COMMAND" ||
     fail "NOTIFY_COMMAND got: $(cat "${tmp}/command.out")"
 
+echo "== notify.sh: one message per change, and a daily reminder"
+sent() { grep -c '^curl body: ' "${STUB_LOG}" || true; }
+run_notify "a first failure is sent" 0 "notified:" failure econgraph-backup-freshness
+KEEP_STATE=1 run_notify "the same failure an hour later is not sent again" 0 "already reported" failure econgraph-backup-freshness
+[[ "$(sent)" == 0 ]] && pass "... nothing posted" || fail "a repeated failure was posted: $(cat "${STUB_LOG}")"
+printf '%s\n' "STALE   offsite: newest off-site copy is 31h old (limit 26h)" \
+    "LOWSPACE dumps: 0.9GiB free of 100GiB (0%, minimum 15%)" "BACKUP CHECK FAIL" >"${tmp}/journal.ages"
+FAKE_JOURNAL_FILE="${tmp}/journal.ages" KEEP_STATE=1 run_notify "... nor when only ages and sizes changed" 0 \
+    "already reported" failure econgraph-backup-freshness
+printf '%s\n' "STALE   offsite: newest off-site copy is 31h old (limit 26h)" \
+    "MISSING restore_drill: newest passing restore drill" >"${tmp}/journal.changed"
+FAKE_JOURNAL_FILE="${tmp}/journal.changed" KEEP_STATE=1 run_notify "a change in what fails is sent at once" 0 \
+    "notified:" failure econgraph-backup-freshness
+grep -qF "MISSING restore_drill" "${STUB_LOG}" && pass "... with the new failure" || fail "the change: $(cat "${STUB_LOG}")"
+state="${ECONGRAPH_STATE_DIR}/notify-econgraph-backup-freshness.service.last"
+sed -i.bak "s/^sent_epoch=.*/sent_epoch=$(( $(date +%s) - 25 * 3600 ))/" "${state}"
+FAKE_JOURNAL_FILE="${tmp}/journal.changed" KEEP_STATE=1 run_notify "the same failure after a day is sent as a reminder" 0 \
+    "failed (still failing; reminder)" failure econgraph-backup-freshness
+KEEP_STATE=1 run_notify "ok forgets the unit's last failure" 0 "" ok econgraph-backup-freshness
+[[ ! -e "${state}" ]] && pass "... so its next failure is sent at once" || fail "ok left ${state}"
+KEEP_STATE=1 run_notify "the next failure after a success is sent" 0 "notified:" failure econgraph-backup-freshness
+run_notify "ok refuses a unit name with shell characters" 1 "usage" ok 'x;y'
+
+echo "== notify.sh: the failed run's own journal lines"
+printf '%s\n' "MISSING dump: newest verified dump under /backups" >"${tmp}/journal.invocation"
+MONITOR_INVOCATION_ID=0123456789abcdef0123456789abcdef FAKE_INVOCATION_FILE="${tmp}/journal.invocation" \
+    run_notify "with MONITOR_INVOCATION_ID, the failed run's lines are quoted" 0 "notified:" failure econgraph-dump
+if grep -qF "MISSING dump" "${STUB_LOG}" && ! grep -qF "STALE   offsite" "${STUB_LOG}" &&
+    grep -qF "_SYSTEMD_INVOCATION_ID=0123456789abcdef0123456789abcdef" "${STUB_LOG}"; then
+    pass "... and not an earlier run's"
+else
+    fail "the invocation's lines: $(cat "${STUB_LOG}")"
+fi
+MONITOR_INVOCATION_ID=0123456789abcdef0123456789abcdef \
+    run_notify "with nothing under the invocation ID, the unit's last 3 hours are read" 0 "notified:" failure econgraph-dump
+grep -q "journalctl --user -u econgraph-dump.service --since -3h" "${STUB_LOG}" && grep -qF "STALE   offsite" "${STUB_LOG}" &&
+    pass "... as the fallback" || fail "the fallback: $(cat "${STUB_LOG}")"
+MONITOR_INVOCATION_ID='bad; id' run_notify "a malformed MONITOR_INVOCATION_ID is not used" 0 "notified:" failure econgraph-dump
+grep -q "INVOCATION_ID=" "${STUB_LOG}" && fail "a malformed invocation ID reached journalctl" || pass "... in the journal query"
+
 FAKE_CURL_RC=22 run_notify "failure still notifies when only NOTIFY_COMMAND delivers" 0 "the Slack webhook did not accept" \
     failure econgraph-dump
 printf 'NOTIFY_SLACK_WEBHOOK_URL=%s\n' "${webhook}" >"${tmp}/config/notify.env"
@@ -121,21 +170,38 @@ FAKE_CURL_RC=7 run_notify "a failed heartbeat ping fails" 1 "heartbeat ping fail
 rm -f "${tmp}/config/notify.env"
 
 echo "== systemd units"
+# in_section FILE SECTION LINE: LINE is a whole line of FILE's [SECTION]. systemd ignores
+# (with a warning) a [Unit] setting written under [Service] and the other way round.
+in_section() {
+    awk -v want="[$2]" -v line="$3" '
+        /^\[.*\]$/ { section = $0; next }
+        section == want && $0 == line { found = 1 }
+        END { exit !found }' "$1"
+}
 for service in "${units}"/econgraph-*.service; do
     name="$(basename "${service}")"
     [[ "${name}" == econgraph-notify@.service ]] && continue
-    grep -qx 'OnFailure=econgraph-notify@%N.service' "${service}" &&
-        pass "${name} reports its failure" || fail "${name} has no OnFailure=econgraph-notify@%N.service"
+    in_section "${service}" Unit 'OnFailure=econgraph-notify@%N.service' &&
+        pass "${name} reports its failure ([Unit] OnFailure=)" || fail "${name} has no [Unit] OnFailure=econgraph-notify@%N.service"
+    in_section "${service}" Service 'ExecStartPost=-%h/.local/lib/econgraph-backup/notify.sh ok %N' &&
+        pass "${name} forgets its last failure after a success" || fail "${name} has no [Service] ExecStartPost=... notify.sh ok %N"
 done
-grep -qx 'ExecStart=%h/.local/lib/econgraph-backup/notify.sh failure %i' "${units}/econgraph-notify@.service" &&
+in_section "${units}/econgraph-notify@.service" Service 'ExecStart=%h/.local/lib/econgraph-backup/notify.sh failure %i' &&
     pass "econgraph-notify@.service runs notify.sh failure with the escaped instance" ||
     fail "econgraph-notify@.service does not run notify.sh failure %i"
 grep -q '^OnFailure=' "${units}/econgraph-notify@.service" &&
     fail "econgraph-notify@.service reports its own failure (a loop)" || pass "econgraph-notify@.service does not report itself"
-grep -qx 'ExecStartPost=-%h/.local/lib/econgraph-backup/notify.sh heartbeat' "${units}/econgraph-backup-freshness.service" &&
+in_section "${units}/econgraph-backup-freshness.service" Service 'ExecStartPost=-%h/.local/lib/econgraph-backup/notify.sh heartbeat' &&
     pass "the freshness check pings the heartbeat after it passes" || fail "the freshness check does not ping the heartbeat"
-grep -qx 'StartLimitBurst=4' "${units}/econgraph-offsite.service" && grep -qx 'StartLimitIntervalSec=3h' "${units}/econgraph-offsite.service" &&
-    pass "the off-site retries end in a failed unit" || fail "econgraph-offsite.service retries without a start limit"
+offsite="${units}/econgraph-offsite.service"
+in_section "${offsite}" Unit 'StartLimitBurst=4' && in_section "${offsite}" Unit 'StartLimitIntervalSec=3h' &&
+    in_section "${offsite}" Service 'Restart=on-failure' && in_section "${offsite}" Service 'RestartMode=direct' &&
+    pass "the off-site retries end in one failed unit ([Unit] StartLimit*, [Service] RestartMode=direct)" ||
+    fail "econgraph-offsite.service: StartLimit* must be in [Unit], Restart= and RestartMode=direct in [Service]"
+# The checks themselves must fail when a setting is in the wrong section.
+printf '[Unit]\nDescription=x\n[Service]\nOnFailure=econgraph-notify@%%N.service\n' >"${tmp}/misplaced.service"
+in_section "${tmp}/misplaced.service" Unit 'OnFailure=econgraph-notify@%N.service' &&
+    fail "in_section accepted OnFailure= under [Service]" || pass "in_section refuses a setting in the wrong section"
 
 echo "== install-user-units.sh"
 # systemctl and loginctl stubs. FAKE_LINGER is the Linger value; enable-linger sets it to
@@ -147,9 +213,9 @@ EOF
 cat >"${tmp}/bin/loginctl" <<'EOF'
 #!/usr/bin/env bash
 echo "loginctl $*" >>"${STUB_LOG}"
-case "$1" in
-    show-user) cat "${FAKE_LINGER_FILE}" ;;
-    enable-linger) [[ "${FAKE_ENABLE_LINGER_RC:-0}" == 0 ]] && echo yes >"${FAKE_LINGER_FILE}"; exit "${FAKE_ENABLE_LINGER_RC:-0}" ;;
+case " $* " in
+    *" show-user "*) cat "${FAKE_LINGER_FILE}" ;;
+    *" enable-linger "*) [[ "${FAKE_ENABLE_LINGER_RC:-0}" == 0 ]] && echo yes >"${FAKE_LINGER_FILE}"; exit "${FAKE_ENABLE_LINGER_RC:-0}" ;;
 esac
 EOF
 chmod +x "${tmp}/bin/systemctl" "${tmp}/bin/loginctl"
@@ -176,12 +242,28 @@ run_install "with lingering on, the installer installs" 0 "no ${tmp}/config/noti
     pass "... notify.sh and econgraph-notify@.service" || fail "notify.sh or the template was not installed"
 grep -q "enable-linger" "${STUB_LOG}" && fail "lingering was already on, but enable-linger ran" || pass "... without touching lingering"
 run_install "with lingering off, the installer enables it and installs" 0 "enabling lingering" no
-grep -qx "loginctl enable-linger $(id -un)" "${STUB_LOG}" && [[ -x "${lib}/notify.sh" ]] &&
-    pass "... for this user" || fail "enable-linger: $(cat "${STUB_LOG}")"
+grep -qx "loginctl --no-ask-password enable-linger $(id -un)" "${STUB_LOG}" && [[ -x "${lib}/notify.sh" ]] &&
+    pass "... for this user, without a password prompt" || fail "enable-linger: $(cat "${STUB_LOG}")"
 FAKE_ENABLE_LINGER_RC=1 run_install "when lingering stays off, the installer stops" 1 "Nothing was installed" no
 [[ ! -e "${lib}" ]] && ! grep -q '^systemctl' "${STUB_LOG}" && pass "... before installing or enabling anything" ||
     fail "the installer went on without lingering: $(cat "${STUB_LOG}")"
-FAKE_ENABLE_LINGER_RC=1 run_install "--allow-no-linger installs anyway, with a warning" 0 "(--allow-no-linger)" no --allow-no-linger
+run_install "--allow-no-linger installs anyway, with a warning" 0 "(--allow-no-linger)" no --allow-no-linger
+grep -q "enable-linger" "${STUB_LOG}" && fail "--allow-no-linger still ran enable-linger" ||
+    pass "... and leaves lingering alone"
+grep -q "start --no-block econgraph-offsite.service" "${STUB_LOG}" &&
+    fail "the off-site copy was started without restic.env" || pass "without restic.env, no off-site run is started"
+mkdir -p "${tmp}/home/.config/econgraph"
+: >"${tmp}/home/.config/econgraph/restic.env"
+run_install "with restic.env and no recorded off-site run, the installer starts one" 0 \
+    "starting econgraph-offsite.service once" yes
+grep -qx "systemctl --user start --no-block econgraph-offsite.service" "${STUB_LOG}" &&
+    pass "... without waiting for it" || fail "the first off-site run: $(cat "${STUB_LOG}")"
+mkdir -p "${ECONGRAPH_STATE_DIR}"
+echo "passed_epoch=$(date +%s)" >"${ECONGRAPH_STATE_DIR}/offsite.last"
+run_install "with a recorded off-site run, the installer starts none" 0 "" yes
+grep -q "start --no-block econgraph-offsite.service" "${STUB_LOG}" &&
+    fail "an off-site run was started although one is recorded" || pass "... and leaves the timer to it"
+rm -f "${tmp}/home/.config/econgraph/restic.env"
 (umask 077 && echo 'NOTIFY_COMMAND=true' >"${tmp}/config/notify.env")
 run_install "with notify.env, the installer does not warn about it" 0 "" yes
 grep -q "notify.env" <<<"${out}" && fail "the installer warned about an existing notify.env: ${out}" || pass "... and says nothing about it"

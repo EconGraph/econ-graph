@@ -296,7 +296,10 @@ install_gateway
 check_restart_on_boot
 
 log "Kind cluster recreated"
-echo "  Gateway, on this host only (127.0.0.1): http://localhost   https://localhost"
+# What Docker actually publishes, from the node container, not what the default
+# configuration intends: a --config may map other ports or omit listenAddress.
+echo "  Local gateway: http://localhost (when port 80 is mapped). Host ports published by ${KIND_CONTROL_PLANE}:"
+docker port "${KIND_CONTROL_PLANE}" 2>/dev/null | sed 's/^/    /' || echo "    (could not read them: docker port ${KIND_CONTROL_PLANE})"
 # The new cluster has a new kube-system UID, so an earlier production marker no
 # longer counts (scripts/deploy/lib/cluster-role.sh), and the restore only
 # brings the tunnel token back into a marked cluster.

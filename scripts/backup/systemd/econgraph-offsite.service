@@ -4,11 +4,12 @@ Documentation=file://%h/src/econ-graph/docs/deployment/BACKUPS.md
 # Only meaningful once ~/.config/econgraph/restic.env exists. Without it the
 # unit is skipped, not failed; check-freshness.sh reports the off-site copy as
 # not configured (NOTCONF), or fails with OFFSITE_REQUIRED=1.
-ConditionPathExists=%h/.config/econgraph/restic.env
 OnFailure=econgraph-notify@%N.service
 # Restart=on-failure below retries every 5 minutes. Four starts within 3 hours
-# is the limit: the fifth leaves the unit failed, so OnFailure= reports a copy
-# that keeps failing instead of retrying silently.
+# is the limit: the fifth leaves the unit failed. With RestartMode=direct
+# (systemd 254 and later) only that final failure runs OnFailure=; before 254
+# the key is ignored and every failed attempt runs it, and notify.sh sends the
+# repeats of one failure only once a day.
 StartLimitIntervalSec=3h
 StartLimitBurst=4
 
@@ -19,6 +20,9 @@ Type=oneshot
 # backup only adds, so a retry is safe).
 Restart=on-failure
 RestartSec=5min
+RestartMode=direct
 ExecStart=%h/.local/lib/econgraph-backup/offsite-restic.sh backup
+# After a success: the next failure is reported at once (notify.sh ok).
+ExecStartPost=-%h/.local/lib/econgraph-backup/notify.sh ok %N
 Nice=10
 IOSchedulingClass=idle

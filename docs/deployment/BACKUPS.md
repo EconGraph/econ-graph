@@ -533,7 +533,10 @@ missing or stale, or if space is low ([Space alerts](#space-alerts)):
 Without `~/.config/econgraph/restic.env` there is no off-site copy, and the check
 prints `NOTCONF offsite` and does not fail on it, because whether to have one is
 still the maintainer's decision ([Off-site](#off-site)). With `OFFSITE_REQUIRED=1`
-in `backup.env`, a missing `restic.env` fails the check too.
+in `backup.env`, a missing `restic.env` fails the check too. With `restic.env` but no
+`offsite.last` yet (an off-site copy set up before runs were recorded), the check reports
+`MISSING offsite` until the next successful run. `install-user-units.sh` starts
+`econgraph-offsite.service` once in that case, so the record exists right away.
 
 Snapshot ages come from the snapshot names, since reading btrfs creation
 times needs root. The backup pool's snapshot directory is root-only, so its
@@ -559,15 +562,30 @@ person:
   `OnFailure=econgraph-notify@%N.service`. That unit runs
   `notify.sh failure <unit>`, which sends one message naming the unit and the host,
   with the failed run's `STALE`, `MISSING`, `LOWSPACE` and `ERROR` lines from the journal.
+  It reads the lines logged under the failed run's invocation ID (systemd passes it as
+  `MONITOR_INVOCATION_ID`), and falls back to the unit's last 3 hours of journal.
+- A failure that says the same as the last one reported for that unit (ages and sizes
+  aside) is not sent again until `NOTIFY_REMIND_HOURS` (default 24) have passed. The
+  hourly freshness check therefore sends a message when it starts failing, another
+  whenever what fails changes, and a daily reminder while it stays failing. Each unit's
+  `ExecStartPost=` runs `notify.sh ok <unit>` after a success, so its next failure is
+  sent at once. The state is in `~/.local/state/econgraph/notify-<unit>.last`.
 - The hourly freshness check fails on a stale or missing dump, off-site copy,
-  snapshot or drill, and on low space, so each of those sends a message every
-  hour until it is fixed.
+  snapshot or drill, and on low space.
 - The off-site unit retries every 5 minutes; after four starts within 3 hours it
-  stays failed, which sends the message.
+  stays failed, which sends the message. `RestartMode=direct` keeps the failed
+  attempts before that from running `OnFailure=` (systemd 254 or later; older systemd
+  ignores the setting and runs it on every attempt, and the repeats are not sent).
 - After every passing freshness check, `notify.sh heartbeat` pings a dead-man's
   switch. When the host is down, the operator's timers have stopped (lingering off),
-  or the check itself cannot run, the pings stop and the switch alerts. Nothing on the
-  host can report its own absence.
+  or the check itself cannot run or keeps failing, the pings stop and the switch
+  alerts. Nothing on the host can report its own absence.
+
+Before installing the units, run `scripts/backup/check-freshness.sh` once. Anything it
+reports as `STALE` or `MISSING` is reported to a person from the first hourly check on,
+and the heartbeat stops until it passes. The restore drill's timer is disabled because
+the drill needs the private identity, so a host without a drill in the last 8 days fails
+the check: run [the drill](#restore-drill) by hand first.
 
 The channels are in `~/.config/econgraph/notify.env`, mode 600. The webhook
 URLs are credentials, so the file is never committed:
@@ -955,8 +973,8 @@ on threadripper. The CronJob remains an independent copy, with these limits:
   monitoring setup has no alert for its Job.
 - Its `encrypt` container needs the same public age recipient as the host dumps.
   `deploy.sh` fills it in from `BACKUP_AGE_RECIPIENT` (environment or
-  `backup.env`), and without one applies no CronJob and removes an existing one,
-  because every run would fail
+  `backup.env`, else the live CronJob's own), and only without any applies no CronJob
+  and removes an existing one, because every run would fail
   ([Encryption setup](POSTGRES_BACKUP_RESTORE.md#encryption-setup)).
 
 Export useful dumps before removing cluster storage or retiring the CronJob.

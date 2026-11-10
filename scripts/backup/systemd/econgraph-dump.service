@@ -10,5 +10,7 @@ Type=oneshot
 # (override with ECONGRAPH_DOCKER_HOST in ~/.config/econgraph/backup.env).
 # No After=docker.service: a user unit can't order itself after a system one.
 ExecStart=%h/.local/lib/econgraph-backup/dump-databases.sh
+# After a success: the next failure is reported at once (notify.sh ok).
+ExecStartPost=-%h/.local/lib/econgraph-backup/notify.sh ok %N
 Nice=10
 IOSchedulingClass=idle

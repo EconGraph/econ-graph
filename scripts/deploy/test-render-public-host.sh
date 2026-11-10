@@ -118,6 +118,8 @@ check "econ-graph-public-withheld serves www.econgraph.com only, on listener htt
   "hosts('econ-graph-public-withheld') == ['www.econgraph.com'] and sections('econ-graph-public-withheld') == ['https'] and route('econ-graph-public-withheld')['metadata']['labels'] == {'econgraph.io/public-host': 'true'}"
 check "econ-graph-public-withheld matches the three prefixes and sends them to no backend" \
   "[(m['path']['type'], m['path']['value']) for r in route('econ-graph-public-withheld')['spec']['rules'] for m in r['matches']] == [('PathPrefix', '/admin'), ('PathPrefix', '/api/admin'), ('PathPrefix', '/playground')] and not any(r.get('backendRefs') for r in route('econ-graph-public-withheld')['spec']['rules'])"
+check "econ-graph-public-withheld sets the backend routes' security headers on its 404" \
+  "[f for f in route('econ-graph-public-withheld')['spec']['rules'][0]['filters'] if f['type'] == 'ResponseHeaderModifier'] == [f for f in route('econ-graph-backend-public')['spec']['rules'][0]['filters'] if f['type'] == 'ResponseHeaderModifier']"
 check "HTTPRouteFilter econ-graph-not-found is a direct 404 response, labelled for cleanup" \
   "docs[('HTTPRouteFilter', 'econ-graph-not-found')]['spec']['directResponse']['statusCode'] == 404 and docs[('HTTPRouteFilter', 'econ-graph-not-found')]['metadata']['labels'] == {'econgraph.io/public-host': 'true'}"
 # What a request gets, by the Gateway API's precedence over every rendered route (serve,
