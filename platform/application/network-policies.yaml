@@ -204,6 +204,9 @@ spec:
     - podSelector:
         matchLabels:
           app: crawler-migrate
+    - podSelector:
+        matchLabels:
+          app: massive-backfill
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: cnpg-system

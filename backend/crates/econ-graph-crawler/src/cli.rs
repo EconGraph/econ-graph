@@ -27,6 +27,8 @@
 //! crawler confirm-successor --source FRED --series OLD --successor NEW
 //! crawler clear-restriction --source FRED --series ID --reason TEXT
 //! crawler accept-guarded-catalog --source BEA [--accept --guarded-at TIME]
+//! crawler massive-backfill [--years 5] [--end DATE] [--mode ticker-range|grouped-daily] [--batch-rows N] [--requests-per-second N]
+//! crawler massive-backfill-estimate [--years 5,10,23] [--tickers N] [--free BYTES|PATH]   # no database needed
 //! ```
 //!
 //! `migrate` applies the data migrations (`backend/migrations/data`) to the data database. No
@@ -71,6 +73,8 @@ use crate::reference_file;
 use crate::refetch::{self, RefetchOptions, SourcePlan, SourceProgress, DEFAULT_REFETCH_PRIORITY};
 use crate::source::SourceId;
 use crate::sources::default_registry;
+use crate::sources::massive::backfill as massive_backfill;
+use crate::sources::massive::symbols as massive_symbols;
 use crate::status::{crawler_status, CrawlerStatusSnapshot};
 use crate::CrawlError;
 
@@ -290,6 +294,77 @@ pub enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Load Massive's historical unadjusted daily bars for the symbol table into the Iceberg
+    /// stock_price_daily dataset, in bounded commits. Resumable: a rerun after a crash continues
+    /// the unfinished run without writing anything twice. A run after a finished one loads only
+    /// older history (see `sources::massive::backfill`).
+    MassiveBackfill {
+        /// History depth in years, clamped to what the plan serves.
+        #[arg(long, default_value_t = massive_backfill::DEFAULT_YEARS,
+              value_parser = clap::value_parser!(u32).range(1..=50))]
+        years: u32,
+        /// Last day to load. Default: the trading day before the daily crawl's first stored
+        /// day, or before today.
+        #[arg(long, value_name = "DATE")]
+        end: Option<chrono::NaiveDate>,
+        /// Request mode. Default: whichever needs fewer requests.
+        #[arg(long, value_enum)]
+        mode: Option<massive_backfill::FetchMode>,
+        /// Most observations per Iceberg commit. Default and maximum: ICEBERG_MAX_SCAN_ROWS.
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(1..))]
+        batch_rows: Option<u64>,
+        /// Request budget, separate from the worker's, which keeps its own for the daily refresh.
+        #[arg(long, value_name = "N", default_value_t = massive_backfill::DEFAULT_REQUESTS_PER_SECOND,
+              value_parser = parse_requests_per_second)]
+        requests_per_second: f64,
+        /// The symbol table (CSV).
+        #[arg(long, env = "MASSIVE_SYMBOLS_PATH", value_name = "PATH")]
+        symbols: Option<PathBuf>,
+        /// Serve /metrics on this address while the run lasts (e.g. 0.0.0.0:9102).
+        #[arg(long, env = "CRAWLER_METRICS_ADDR", value_name = "ADDR")]
+        metrics_addr: Option<std::net::SocketAddr>,
+        /// Keep serving /metrics this long after the run, so Prometheus scrapes the outcome.
+        #[arg(long, value_name = "SECS", default_value_t = 0)]
+        metrics_linger_secs: u64,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Estimate the object store space a Massive backfill uses, including compaction copies
+    /// and the daily refresh's re-appends before a compaction. Needs no database.
+    MassiveBackfillEstimate {
+        /// Comma-separated history depths in years, one table row each.
+        #[arg(long, value_delimiter = ',', num_args = 1.., default_value = "5",
+              value_parser = clap::value_parser!(u32).range(1..=50))]
+        years: Vec<u32>,
+        /// Ticker count. Default: the symbol table's tickers in each window.
+        #[arg(long, value_name = "N")]
+        tickers: Option<usize>,
+        /// The symbol table (CSV), when --tickers is not given.
+        #[arg(long, env = "MASSIVE_SYMBOLS_PATH", value_name = "PATH")]
+        symbols: Option<PathBuf>,
+        /// Last day of the window. Default: the last trading day before today.
+        #[arg(long, value_name = "DATE")]
+        end: Option<chrono::NaiveDate>,
+        /// Request mode. Default: whichever needs fewer requests.
+        #[arg(long, value_enum)]
+        mode: Option<massive_backfill::FetchMode>,
+        /// Observations per commit. Default: ICEBERG_MAX_SCAN_ROWS.
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(1..))]
+        batch_rows: Option<u64>,
+        /// Compactions, each writing a full copy while old objects are kept.
+        #[arg(long, default_value_t = 1)]
+        compactions: u32,
+        /// Days of daily refresh before a compaction.
+        #[arg(long, value_name = "DAYS", default_value_t = 7)]
+        refresh_days: u32,
+        /// Free space to compare with: bytes (K, M, G, T suffixes) or a path on the store.
+        #[arg(long, value_name = "BYTES|PATH")]
+        free: Option<String>,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 impl Command {
@@ -302,6 +377,7 @@ impl Command {
             | Command::Discover { source, .. }
             | Command::Fetch { source, .. }
             | Command::RecordReferenceSeeds { source, .. } => vec![*source],
+            Command::MassiveBackfill { .. } => vec![SourceId::Massive],
             Command::Refetch { sources, .. } => sources.source.clone(),
             // Gated in `check_selection_sources`, which refuses with `EXIT_USAGE`.
             Command::CheckSelection { .. } => Vec::new(),
@@ -312,7 +388,8 @@ impl Command {
             | Command::Status { .. }
             | Command::Coverage { .. }
             | Command::Sources
-            | Command::Migrate { .. } => Vec::new(),
+            | Command::Migrate { .. }
+            | Command::MassiveBackfillEstimate { .. } => Vec::new(),
         }
     }
 }
@@ -562,6 +639,9 @@ impl Cli {
         for source in self.command.upstream_sources() {
             licence::check(source)?;
         }
+        if let Command::MassiveBackfillEstimate { .. } = &self.command {
+            return massive_backfill_estimate(&self.command);
+        }
         if let Command::RecordReferenceSeeds {
             source,
             migrations_dir,
@@ -759,6 +839,45 @@ impl Cli {
                 series,
                 full,
             } => fetch_one(pool.0, source, series.trim(), full).await,
+            Command::MassiveBackfill {
+                years,
+                end,
+                mode,
+                batch_rows,
+                requests_per_second,
+                symbols,
+                metrics_addr,
+                metrics_linger_secs,
+                json,
+            } => {
+                let options = massive_backfill::BackfillOptions {
+                    years,
+                    end,
+                    mode,
+                    batch_rows: batch_rows.map(usize::try_from).transpose()?,
+                    today: Utc::now().date_naive(),
+                };
+                let metrics = match metrics_addr {
+                    Some(addr) => Some(massive_backfill::serve_metrics(addr).await?),
+                    None => None,
+                };
+                let result =
+                    massive_backfill_run(pool.0, &options, requests_per_second, symbols.as_deref())
+                        .await;
+                if let Some((addr, task)) = metrics {
+                    if metrics_linger_secs > 0 {
+                        tracing::info!(%addr, metrics_linger_secs, "serving final metrics");
+                        tokio::time::sleep(Duration::from_secs(metrics_linger_secs)).await;
+                    }
+                    task.abort();
+                }
+                let report = result?;
+                if json {
+                    Ok(format!("{}\n", serde_json::to_string_pretty(&report)?))
+                } else {
+                    Ok(report.to_text())
+                }
+            }
             Command::ConfirmSuccessor {
                 source,
                 series,
@@ -785,7 +904,8 @@ impl Cli {
             Command::Sources
             | Command::RecordReferenceSeeds { .. }
             | Command::CheckSelection { .. }
-            | Command::Migrate { .. } => {
+            | Command::Migrate { .. }
+            | Command::MassiveBackfillEstimate { .. } => {
                 unreachable!("handled above")
             }
         }
@@ -1068,6 +1188,128 @@ fn worker_policies(registry: &AdapterRegistry) -> HashMap<SourceId, SourcePolicy
             (id, policy)
         })
         .collect()
+}
+
+/// `--requests-per-second`: more than 0, at most 100 (Massive asks for well under 100).
+fn parse_requests_per_second(s: &str) -> Result<f64, String> {
+    let n: f64 = s
+        .trim()
+        .parse()
+        .map_err(|e| format!("{s:?} is not a number: {e}"))?;
+    if n > 0.0 && n <= 100.0 {
+        Ok(n)
+    } else {
+        Err(format!("{n} is not in (0, 100]"))
+    }
+}
+
+/// The symbol table at `path`, else `MASSIVE_SYMBOLS_PATH`'s default.
+fn massive_symbols(path: Option<&Path>) -> anyhow::Result<massive_symbols::SymbolTable> {
+    let path = path.map_or_else(massive_symbols::default_path, Path::to_path_buf);
+    massive_symbols::SymbolTable::load(&path)
+        .with_context(|| format!("loading the Massive symbol table {}", path.display()))
+}
+
+/// Runs `crawler massive-backfill` with a request budget of its own.
+async fn massive_backfill_run(
+    pool: DatabasePool,
+    options: &massive_backfill::BackfillOptions,
+    requests_per_second: f64,
+    symbols: Option<&Path>,
+) -> anyhow::Result<massive_backfill::BackfillReport> {
+    let symbols = massive_symbols(symbols)?;
+    let key_var = api_key_env_var(SourceId::Massive).expect("Massive has an API key");
+    let key = std::env::var(key_var)
+        .ok()
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .ok_or_else(|| anyhow!("{key_var} is not set"))?;
+    let mut policies = worker_policies(&default_registry());
+    let policy = policies
+        .get(&SourceId::Massive)
+        .copied()
+        .unwrap_or_else(|| SourcePolicy::default_for(SourceId::Massive));
+    policies.insert(
+        SourceId::Massive,
+        SourcePolicy {
+            requests_per_second,
+            ..policy
+        },
+    );
+    let http = HttpFetcher::new(http_config(), policies)?;
+    let client = crate::sources::massive::client::MassiveClient::new(
+        http,
+        crate::sources::massive::client::DEFAULT_BASE_URL,
+        key,
+    );
+    let catalog = econ_graph_timeseries::SqlCatalog::new(
+        pool.clone(),
+        econ_graph_timeseries::StorageConfig::from_env()?,
+    );
+    massive_backfill::run(&pool, &catalog, &client, &symbols, options).await
+}
+
+/// Runs `crawler massive-backfill-estimate`.
+fn massive_backfill_estimate(command: &Command) -> anyhow::Result<String> {
+    use crate::sources::massive::calendar;
+    use massive_backfill::estimate;
+    let Command::MassiveBackfillEstimate {
+        years,
+        tickers,
+        symbols,
+        end,
+        mode,
+        batch_rows,
+        compactions,
+        refresh_days,
+        free,
+        json,
+    } = command
+    else {
+        unreachable!("called for massive-backfill-estimate only")
+    };
+    let end = end.unwrap_or_else(|| calendar::previous_trading_day(Utc::now().date_naive()));
+    let table = match tickers {
+        Some(_) => None,
+        None => Some(massive_symbols(symbols.as_deref())?),
+    };
+    let batch_rows = match batch_rows {
+        Some(n) => usize::try_from(*n)?,
+        None => econ_graph_timeseries::query::QueryLimits::from_env()?.max_rows,
+    };
+    let mut estimates = Vec::new();
+    for &y in years {
+        let start = massive_backfill::window_start(end, y);
+        let trading_days = calendar::trading_days(start, end).len();
+        let tickers = match (tickers, &table) {
+            (Some(n), _) => *n,
+            (None, Some(table)) => massive_backfill::ticker_segments(table, start, end),
+            (None, None) => unreachable!("the table is loaded without --tickers"),
+        };
+        let input = estimate::EstimateInput {
+            tickers,
+            years: y,
+            trading_days,
+            mode: mode.unwrap_or_else(|| massive_backfill::choose_mode(tickers, trading_days)),
+            batch_rows,
+            compactions: *compactions,
+            refresh_days: *refresh_days,
+        };
+        estimates.push(estimate::estimate(input, &estimate::MEASURED)?);
+    }
+    let free = free.as_deref().map(estimate::free_space).transpose()?;
+    if *json {
+        Ok(format!(
+            "{}\n",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "model": estimate::MEASURED,
+                "estimates": estimates,
+                "free": free,
+            }))?
+        ))
+    } else {
+        Ok(estimate::to_text(&estimates, free))
+    }
 }
 
 /// The HTTP settings the worker binary uses.
