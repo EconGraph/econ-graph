@@ -2346,6 +2346,8 @@ mod tests {
     /// again until Monday's slot (Tuesday 11:30 New York time); one refreshed before it is.
     #[tokio::test]
     async fn massive_series_are_due_once_per_trading_day_slot() {
+        // As a build with the crawl_massive licence flag on would (it is off in every profile).
+        let _unlocked = crate::licence::testing::unlock(SourceId::Massive);
         let Some(db) = db().await else { return };
         let p = &db.pool;
         set_enabled(p, SourceId::Massive, true).await;
@@ -2409,6 +2411,8 @@ mod tests {
     /// Friday the 26th's slot isn't due until Wednesday the 31st's (Thursday morning).
     #[tokio::test]
     async fn massive_series_wait_out_unscheduled_closures() {
+        // As a build with the crawl_massive licence flag on would (it is off in every profile).
+        let _unlocked = crate::licence::testing::unlock(SourceId::Massive);
         let Some(db) = db().await else { return };
         let p = &db.pool;
         set_enabled(p, SourceId::Massive, true).await;

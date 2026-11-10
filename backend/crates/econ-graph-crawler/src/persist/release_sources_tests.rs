@@ -30,6 +30,9 @@ fn release_sources() -> Vec<SourceId> {
         .ids()
         .into_iter()
         .filter(|&s| !is_static_catalog_source(s))
+        // A licence-gated source (Massive, until crawl_massive is on) is not crawled by a
+        // release build: the worker's registry leaves it out.
+        .filter(|&s| crate::licence::allows(s))
         .collect()
 }
 
