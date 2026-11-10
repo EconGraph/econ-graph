@@ -977,4 +977,122 @@ mod tests {
         let empty = run(&pool, &reader, staff(), &format!(r#"{{ securityEvents(filter: {{eventType: "{event_type}", createdAfter: "{}"}}) {{ id }} }}"#, after.to_rfc3339())).await;
         assert!(empty["securityEvents"].as_array().unwrap().is_empty());
     }
+
+    /// How many `users` rows exist for `id`, and how many of them are active.
+    async fn user_rows(pool: &DatabasePool, id: Uuid) -> (i64, i64) {
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        use econ_graph_core::schema::users;
+        let mut conn = pool.get().await.unwrap();
+        let all = users::table
+            .filter(users::id.eq(id))
+            .count()
+            .get_result(&mut conn)
+            .await
+            .unwrap();
+        let active = users::table
+            .filter(users::id.eq(id).and(users::is_active.eq(true)))
+            .count()
+            .get_result(&mut conn)
+            .await
+            .unwrap();
+        (all, active)
+    }
+
+    /// Sign in with `token`, as every request that carries a token does.
+    async fn sign_in(
+        pool: &DatabasePool,
+        verifier: &econ_graph_auth::OidcVerifier,
+        token: &str,
+    ) -> std::result::Result<Option<econ_graph_auth::Caller>, econ_graph_auth::BearerError> {
+        econ_graph_auth::authenticate(
+            &econ_graph_core::database::AppPool(pool.clone()),
+            Some(verifier),
+            Some(&format!("Bearer {token}")),
+        )
+        .await
+    }
+
+    /// ECO-889: `deleteUser` is a lockout. The deleted user's still-valid token is refused,
+    /// and the request does not recreate their `users` row.
+    #[tokio::test]
+    async fn a_deleted_users_valid_token_is_refused_and_recreates_nothing() {
+        let Some((pool, _guard)) = db().await else {
+            return;
+        };
+        let issuer = econ_graph_auth::testkit::TestIssuer::start().await;
+        let verifier = issuer.verifier();
+        let sub = Uuid::new_v4();
+        let token = issuer.mint_token(sub, &["annotation:create"]);
+        let caller = sign_in(&pool, &verifier, &token)
+            .await
+            .expect("signed in")
+            .expect("a caller");
+        assert_eq!(caller.user.id, sub);
+        assert_eq!(user_rows(&pool, sub).await, (1, 1));
+
+        let admin = insert_user(&pool, "containment admin").await;
+        run(
+            &pool,
+            &admin,
+            staff(),
+            &format!(r#"mutation {{ deleteUser(id: "{sub}") }}"#),
+        )
+        .await;
+        assert_eq!(user_rows(&pool, sub).await, (0, 0));
+
+        for _ in 0..2 {
+            let again = sign_in(&pool, &verifier, &token).await;
+            assert!(again.is_err(), "{again:?}");
+            assert_eq!(user_rows(&pool, sub).await, (0, 0), "the row came back");
+        }
+    }
+
+    /// ECO-889: suspending and then deleting an account keeps it out. Re-presenting its token
+    /// neither recreates an active row nor lifts the suspension, and `activateUser` has
+    /// nothing to reactivate.
+    #[tokio::test]
+    async fn suspend_then_delete_keeps_the_suspension() {
+        let Some((pool, _guard)) = db().await else {
+            return;
+        };
+        let issuer = econ_graph_auth::testkit::TestIssuer::start().await;
+        let verifier = issuer.verifier();
+        let sub = Uuid::new_v4();
+        let token = issuer.mint_token(sub, &["annotation:create"]);
+        sign_in(&pool, &verifier, &token)
+            .await
+            .expect("signed in")
+            .expect("a caller");
+
+        let admin = insert_user(&pool, "containment suspender").await;
+        run(
+            &pool,
+            &admin,
+            staff(),
+            &format!(r#"mutation {{ suspendUser(id: "{sub}") }}"#),
+        )
+        .await;
+        assert!(matches!(
+            sign_in(&pool, &verifier, &token).await,
+            Err(econ_graph_auth::BearerError::Inactive(id)) if id == sub
+        ));
+        run(
+            &pool,
+            &admin,
+            staff(),
+            &format!(r#"mutation {{ deleteUser(id: "{sub}") }}"#),
+        )
+        .await;
+
+        let again = sign_in(&pool, &verifier, &token).await;
+        assert!(again.is_err(), "{again:?}");
+        assert_eq!(user_rows(&pool, sub).await, (0, 0));
+        let reactivate = schema_for(&pool, &admin, staff())
+            .execute(format!(r#"mutation {{ activateUser(id: "{sub}") }}"#))
+            .await;
+        assert_eq!(reactivate.errors.len(), 1, "{reactivate:?}");
+        assert!(sign_in(&pool, &verifier, &token).await.is_err());
+        assert_eq!(user_rows(&pool, sub).await, (0, 0));
+    }
 }

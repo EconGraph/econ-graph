@@ -1883,6 +1883,98 @@ mod request_auth_tests {
         );
     }
 
+    /// Log lines written while `f` runs, through a subscriber capped at INFO as `main`'s is.
+    async fn captured_logs<F: std::future::Future>(f: F) -> (F::Output, String) {
+        use std::sync::{Arc, Mutex};
+        #[derive(Clone, Default)]
+        struct Sink(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Sink {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let sink = Sink::default();
+        let writer = sink.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        let guard = tracing::subscriber::set_default(subscriber);
+        let output = f.await;
+        drop(guard);
+        let logs = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
+        (output, logs)
+    }
+
+    /// `invalid_token` security events recorded for requests from `ip`.
+    async fn invalid_token_events(pool: &DatabasePool, ip: &str) -> i64 {
+        use diesel::prelude::*;
+        use diesel_async::RunQueryDsl;
+        use econ_graph_core::schema::security_events;
+        let mut conn = pool.get().await.unwrap();
+        security_events::table
+            .filter(security_events::event_type.eq("invalid_token"))
+            .filter(security_events::ip_address.eq(ip))
+            .count()
+            .get_result(&mut conn)
+            .await
+            .unwrap()
+    }
+
+    /// ECO-889: a forged token leaves a trace. It is logged at a level the INFO cap keeps and
+    /// recorded as one security event; a burst of them from one client is rate-limited.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_forged_token_is_logged_and_recorded_and_a_burst_is_rate_limited() {
+        let Some((_db, pool)) = database().await else {
+            return;
+        };
+        let issuer = TestIssuer::start().await;
+        let verifier = issuer.verifier();
+        let forged = sign_hs256(
+            &issuer.claims(Uuid::new_v4(), &["admin.users:delete"]),
+            Some(issuer.current_key().kid()),
+            b"a-shared-secret",
+        );
+        let header = bearer(&forged);
+        let client = ClientInfo::new(Some("203.0.113.77".into()), Some("ForgedTest/1.0"));
+
+        let (refusal, logs) = captured_logs(graphql_caller(
+            &pool,
+            Some(&verifier),
+            Some(&header),
+            &client,
+        ))
+        .await;
+        assert_eq!(refusal.expect_err("forged"), GraphqlRefusal::InvalidToken);
+        let line = logs
+            .lines()
+            .find(|line| line.contains("rejected bearer token"))
+            .unwrap_or_else(|| panic!("no log line for the forged token in: {logs:?}"));
+        assert!(line.contains("WARN"), "{line}");
+        assert!(line.contains("203.0.113.77"), "{line}");
+        assert!(
+            !line.contains(&forged),
+            "the token itself was logged: {line}"
+        );
+        assert_eq!(invalid_token_events(&pool, "203.0.113.77").await, 1);
+
+        for _ in 0..30 {
+            let refusal = graphql_caller(&pool, Some(&verifier), Some(&header), &client).await;
+            assert_eq!(refusal.expect_err("forged"), GraphqlRefusal::InvalidToken);
+        }
+        let recorded = invalid_token_events(&pool, "203.0.113.77").await;
+        assert!(
+            (2..=10).contains(&recorded),
+            "a burst of 31 forged tokens wrote {recorded} security events"
+        );
+    }
+
     async fn set_active(pool: &DatabasePool, id: Uuid, active: bool) {
         use diesel::prelude::*;
         use diesel_async::RunQueryDsl;
