@@ -297,6 +297,17 @@ if [ "$DRY_RUN" != true ]; then
         crd/gateways.gateway.networking.k8s.io crd/httproutes.gateway.networking.k8s.io \
         crd/envoyproxies.gateway.envoyproxy.io crd/backendtrafficpolicies.gateway.envoyproxy.io \
         crd/httproutefilters.gateway.envoyproxy.io
+    # Established can come before API discovery serves the type. A controller
+    # started in that window skips the HTTPRouteFilter watch for good, and the
+    # public host's withheld route would then answer 500 instead of 404.
+    for _ in $(seq 1 60); do
+        kc api-resources --api-group=gateway.envoyproxy.io -o name 2>/dev/null \
+            | grep -qx 'httproutefilters.gateway.envoyproxy.io' && break
+        sleep 2
+    done
+    kc api-resources --api-group=gateway.envoyproxy.io -o name 2>/dev/null \
+        | grep -qx 'httproutefilters.gateway.envoyproxy.io' \
+        || die "the API server does not serve httproutefilters.gateway.envoyproxy.io after 120s"
 fi
 
 log "Envoy Gateway controller (namespace envoy-gateway-system)"
