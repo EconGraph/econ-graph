@@ -62,6 +62,29 @@ def timestamp(value):
 
 # cnpg-startup
 
+def rollout_failures(d):
+    """Why a Deployment's rollout is not complete, by `kubectl rollout status`'s rules.
+
+    During a surge the old pod stays Available while the new one starts, so availability alone
+    passes too early: every replica must be updated, no old replica may remain, and every
+    updated replica must be available.
+    """
+    name, want = d['metadata']['name'], d.get('spec', {}).get('replicas', 1)
+    status = d.get('status', {})
+    updated, total = status.get('updatedReplicas', 0), status.get('replicas', 0)
+    available = status.get('availableReplicas', 0)
+    failures = []
+    if (status.get('observedGeneration') or 0) < (d['metadata'].get('generation') or 0):
+        failures.append(f"{name}: controller has not observed generation {d['metadata'].get('generation')}")
+    if want < 1 or updated != want:
+        failures.append(f'{name}: {updated}/{want} replicas updated')
+    if total != updated:
+        failures.append(f'{name}: {total - updated} old replicas still running')
+    if available != updated or not condition(d, 'Available'):
+        failures.append(f'{name}: {available}/{updated} updated replicas available')
+    return failures
+
+
 def check_cnpg_startup(deployments, clusters):
     failures = []
     for wanted in ('cloudnative-pg', 'barman'):
@@ -69,16 +92,7 @@ def check_cnpg_startup(deployments, clusters):
         if not found:
             failures.append(f'no {wanted} Deployment in cnpg-system')
         for d in found:
-            want = d.get('spec', {}).get('replicas', 1)
-            status = d.get('status', {})
-            have = status.get('availableReplicas', 0)
-            if want < 1 or have < want or not condition(d, 'Available'):
-                failures.append(f"{d['metadata']['name']}: {have}/{want} replicas available")
-            # A rollout still in progress can show old replicas as available.
-            if status.get('observedGeneration') != d['metadata'].get('generation'):
-                failures.append(f"{d['metadata']['name']}: controller has not observed generation {d['metadata'].get('generation')}")
-            if status.get('updatedReplicas', 0) != want:
-                failures.append(f"{d['metadata']['name']}: {status.get('updatedReplicas', 0)}/{want} replicas updated")
+            failures += rollout_failures(d)
     by_name = {c['metadata']['name']: c for c in clusters}
     for name in CLUSTERS:
         c = by_name.get(name)
@@ -114,11 +128,14 @@ def check_backup_history(backups, now, window, limits, grace=dt.timedelta(hours=
             status = b.get('status', {})
             created = timestamp(b['metadata']['creationTimestamp'])
             stopped = timestamp(status['stoppedAt']) if status.get('stoppedAt') else None
-            # In the window if created in it, or created before it and finished or failed in it.
-            if created < start and not (stopped and stopped > start):
-                continue
             phase = status.get('phase') or ''
             if phase == 'completed':
+                if not stopped:
+                    failed.append(f"{b['metadata']['name']} (completed without stoppedAt)")
+                continue
+            # Skip only what provably ended before the window. Without stoppedAt there is no
+            # end to place, so a pre-window backup that is unfinished or failed still counts.
+            if created < start and stopped and stopped <= start:
                 continue
             if phase.lower() in ('failed', 'walarchivingfailing') or now - created > grace:
                 # Failed outright, or still running, pending or unknown past the grace period.
@@ -228,6 +245,11 @@ def check_resources(nodes, pods, usage, disks, mounts, limits):
     for mount in mounts:
         if mount not in disks:
             failures.append(f'{mount}: expected filesystem missing from the df capture')
+    for n in nodes:
+        if not condition(n, 'Ready'):
+            failures.append(f"{n['metadata']['name']}: node is not Ready")
+        if n.get('spec', {}).get('unschedulable'):
+            failures.append(f"{n['metadata']['name']}: node is cordoned")
     allocatable = {n['metadata']['name']: {'cpu': cpu(n['status']['allocatable']['cpu']),
                                             'memory': memory(n['status']['allocatable']['memory'])}
                    for n in nodes}
@@ -238,6 +260,9 @@ def check_resources(nodes, pods, usage, disks, mounts, limits):
             # A pod that fits on no node is the clearest sign of too little capacity.
             meta = pod.get('metadata', {})
             failures.append(f"{meta.get('namespace')}/{meta.get('name')}: Pending and not scheduled")
+        if node and node not in requested and pod.get('status', {}).get('phase') not in ('Succeeded', 'Failed'):
+            meta = pod.get('metadata', {})
+            failures.append(f"{meta.get('namespace')}/{meta.get('name')}: on node {node}, which is not in the node capture")
         if node in requested and pod.get('status', {}).get('phase') not in ('Succeeded', 'Failed'):
             for unit, amount in pod_requests(pod).items():
                 requested[node][unit] += amount
@@ -300,6 +325,9 @@ def request_once(url, body, timeout, context, graphql):
     return record
 
 
+ABANDONED = []  # request threads still running after their deadline
+
+
 def request_bounded(url, body, timeout, context, graphql):
     """request_once under one overall deadline of `timeout` seconds.
 
@@ -313,6 +341,8 @@ def request_bounded(url, body, timeout, context, graphql):
     worker.start()
     worker.join(timeout)
     if worker.is_alive() or not result:
+        if worker.is_alive():
+            ABANDONED.append(worker)
         return {'started_at': started.isoformat(), 'completed_at': dt.datetime.now(dt.timezone.utc).isoformat(),
                 'duration_seconds': round(time.monotonic() - clock, 3), 'success': False,
                 'error': f'no response within the {timeout}s deadline'}
@@ -333,7 +363,9 @@ def probe(args, clock=time.monotonic, sleep=time.sleep, send=request_bounded):
     previous = {s: signal.signal(s, finish) for s in (signal.SIGTERM, signal.SIGINT)}
     evidence = {'url': args.url, 'interval_seconds': args.interval, 'requests': []}
     deadline = clock() + args.duration
-    previous_done = None
+    previous_done, previous_wall = None, None
+    limit = args.interval + args.timeout
+    max_abandoned = getattr(args, 'max_abandoned', 5)
     try:
         # The file is rewritten after every request, so a reader mid-run sees a complete JSON document.
         while not stop['now'] and clock() < deadline:
@@ -342,11 +374,22 @@ def probe(args, clock=time.monotonic, sleep=time.sleep, send=request_bounded):
             if record.get('duration_seconds', 0) > args.timeout:
                 record['success'], record['error'] = False, f"took {record['duration_seconds']}s, limit {args.timeout}s"
             # A stalled probe leaves a stretch with no observation, which must not pass as available.
-            if previous_done is not None and done - previous_done > args.interval + args.timeout:
+            # The monotonic clock stops while the host is suspended, so also compare wall-clock times.
+            wall = timestamp(record['completed_at']) if record.get('completed_at') else None
+            gaps = []
+            if previous_done is not None:
+                gaps.append(done - previous_done)
+            if previous_wall is not None and wall is not None:
+                gaps.append((wall - previous_wall).total_seconds())
+            if gaps and max(gaps) > limit:
                 record['success'] = False
-                record['error'] = (f'{done - previous_done:.1f}s since the previous request completed, '
-                                   f'limit {args.interval + args.timeout}s')
-            previous_done = done
+                record['error'] = f'{max(gaps):.1f}s since the previous request completed, limit {limit}s'
+            previous_done, previous_wall = done, wall or previous_wall
+            leaked = sum(t.is_alive() for t in ABANDONED)
+            if leaked > max_abandoned:
+                record['success'] = False
+                record['error'] = f'{leaked} requests still running past their deadline; stopping the probe'
+                stop['now'] = True
             evidence['requests'].append(record)
             write_atomic(args.out, evidence)
             sleep(args.interval)
@@ -405,6 +448,8 @@ def parser():
     s.add_argument('--interval', type=float, default=2.0)
     s.add_argument('--timeout', type=float, default=5.0)
     s.add_argument('--duration', type=float, default=3600.0, help='seconds; SIGTERM or Ctrl-C stops it sooner')
+    s.add_argument('--max-abandoned', type=int, default=5,
+                   help='stop, failing, when more requests than this are still running past their deadline')
     s.add_argument('--out', type=Path, required=True)
     return p
 

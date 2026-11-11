@@ -22,10 +22,11 @@ UTC = dt.timezone.utc
 NOW = dt.datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
 
 
-def deployment(name, want=1, have=1, available=True, generation=3, observed=3, updated=None):
+def deployment(name, want=1, have=None, available=True, generation=3, observed=3, updated=None, total=None):
+    updated = want if updated is None else updated
     return {'metadata': {'name': name, 'generation': generation}, 'spec': {'replicas': want},
-            'status': {'availableReplicas': have, 'observedGeneration': observed,
-                       'updatedReplicas': want if updated is None else updated,
+            'status': {'availableReplicas': updated if have is None else have, 'observedGeneration': observed,
+                       'updatedReplicas': updated, 'replicas': updated if total is None else total,
                        'conditions': [{'type': 'Available', 'status': 'True' if available else 'False'}]}}
 
 
@@ -79,6 +80,17 @@ class CnpgStartupTests(unittest.TestCase):
         self.assertIn('cnpg-cloudnative-pg: controller has not observed generation 4', failures)
         self.assertIn('barman-plugin: 1/2 replicas updated', failures)
 
+    def test_surge_rollout_in_progress_fails(self):
+        # maxSurge 1: the new pod is updated but not ready, the old pod is still Available.
+        _, clusters = self.healthy()
+        surge = deployment('cnpg-cloudnative-pg', want=1, have=1, updated=1, total=2)
+        surge['status']['availableReplicas'] = 1  # the old pod
+        failures = gates.check_cnpg_startup([surge, deployment('barman-plugin')], clusters)['failures']
+        self.assertIn('cnpg-cloudnative-pg: 1 old replicas still running', failures)
+        surge['status'].update(replicas=1, availableReplicas=0)
+        failures = gates.check_cnpg_startup([surge, deployment('barman-plugin')], clusters)['failures']
+        self.assertIn('cnpg-cloudnative-pg: 0/1 updated replicas available', failures)
+
     def test_each_cluster_condition_is_checked(self):
         deployments, _ = self.healthy()
         clusters = [cluster('econgraph-app', ready=1), cluster('econgraph-data', archiving=False),
@@ -125,7 +137,8 @@ class BackupHistoryTests(unittest.TestCase):
 
     def test_failed_backup_in_window_fails_and_old_failure_is_ignored(self):
         backups = hourly('econgraph-app', NOW - dt.timedelta(days=8), NOW)
-        backups.append(backup('old', 'econgraph-app', None, phase='failed', created=NOW - dt.timedelta(days=9)))
+        backups.append(backup('old', 'econgraph-app', NOW - dt.timedelta(days=9), phase='failed',
+                              created=NOW - dt.timedelta(days=9, minutes=5)))
         self.assertEqual(self.run_check(backups)['failures'], [])
         backups.append(backup('new', 'econgraph-app', None, phase='failed', created=NOW - dt.timedelta(days=1)))
         self.assertTrue(any('1 backups in the window did not complete' in f for f in self.run_check(backups)['failures']))
@@ -147,11 +160,16 @@ class BackupHistoryTests(unittest.TestCase):
                               created=self.start() - dt.timedelta(minutes=10)))
         self.assertTrue(any('edge (failed)' in f for f in self.run_check(backups)['failures']))
 
-    def test_zero_longest_gap_is_reported(self):
-        backups = [backup('a', 'econgraph-app', NOW - dt.timedelta(days=8)), backup('b', 'econgraph-app', NOW)]
-        report = gates.check_backup_history(backups, NOW, self.window, {'econgraph-app': 10**7})
-        self.assertEqual(report['failures'], [])
-        self.assertIsNotNone(report['clusters']['econgraph-app']['longest_gap_seconds'])
+    def test_backups_without_stoppedat_are_not_skipped(self):
+        backups = hourly('econgraph-app', NOW - dt.timedelta(days=8), NOW)
+        before = NOW - dt.timedelta(days=9)
+        backups += [backup('stuck-before', 'econgraph-app', None, phase='running', created=before),
+                    backup('failed-before', 'econgraph-app', None, phase='failed', created=before),
+                    backup('malformed', 'econgraph-app', None, phase='completed', created=NOW - dt.timedelta(days=2))]
+        failure = next(f for f in self.run_check(backups)['failures'] if 'did not complete' in f)
+        self.assertIn('3 backups', failure)
+        for name in ('stuck-before (running)', 'failed-before (failed)', 'malformed (completed without stoppedAt)'):
+            self.assertIn(name, failure)
 
     def start(self):
         return NOW - self.window
@@ -166,7 +184,9 @@ class BackupHistoryTests(unittest.TestCase):
 
 class ResourceTests(unittest.TestCase):
     limits = {'requests': 0.85, 'usage': 0.80, 'disk': 0.80, 'min_samples': 2}
-    nodes = [{'metadata': {'name': 'w1'}, 'status': {'allocatable': {'cpu': '16', 'memory': '64Gi'}}}]
+    nodes = [{'metadata': {'name': 'w1'}, 'spec': {},
+              'status': {'allocatable': {'cpu': '16', 'memory': '64Gi'},
+                         'conditions': [{'type': 'Ready', 'status': 'True'}]}}]
 
     @staticmethod
     def pod(cpu_request, memory_request, phase='Running', init=None):
@@ -190,6 +210,14 @@ class ResourceTests(unittest.TestCase):
             {'name': 'late', 'resources': {'requests': {'cpu': '2', 'memory': '64Mi'}}}]
         # main: 1 + 0.05 sidecar; init peak: 2 + 0.05 for the one-shot started after the sidecar.
         self.assertEqual(gates.pod_requests(pod), {'cpu': 2.05, 'memory': 2**30 + 128 * 2**20})
+
+    def test_large_init_container_before_the_sidecar_sets_the_peak(self):
+        pod = self.pod('1', '1Gi')
+        pod['spec']['initContainers'] = [
+            {'name': 'big', 'resources': {'requests': {'cpu': '4', 'memory': '4Gi'}}},
+            {'name': 'sidecar', 'restartPolicy': 'Always', 'resources': {'requests': {'cpu': '1', 'memory': '1Gi'}}}]
+        # The sidecar starts after `big` finishes, so it does not add to big's 4 CPU / 4 GiB.
+        self.assertEqual(gates.pod_requests(pod), {'cpu': 4.0, 'memory': 4 * 2**30})
 
     def test_init_container_request_counts_when_larger(self):
         pod = self.pod('100m', '1Gi', init={'cpu': '2', 'memory': '512Mi'})
@@ -228,6 +256,19 @@ class ResourceTests(unittest.TestCase):
         self.assertIn('no nodes in the node capture', failures)
         self.assertIn('the df capture lists no filesystems', failures)
         self.assertIn('/srv: expected filesystem missing from the df capture', failures)
+
+    def test_unready_cordoned_and_unknown_nodes_fail(self):
+        node = json.loads(json.dumps(self.nodes[0]))
+        node['spec']['unschedulable'] = True
+        node['status']['conditions'][0]['status'] = 'False'
+        stray = self.pod('1', '1Gi')
+        stray['spec']['nodeName'] = 'w9'
+        stray['metadata'] = {'namespace': 'econ-graph', 'name': 'stray'}
+        usage = gates.parse_usage(self.matrix({'w1': [1, 1]}), self.matrix({'w1': [1, 1]}))
+        failures = gates.check_resources([node], [stray], usage, {'/srv': 0.1}, ['/srv'], self.limits)['failures']
+        self.assertIn('w1: node is not Ready', failures)
+        self.assertIn('w1: node is cordoned', failures)
+        self.assertIn('econ-graph/stray: on node w9, which is not in the node capture', failures)
 
     def test_unscheduled_pending_pod_fails(self):
         pending = {'metadata': {'namespace': 'econ-graph', 'name': 'econgraph-data-3'}, 'spec': {}, 'status': {'phase': 'Pending'}}
@@ -341,6 +382,29 @@ class ProbeTests(unittest.TestCase):
         self.assertIn('took 6.0s', requests[1]['error'])
         self.assertIn('since the previous request completed', requests[2]['error'])
 
+    def test_wall_clock_gap_fails_when_the_monotonic_clock_did_not_move(self):
+        # Across a host suspend the monotonic clock barely advances, but completed_at jumps.
+        first = {'success': True, 'duration_seconds': 0.1, 'completed_at': '2026-11-10T12:00:00+00:00'}
+        later = dict(first, completed_at='2026-11-10T12:05:00+00:00')
+        code, requests = self.run_probe([first, later], [0, 1, 2, 3, 4, 1000])
+        self.assertEqual(code, 1)
+        self.assertIn('300.0s since the previous request completed', requests[1]['error'])
+
+    def test_too_many_abandoned_requests_stop_the_probe(self):
+        class Alive:
+            def is_alive(self):
+                return True
+        ok = {'success': True, 'duration_seconds': 0.1, 'completed_at': '2026-11-10T12:00:00+00:00'}
+        saved = list(gates.ABANDONED)
+        gates.ABANDONED[:] = [Alive()] * 6
+        try:
+            code, requests = self.run_probe([ok, ok, ok], [0, 1, 2, 3, 4, 5, 6, 1000])
+        finally:
+            gates.ABANDONED[:] = saved
+        self.assertEqual(code, 1)
+        self.assertEqual(len(requests), 1)
+        self.assertIn('past their deadline; stopping the probe', requests[0]['error'])
+
     def test_overall_deadline_bounds_a_slow_drip(self):
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
@@ -358,7 +422,10 @@ class ProbeTests(unittest.TestCase):
         server = http.server.HTTPServer(('127.0.0.1', 0), Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.shutdown)
+        saved = list(gates.ABANDONED)
         record = gates.request_bounded(f'http://127.0.0.1:{server.server_port}/', None, 1.0, None, False)
+        self.assertEqual(len(gates.ABANDONED), len(saved) + 1)  # the late request is tracked
+        gates.ABANDONED[:] = saved
         self.assertFalse(record['success'])
         self.assertIn('deadline', record['error'])
         self.assertLess(record['duration_seconds'], 1.5)
