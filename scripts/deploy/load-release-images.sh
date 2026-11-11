@@ -193,7 +193,7 @@ else
 fi
 case "$provenance_rc" in
     0) ;;
-    1) ri_die "an image of ${TAG} has no valid release provenance for ${COMMIT}; refusing" ;;
+    1) ri_die "the provenance check refused an image of ${TAG} for ${COMMIT} (see its message above); refusing" ;;
     3) ri_die "the provenance check of ${TAG}'s images could not run (gh not logged in, or a GitHub or registry error; see above); fix that and re-run. Nothing about the images is known yet" ;;
     *) ri_die "the provenance check of ${TAG}'s images failed unexpectedly (verify-image-provenance.sh exit ${provenance_rc}); refusing" ;;
 esac

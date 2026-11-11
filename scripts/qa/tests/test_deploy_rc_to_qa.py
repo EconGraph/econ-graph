@@ -415,7 +415,7 @@ class DeployRcToQaTest(unittest.TestCase):
         tag, _ = self.provenance_candidate()
         self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}, 'no_provenance': True})
         result = self.deploy('--tag', tag, '--dump-dir', str(self.dump), '--name', NAME)
-        self.assert_refused(result, 'has no valid release provenance')
+        self.assert_refused(result, 'the provenance check refused an image')
         self.assertFalse(any(c['prog'].endswith('.sh') for c in self.logged()))
 
     def test_the_candidate_gets_verified_digests_never_a_github_credential(self):
@@ -736,6 +736,72 @@ class DeployRcToQaTest(unittest.TestCase):
         result = self.deploy('--tag', TAG, '--teardown')
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertFalse(self.read_state()['cluster'])
+
+
+    # --- kind: the candidate's files never run here; only a trusted kind runs here (ECO-896) ------
+
+    def test_the_candidates_kind_version_file_is_read_never_run(self):
+        marker = self.work / 'kind-version-ran'
+        leak = self.work / 'kind-version-leak'
+        git = ['git', '-C', str(self.repo), '-c', 'user.name=t', '-c', 'user.email=t@t']
+        (self.repo / 'scripts/deploy/lib/kind-version.sh').write_text(
+            f'touch {marker}\necho "$GH_TOKEN $SSH_AUTH_SOCK" >{leak}\n'
+            'KIND_VERSION="v0.33.0"\nKIND_PINNED_BIN=/bin/false\n')
+        run(git + ['commit', '-q', '-am', 'kind-version with side effects'])
+        run(git + ['tag', 'v4.1.0-rc.2'])
+        run(git + ['push', '-q', 'origin', '--tags'])
+        result = self.deploy('--tag', 'v4.1.0-rc.2', '--dump-dir', str(self.dump), '--name', NAME,
+                             GH_TOKEN='operator-admin-token')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        result = self.deploy('--tag', 'v4.1.0-rc.2', '--teardown', '--name', NAME)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(marker.exists(), 'the candidate\'s kind-version.sh ran')
+        self.assertFalse(leak.exists(), 'the candidate\'s kind-version.sh ran')
+        # The version came from the file's text; KIND_PINNED_BIN was not taken from it.
+        self.assertTrue(any(c['prog'] == 'kind' and c['args'][:2] == ['delete', 'cluster'] for c in self.logged()))
+
+    def test_a_kind_version_that_is_not_vxyz_is_refused(self):
+        git = ['git', '-C', str(self.repo), '-c', 'user.name=t', '-c', 'user.email=t@t']
+        (self.repo / 'scripts/deploy/lib/kind-version.sh').write_text('KIND_VERSION="../../../bin/sh"\n')
+        run(git + ['commit', '-q', '-am', 'bad kind version'])
+        run(git + ['tag', 'v4.1.0-rc.3'])
+        run(git + ['push', '-q', 'origin', '--tags'])
+        result = self.deploy('--tag', 'v4.1.0-rc.3', '--dump-dir', str(self.dump), '--name', NAME)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('no KIND_VERSION="vX.Y.Z" line', result.stdout)
+
+    def remove_operator_kind(self):
+        (self.data_home / 'econgraph/bin/kind-v0.33.0').unlink()
+
+    def test_teardown_without_an_operator_kind_never_runs_an_unverified_copy(self):
+        self.assertEqual(self.deploy().returncode, 0)
+        self.remove_operator_kind()
+        # The QA directory's copy (here the stub) has no checksum this checkout pins.
+        self.calls.write_text('')
+        result = self.deploy('--tag', TAG, '--teardown')
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('no trusted kind v0.33.0', result.stdout)
+        self.assertFalse(any(c['prog'] == 'kind' for c in self.logged()))
+        self.assertTrue(self.read_state()['cluster'])
+
+    def test_teardown_without_an_operator_kind_runs_a_checksum_verified_copy(self):
+        import hashlib
+        import platform
+        self.assertEqual(self.deploy().returncode, 0)
+        self.remove_operator_kind()
+        staged = self.qa_root / NAME / 'data/econgraph/bin/kind-v0.33.0'
+        digest = hashlib.sha256(staged.read_bytes()).hexdigest()
+        os_name = {'Linux': 'linux', 'Darwin': 'darwin'}[platform.system()]
+        arch = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}[platform.machine()]
+        # This checkout's install-kind.sh pins the staged copy's checksum.
+        install = self.repo / 'scripts/deploy/install-kind.sh'
+        install.write_text(f'pinned_sha256() {{\n    case "$1" in\n'
+                           f'        v0.33.0/{os_name}-{arch}) echo {digest} ;;\n    esac\n}}\n')
+        self.calls.write_text('')
+        result = self.deploy('--tag', TAG, '--teardown')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(self.read_state()['cluster'])
+        self.assertTrue(any(c['prog'] == 'kind' and c['args'][:2] == ['delete', 'cluster'] for c in self.logged()))
 
 
 if __name__ == '__main__':

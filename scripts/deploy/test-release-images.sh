@@ -766,13 +766,13 @@ refuses "a missing revision label" "has no org.opencontainers.image.revision lab
 refuses "a pulled image without the registry's digest" "does not carry digest $(digest_of backend)" STUB_PULLED_DIGEST_DIFFERS=backend
 refuses "an rc tag on another digest" "refusing" STUB_RC_DIGEST_DIFFERS=1
 # Missing or wrong signature: refused before anything is pulled, in a dry run too.
-refuses "an image without release provenance" "has no valid release provenance for $STUB_COMMIT; refusing" STUB_NO_PROVENANCE=frontend
+refuses "an image without release provenance" "the provenance check refused an image of $TAG for $STUB_COMMIT" STUB_NO_PROVENANCE=frontend
 grep -qE '^docker .* pull ' "$STUB_LOG" && fail "load pulled despite an image without release provenance"
 reset
-expect_fail "has no valid release provenance for $STUB_COMMIT; refusing" env STUB_NO_PROVENANCE=chart-api "$load" --tag "$TAG" --dry-run
+expect_fail "the provenance check refused an image of $TAG for $STUB_COMMIT" env STUB_NO_PROVENANCE=chart-api "$load" --tag "$TAG" --dry-run
 # gh not logged in: "could not run", never "no valid provenance", before anything is pulled.
 refuses "gh not logged in" "the provenance check of ${TAG}'s images could not run" STUB_GH_LOGGED_OUT=1
-grep -q 'no valid release provenance' "$tmp/out" && fail "gh not logged in was reported as missing provenance"
+grep -q 'provenance check refused an image' "$tmp/out" && fail "gh not logged in was reported as missing provenance"
 grep -qE '^docker .* pull ' "$STUB_LOG" && fail "load pulled despite gh not being logged in"
 # ECONGRAPH_PROVENANCE_VERIFIED (from deploy-rc-to-qa.sh): gh is skipped when every digest
 # is listed; one digest missing or different stops the load and names it.

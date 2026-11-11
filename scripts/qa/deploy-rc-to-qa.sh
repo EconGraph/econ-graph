@@ -90,6 +90,10 @@
 #
 # Needs: git, python3 with PyYAML, btrfs-progs, the rootful Docker daemon
 # (ECONGRAPH_DOCKER_HOST, default unix:///var/run/docker.sock) and `docker login ghcr.io`.
+# The kind this script runs itself (its kubeconfig fallback, teardown) is the operator's,
+# installed by this checkout's scripts/deploy/install-kind.sh at the version the candidate
+# pins; the copy in the QA directory is run only when its checksum is the one install-kind.sh
+# pins. The candidate's kind-version.sh is read as text, never sourced.
 # For a candidate that has scripts/release/verify-image-provenance.sh (ECO-896 on), also gh,
 # logged in (gh auth login, or GH_TOKEN): this checkout's verify-image-provenance.sh checks
 # the candidate's images before anything changes and before any of the candidate's code
@@ -180,14 +184,52 @@ STORAGE="${QA_DIR}/storage"
 STATE="${QA_DIR}/state.env"
 QA_KUBECTL="${QA_DIR}/cache/econgraph/bin/kubectl"
 QA_KUBECONFIG="${QA_DIR}/cache/econgraph/kubeconfig-${NAME}"
-# The pinned kind the candidate's scripts install (scripts/deploy/lib/kind-version.sh), read
-# from the candidate's worktree when there is one.
-kind_bin() {
-    local version_file="${SRC}/scripts/deploy/lib/kind-version.sh"
-    [ -f "$version_file" ] || version_file="${SCRIPT_REPO}/scripts/deploy/lib/kind-version.sh"
-    (XDG_DATA_HOME="$REAL_DATA_HOME"; HOME="$REAL_HOME"
-     # shellcheck source=scripts/deploy/lib/kind-version.sh
-     source "$version_file"; echo "$KIND_PINNED_BIN")
+# kind_version: the kind version the candidate pins (KIND_VERSION in its
+# scripts/deploy/lib/kind-version.sh), this checkout's when the candidate has none. Read as
+# text and checked against vX.Y.Z, never sourced: the candidate's files never run in this
+# script's environment (ECO-896).
+kind_version() {
+    local file="${SRC}/scripts/deploy/lib/kind-version.sh" version
+    [ -f "$file" ] && [ ! -L "$file" ] || file="${SCRIPT_REPO}/scripts/deploy/lib/kind-version.sh"
+    version="$(head -c 65536 "$file" | sed -nE 's/^KIND_VERSION="?(v[0-9]+\.[0-9]+\.[0-9]+)"?[[:space:]]*$/\1/p' | head -1)"
+    [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "no KIND_VERSION=\"vX.Y.Z\" line in ${file}"
+    echo "$version"
+}
+
+sha256_of() {
+    if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+
+# trusted_kind_sha256 VERSION: the release checksum this checkout's install-kind.sh pins for
+# VERSION on this platform, or nothing.
+trusted_kind_sha256() {
+    local os arch
+    case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) return 0 ;; esac
+    case "$(uname -m)" in x86_64 | amd64) arch=amd64 ;; aarch64 | arm64) arch=arm64 ;; *) return 0 ;; esac
+    sed -nE "s/^[[:space:]]*${1//./\\.}\/${os}-${arch}\) echo ([0-9a-f]{64}) ;;$/\1/p" \
+        "${SCRIPT_REPO}/scripts/deploy/install-kind.sh" 2>/dev/null | head -1
+}
+
+# trusted_kind: a kind this script may run itself, outside the candidate's environment (its
+# kubeconfig fallback, teardown): the operator's own install
+# (${XDG_DATA_HOME:-~/.local/share}/econgraph/bin/kind-VERSION, from install-kind.sh), or the
+# copy in the QA directory only when its checksum is the one this checkout's install-kind.sh
+# pins. Anything else in the QA directory may be the candidate's, and is never run here.
+trusted_kind() {
+    local version operator staged expected
+    version="$(kind_version)" || exit "$EXIT_FAILED"
+    operator="${REAL_DATA_HOME}/econgraph/bin/kind-${version}"
+    if [ -x "$operator" ]; then
+        echo "$operator"
+        return
+    fi
+    staged="${QA_DIR}/data/econgraph/bin/kind-${version}"
+    expected="$(trusted_kind_sha256 "$version")"
+    if [ -n "$expected" ] && [ -f "$staged" ] && [ "$(sha256_of "$staged")" = "$expected" ]; then
+        echo "$staged"
+        return
+    fi
+    die "no trusted kind ${version}: run this checkout's scripts/deploy/install-kind.sh (the copy in ${QA_DIR}/data, if any, does not match its pinned checksum)"
 }
 
 # The QA directory and its storage are the script's own: real directories, not symlinks, at
@@ -262,7 +304,9 @@ qk() {
             fi
         fi
         if [ ! -s "$QA_KUBECONFIG" ]; then
-            if ! { (umask 077; "$(kind_bin)" get kubeconfig --name "$NAME" >"${QA_KUBECONFIG}.new") &&
+            local kind
+            kind="$(trusted_kind)" || exit "$EXIT_FAILED"
+            if ! { (umask 077; "$kind" get kubeconfig --name "$NAME" >"${QA_KUBECONFIG}.new") &&
                 mv -f "${QA_KUBECONFIG}.new" "$QA_KUBECONFIG"; }; then
                 die "could not get ${NAME}'s kubeconfig"
             fi
@@ -278,17 +322,18 @@ qk() {
     "$QA_KUBECTL" --kubeconfig "$QA_KUBECONFIG" --context "$CONTEXT" "$@"
 }
 
-# stage_kind: copy (never link) the candidate's pinned kind into the QA directory's own data
-# home, so the candidate's scripts find it without writing the operator's ~/.local/share
-# (where a planted binary would later run as the operator's kind).
+# stage_kind: copy (never link) the operator's kind, at the version the candidate pins, into
+# the QA directory's own data home, so the candidate's scripts find it without writing the
+# operator's ~/.local/share (where a planted binary would later run as the operator's kind).
 stage_kind() {
-    local src dest="${QA_DIR}/data/econgraph/bin"
-    src="$(kind_bin)"
+    local version src dest="${QA_DIR}/data/econgraph/bin"
+    version="$(kind_version)" || exit "$EXIT_FAILED"
+    src="${REAL_DATA_HOME}/econgraph/bin/kind-${version}"
     mkdir -p "$dest"
     # Without one, the candidate's own scripts say how to install it.
     [ -f "$src" ] || return 0
-    cmp -s "$src" "${dest}/${src##*/}" || cp -f "$src" "${dest}/${src##*/}"
-    chmod 755 "${dest}/${src##*/}"
+    cmp -s "$src" "${dest}/kind-${version}" || cp -f "$src" "${dest}/kind-${version}"
+    chmod 755 "${dest}/kind-${version}"
 }
 
 # rc ARGS: run one of the candidate's scripts from src/, with every default path of theirs
@@ -362,7 +407,8 @@ if [ "$TEARDOWN" = true ]; then
     if cluster_exists; then
         log "Deleting kind cluster ${NAME}"
         mkdir -p "${QA_DIR}/cache/econgraph"
-        "$(kind_bin)" delete cluster --name "$NAME" --kubeconfig "${QA_DIR}/cache/econgraph/kind-delete.kubeconfig"
+        kind="$(trusted_kind)" || exit "$EXIT_FAILED"
+        "$kind" delete cluster --name "$NAME" --kubeconfig "${QA_DIR}/cache/econgraph/kind-delete.kubeconfig"
     fi
     for volume in data-plane app-prod; do
         [ -d "${STORAGE}/${volume}" ] || continue
@@ -441,7 +487,7 @@ if git -C "$SCRIPT_REPO" cat-file -e "${COMMIT}:scripts/release/verify-image-pro
         provenance_rc=$?
     case "$provenance_rc" in
         0) PROVENANCE_VERIFIED="${verified[*]}" ;;
-        1) refuse "an image of ${TAG} has no valid release provenance for ${COMMIT}" ;;
+        1) refuse "the provenance check refused an image of ${TAG} for ${COMMIT} (see its message above)" ;;
         3) refuse "the provenance check of ${TAG}'s images could not run (gh not logged in: gh auth login or GH_TOKEN; or a GitHub or registry error); fix that and re-run" ;;
         *) refuse "the provenance check of ${TAG}'s images failed unexpectedly (exit ${provenance_rc})" ;;
     esac

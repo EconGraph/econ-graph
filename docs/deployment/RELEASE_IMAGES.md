@@ -63,7 +63,7 @@ kept in `~/.cache/econgraph`, and prints that cluster's identity first.
    ([verify-image-provenance.sh](../../scripts/release/verify-image-provenance.sh), which runs
    `gh attestation verify`, so `gh` must be logged in). The attestation must also name the
    tag's commit as its source. An image without one, or attested by anything else, stops the
-   script before anything is pulled, in `--dry-run` too ("no valid release provenance"). When
+   script before anything is pulled, in `--dry-run` too ("the provenance check refused an image", after the check's own reason). When
    the check itself cannot run (gh not logged in, a GitHub, network or registry error), the
    script says "could not run" instead: fix that and re-run; nothing is wrong with the image
    yet.

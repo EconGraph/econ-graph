@@ -89,6 +89,12 @@ sandbox: they still run as the operator's user, with the rootful Docker socket a
 level of reviewed `main` plus an rc tag only an admin can push. Running one that isn't
 needs a separate user or VM.
 
+The script never runs the candidate's files in its own environment: it reads the kind
+version the candidate pins as text. The kind it runs itself (to get a kubeconfig, and to
+delete the cluster on teardown) is the operator's, installed with this checkout's
+`scripts/deploy/install-kind.sh` at that version. It falls back to the copy in the QA
+directory only when that copy's checksum is the one `install-kind.sh` pins.
+
 The site is at `http://localhost:PORT`, on 127.0.0.1 only, with sign-in, the backend's issuer
 and CORS moved to that address: a deliberate difference from the candidate's own
 configuration, since `http://localhost` on port 80 is production's gateway on its host. The
