@@ -121,3 +121,11 @@ which requires existing `sha-<full-commit-SHA>` images for that commit and fails
 missing. It resolves all three digests before applying version image tags, reusing the tested
 images rather than rebuilding. It also updates `latest` if this is the newest release and
 drafts the GitHub release from the changelog.
+
+## Deploying
+
+From v4.2.0, production runs on the Talos platform. The
+[Talos production runbook](../deployment/TALOS_PRODUCTION_RUNBOOK.md) covers promoting a
+release, verifying it, rolling it back, restoring the databases, and the cutover from kind.
+[Deploying a release](../deployment/RELEASE_DEPLOY.md) describes the kind cluster, and
+applies until kind is retired.
