@@ -8,7 +8,7 @@ a host themselves. `probe` sends HTTP requests to the one URL it is given.
   cnpg-startup    CNPG operator and barman plugin running, all three Clusters healthy
   backup-history  every database kept a completed base backup within its limit, all window long
   resources       pod requests, peak node use (from Prometheus) and host disk below their limits
-  probe           request one URL until stopped and record each result, for the drain gate
+  probe           request one URL until stopped and record each result and its timing, for the drain gate
 
 Each check prints a JSON report, writes it to --report when given, and exits 1 on failure.
 """
@@ -17,12 +17,14 @@ import datetime as dt
 import http.client
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
 import signal
 import ssl
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -68,9 +70,15 @@ def check_cnpg_startup(deployments, clusters):
             failures.append(f'no {wanted} Deployment in cnpg-system')
         for d in found:
             want = d.get('spec', {}).get('replicas', 1)
-            have = d.get('status', {}).get('availableReplicas', 0)
+            status = d.get('status', {})
+            have = status.get('availableReplicas', 0)
             if want < 1 or have < want or not condition(d, 'Available'):
                 failures.append(f"{d['metadata']['name']}: {have}/{want} replicas available")
+            # A rollout still in progress can show old replicas as available.
+            if status.get('observedGeneration') != d['metadata'].get('generation'):
+                failures.append(f"{d['metadata']['name']}: controller has not observed generation {d['metadata'].get('generation')}")
+            if status.get('updatedReplicas', 0) != want:
+                failures.append(f"{d['metadata']['name']}: {status.get('updatedReplicas', 0)}/{want} replicas updated")
     by_name = {c['metadata']['name']: c for c in clusters}
     for name in CLUSTERS:
         c = by_name.get(name)
@@ -93,7 +101,7 @@ def check_cnpg_startup(deployments, clusters):
 
 # backup-history
 
-def check_backup_history(backups, now, window, limits):
+def check_backup_history(backups, now, window, limits, grace=dt.timedelta(hours=2)):
     failures, clusters = [], {}
     start = now - window
     for name, limit_seconds in limits.items():
@@ -101,9 +109,20 @@ def check_backup_history(backups, now, window, limits):
         own = [b for b in backups if b.get('spec', {}).get('cluster', {}).get('name') == name
                and b.get('spec', {}).get('method') == 'plugin'
                and b.get('spec', {}).get('pluginConfiguration', {}).get('name') == PLUGIN]
-        failed = [b['metadata']['name'] for b in own
-                  if b.get('status', {}).get('phase', '').lower() == 'failed'
-                  and timestamp(b['metadata']['creationTimestamp']) >= start]
+        failed = []
+        for b in own:
+            status = b.get('status', {})
+            created = timestamp(b['metadata']['creationTimestamp'])
+            stopped = timestamp(status['stoppedAt']) if status.get('stoppedAt') else None
+            # In the window if created in it, or created before it and finished or failed in it.
+            if created < start and not (stopped and stopped > start):
+                continue
+            phase = status.get('phase') or ''
+            if phase == 'completed':
+                continue
+            if phase.lower() in ('failed', 'walarchivingfailing') or now - created > grace:
+                # Failed outright, or still running, pending or unknown past the grace period.
+                failed.append(f"{b['metadata']['name']} ({phase or 'no phase'})")
         done = sorted(timestamp(b['status']['stoppedAt']) for b in own
                       if b.get('status', {}).get('phase') == 'completed' and b.get('status', {}).get('stoppedAt'))
         # A backup completed before the window still covers its start.
@@ -122,9 +141,9 @@ def check_backup_history(backups, now, window, limits):
             if worst > limit:
                 failures.append(f'{name}: longest time without a completed backup was {worst}, limit {limit}')
         if failed:
-            failures.append(f'{name}: {len(failed)} failed backups in the window: {", ".join(sorted(failed))}')
+            failures.append(f'{name}: {len(failed)} backups in the window did not complete: {", ".join(sorted(failed))}')
         clusters[name] = {'completed_in_window': len(inside), 'failed_in_window': len(failed),
-                          'longest_gap_seconds': worst.total_seconds() if worst else None,
+                          'longest_gap_seconds': worst.total_seconds() if worst is not None else None,
                           'limit_seconds': limit_seconds}
     return {'window_start': start.isoformat(), 'window_end': now.isoformat(),
             'clusters': clusters, 'failures': failures}
@@ -149,15 +168,27 @@ def memory(value):
 
 
 def pod_requests(pod):
-    # Kubernetes schedules on max(sum of containers, largest init container) plus overhead.
-    def total(containers, unit, parse):
-        return [parse(c.get('resources', {}).get('requests', {}).get(unit, 0)) for c in containers]
+    """The pod's effective request, as the Kubernetes scheduler computes it.
+
+    Init containers with restartPolicy: Always are native sidecars (the barman plugin's is one):
+    they keep running, so they add to the regular containers and to every init container
+    started after them. The pod needs max(regular containers + all sidecars, peak while
+    initialising) plus overhead.
+    """
     spec = pod.get('spec', {})
     result = {}
     for unit, parse in (('cpu', cpu), ('memory', memory)):
-        main = sum(total(spec.get('containers', []), unit, parse))
-        init = max(total(spec.get('initContainers', []), unit, parse), default=0)
-        result[unit] = max(main, init) + parse(spec.get('overhead', {}).get(unit, 0))
+        def request(container):
+            return parse(container.get('resources', {}).get('requests', {}).get(unit, 0))
+        sidecars, init_peak = 0.0, 0.0
+        for container in spec.get('initContainers', []):
+            if container.get('restartPolicy') == 'Always':
+                sidecars += request(container)
+                init_peak = max(init_peak, sidecars)
+            else:
+                init_peak = max(init_peak, sidecars + request(container))
+        main = sum(request(c) for c in spec.get('containers', [])) + sidecars
+        result[unit] = max(main, init_peak) + parse(spec.get('overhead', {}).get(unit, 0))
     return result
 
 
@@ -171,29 +202,42 @@ def parse_usage(cpu_range, memory_range):
             node = series.get('metric', {}).get('node')
             if not node:
                 raise ValueError(f'{unit}: series without a node label; group the query by node')
-            usage.setdefault(node, {}).setdefault(unit, []).extend(float(v) for _, v in series['values'])
+            # Prometheus writes NaN or Inf for gaps and division by zero; they are not measurements.
+            values = [float(v) for _, v in series['values']]
+            usage.setdefault(node, {}).setdefault(unit, []).extend(v for v in values if math.isfinite(v))
     return usage
 
 
 def parse_df(text):
-    """`df -P -B1 PATH...` output."""
+    """`df -P -B1 PATH...` output, as mount -> used / (used + available), the ratio df prints."""
     result = {}
     for line in text.splitlines()[1:]:
         fields = line.split()
         if len(fields) >= 6:
-            size, used = int(fields[1]), int(fields[2])
-            result[fields[5]] = used / size if size else 1.0
+            used, available = int(fields[2]), int(fields[3])
+            result[' '.join(fields[5:])] = used / (used + available) if used + available else 1.0
     return result
 
 
-def check_resources(nodes, pods, usage, disks, limits):
+def check_resources(nodes, pods, usage, disks, mounts, limits):
     failures, report = [], {}
+    if not nodes:
+        failures.append('no nodes in the node capture')
+    if not disks:
+        failures.append('the df capture lists no filesystems')
+    for mount in mounts:
+        if mount not in disks:
+            failures.append(f'{mount}: expected filesystem missing from the df capture')
     allocatable = {n['metadata']['name']: {'cpu': cpu(n['status']['allocatable']['cpu']),
                                             'memory': memory(n['status']['allocatable']['memory'])}
                    for n in nodes}
     requested = {name: {'cpu': 0.0, 'memory': 0.0} for name in allocatable}
     for pod in pods:
         node = pod.get('spec', {}).get('nodeName')
+        if not node and pod.get('status', {}).get('phase') == 'Pending':
+            # A pod that fits on no node is the clearest sign of too little capacity.
+            meta = pod.get('metadata', {})
+            failures.append(f"{meta.get('namespace')}/{meta.get('name')}: Pending and not scheduled")
         if node in requested and pod.get('status', {}).get('phase') not in ('Succeeded', 'Failed'):
             for unit, amount in pod_requests(pod).items():
                 requested[node][unit] += amount
@@ -231,6 +275,7 @@ def write_atomic(path, value):
 
 def request_once(url, body, timeout, context, graphql):
     started = dt.datetime.now(dt.timezone.utc)
+    clock = time.monotonic()
     data = body.encode() if body is not None else None
     headers = {'Content-Type': 'application/json'} if data is not None else {}
     record = {'started_at': started.isoformat()}
@@ -250,11 +295,31 @@ def request_once(url, body, timeout, context, graphql):
         # Connection failures, timeouts, TLS errors, truncated or non-JSON bodies all count as failed requests.
         success, record['error'] = False, type(error).__name__
     record['completed_at'] = dt.datetime.now(dt.timezone.utc).isoformat()
+    record['duration_seconds'] = round(time.monotonic() - clock, 3)
     record['success'] = success
     return record
 
 
-def probe(args, clock=time.monotonic, sleep=time.sleep, send=request_once):
+def request_bounded(url, body, timeout, context, graphql):
+    """request_once under one overall deadline of `timeout` seconds.
+
+    The socket timeout bounds each read, not the request: a slow DNS lookup or a body that
+    drips a byte at a time can run far past it. A request still running at the deadline is
+    recorded as failed and left to finish in a daemon thread.
+    """
+    result, started, clock = {}, dt.datetime.now(dt.timezone.utc), time.monotonic()
+    worker = threading.Thread(target=lambda: result.update(request_once(url, body, timeout, context, graphql)),
+                              daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive() or not result:
+        return {'started_at': started.isoformat(), 'completed_at': dt.datetime.now(dt.timezone.utc).isoformat(),
+                'duration_seconds': round(time.monotonic() - clock, 3), 'success': False,
+                'error': f'no response within the {timeout}s deadline'}
+    return dict(result)
+
+
+def probe(args, clock=time.monotonic, sleep=time.sleep, send=request_bounded):
     if not args.url.startswith(('https://', 'http://')):
         raise ValueError('--url must be an http(s) URL')
     body = args.json_body.read_text() if args.json_body else None
@@ -268,10 +333,21 @@ def probe(args, clock=time.monotonic, sleep=time.sleep, send=request_once):
     previous = {s: signal.signal(s, finish) for s in (signal.SIGTERM, signal.SIGINT)}
     evidence = {'url': args.url, 'interval_seconds': args.interval, 'requests': []}
     deadline = clock() + args.duration
+    previous_done = None
     try:
         # The file is rewritten after every request, so a reader mid-run sees a complete JSON document.
         while not stop['now'] and clock() < deadline:
-            evidence['requests'].append(send(args.url, body, args.timeout, context, args.graphql))
+            record = send(args.url, body, args.timeout, context, args.graphql)
+            done = clock()
+            if record.get('duration_seconds', 0) > args.timeout:
+                record['success'], record['error'] = False, f"took {record['duration_seconds']}s, limit {args.timeout}s"
+            # A stalled probe leaves a stretch with no observation, which must not pass as available.
+            if previous_done is not None and done - previous_done > args.interval + args.timeout:
+                record['success'] = False
+                record['error'] = (f'{done - previous_done:.1f}s since the previous request completed, '
+                                   f'limit {args.interval + args.timeout}s')
+            previous_done = done
+            evidence['requests'].append(record)
             write_atomic(args.out, evidence)
             sleep(args.interval)
     finally:
@@ -305,13 +381,17 @@ def parser():
     s.add_argument('--now', help='UTC end of the window (default: now)')
     s.add_argument('--limit', action='append', default=[], metavar='CLUSTER=SECONDS',
                    help='override the backup-health.py limit for one cluster; repeatable')
+    s.add_argument('--grace-minutes', type=float, default=120.0,
+                   help='a backup still not completed this long after creation counts as failed')
     s.add_argument('--report', type=Path)
     s = sub.add_parser('resources')
     s.add_argument('--nodes', type=Path, required=True, help='kubectl get nodes -o json')
     s.add_argument('--pods', type=Path, required=True, help='kubectl get pods -A -o json')
     s.add_argument('--cpu-range', type=Path, required=True, help='Prometheus query_range JSON: CPU cores used, by node')
     s.add_argument('--memory-range', type=Path, required=True, help='Prometheus query_range JSON: working-set bytes, by node')
-    s.add_argument('--df', type=Path, help='host df -P -B1 PATH... output')
+    s.add_argument('--df', type=Path, required=True, help='host df -P -B1 PATH... output')
+    s.add_argument('--mount', action='append', required=True,
+                   help='a mount point that must appear in the df capture; repeatable')
     s.add_argument('--max-request-ratio', type=float, default=0.85)
     s.add_argument('--max-usage-ratio', type=float, default=0.80)
     s.add_argument('--max-disk-ratio', type=float, default=0.80)
@@ -342,13 +422,13 @@ def main(argv=None):
                 raise ValueError(f'--limit wants one of {", ".join(limits)}=SECONDS, got {override!r}')
             limits[name] = int(seconds)
         return emit(check_backup_history(items(args.backups), now, dt.timedelta(days=args.window_days),
-                                         limits), args.report)
+                                         limits, dt.timedelta(minutes=args.grace_minutes)), args.report)
     if args.command == 'resources':
         limits = {'requests': args.max_request_ratio, 'usage': args.max_usage_ratio,
                   'disk': args.max_disk_ratio, 'min_samples': args.min_samples}
-        disks = parse_df(args.df.read_text()) if args.df else {}
+        disks = parse_df(args.df.read_text())
         usage = parse_usage(json.loads(args.cpu_range.read_text()), json.loads(args.memory_range.read_text()))
-        return emit(check_resources(items(args.nodes), items(args.pods), usage, disks, limits), args.report)
+        return emit(check_resources(items(args.nodes), items(args.pods), usage, disks, args.mount, limits), args.report)
     return probe(args)
 
 
