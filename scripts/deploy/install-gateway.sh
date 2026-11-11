@@ -295,7 +295,8 @@ ssa "$FIELD_MANAGER" "$WORK/envoy-gateway-crds.yaml"
 if [ "$DRY_RUN" != true ]; then
     kc wait --for=condition=Established --timeout=120s \
         crd/gateways.gateway.networking.k8s.io crd/httproutes.gateway.networking.k8s.io \
-        crd/envoyproxies.gateway.envoyproxy.io crd/backendtrafficpolicies.gateway.envoyproxy.io
+        crd/envoyproxies.gateway.envoyproxy.io crd/backendtrafficpolicies.gateway.envoyproxy.io \
+        crd/httproutefilters.gateway.envoyproxy.io
 fi
 
 log "Envoy Gateway controller (namespace envoy-gateway-system)"
