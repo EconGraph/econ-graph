@@ -28,25 +28,30 @@ resource "local_file" "kind_config" {
         kubeadmConfigPatches = [
           "kind: InitConfiguration\nnodeRegistration:\n  kubeletExtraArgs:\n    node-labels: \"ingress-ready=true\""
         ]
+        # Loopback only. cloudflared runs inside the cluster and reaches the
+        # gateway through its Service, so nothing off this host needs these
+        # ports. Without listenAddress, kind (Docker) publishes them on every
+        # host interface, and anyone who can reach the host gets the site
+        # without Cloudflare. Docker-published ports bypass ufw's INPUT rules,
+        # so the binding, not the firewall, keeps them local, on Docker 28 or
+        # later; an older Docker lets hosts on the same network segment reach
+        # 127.0.0.1-published ports and needs the DOCKER-USER rules kept
+        # (docs/deployment/KUBERNETES_DEPLOYMENT.md, "Host ports and firewall").
+        # kind cannot change the mappings of an existing cluster: they take
+        # effect when the cluster is next created (recreate-kind-cluster.sh).
+        # Nothing listens on node ports 3000 or 8080 (the NodePorts are 30000
+        # and 30080), so those mappings were dropped.
         extraPortMappings = [
           {
             containerPort = 80
             hostPort      = 80
+            listenAddress = "127.0.0.1"
             protocol      = "TCP"
           },
           {
             containerPort = 443
             hostPort      = 443
-            protocol      = "TCP"
-          },
-          {
-            containerPort = 3000
-            hostPort      = 3000
-            protocol      = "TCP"
-          },
-          {
-            containerPort = 8080
-            hostPort      = 8080
+            listenAddress = "127.0.0.1"
             protocol      = "TCP"
           }
         ]
@@ -162,7 +167,7 @@ output "cluster_info" {
     context      = "kind-econ-graph"
     kubeconfig   = "~/.kube/config"
     ingress_ip   = "localhost"
-    frontend_url = "http://localhost:3000"
-    backend_url  = "http://localhost:8080"
+    frontend_url = "http://localhost"
+    backend_url  = "http://localhost/api"
   }
 }

@@ -2,8 +2,13 @@
 #
 # Encrypts verified pg_dump archives with the maintainer's public age recipient.
 # Plaintext exists only on a memory-backed emptyDir; the PVC and S3 receive
-# .dump.age files. Configure BACKUP_AGE_RECIPIENT on the encrypt container
-# before enabling this job. No private age identity belongs in Kubernetes.
+# .dump.age files. BACKUP_AGE_RECIPIENT on the encrypt container is empty
+# here: scripts/deploy/deploy.sh fills it in (render-backup-cronjob.py) from
+# the host dumps' own public recipient (BACKUP_AGE_RECIPIENT in the
+# environment or ~/.config/econgraph/backup.env), and without one applies no
+# CronJob and removes an existing one, since every run would fail. Applying
+# this file as it stands gives a CronJob that fails every night. No private
+# age identity belongs in Kubernetes.
 #
 # Writes a pg_dump of each of the three databases (the app database only when
 # app-database-url names it, see below), the data database
@@ -200,7 +205,7 @@ spec:
             command: ["/scripts/encrypt.sh"]
             env:
             - name: BACKUP_AGE_RECIPIENT
-              value: "" # Set to the maintainer's PUBLIC age1 recipient; never a private identity.
+              value: "" # deploy.sh sets the maintainer's PUBLIC age1 recipient; never a private identity.
             - name: BACKUP_STATUS_FILE
               value: "/status/failed"
             volumeMounts:

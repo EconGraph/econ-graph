@@ -1,0 +1,9 @@
+[Unit]
+Description=Tell a person that %i failed (econ-graph backups)
+Documentation=file://%h/src/econ-graph/docs/deployment/BACKUPS.md
+
+[Service]
+Type=oneshot
+# %i, not %I: the instance is the failed unit's name as it stands (OnFailure=
+# passes %N), and unescaping it would turn its dashes into slashes.
+ExecStart=%h/.local/lib/econgraph-backup/notify.sh failure %i

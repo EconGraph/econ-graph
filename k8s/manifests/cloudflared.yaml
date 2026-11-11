@@ -2,7 +2,11 @@
 # (PUBLIC_HOST base domain, MAIN_HOST https://www.econgraph.com by default) from this cluster.
 #
 # Traffic: browser -> Cloudflare edge (TLS) -> this tunnel (outbound-only from
-# the cluster, no inbound port is opened on the host) -> the gateway -> the app.
+# the cluster; the tunnel itself needs no inbound port) -> the gateway -> the app.
+# The gateway's own host ports 80 and 443 (terraform/k8s/kind-config.yaml) are
+# bound to 127.0.0.1 only, for on-host checks; a cluster created before that
+# change publishes them on every interface until it is recreated
+# (docs/deployment/KUBERNETES_DEPLOYMENT.md, "Host ports and firewall").
 # The tunnel is remotely managed: its public hostnames and their origin service
 # are set in the Cloudflare dashboard (Zero Trust > Networks > Tunnels), not here.
 # Each public hostname (econgraph.com, www.econgraph.com) points at

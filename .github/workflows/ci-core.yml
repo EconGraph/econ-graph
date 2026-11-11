@@ -324,13 +324,14 @@ jobs:
 
     # The postgres-backup CronJob's backup, sync and restore scripts, in its
     # images, against scratch econ_graph, econ_graph_app and keycloak databases
-    # and an S3 mock; and backup-postgres-now.sh, which starts one, against a stub
-    # kubectl.
+    # and an S3 mock; backup-postgres-now.sh, which starts one, against a stub
+    # kubectl; and how deploy.sh fills in the CronJob's public age recipient.
     - name: Check the backup and restore scripts
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-postgres-backup-scripts.sh
         scripts/deploy/test-backup-postgres-now.sh
+        scripts/deploy/test-render-backup-cronjob.sh
 
   sanitized-fixture:
     name: Sanitized Fixture Builder
@@ -375,11 +376,13 @@ jobs:
     # rendering against the manifests, the library and the cut-over's rollback
     # NetworkPolicy step against a stub kubectl, and check-public-site.sh's main-host
     # redirect and CORS checks and restart-k8s-rollout.sh's URL summary against a stub
-    # curl.
+    # curl; and that the production kind config publishes only 80 and 443 on 127.0.0.1,
+    # as main.tf declares.
     - name: Check the public-host rendering
       run: |
         python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
         scripts/deploy/test-render-public-host.sh
+        python3 scripts/deploy/test-kind-config.py
         scripts/deploy/test-check-public-site.sh
         shellcheck -x scripts/deploy/switch-main-host.sh scripts/deploy/test-switch-main-host.sh
         scripts/deploy/test-switch-main-host.sh
@@ -800,6 +803,11 @@ jobs:
 
     - name: Check that the off-site wrapper refuses forget and prune
       run: scripts/backup/test-offsite-restic.sh
+
+    - name: Check backup failure notifications, the units' OnFailure hooks and lingering
+      run: |
+        shellcheck -x scripts/backup/notify.sh scripts/backup/install-user-units.sh scripts/backup/test-notify.sh
+        scripts/backup/test-notify.sh
 
     - name: Check the backup and restore scripts against fake btrfs (no root)
       run: scripts/host/test-backup-scripts.sh

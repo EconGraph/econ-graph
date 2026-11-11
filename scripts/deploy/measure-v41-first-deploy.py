@@ -45,7 +45,7 @@ The script refuses a target that may reach the production cluster's data databas
     the kind-env.sh kubeconfig-<cluster>, is refused.
 What it trusts, and why that holds today: an address that is not this machine's, because
 production's data database is a ClusterIP Service in the kind cluster econ-graph, with no
-NodePort or hostPort (kind maps only ports 80, 443, 3000 and 8080), so from this host it is
+NodePort or hostPort (kind maps only the gateway ports 80 and 443), so from this host it is
 reachable only through an in-cluster name or a local forward; and a port-forward's cluster by
 name, because kind names a cluster's context kind-<cluster> and kind-env.sh its kubeconfig
 kubeconfig-<cluster>, so one naming another cluster reaches that cluster.

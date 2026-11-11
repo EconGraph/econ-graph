@@ -88,10 +88,21 @@ k() { KUBECONFIG=~/.cache/econgraph/kubeconfig-econ-graph ~/.cache/econgraph/bin
 
 ## Encryption setup
 
-Before deploying this CronJob, set `BACKUP_AGE_RECIPIENT` on its `encrypt`
-container to the maintainer's native `age1...` **public recipient**. This is
-public configuration and can be committed or rendered in a local overlay.
-An empty, malformed or private-key value fails the job; there is no plaintext
+The CronJob's `encrypt` container needs the maintainer's native `age1...`
+**public recipient** in `BACKUP_AGE_RECIPIENT`. The committed manifest leaves it
+empty. `scripts/deploy/deploy.sh` fills it in with the recipient the host dumps
+already use: `BACKUP_AGE_RECIPIENT` from the environment, else from
+`~/.config/econgraph/backup.env` (see [Backups](BACKUPS.md)), through
+`scripts/deploy/render-backup-cronjob.py`. When the deploy's shell has none (another
+`HOME`, `sudo`, another `ECONGRAPH_CONFIG_DIR`), it reuses the live CronJob's recipient
+if that is well formed. The recipient must also pass `backup_recipient_proven`, as the
+host dumps' does (ECO-718; it accepts every well-formed recipient for now); an unproven
+one changes nothing. Only when neither this shell nor the live CronJob has a well-formed
+recipient does `deploy.sh` skip the CronJob and remove the live one, since every run
+would fail; the `postgres-backup-data` PVC and the backups on it stay. Check what a deploy did with
+`kubectl -n econ-graph get cronjob postgres-backup` and, after the next 08:00 UTC
+run or `scripts/deploy/backup-postgres-now.sh`, `kubectl -n econ-graph get jobs`.
+A malformed or private-key value fails the job; there is no plaintext
 fallback. Keep the private identity only on the operator's host, outside
 backup directories. Never create a Kubernetes Secret containing that identity.
 

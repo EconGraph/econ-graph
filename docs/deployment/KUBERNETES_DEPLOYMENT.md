@@ -275,13 +275,14 @@ literal values in the manifests.
 
 The frontend and backend NodePorts are `30000` and `30080`. Kind runs nodes inside Docker
 containers, so NodePorts reachable on a node's Docker network are not automatically
-reachable at host localhost. The checked-in kind configuration maps host ports
-`80`, `443`, `3000` and `8080`, not those NodePorts. Prefer the Gateway or port forwarding.
+reachable at host localhost. The checked-in kind configuration maps only the Gateway's
+host ports `80` and `443`, on `127.0.0.1`, not those NodePorts (see
+[Host ports and firewall](#host-ports-and-firewall)). Prefer the Gateway or port forwarding.
 If customizing mappings, preserve the storage worker, mounts and Gateway mappings in the
 repository configuration; do not replace it with a one-node cluster just to expose ports.
 
 For direct Service diagnosis, use unused local ports and run each forward in its own
-terminal. The frontend example avoids the kind host mapping on port 3000:
+terminal:
 
 ```bash
 kubectl -n econ-graph port-forward service/econ-graph-frontend-service 3003:3000
@@ -436,6 +437,60 @@ Review its selectors and required connections before applying policies, and esta
 that the selected CNI enforces them. A checked-in policy does not establish active
 isolation. See [Kubernetes security guidance](../../k8s/README.md#-security) and
 [Secrets Management](../technical/SECRETS_MANAGEMENT.md).
+
+### Host ports and firewall
+
+The public site needs no inbound port on the host: cloudflared runs in the cluster,
+connects out to Cloudflare, and reaches the Gateway through its Service. The kind
+configuration therefore publishes the Gateway's host ports `80` and `443` on
+`127.0.0.1` only, for on-host checks (`check-public-site.sh`, `test-gateway-routes.sh`),
+and maps nothing else. Kind's API server port is on `127.0.0.1` by default.
+
+Expected state on the production host:
+
+- `docker port econ-graph-control-plane` lists `80/tcp -> 127.0.0.1:80`,
+  `443/tcp -> 127.0.0.1:443` and the API server's `6443/tcp -> 127.0.0.1:<port>`, and
+  nothing on `0.0.0.0` or `[::]`. `ss -Hltn` shows no listener on `*:80`, `*:443`,
+  `*:3000` or `*:8080`.
+- From another machine on the host's network, `nc -vz -w 5 <host> 80` and
+  `nc -vz -w 5 <host> 443` are refused. An operator runs this check; it is the
+  acceptance test for the binding.
+- The host firewall allows inbound SSH for the operator, and on the Talos VM bridge the
+  node exporter rule in [Host disk monitoring](HOST_DISK_MONITORING.md). It needs no rule
+  for `80`, `443`, `3000` or `8080`, and none is relied on: Docker inserts its own
+  NAT rules for published ports, so they bypass ufw's `INPUT` rules. The loopback binding
+  is what keeps the ports local, on Docker 28 or later: those versions drop packets that
+  other hosts on the same network segment address to a port published on `127.0.0.1`.
+  Before Docker 28, such a host can still reach the port. Check
+  `docker version --format '{{.Server.Version}}'`. On an older Docker, keep the interim
+  rules below for good (saved, so they survive a reboot), or upgrade Docker.
+
+kind cannot change the port mappings of an existing cluster: Docker fixes them when it
+creates the node container. A cluster created from an older configuration keeps
+publishing `80`, `443`, `3000` and `8080` on every interface until it is recreated. This
+is an operator step, done in a planned window:
+
+1. Check what the running cluster publishes: `docker port econ-graph-control-plane`.
+2. Until the cluster is recreated, drop outside traffic to those ports. `<if>` is the
+   host's external interface. Over IPv4, Docker forwards published ports through NAT, so
+   the rule goes in Docker's own `DOCKER-USER` chain. Over IPv6, when the daemon has no
+   IPv6 NAT, `docker-proxy` itself listens on `[::]` (`ss -Hltnp` shows it). That traffic
+   arrives through `INPUT`, which `DOCKER-USER` never sees, so drop it in `INPUT` too.
+   The rules do not survive a reboot or a Docker restart unless they are saved:
+
+   ```bash
+   sudo iptables -I DOCKER-USER -i <if> -p tcp -m multiport --dports 80,443,3000,8080 -j DROP
+   sudo ip6tables -I DOCKER-USER -i <if> -p tcp -m multiport --dports 80,443,3000,8080 -j DROP
+   sudo ip6tables -I INPUT -i <if> -p tcp -m multiport --dports 80,443,3000,8080 -j DROP
+   ```
+
+3. Recreate the cluster with `./scripts/deploy/recreate-kind-cluster.sh`, which backs up
+   the databases and Secrets, deletes the cluster and creates it from the current
+   configuration. The databases live on the host subvolumes and survive it; see
+   [Host Storage](HOST_STORAGE.md) for what else it restores. Then redeploy.
+4. Repeat the checks above from the host and from another machine, over IPv4 and IPv6.
+   On Docker 28 or later, remove the interim rules. On an older Docker, keep them and save
+   them.
 
 ## Remove the application or cluster
 

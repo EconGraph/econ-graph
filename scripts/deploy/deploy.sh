@@ -226,7 +226,42 @@ kubectl -n econ-graph rollout status statefulset/app-postgres --timeout=300s
 echo "🗄️  Deploying PostgreSQL backup CronJob..."
 kubectl apply -f k8s/manifests/postgres-backup-pvc.yaml
 kubectl apply -f k8s/manifests/postgres-backup-configmap.yaml
-kubectl apply -f k8s/manifests/postgres-backup-cronjob.yaml
+# The CronJob encrypts to the same public age recipient as the host dumps
+# (BACKUP_AGE_RECIPIENT, from the environment or ~/.config/econgraph/backup.env;
+# docs/deployment/BACKUPS.md). The committed manifest leaves it empty, and
+# encrypt.sh fails every run without one. When this shell has no recipient (a
+# different HOME, sudo, another ECONGRAPH_CONFIG_DIR), the live CronJob's own
+# recipient is reused if it is well formed. Only a CronJob with an empty or
+# malformed recipient, which could only fail, is removed; its PVC, and the
+# backups on it, stay. The recipient must also pass backup_recipient_proven, as
+# for the host dumps (scripts/backup/encryption.sh; ECO-718).
+# shellcheck source=scripts/backup/encryption.sh
+source "$PROJECT_ROOT/scripts/backup/encryption.sh"
+live_backup_recipient="$(kubectl -n econ-graph get cronjob postgres-backup --ignore-not-found \
+  -o 'jsonpath={.spec.jobTemplate.spec.template.spec.initContainers[?(@.name=="encrypt")].env[?(@.name=="BACKUP_AGE_RECIPIENT")].value}')"
+live_backup_recipient_ok=false
+[[ "$live_backup_recipient" =~ ^age1[0-9a-z]+$ ]] && live_backup_recipient_ok=true
+if ! backup_recipient_load && [ "$live_backup_recipient_ok" = true ]; then
+  if [ -n "${BACKUP_AGE_RECIPIENT:-}" ]; then
+    echo "   This shell's BACKUP_AGE_RECIPIENT is not a well-formed public age1 recipient; ignoring it."
+  fi
+  echo "   No well-formed recipient in this shell; reusing the live CronJob's public recipient."
+  BACKUP_AGE_RECIPIENT="$live_backup_recipient"
+fi
+if [[ "${BACKUP_AGE_RECIPIENT:-}" =~ ^age1[0-9a-z]+$ ]] && backup_recipient_proven "$BACKUP_AGE_RECIPIENT"; then
+  backup_cronjob="$(python3 "$PROJECT_ROOT/scripts/deploy/render-backup-cronjob.py" "$BACKUP_AGE_RECIPIENT" \
+    k8s/manifests/postgres-backup-cronjob.yaml)"
+  printf '%s\n' "$backup_cronjob" | kubectl apply -f -
+elif [ "$live_backup_recipient_ok" = true ]; then
+  echo "⚠️  BACKUP_AGE_RECIPIENT has not been proven to belong to a held identity: the in-cluster backup"
+  echo "   CronJob is left as it is, with its own recipient."
+else
+  echo "⚠️  No public age recipient (BACKUP_AGE_RECIPIENT in the environment or ~/.config/econgraph/backup.env,"
+  echo "   or on the live CronJob): the in-cluster backup CronJob is not applied, and an existing one, which"
+  echo "   could only fail, is removed. The host dumps (scripts/backup/dump-databases.sh) need the same"
+  echo "   recipient; see docs/deployment/BACKUPS.md."
+  kubectl -n econ-graph delete cronjob postgres-backup --ignore-not-found
+fi
 run_script "$PROJECT_ROOT/scripts/deploy/protect-postgres-pv.sh"
 
 # Deploy Keycloak (its own Postgres, then Keycloak with the econ-graph realm).

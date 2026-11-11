@@ -20,7 +20,12 @@
 #
 # Not routed: the admin frontend (/admin), /playground (the backend serves it
 # only with ENABLE_GRAPHQL_PLAYGROUND=true), Keycloak's admin console
-# (/idp/admin) and master realm (/idp/realms/master).
+# (/idp/admin) and master realm (/idp/realms/master). On localhost, /admin and
+# /playground fall through to the frontend's / and /api/admin to the backend's
+# /api. On the public host, render-public-host.py adds route
+# econ-graph-public-withheld, which answers /admin, /api/admin and /playground
+# (and everything under them) with a 404 from the gateway: its longer prefixes
+# win over / and /api.
 #
 # The rate limits on econ-graph-graphql and econ-graph-data-graphql are in
 # ratelimit-policies.yaml. The backend and GraphQL routes set
