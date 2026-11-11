@@ -46,8 +46,9 @@ LOCAL_IMAGES = sorted({c['image'] for f in ('backend-deployment.yaml', 'crawler-
 STUB = r'''#!/usr/bin/env python3
 import json, os, pathlib, sys
 # Settings beside the stub, not in the environment: the script runs the candidate's scripts
-# with an empty one.
-STUB_DIR = pathlib.Path(__file__).resolve().parent
+# with an empty one. The directory is written in by the test (STUB_DIR_PATH), since the QA
+# script runs a copy of the stub as the candidate's pinned kind.
+STUB_DIR = pathlib.Path(STUB_DIR_PATH)
 CONFIG = json.loads((STUB_DIR / 'stub-env.json').read_text())
 PRODUCTION_KEYCLOAK = CONFIG['production_keycloak']
 prog = pathlib.Path(sys.argv[0]).name
@@ -60,7 +61,8 @@ stdin = sys.stdin.read() if reads_stdin and not sys.stdin.isatty() else ''
 keep = ('HOME', 'KIND_CLUSTER', 'ECONGRAPH_SCRATCH_STORAGE', 'XDG_CACHE_HOME', 'ECONGRAPH_BACKUP_ROOT',
         'ECONGRAPH_RELEASES_DIR', 'ECONGRAPH_DEPLOY_ENV', 'PUBLIC_HOST', 'APP_DATABASE', 'DOCKER_HOST',
         'FRED_API_KEY', 'KUBECONFIG', 'KUBECTL', 'TMPDIR', 'CLOUDFLARE_TUNNEL_TOKEN', 'DRY_RUN', 'NAMESPACE',
-        'GH_CONFIG_DIR', 'GH_TOKEN', 'ECONGRAPH_PROVENANCE_VERIFIED')
+        'GH_CONFIG_DIR', 'GH_TOKEN', 'ECONGRAPH_PROVENANCE_VERIFIED', 'SSH_AUTH_SOCK',
+        'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XDG_DATA_HOME')
 with open(CONFIG['calls'], 'a') as log:
     log.write(json.dumps({'prog': prog, 'args': args, 'cwd': os.getcwd(),
                           'env': {k: os.environ.get(k) for k in keep}, 'stdin': stdin}) + '\n')
@@ -222,7 +224,7 @@ class DeployRcToQaTest(unittest.TestCase):
         self.bin = self.work / 'bin'
         self.bin.mkdir()
         stub = self.bin / 'stub.py'
-        stub.write_text(STUB)
+        stub.write_text(STUB.replace('pathlib.Path(STUB_DIR_PATH)', f'pathlib.Path({str(self.bin)!r})'))
         self.state = self.work / 'state.json'
         self.calls = self.work / 'calls.jsonl'
         (self.bin / 'stub-env.json').write_text(json.dumps({
@@ -295,7 +297,11 @@ class DeployRcToQaTest(unittest.TestCase):
                    ECONGRAPH_QA_ROOT=str(self.qa_root), XDG_DATA_HOME=str(self.data_home),
                    FRED_API_KEY='production-fred-key', CLOUDFLARE_TUNNEL_TOKEN='production-tunnel-token',
                    DRY_RUN='false', NAMESPACE='econ-graph-prod', KUBECONFIG=str(self.work / 'operator-kubeconfig'),
-                   GH_CONFIG_DIR=str(self.work / 'gh-config'))
+                   GH_CONFIG_DIR=str(self.work / 'gh-config'),
+                   # What an operator's desktop session has: none of it may reach a candidate.
+                   SSH_AUTH_SOCK=str(self.work / 'ssh-agent.sock'),
+                   DBUS_SESSION_BUS_ADDRESS='unix:path=/run/user/1000/bus',
+                   XDG_RUNTIME_DIR=str(self.work / 'runtime'))
         env.pop('ECONGRAPH_DOCKER_HOST', None)
         env.pop('GH_TOKEN', None)
         env.update(extra)
@@ -524,9 +530,16 @@ class DeployRcToQaTest(unittest.TestCase):
             self.assertEqual(env['KUBECONFIG'], str(qa / f'cache/econgraph/kubeconfig-{NAME}'))
             self.assertEqual(env['KUBECTL'], str(qa / 'cache/econgraph/bin/kubectl'))
             self.assertEqual(env['DOCKER_HOST'], 'unix:///var/run/docker.sock')
-            # No GitHub credential ever reaches the candidate's code (ECO-896).
-            self.assertIsNone(env['GH_CONFIG_DIR'])
-            self.assertIsNone(env['GH_TOKEN'])
+            # No GitHub credential, SSH agent, session bus (keyring) or the operator's data
+            # home reaches the candidate's code (ECO-896).
+            for withheld in ('GH_CONFIG_DIR', 'GH_TOKEN', 'SSH_AUTH_SOCK', 'DBUS_SESSION_BUS_ADDRESS',
+                             'XDG_RUNTIME_DIR'):
+                self.assertIsNone(env[withheld], withheld)
+            self.assertEqual(env['XDG_DATA_HOME'], str(qa / 'data'))
+        # The pinned kind is a copy in the QA directory, not a link to the operator's.
+        staged = qa / 'data/econgraph/bin/kind-v0.33.0'
+        self.assertTrue(staged.is_file())
+        self.assertFalse(staged.is_symlink())
         # The candidate's deploy never starts a crawler.
         self.assertEqual(state['deployed_crawler_replicas'], 0)
         self.assertEqual(rc[1]['args'], ['--tag', TAG, '--cluster', NAME, '--allow-missing-nodes'])

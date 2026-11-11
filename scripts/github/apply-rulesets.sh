@@ -218,13 +218,14 @@ else
 fi
 
 # A live tag ruleset must not quietly leave release tags unprotected: no exclude
-# pattern that could match a v* or train-* tag (~ALL, or a refs/tags/ pattern whose
-# literal prefix is compatible with "v" or "train-"), and no bypass actor that
+# pattern that could match a v* or train-* tag (~ALL, or a refs/tags/ pattern, or one with
+# no refs/ prefix at all, whose literal prefix is compatible with "v" or "train-"), and no
+# bypass actor that
 # tag-ruleset.json doesn't list. Fixing either is a decision for an admin.
 tag_problem="$(jq -r --slurpfile f "$TAG_FILE" '
   def lit: sub("^refs/tags/"; "") | capture("^(?<l>[^*?\\[]*)").l;
   def overlaps: . == "~ALL"
-    or (startswith("refs/tags/") and (lit as $l | any("v", "train-"; . as $t | ($t | startswith($l)) or ($l | startswith($t)))));
+    or ((startswith("refs/tags/") or (startswith("refs/") | not)) and (lit as $l | any("v", "train-"; . as $t | ($t | startswith($l)) or ($l | startswith($t)))));
   if . == null then "" else
     ([(.conditions.ref_name.exclude // [])[] | select(overlaps) | "it excludes \(.)"]
      + [(.bypass_actors // [])[] | . as $a

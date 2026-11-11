@@ -80,6 +80,15 @@ the tag (from v4.1). The dump directory is a verified backup (`counts.env`, the 
 refuses the production cluster names, a cluster with a production marker or one it did not
 create, and a dump inside the QA root.
 
+For a candidate from ECO-896 on, the script checks each image's signed build provenance with
+its own copy of `scripts/release/verify-image-provenance.sh` (so `gh` must be logged in)
+before any of the candidate's code runs. The candidate's scripts get no GitHub token, gh
+config, SSH agent, session bus (keyring) or the operator's data home. This is not a
+sandbox: they still run as the operator's user, with the rootful Docker socket and the
+`ghcr.io` login they need to pull the candidate's images. So a candidate is trusted at the
+level of reviewed `main` plus an rc tag only an admin can push. Running one that isn't
+needs a separate user or VM.
+
 The site is at `http://localhost:PORT`, on 127.0.0.1 only, with sign-in, the backend's issuer
 and CORS moved to that address: a deliberate difference from the candidate's own
 configuration, since `http://localhost` on port 80 is production's gateway on its host. The

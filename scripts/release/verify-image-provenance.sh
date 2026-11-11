@@ -95,7 +95,12 @@ for ref in "$@"; do
     # the policy ("Verification failed", "expected <field> to be ..."). Anything
     # else (401/403, 5xx, rate limits, network, a registry 404 for the image
     # itself) means the check failed, which says nothing about the image.
-    if grep -qiE 'no attestations found|fetch(ing)? attestations[^[:cntrl:]]*HTTP 404|verification failed|expected [[:alnum:]_.]+ to (be|match)' <<<"$out"; then
+    # The attestations API also answers 404 to a token that cannot see the repository, so
+    # a 404 says so instead of claiming the attestation is missing.
+    if grep -qiE 'fetch(ing)? attestations[^[:cntrl:]]*HTTP 404' <<<"$out"; then
+        no_provenance "${ref} has no build provenance from release.yml for commit ${commit} that this gh login can see: either there is none (refuse the image), or the token cannot read ${RELEASE_REPO}'s attestations (check gh auth status and the token's access, and re-run)"
+    fi
+    if grep -qiE 'no attestations found|verification failed|expected [[:alnum:]_.]+ to (be|match)' <<<"$out"; then
         no_provenance "${ref} has no valid build provenance from release.yml on main, release/<name> or an rc tag for commit ${commit}; refusing it"
     fi
     cannot_check "could not check the provenance of ${ref} (see gh's output above); nothing is known about the image; fix the cause and re-run"

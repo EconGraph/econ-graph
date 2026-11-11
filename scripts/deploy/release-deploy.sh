@@ -238,6 +238,11 @@ fi
 for var in GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_NAMESPACE; do
     [ -z "${!var+set}" ] || die "${var} is set in the environment; unset it, so git checks this checkout itself"
 done
+# Production always checks image provenance itself: load-release-images.sh skips its gh
+# check for refs named in ECONGRAPH_PROVENANCE_VERIFIED, which only
+# scripts/qa/deploy-rc-to-qa.sh sets, for its own candidates (ECO-896).
+[ -z "${ECONGRAPH_PROVENANCE_VERIFIED+set}" ] ||
+    die "ECONGRAPH_PROVENANCE_VERIFIED is set in the environment; unset it, so the deploy verifies image provenance itself"
 RC_TAG="$TAG"
 if [[ "$TAG" != *-rc.* ]]; then
     git -C "$PROJECT_ROOT" fetch --tags origin >/dev/null 2>&1 ||

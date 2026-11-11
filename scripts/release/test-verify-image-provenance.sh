@@ -8,9 +8,10 @@
 #   - every image is verified by digest with --repo EconGraph/econ-graph, the
 #     signer regex, GitHub's OIDC issuer, --source-digest <commit> and
 #     --deny-self-hosted-runners;
-#   - a missing attestation or one that fails the policy (another signer,
-#     another commit) exits 1 with "no valid build provenance", and later
-#     images are not verified;
+#   - an attestation that fails the policy (another signer, another commit)
+#     exits 1 with "no valid build provenance"; the attestations API's 404
+#     exits 1 saying there is none or the token can't see the repository;
+#     later images are not verified;
 #   - gh not logged in, or an API, network or registry error, exits 3 with
 #     "could not check" / "not logged in", never "no valid build provenance";
 #   - a tag, a short digest, a missing or short --commit, or no image is a
@@ -102,12 +103,18 @@ expect() {
 
 bad="has no valid build provenance"
 export STUB_FAIL_ON=econ-graph-backend
-for mode in missing policy; do
-    export STUB_FAIL_AS=$mode
-    expect "a ${mode} attestation exits 1" 1 "${backend} ${bad} from release.yml on main, release/<name> or an rc tag for commit ${commit}" \
-        "could not check" --commit "$commit" "$backend" "$frontend"
-    [ "$(verifies)" = 1 ] || fail "a ${mode} attestation stops before the next image" "$(cat "$STUB_LOG")"
-done
+export STUB_FAIL_AS=policy
+expect "a policy failure exits 1" 1 "${backend} ${bad} from release.yml on main, release/<name> or an rc tag for commit ${commit}" \
+    "could not check" --commit "$commit" "$backend" "$frontend"
+[ "$(verifies)" = 1 ] || fail "a policy failure stops before the next image" "$(cat "$STUB_LOG")"
+# The attestations API's 404: none, or a token that can't see the repository. Exit 1, saying both.
+export STUB_FAIL_AS=missing
+expect "an attestations 404 exits 1 and names the token as a possible cause" 1 \
+    "${backend} has no build provenance from release.yml for commit ${commit} that this gh login can see" \
+    "could not check" --commit "$commit" "$backend" "$frontend"
+grep -qF "the token cannot read EconGraph/econ-graph's attestations" <<<"$out" ||
+    fail "an attestations 404 does not mention the token's access" "$out"
+[ "$(verifies)" = 1 ] || fail "an attestations 404 stops before the next image" "$(cat "$STUB_LOG")"
 for mode in api unauthorized registry404 mismatch; do
     export STUB_FAIL_AS=$mode
     expect "an ${mode} error exits 3, not 'no provenance'" 3 "could not check the provenance of ${backend}" \

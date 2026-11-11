@@ -464,7 +464,7 @@ done
 expect_refusal "refuses two tag rulesets of the same name" "2 tag rulesets are named" --yes
 
 # A live tag ruleset that would leave release tags unprotected is refused, not merged.
-for exclude in "refs/tags/v1*" "refs/tags/*" "refs/tags/t*" "refs/tags/train-5" "~ALL"; do
+for exclude in "refs/tags/v1*" "refs/tags/*" "refs/tags/t*" "refs/tags/train-5" "~ALL" "v*" "train-*" "*"; do
     reset
     jq --arg e "$exclude" '. + {id: 601} | .conditions.ref_name.exclude = [$e]' "$tag_rules" \
         >"$STUB_STATE/rulesets/601.json"

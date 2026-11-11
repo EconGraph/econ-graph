@@ -766,15 +766,16 @@ refuses "a missing revision label" "has no org.opencontainers.image.revision lab
 refuses "a pulled image without the registry's digest" "does not carry digest $(digest_of backend)" STUB_PULLED_DIGEST_DIFFERS=backend
 refuses "an rc tag on another digest" "refusing" STUB_RC_DIGEST_DIFFERS=1
 # Missing or wrong signature: refused before anything is pulled, in a dry run too.
-refuses "an image without release provenance" "has no valid build provenance from release.yml" STUB_NO_PROVENANCE=frontend
+refuses "an image without release provenance" "has no valid release provenance for $STUB_COMMIT; refusing" STUB_NO_PROVENANCE=frontend
 grep -qE '^docker .* pull ' "$STUB_LOG" && fail "load pulled despite an image without release provenance"
 reset
 expect_fail "has no valid release provenance for $STUB_COMMIT; refusing" env STUB_NO_PROVENANCE=chart-api "$load" --tag "$TAG" --dry-run
 # gh not logged in: "could not run", never "no valid provenance", before anything is pulled.
 refuses "gh not logged in" "the provenance check of ${TAG}'s images could not run" STUB_GH_LOGGED_OUT=1
 grep -q 'no valid release provenance' "$tmp/out" && fail "gh not logged in was reported as missing provenance"
-# ECONGRAPH_PROVENANCE_VERIFIED (from deploy-rc-to-qa.sh): gh is skipped only when every
-# digest is listed; one digest missing or different and gh runs as usual.
+grep -qE '^docker .* pull ' "$STUB_LOG" && fail "load pulled despite gh not being logged in"
+# ECONGRAPH_PROVENANCE_VERIFIED (from deploy-rc-to-qa.sh): gh is skipped when every digest
+# is listed; one digest missing or different stops the load and names it.
 all_verified=""
 for n in "${names[@]}"; do all_verified+=" ghcr.io/econgraph/econ-graph-$n@$(digest_of "$n")"; done
 reset
@@ -784,10 +785,11 @@ run env STUB_GH_LOGGED_OUT=1 ECONGRAPH_PROVENANCE_VERIFIED="$all_verified" "$loa
 grep -q '^gh ' "$STUB_LOG" && fail "load ran gh although every digest was pre-verified"
 grep -qF "already verified by the caller" "$tmp/out" || fail "load did not say the caller verified the provenance"
 partly_verified="${all_verified/econ-graph-frontend@$(digest_of frontend)/econ-graph-frontend@sha256:$(rep 0)}"
-refuses "a pre-verified list with another frontend digest" "could not run" \
-  STUB_GH_LOGGED_OUT=1 ECONGRAPH_PROVENANCE_VERIFIED="$partly_verified"
-grep -q '^gh auth status' "$STUB_LOG" || fail "load skipped gh with a pre-verified list missing a digest"
-grep -qE '^docker .* pull ' "$STUB_LOG" && fail "load pulled despite gh not being logged in"
+refuses "a pre-verified list with another frontend digest" \
+  "ghcr.io/econgraph/econ-graph-frontend@$(digest_of frontend) is not in the caller's verified list" \
+  ECONGRAPH_PROVENANCE_VERIFIED="$partly_verified"
+grep -q '^gh ' "$STUB_LOG" && fail "load ran gh with a pre-verified list instead of naming the missing digest"
+grep -qE '^docker .* pull ' "$STUB_LOG" && fail "load pulled despite a pre-verified list missing a digest"
 refuses "an unreachable daemon" "is not reachable" STUB_DOCKER_DOWN=1
 refuses "a rootless daemon" "is a rootless daemon" STUB_ROOTLESS=1
 # Docker's containerd image store: refused before anything is pulled, and in a dry run.

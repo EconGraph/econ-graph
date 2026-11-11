@@ -93,9 +93,15 @@
 # For a candidate that has scripts/release/verify-image-provenance.sh (ECO-896 on), also gh,
 # logged in (gh auth login, or GH_TOKEN): this checkout's verify-image-provenance.sh checks
 # the candidate's images before anything changes and before any of the candidate's code
-# runs. The candidate's code is not trusted with a GitHub credential: its scripts never see
-# GH_TOKEN or a gh config. They get the verified digests in ECONGRAPH_PROVENANCE_VERIFIED,
-# and the candidate's load-release-images.sh skips its own gh check only for exactly those.
+# runs. The candidate's scripts get the verified digests in ECONGRAPH_PROVENANCE_VERIFIED,
+# and its load-release-images.sh skips its own gh check only for exactly those.
+#
+# What this is not: a sandbox. The GitHub token, the gh config, the SSH agent, the session
+# bus (and with it the keyring) and the operator's data home are no longer passed in, but the
+# candidate's scripts still run as the operator's user, with the rootful Docker socket and
+# the ghcr.io login (DOCKER_CONFIG: its load-release-images.sh resolves and pulls the
+# candidate's private images). So a candidate is trusted at the level of reviewed main plus an
+# rc tag only an admin can push (ECO-896); running one that isn't needs a separate user or VM.
 # Exit status: 0 done; 1 a step failed; 2 usage; 3 refused.
 set -euo pipefail
 
@@ -272,22 +278,38 @@ qk() {
     "$QA_KUBECTL" --kubeconfig "$QA_KUBECONFIG" --context "$CONTEXT" "$@"
 }
 
+# stage_kind: copy (never link) the candidate's pinned kind into the QA directory's own data
+# home, so the candidate's scripts find it without writing the operator's ~/.local/share
+# (where a planted binary would later run as the operator's kind).
+stage_kind() {
+    local src dest="${QA_DIR}/data/econgraph/bin"
+    src="$(kind_bin)"
+    mkdir -p "$dest"
+    # Without one, the candidate's own scripts say how to install it.
+    [ -f "$src" ] || return 0
+    cmp -s "$src" "${dest}/${src##*/}" || cp -f "$src" "${dest}/${src##*/}"
+    chmod 755 "${dest}/${src##*/}"
+}
+
 # rc ARGS: run one of the candidate's scripts from src/, with every default path of theirs
 # inside the QA directory and no upstream API key or production kubeconfig in reach.
 # Its environment starts empty: only the variables below, so nothing of the operator's shell
-# (API keys, a tunnel token, KUBECONFIG, DRY_RUN, NAMESPACE, ...) reaches it. The cluster's own
-# kubectl and kubeconfig are named (KUBECTL, KUBECONFIG), so no script looks for production's.
+# (API keys, a tunnel token, KUBECONFIG, DRY_RUN, NAMESPACE, a GitHub token, the SSH agent,
+# the session bus and keyring, ...) reaches it. The cluster's own kubectl and kubeconfig are
+# named (KUBECTL, KUBECONFIG), so no script looks for production's. DOCKER_CONFIG is passed
+# because the candidate's load-release-images.sh resolves and pulls its private ghcr.io
+# images. This limits what reaches the candidate; it is not a sandbox (see the header).
 rc() {
+    stage_kind
     (
         cd "$SRC"
         env -i PATH="$PATH" LANG="${LANG:-C.UTF-8}" TERM="${TERM:-dumb}" USER="${USER:-}" \
-            LOGNAME="${LOGNAME:-}" SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
-            DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" \
+            LOGNAME="${LOGNAME:-}" \
             KUBECTL="$QA_KUBECTL" KUBECONFIG="$QA_KUBECONFIG" \
             DOCKER_HOST="$DOCKER_HOST" ECONGRAPH_DOCKER_HOST="$DOCKER_HOST" \
             HOME="${QA_DIR}/home" DOCKER_CONFIG="${DOCKER_CONFIG:-${REAL_HOME}/.docker}" \
             ECONGRAPH_PROVENANCE_VERIFIED="$PROVENANCE_VERIFIED" \
-            XDG_DATA_HOME="$REAL_DATA_HOME" XDG_CACHE_HOME="${QA_DIR}/cache" \
+            XDG_DATA_HOME="${QA_DIR}/data" XDG_CACHE_HOME="${QA_DIR}/cache" \
             XDG_CONFIG_HOME="${QA_DIR}/home/.config" XDG_STATE_HOME="${QA_DIR}/home/.local/state" \
             KIND_CLUSTER="$NAME" ECONGRAPH_SCRATCH_STORAGE="$STORAGE" \
             ECONGRAPH_BACKUP_ROOT="${QA_DIR}/backups" ECONGRAPH_RELEASES_DIR="${QA_DIR}/releases" \

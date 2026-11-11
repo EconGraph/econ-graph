@@ -177,14 +177,16 @@ pin_refs=()
 for name in "${RI_NAMES[@]}"; do pin_refs+=("${PIN_REF[$name]}"); done
 # ECONGRAPH_PROVENANCE_VERIFIED: refs a trusted caller already verified for this commit with
 # its own copy of verify-image-provenance.sh (scripts/qa/deploy-rc-to-qa.sh does, so the
-# candidate's code never gets a GitHub credential). The check is skipped only when every
-# ref here is in it, digest for digest; otherwise it runs as usual.
-preverified=true
-for ref in "${pin_refs[@]}"; do
-    [[ " ${ECONGRAPH_PROVENANCE_VERIFIED:-} " == *" ${ref} "* ]] || preverified=false
-done
+# candidate's code never gets a GitHub credential). When it is set, every ref here must be
+# in it, digest for digest, or the script stops: the tag moved since the caller's check.
+# Unset, the check runs here as usual. scripts/deploy/release-deploy.sh refuses to run with
+# it set.
 provenance_rc=0
-if [ "$preverified" = true ]; then
+if [ -n "${ECONGRAPH_PROVENANCE_VERIFIED:-}" ]; then
+    for ref in "${pin_refs[@]}"; do
+        [[ " ${ECONGRAPH_PROVENANCE_VERIFIED} " == *" ${ref} "* ]] ||
+            ri_die "${ref} is not in the caller's verified list ECONGRAPH_PROVENANCE_VERIFIED (did the tag move since the check?); refusing"
+    done
     echo "provenance of ${TAG}'s images already verified by the caller (ECONGRAPH_PROVENANCE_VERIFIED)"
 else
     "$PROJECT_ROOT/scripts/release/verify-image-provenance.sh" --commit "$COMMIT" "${pin_refs[@]}" || provenance_rc=$?
