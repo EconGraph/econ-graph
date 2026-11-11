@@ -200,8 +200,15 @@ PY
 }
 check_archive_servers() {  # check_archive_servers SETTINGS: run from the deploy ref; each live cluster keeps its archive serverName
   for p in app data keycloak; do
-    live="$(k -n econ-graph get cluster "econgraph-$p" -o jsonpath='{.spec.plugins[0].parameters.serverName}' 2>/dev/null)" ||
-      { echo "econgraph-$p doesn't exist yet: skipped"; continue; }
+    errf="$(mktemp)"
+    if ! live="$(k -n econ-graph get cluster "econgraph-$p" -o jsonpath='{.spec.plugins[0].parameters.serverName}' 2>"$errf")"; then
+      err="$(cat "$errf")"; rm -f "$errf"
+      case "$err" in
+        *NotFound*) echo "econgraph-$p doesn't exist yet: skipped"; continue ;;
+        *) stop "can't read econgraph-$p: $err"; return 1 ;;
+      esac
+    fi
+    rm -f "$errf"
     rendered="$(python3 - "$p" "$1" <<'PY'
 import re, sys, yaml
 plane, settings = sys.argv[1:]
@@ -282,6 +289,12 @@ unsilence() {  # expire every silence this run recorded, then list what is still
     amtool --alertmanager.url="$AM" silence expire "$id" 2>/dev/null || true   # an id expires only once
   done
   amtool --alertmanager.url="$AM" silence query
+}
+silence_minutes() {  # silence_minutes PREFIX: minutes left on the shortest active silence whose comment starts with PREFIX; 0 if none
+  am_up || return 1
+  amtool --alertmanager.url="$AM" silence query -o json | jq -r --arg c "$1" \
+    '[.[] | select(.comment | startswith($c)) | (.endsAt | sub("\\.[0-9]+"; "") | fromdateiso8601) - now]
+     | if length == 0 then 0 else (min / 60 | floor) end'
 }
 ```
 
@@ -632,16 +645,23 @@ still waits for `platform-data-schema` through `dependsOn`.
 
 ### 1.8 Migrate, then release the application
 
-The block waits for `crawler-migrate` to run this release's image and finish. It stops on
-a failed migration before anything resumes. It then deletes the completed
+The block first makes sure the promotion silences have at least an hour left, and adds
+fresh ones if not. It then waits for `crawler-migrate` to run this release's image and
+finish, before waiting for `platform-data-schema` to report Ready. That way a failed Job
+stops the block as soon as it fails, not after the Kustomization's timeout, and nothing
+resumes. It then deletes the completed
 `keycloak-realm-import` Job, so that Flux recreates it from this release; otherwise a
 changed Job spec fails with `field is immutable` (**Gap G15**, ECO-922). Last, it resumes
 the application and lifts the promotion silences.
 
 ```sh
 ( set -eo pipefail
-  flux_wait platform-data-schema "$DEPLOY_COMMIT" 30
+  if [ "$(silence_minutes "promotion $RUN")" -lt 60 ]; then
+    silence 2h "promotion $RUN: crawler stopped (extended)" 'alertname=~"CrawlerWorkerDown|CrawlerMetricsMissing"'
+    silence 2h "promotion $RUN (extended)" alertname=KubeJobFailed 'job_name!="crawler-migrate"'
+  fi
   wait_migrate "$CRAWLER_DIGEST" 30
+  flux_wait platform-data-schema "$DEPLOY_COMMIT" 30
   k -n econ-graph logs job/crawler-migrate > "$EVIDENCE/crawler-migrate.log"
   k -n econ-graph delete job keycloak-realm-import --ignore-not-found
   resume_ks platform-application
@@ -818,7 +838,8 @@ is ECO-883's decision.
 ### 3.1 Stop and decide
 
 Silence the alerts the rollback causes ([3.4](#34-alerts-expected-during-a-rollback)).
-Then stop everything that migrates, and compare the full set of applied migrations with
+Then stop everything that migrates. `platform-data-schema` is suspended too, so that Flux
+can't rerun the new release's `crawler-migrate` while it is still pinned to it. Compare the full set of applied migrations with
 the set from before the promotion:
 
 ```sh
@@ -827,6 +848,7 @@ export SILENCE_FOR=6h   # long enough for a data-plane restore; unsilence ends i
   silence "$SILENCE_FOR" "rollback $RUN" \
     'alertname=~"CrawlerWorkerDown|CrawlerMetricsMissing|EconGraphEdge5xxRatioHigh|EconGraphKeycloakDown|EconGraphKeycloakInstanceDown|EconGraphPostgresInstanceNotReady|EconGraphBackupHealthCheckStale"'
   silence "$SILENCE_FOR" "rollback $RUN" alertname=KubeJobFailed 'job_name!="crawler-migrate"'
+  suspend_ks platform-data-schema
   suspend_ks platform-application
   k -n econ-graph scale deployment/econ-graph-backend deployment/econ-graph-data-backend --replicas=0
   k -n econ-graph wait --for=delete pod -l 'app in (econ-graph-backend,econ-graph-data-backend)' --timeout=10m
@@ -844,7 +866,8 @@ the frontend, which shows errors.
 ### 3.2 Before a migration ran
 
 Check out the previous release's deploy ref, and delete the Jobs that Flux must recreate
-from it (G15):
+from it (G15). `platform-data-schema` stays suspended from 3.1 until the re-pin, so the
+deleted `crawler-migrate` can't come back from the new release's commit.
 
 ```sh
 export PREV_DEPLOY_REF="deploy/$CLUSTER-$PREV_TAG"
@@ -855,9 +878,10 @@ git fetch origin
   git switch -C "$PREV_DEPLOY_REF" "origin/$PREV_DEPLOY_REF"
   [ "$(git rev-parse HEAD)" = "$(cat "$SETTINGS_DIR/deploy-commit-$PREV_TAG")" ] || stop "$PREV_DEPLOY_REF moved since it was promoted"
   check_settings "$SETTINGS_DIR/platform-settings-$PREV_TAG.yaml"
+  [ "$(k -n flux-system get kustomization platform-data-schema -o jsonpath='{.spec.suspend}')" = true ] || stop "platform-data-schema is not suspended; run 3.1 first"
   k -n econ-graph delete job crawler-migrate keycloak-realm-import --ignore-not-found
 )
-export PREV_DEPLOY_COMMIT="$(git rev-parse HEAD)"
+export PREV_DEPLOY_COMMIT="$(cat "$SETTINGS_DIR/deploy-commit-$PREV_TAG")"
 ```
 
 Apply it. On a scratch cluster:
@@ -876,18 +900,22 @@ On production (Gap G1, as in 1.7):
 
 ```sh
 ( set -eo pipefail
+  [ -n "$PREV_DEPLOY_COMMIT" ] && [ "$(git rev-parse HEAD)" = "$PREV_DEPLOY_COMMIT" ] || stop "check out $PREV_DEPLOY_REF at $PREV_DEPLOY_COMMIT first"
   k apply -f "$SETTINGS_DIR/platform-settings-$PREV_TAG.yaml"
   pin_ref "$PREV_DEPLOY_COMMIT"
 )
 ```
 
-Then, on both kinds of cluster, migrate (a no-op on the unchanged schema), start the
-application, and check the replica counts are back:
+Then, on both kinds of cluster, check the pin and resume `platform-data-schema`. The block
+then migrates (a no-op on the unchanged schema), starts the application, and checks that
+the replica counts are back:
 
 ```sh
 ( set -eo pipefail
-  flux_wait platform-data-schema "$PREV_DEPLOY_COMMIT" 30
+  [ "$(k -n flux-system get gitrepository econgraph-platform -o jsonpath='{.spec.ref.commit}')" = "$PREV_DEPLOY_COMMIT" ] || stop "Flux is not pinned to $PREV_DEPLOY_COMMIT yet"
+  resume_ks platform-data-schema
   wait_migrate "$CRAWLER_DIGEST" 30
+  flux_wait platform-data-schema "$PREV_DEPLOY_COMMIT" 30
   resume_ks platform-application
   flux_wait platform-application "$PREV_DEPLOY_COMMIT" 30
   wait_job keycloak-realm-import 15
@@ -1214,22 +1242,25 @@ its own policies, copied from `cnpg-$PLANE` and `cnpg-api`
 - egress to DNS and to the object store;
 - egress to the API server.
 
-First build the trial manifest from the committed spec, and have the API server check it
-(the minimum check):
+First build the trial manifest from the restore commit itself, not the working tree, and
+have the API server check it (the minimum check). Any earlier trial result for this plane
+is removed first, so that only a trial of `$RESTORE_COMMIT` can pass 4.7:
 
 ```sh
 ( set -eo pipefail
-  python3 - "$PLANE" > "$EVIDENCE/trial-$PLANE.json" <<'PY'
+  [ -n "$RESTORE_COMMIT" ] || stop "RESTORE_COMMIT is empty; run 4.5 first"
+  rm -f "$EVIDENCE/trial-version-$PLANE.txt" "$EVIDENCE/trial-ok-$PLANE"
+  git show "$RESTORE_COMMIT:platform/databases/clusters.yaml" | python3 -c '
 import json, sys, yaml
 plane = sys.argv[1]
-docs = [d for d in yaml.safe_load_all(open('platform/databases/clusters.yaml')) if d]
-doc = [d for d in docs if d['metadata']['name'] == 'econgraph-' + plane][0]
-doc['metadata'] = {'name': 'econgraph-%s-trial' % plane, 'namespace': 'econ-graph',
-                   'labels': {'econgraph.io/restore-trial': plane}}
-doc['spec']['instances'] = 1
-doc['spec'].pop('plugins', None)
-json.dump(doc, sys.stdout)
-PY
+docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
+doc = [d for d in docs if d["metadata"]["name"] == "econgraph-" + plane][0]
+doc["metadata"] = {"name": "econgraph-%s-trial" % plane, "namespace": "econ-graph",
+                   "labels": {"econgraph.io/restore-trial": plane}}
+doc["spec"]["instances"] = 1
+doc["spec"].pop("plugins", None)
+json.dump(doc, sys.stdout)' "$PLANE" > "$EVIDENCE/trial-$PLANE.json"
+  echo "$RESTORE_COMMIT" > "$EVIDENCE/trial-commit-$PLANE"
   k apply --dry-run=server -f "$EVIDENCE/trial-$PLANE.json"
 )
 ```
@@ -1240,6 +1271,8 @@ If 4.2 showed room for the trial, run it:
 export OS_CIDR="$(k -n flux-system get configmap platform-settings -o jsonpath='{.data.OBJECT_STORE_CIDR}')"
 export OS_PORT="$(k -n flux-system get configmap platform-settings -o jsonpath='{.data.OBJECT_STORE_PORT}')"
 ( set -eo pipefail
+  rm -f "$EVIDENCE/trial-version-$PLANE.txt" "$EVIDENCE/trial-ok-$PLANE"
+  [ "$(cat "$EVIDENCE/trial-commit-$PLANE")" = "$RESTORE_COMMIT" ] || stop "the trial manifest is not from $RESTORE_COMMIT; run the block above again"
   [ -n "$OS_CIDR" ] && [ -n "$OS_PORT" ] || stop "OBJECT_STORE_CIDR or OBJECT_STORE_PORT missing from platform-settings"
   k apply -f - <<EOF
 apiVersion: networking.k8s.io/v1
@@ -1321,9 +1354,10 @@ match writes the `trial-ok` file that 4.7 requires:
 
 ```sh
 ( set -eo pipefail
+  [ "$(cat "$EVIDENCE/trial-commit-$PLANE")" = "$RESTORE_COMMIT" ] || stop "the trial was not of $RESTORE_COMMIT"
   [ -s "$EVIDENCE/trial-version-$PLANE.txt" ] || stop "the trial didn't produce a version list"
   diff "$EVIDENCE/expected-version-$PLANE.txt" "$EVIDENCE/trial-version-$PLANE.txt" || stop "the trial restored a different schema"
-  echo "$RESTORE_COMMIT $(date -u +%FT%TZ)" > "$EVIDENCE/trial-ok-$PLANE"
+  echo "$RESTORE_COMMIT $(date -u +%FT%TZ)" > "$EVIDENCE/trial-ok-$PLANE"   # 4.7 checks the first field
 )
 ```
 
@@ -1343,6 +1377,8 @@ that the trial passed, before it deletes anything:
 ```sh
 ( set -eo pipefail
   suspend_ks platform-databases
+  [ -n "$RESTORE_COMMIT" ] || stop "RESTORE_COMMIT is empty; run 4.5 first"
+  [ "$(git rev-parse HEAD)" = "$RESTORE_COMMIT" ] || stop "check out $RESTORE_REF at $RESTORE_COMMIT first"
   git show "$RESTORE_COMMIT:platform/databases/clusters.yaml" | python3 -c '
 import sys, yaml
 plane, new = sys.argv[1:]
@@ -1350,7 +1386,8 @@ doc = [d for d in yaml.safe_load_all(sys.stdin) if d and d["metadata"]["name"] =
 if list(doc["spec"]["bootstrap"]) != ["recovery"] or doc["spec"]["plugins"][0]["parameters"].get("serverName") != new:
     sys.exit("STOP: %s does not restore econgraph-%s archiving as %s" % ("RESTORE_COMMIT", plane, new))
 print("restore commit OK")' "$PLANE" "$NEW_SERVER"
-  [ -s "$EVIDENCE/trial-ok-$PLANE" ] || [ "${TRIAL_WAIVED_BY:-}" = Joe ] || stop "4.6 hasn't passed for $PLANE"
+  trial_commit="$(cut -d' ' -f1 "$EVIDENCE/trial-ok-$PLANE" 2>/dev/null || true)"
+  [ "$trial_commit" = "$RESTORE_COMMIT" ] || [ "${TRIAL_WAIVED_BY:-}" = Joe ] || stop "4.6 hasn't passed for $PLANE at $RESTORE_COMMIT"
   k -n econ-graph delete cluster "econgraph-$PLANE" --wait=true --timeout=10m
   { k get pv | grep -E "econ-graph/econgraph-$PLANE-[0-9]+ " || true; } | tee -a "$EVIDENCE/replaced-volumes-$PLANE.txt"   # Released, not gone
   pin_ref "$RESTORE_COMMIT"
