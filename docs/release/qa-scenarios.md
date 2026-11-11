@@ -82,18 +82,30 @@ create, and a dump inside the QA root.
 
 For a candidate from ECO-896 on, the script checks each image's signed build provenance with
 its own copy of `scripts/release/verify-image-provenance.sh` (so `gh` must be logged in)
-before any of the candidate's code runs. The candidate's scripts get no GitHub token, gh
-config, SSH agent, session bus (keyring) or the operator's data home. This is not a
-sandbox: they still run as the operator's user, with the rootful Docker socket and the
-`ghcr.io` login they need to pull the candidate's images. So a candidate is trusted at the
-level of reviewed `main` plus an rc tag only an admin can push. Running one that isn't
-needs a separate user or VM.
+before any of the candidate's code runs.
 
-The script never runs the candidate's files in its own environment: it reads the kind
-version the candidate pins as text. The kind it runs itself (to get a kubeconfig, and to
-delete the cluster on teardown) is the operator's, installed with this checkout's
-`scripts/deploy/install-kind.sh` at that version. It falls back to the copy in the QA
-directory only when that copy's checksum is the one `install-kind.sh` pins.
+**The candidate is trusted, not sandboxed.** Its code runs as the operator's user, with the
+rootful Docker socket and the `ghcr.io` login it needs to pull its images. So it can tamper
+with anything that user can write, this script and its tools included. A candidate is
+therefore trusted at the level of reviewed `main` plus an rc tag only an admin can push.
+Running one that isn't needs a separate user or VM
+([ECO-926](https://linear.app/econgraph/issue/ECO-926/run-qa-release-candidates-as-a-separate-user-or-in-a-vm)).
+
+The script removes credentials from every process it starts once candidate code can have
+run. That is defence in depth, not a boundary:
+
+- The candidate's scripts get no GitHub token or gh config, SSH agent, session bus (keyring),
+  `XDG_RUNTIME_DIR` or the operator's data home.
+- After the provenance check, and throughout a teardown, the script strips its own
+  environment, so nothing it starts gets those either, or any other variable of the
+  operator's shell.
+- It runs kind and kubectl only as fresh private copies. For kind, the copy's checksum must
+  be the one this checkout's `scripts/deploy/install-kind.sh` pins.
+- It regenerates the kubeconfig with kind each run, and refuses one with an `exec` or
+  `auth-provider` entry.
+- It never runs git inside the candidate's worktree.
+- It reads the candidate's kind version as text, never runs that file, and refuses it unless
+  it sets one `KIND_VERSION="vX.Y.Z"`.
 
 The site is at `http://localhost:PORT`, on 127.0.0.1 only, with sign-in, the backend's issuer
 and CORS moved to that address: a deliberate difference from the candidate's own

@@ -19,6 +19,8 @@ import stat
 import subprocess
 import tempfile
 import textwrap
+import hashlib
+import platform
 import unittest
 
 import yaml
@@ -111,6 +113,8 @@ if prog == 'docker':
 elif prog == 'kind':
     if args[:2] == ['get', 'kubeconfig']:
         out = 'apiVersion: v1\nkind: Config\n'
+        if state.get('kubeconfig_exec'):
+            out += 'users:\n- name: x\n  user:\n    exec:\n      command: /tmp/steal\n'
     elif args[:2] == ['delete', 'cluster']:
         state.update(cluster=False, owner='')
         save()
@@ -237,6 +241,7 @@ class DeployRcToQaTest(unittest.TestCase):
         kind_dir = self.data_home / 'econgraph/bin'
         kind_dir.mkdir(parents=True)
         (kind_dir / 'kind-v0.33.0').symlink_to(stub)
+        self.stub_sha256 = hashlib.sha256(stub.read_bytes()).hexdigest()
         # The candidate: a repository with the script, stub deploy scripts and the real
         # kind config and realm-import Job, tagged and pushed to a local origin.
         origin = self.work / 'origin.git'
@@ -262,6 +267,7 @@ class DeployRcToQaTest(unittest.TestCase):
             target = self.repo / 'scripts/deploy' / script
             target.parent.mkdir(parents=True, exist_ok=True)
             target.symlink_to(stub)
+        self.pin_kind(self.stub_sha256)
         git = ['git', '-C', str(self.repo), '-c', 'user.name=t', '-c', 'user.email=t@t']
         run(git + ['add', '-A'])
         run(git + ['commit', '-q', '-m', 'candidate'])
@@ -277,6 +283,15 @@ class DeployRcToQaTest(unittest.TestCase):
         self.dump_before = self.fingerprint(self.dump)
         self.qa_root = self.work / 'qa'
         self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}})
+
+    def pin_kind(self, digest):
+        # This checkout's install-kind.sh, pinning DIGEST for kind v0.33.0 on this platform.
+        os_name = {'Linux': 'linux', 'Darwin': 'darwin'}[platform.system()]
+        arch = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}[platform.machine()]
+        install = self.repo / 'scripts/deploy/install-kind.sh'
+        install.parent.mkdir(parents=True, exist_ok=True)
+        install.write_text(f'pinned_sha256() {{\n    case "$1" in\n'
+                           f'        v0.33.0/{os_name}-{arch}) echo {digest} ;;\n    esac\n}}\n')
 
     def fingerprint(self, path):
         return sorted((str(p), p.stat().st_size, p.stat().st_mtime_ns) for p in path.rglob('*'))
@@ -558,8 +573,10 @@ class DeployRcToQaTest(unittest.TestCase):
         # Every kubectl call is on the QA kubeconfig and context; nothing names production.
         kubectl = [c for c in self.logged() if c['prog'] == 'kubectl']
         for call in kubectl:
-            self.assertEqual(call['args'][:4], ['--kubeconfig', str(qa / f'cache/econgraph/kubeconfig-{NAME}'),
-                                                '--context', f'kind-{NAME}'])
+            self.assertEqual(call['args'][0], '--kubeconfig')
+            self.assertEqual(Path(call['args'][1]).name, 'kubeconfig')
+            self.assertNotIn(str(qa), call['args'][1])
+            self.assertEqual(call['args'][2:4], ['--context', f'kind-{NAME}'])
         texts = [' '.join(c['args']) for c in kubectl]
         self.assertTrue(any('delete secret crawler-api-keys' in t for t in texts))
         self.assertTrue(any('delete secret grafana-admin monitoring-auth' in t for t in texts))
@@ -776,17 +793,17 @@ class DeployRcToQaTest(unittest.TestCase):
     def test_teardown_without_an_operator_kind_never_runs_an_unverified_copy(self):
         self.assertEqual(self.deploy().returncode, 0)
         self.remove_operator_kind()
-        # The QA directory's copy (here the stub) has no checksum this checkout pins.
+        # The QA directory's copy, changed after staging: its checksum is not the pinned one.
+        staged = self.qa_root / NAME / 'data/econgraph/bin/kind-v0.33.0'
+        staged.write_bytes(staged.read_bytes() + b'\n# planted\n')
         self.calls.write_text('')
         result = self.deploy('--tag', TAG, '--teardown')
         self.assertNotEqual(result.returncode, 0, result.stdout)
-        self.assertIn('no trusted kind v0.33.0', result.stdout)
+        self.assertIn('no kind v0.33.0 with the checksum', result.stdout)
         self.assertFalse(any(c['prog'] == 'kind' for c in self.logged()))
         self.assertTrue(self.read_state()['cluster'])
 
     def test_teardown_without_an_operator_kind_runs_a_checksum_verified_copy(self):
-        import hashlib
-        import platform
         self.assertEqual(self.deploy().returncode, 0)
         self.remove_operator_kind()
         staged = self.qa_root / NAME / 'data/econgraph/bin/kind-v0.33.0'
@@ -802,6 +819,60 @@ class DeployRcToQaTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertFalse(self.read_state()['cluster'])
         self.assertTrue(any(c['prog'] == 'kind' and c['args'][:2] == ['delete', 'cluster'] for c in self.logged()))
+
+
+    def test_a_tampered_operator_kind_is_never_run(self):
+        self.assertEqual(self.deploy().returncode, 0)
+        operator = self.data_home / 'econgraph/bin/kind-v0.33.0'
+        tampered = operator.read_bytes() + b'\n# planted\n'
+        operator.unlink()
+        operator.write_bytes(tampered)
+        operator.chmod(0o755)
+        (self.qa_root / NAME / 'data/econgraph/bin/kind-v0.33.0').unlink()
+        self.calls.write_text('')
+        result = self.deploy('--tag', TAG, '--teardown')
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('no kind v0.33.0 with the checksum', result.stdout)
+        self.assertFalse(any(c['prog'] == 'kind' for c in self.logged()))
+
+    def test_a_kind_version_set_twice_is_refused(self):
+        git = ['git', '-C', str(self.repo), '-c', 'user.name=t', '-c', 'user.email=t@t']
+        (self.repo / 'scripts/deploy/lib/kind-version.sh').write_text(
+            'KIND_VERSION="v0.33.0"\nKIND_VERSION="v9.9.9"\n')
+        run(git + ['commit', '-q', '-am', 'kind version twice'])
+        run(git + ['tag', 'v4.1.0-rc.4'])
+        run(git + ['push', '-q', 'origin', '--tags'])
+        result = self.deploy('--tag', 'v4.1.0-rc.4', '--dump-dir', str(self.dump), '--name', NAME)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('must set KIND_VERSION exactly once', result.stdout)
+
+    def test_a_kubeconfig_with_an_exec_entry_is_refused(self):
+        self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}, 'kubeconfig_exec': True})
+        result = self.deploy()
+        self.assertEqual(result.returncode, 3, result.stdout)
+        self.assertIn('has an exec or auth-provider entry', result.stdout)
+        self.assertFalse(any(c['prog'] == 'kubectl' for c in self.logged()))
+
+    def test_no_command_after_candidate_code_gets_the_operators_credentials(self):
+        tag, _ = self.provenance_candidate()
+        result = self.deploy('--tag', tag, '--dump-dir', str(self.dump), '--name', NAME,
+                             GH_TOKEN='operator-admin-token')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        calls = self.logged()
+        # The provenance check, before any candidate code, keeps the token.
+        self.assertTrue(any(c['prog'] == 'gh' and c['env']['GH_TOKEN'] == 'operator-admin-token' for c in calls))
+        first_candidate = next(i for i, c in enumerate(calls) if c['prog'].endswith('.sh'))
+        last_gh = max(i for i, c in enumerate(calls) if c['prog'] == 'gh')
+        self.assertLess(last_gh, first_candidate)
+        self.calls.write_text('')
+        result = self.deploy('--tag', tag, '--teardown', '--name', NAME, GH_TOKEN='operator-admin-token')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        after = calls[last_gh + 1:] + self.logged()
+        self.assertTrue(any(c['prog'] in ('kind', 'kubectl', 'docker') for c in after))
+        for call in after:
+            for withheld in ('GH_TOKEN', 'GH_CONFIG_DIR', 'SSH_AUTH_SOCK', 'DBUS_SESSION_BUS_ADDRESS',
+                             'XDG_RUNTIME_DIR', 'FRED_API_KEY', 'CLOUDFLARE_TUNNEL_TOKEN'):
+                self.assertIsNone(call['env'][withheld], (withheld, call['prog'], call['args'][:3]))
 
 
 if __name__ == '__main__':
