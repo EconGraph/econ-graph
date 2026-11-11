@@ -57,7 +57,30 @@ kept in `~/.cache/econgraph`, and prints that cluster's identity first.
 1. It runs `git fetch --tags origin` (also in `--dry-run`) and resolves the tag to its commit.
 2. It requires `ghcr.io/econgraph/econ-graph-<name>:sha-<full commit>` and the rc tag to report
    one digest on GHCR. The packages are private, so the Docker client needs a
-   `docker login ghcr.io` with a token that has `read:packages`.
+   `docker login ghcr.io` with a token that has `read:packages`. Each digest must carry a
+   signed build provenance attestation from `.github/workflows/release.yml` run on `main`, a
+   `release/*` branch or an rc tag
+   ([verify-image-provenance.sh](../../scripts/release/verify-image-provenance.sh), which runs
+   `gh attestation verify`, so `gh` must be logged in). The attestation must also name the
+   tag's commit as its source. An image without one, or attested by anything else, stops the
+   script before anything is pulled, in `--dry-run` too ("the provenance check refused an image", after the check's own reason). When
+   the check itself cannot run (gh not logged in, a GitHub, network or registry error), the
+   script says "could not run" instead: fix that and re-run; nothing is wrong with the image
+   yet.
+
+   Images from before ECO-896:
+
+   - Every v4.0 and v4.1 image has no attestation, so this checkout's `load-release-images.sh`
+     refuses all of them. To load an old tag (a rollback to v4.1.x, say), run that tag's own
+     checkout of the script, as `scripts/qa/deploy-rc-to-qa.sh` does for a candidate.
+   - `release/v4.1` still has the old `release.yml`, so a build from it has no attestation
+     either, and no loader from ECO-896 on accepts it. A 4.1.x patch is built and loaded with
+     the v4.1 tooling (that branch's workflow and its tag's own `load-release-images.sh`), or
+     ECO-896 is ported to `release/v4.1` first.
+   - The existing `sha-67e58882…` images on GHCR have no attestation, so the workflow refuses
+     to adopt them, and refuses to overwrite them: a rebuild of that commit fails until those
+     package versions are deleted.
+   - The v4.2.0 release candidate must be built after ECO-896 merges.
 3. It decides what to keep for each image: what the Deployment's running pods run now, or,
    once the tag has a load record, what the first record kept. It stops before changing
    anything if an earlier load of the tag moved another name (the record's `local=`) than the

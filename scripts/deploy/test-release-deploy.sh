@@ -1047,6 +1047,12 @@ rm -f "$TREE/k8s/manifests/extra.yaml"
 
 run env GIT_DIR="$TREE/.git" "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
 refused "GIT_DIR set in the environment" "GIT_DIR is set in the environment"
+# ECO-896: production never takes a caller's "already verified" provenance list.
+run env ECONGRAPH_PROVENANCE_VERIFIED="ghcr.io/econgraph/econ-graph-backend@sha256:$(printf 'a%.0s' {1..64})" \
+    "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "ECONGRAPH_PROVENANCE_VERIFIED set in the environment" "ECONGRAPH_PROVENANCE_VERIFIED is set in the environment"
+run env ECONGRAPH_PROVENANCE_VERIFIED= "$RELEASE_DEPLOY" --tag "$TAG" "${YES[@]}"
+refused "an empty ECONGRAPH_PROVENANCE_VERIFIED" "ECONGRAPH_PROVENANCE_VERIFIED is set in the environment"
 cp -a "$TREE" "$WORK/my tree"
 run "$WORK/my tree/scripts/deploy/release-deploy.sh" --tag "$TAG" "${YES[@]}"
 [ "$rc" -eq 0 ] && [ "$(steps)" = "$ALL" ] ||

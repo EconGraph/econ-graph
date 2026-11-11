@@ -10,7 +10,18 @@
 #     refs/heads/release/*: main's live `non_fast_forward` and `pull_request`
 #     rules and `bypass_actors`, plus the same rules without the
 #     `Lint workflows` check and without the merge queue (GitHub refuses a
-#     merge queue on a ruleset whose branch pattern has a wildcard).
+#     merge queue on a ruleset whose branch pattern has a wildcard), and a
+#     `creation` rule: only the bypass actors can create a release/* branch,
+#     since release.yml and verify-image-provenance.sh trust every one
+#     (ECO-896);
+#   - create, or update, the tag ruleset in tag-ruleset.json (`release tags
+#     by admins only`): only the file's bypass actors (organization admins)
+#     may create, move or delete v* and train-* tags, so release.yml only ever
+#     sees release tags an admin pushed (ECO-896). Bypass actors are never
+#     inherited from main, and pull_request-mode actors are dropped (they mean
+#     nothing for tags). A live tag ruleset with another bypass actor, or an
+#     exclude pattern that could match a v* or train-* tag, is refused before
+#     anything is written.
 #
 # Usage: scripts/github/apply-rulesets.sh [--dry-run] [--yes]
 #
@@ -23,8 +34,10 @@
 # manage is kept as it is; a live rule of a type it does manage keeps every
 # parameter, with the script's values set over it, and a live required check
 # the script doesn't list stays required. Nothing live is removed, so removing
-# a rule or a check is done by hand. The release ruleset is found by name and
-# target, so a re-run updates it instead of creating another. When the live
+# a rule or a check is done by hand. The release and tag rulesets are found by
+# name and target, so a re-run updates them instead of creating others; the
+# tag ruleset takes its name, enforcement, refs, bypass actors and rules from
+# tag-ruleset.json, merged the same additive way into a live one. When the live
 # rulesets already match, the script says "already applied" and writes nothing.
 #
 # It refuses before writing anything when `gh` is not logged in, the account
@@ -32,7 +45,7 @@
 # the expected one (id, name, target, source, branch condition, rules). When
 # GitHub rejects a write, it prints which ruleset failed, whether the main
 # ruleset was already written, and GitHub's error message and errors, then
-# exits non-zero. After writing it re-reads both rulesets and fails unless
+# exits non-zero. After writing it re-reads every ruleset and fails unless
 # they match.
 #
 # Needs gh (logged in as a repository admin), jq and diff. Reads and writes
@@ -51,6 +64,7 @@ RELEASE_SKIPPED_CHECK="Lint workflows"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RULES_FILE="${SCRIPT_DIR}/merge-queue-rules.json"
+TAG_FILE="${SCRIPT_DIR}/tag-ruleset.json"
 
 usage() {
     sed -n '/^# Usage:/,/^#   --yes/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -86,6 +100,12 @@ done
 [ -r "$RULES_FILE" ] || die "missing $RULES_FILE"
 jq -e 'type == "array" and length > 0 and all(.[]; type == "object" and (.type | type) == "string")' \
     "$RULES_FILE" >/dev/null || die "$RULES_FILE is not a list of rules"
+[ -r "$TAG_FILE" ] || die "missing $TAG_FILE"
+jq -e '(.name | type) == "string" and .target == "tag" and (.enforcement | type) == "string"
+       and (.conditions.ref_name.include | type) == "array" and (.bypass_actors | type) == "array"
+       and (.rules | type) == "array" and all(.rules[]; (.type | type) == "string")' \
+    "$TAG_FILE" >/dev/null || die "$TAG_FILE is not a tag ruleset (name, target tag, enforcement, conditions, bypass_actors, rules)"
+TAG_NAME="$(jq -r '.name' "$TAG_FILE")"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -183,16 +203,51 @@ else
     echo null >"$work/release-live.json"
 fi
 
+tag_ids="$(jq -r --arg name "$TAG_NAME" \
+    '[.[] | select(.name == $name and .target == "tag") | .id] | map(tostring) | join(" ")' \
+    "$work/list.json")"
+tag_count="$(wc -w <<<"$tag_ids" | tr -d ' ')"
+[ "$tag_count" -le 1 ] ||
+    die "${tag_count} tag rulesets are named \"${TAG_NAME}\" (ids ${tag_ids}); keep one and re-run"
+tag_id="$tag_ids"
+if [ -n "$tag_id" ]; then
+    gh api "repos/${REPO}/rulesets/${tag_id}" >"$work/tag-live.json" 2>"$work/err" ||
+        die "can't read the tag ruleset ${tag_id}: $(cat "$work/err")"
+else
+    echo null >"$work/tag-live.json"
+fi
+
+# A live tag ruleset must not quietly leave release tags unprotected: no exclude
+# pattern that could match a v* or train-* tag (~ALL, or a refs/tags/ pattern, or one with
+# no refs/ prefix at all, whose literal prefix is compatible with "v" or "train-"), and no
+# bypass actor that
+# tag-ruleset.json doesn't list. Fixing either is a decision for an admin.
+tag_problem="$(jq -r --slurpfile f "$TAG_FILE" '
+  def lit: sub("^refs/tags/"; "") | capture("^(?<l>[^*?\\[]*)").l;
+  def overlaps: . == "~ALL"
+    or ((startswith("refs/tags/") or (startswith("refs/") | not)) and (lit as $l | any("v", "train-"; . as $t | ($t | startswith($l)) or ($l | startswith($t)))));
+  if . == null then "" else
+    ([(.conditions.ref_name.exclude // [])[] | select(overlaps) | "it excludes \(.)"]
+     + [(.bypass_actors // [])[] | . as $a
+         | select(any($f[0].bypass_actors[]; .actor_type == $a.actor_type and .actor_id == $a.actor_id) | not)
+         | "it lets \(.actor_type) \(.actor_id // "null") bypass (\(.bypass_mode))"])
+    | join("; ")
+  end' "$work/tag-live.json")"
+[ -z "$tag_problem" ] ||
+    die "the live tag ruleset ${tag_id} \"${TAG_NAME}\" would leave release tags unprotected (${tag_problem}); fix it in the repository settings, or list the actor in ${TAG_FILE}, and re-run"
+
 # --- Desired rulesets --------------------------------------------------------
 
 # No merge queue on the release ruleset: GitHub rejects (HTTP 422) a merge
 # queue on a ruleset whose branch name pattern has a wildcard, and
 # refs/heads/release/* has one. Release branches stay protected (PR, checks,
-# no force push, no deletion) and merge without a queue.
+# no force push, no deletion) and merge without a queue. `creation` restricts
+# who can cut one to the bypass actors.
 jq --arg skip "$RELEASE_SKIPPED_CHECK" '
   map(select(.type != "merge_queue"))
   | (.[] | select(.type == "required_status_checks") | .parameters.required_status_checks) |=
-    map(select(.context != $skip))' "$RULES_FILE" >"$work/release-new-rules.json"
+    map(select(.context != $skip))
+  | . + [{type: "creation"}]' "$RULES_FILE" >"$work/release-new-rules.json"
 
 jq "$JQ_LIB"' writable | .rules |= merge_rules($new[0])' \
     --slurpfile new "$RULES_FILE" "$work/main-live.json" >"$work/main-desired.json"
@@ -211,6 +266,21 @@ jq -n "$JQ_LIB"'
     --arg name "$RELEASE_NAME" --arg ref "$RELEASE_REF" \
     --slurpfile main "$work/main-live.json" --slurpfile release "$work/release-live.json" \
     --slurpfile new "$work/release-new-rules.json" >"$work/release-desired.json"
+
+# The tag ruleset: tag-ruleset.json as it is when none exists; otherwise the
+# live one (checked above) with the file's enforcement, its refs added, and its
+# rules merged in. Bypass actors are the file's only, never main's, and never
+# in pull_request mode.
+jq -n "$JQ_LIB"'
+  $file[0] as $f
+  | [$f.bypass_actors[] | select(.bypass_mode != "pull_request")] as $actors
+  | ($live[0] | if . == null then $f | writable | .bypass_actors = [] else writable end)
+  | .enforcement = $f.enforcement
+  | .conditions.ref_name.include |= ((. // []) as $i | $i + [$f.conditions.ref_name.include[] | select(. as $r | $i | index($r) | not)])
+  | .conditions.ref_name.exclude |= (. // [])
+  | .bypass_actors |= ([(. // [])[] | select(.bypass_mode != "pull_request")] | union_actors($actors))
+  | .rules |= merge_rules($f.rules)' \
+    --slurpfile file "$TAG_FILE" --slurpfile live "$work/tag-live.json" >"$work/tag-desired.json"
 
 # --- Diff --------------------------------------------------------------------
 
@@ -245,9 +315,18 @@ fi
 show_diff "$release_label" "$work/release-live.json" "$work/release-desired.json" &&
     release_changes=true
 echo
+tag_changes=false
+if [ -n "$tag_id" ]; then
+    tag_label="ruleset ${tag_id} \"${TAG_NAME}\""
+else
+    tag_label="new ruleset \"${TAG_NAME}\""
+fi
+show_diff "$tag_label" "$work/tag-live.json" "$work/tag-desired.json" &&
+    tag_changes=true
+echo
 
-if ! $main_changes && ! $release_changes; then
-    echo "Both rulesets are already applied; nothing to do."
+if ! $main_changes && ! $release_changes && ! $tag_changes; then
+    echo "All three rulesets are already applied; nothing to do."
     exit 0
 fi
 if $dry_run; then
@@ -266,7 +345,8 @@ if ! $assume_yes; then
     esac
 fi
 
-main_written=false
+# The rulesets written so far, for the summary of a failed write.
+written=""
 
 # write_ruleset LABEL METHOD PATH INPUT OUTPUT: write a ruleset with gh api. On an
 # error, print which ruleset failed and GitHub's error body (gh writes it to
@@ -292,9 +372,10 @@ write_ruleset() {
         elif [ -s "$output" ]; then
             sed 's/^/  /' "$output"
         fi
-        if $main_written; then
-            echo "Ruleset ${MAIN_ID} \"${MAIN_NAME}\" was already updated; ${label} was not."
-            echo "Fix the cause and re-run: the main ruleset will show as already applied."
+        if [ -n "$written" ]; then
+            printf 'Already written: %s\n' "$written"
+            echo "Not written: ${label}, and any after it."
+            echo "Fix the cause and re-run: what was written will show as already applied."
         else
             echo "Nothing was written."
         fi
@@ -305,20 +386,35 @@ write_ruleset() {
 if $main_changes; then
     write_ruleset "ruleset ${MAIN_ID} \"${MAIN_NAME}\"" PUT "repos/${REPO}/rulesets/${MAIN_ID}" \
         "$work/main-desired.json" "$work/main-written.json"
-    main_written=true
+    written="ruleset ${MAIN_ID} \"${MAIN_NAME}\""
     echo "Updated ruleset ${MAIN_ID} \"${MAIN_NAME}\"."
 fi
 if $release_changes; then
     if [ -n "$release_id" ]; then
         write_ruleset "ruleset ${release_id} \"${RELEASE_NAME}\"" PUT "repos/${REPO}/rulesets/${release_id}" \
             "$work/release-desired.json" "$work/release-written.json"
+        written="${written:+${written}, }ruleset ${release_id} \"${RELEASE_NAME}\""
         echo "Updated ruleset ${release_id} \"${RELEASE_NAME}\"."
     else
         write_ruleset "new ruleset \"${RELEASE_NAME}\"" POST "repos/${REPO}/rulesets" \
             "$work/release-desired.json" "$work/created.json"
         release_id="$(jq -r '.id' "$work/created.json")"
         [[ "$release_id" =~ ^[0-9]+$ ]] || die "the create returned no ruleset id"
+        written="${written:+${written}, }ruleset ${release_id} \"${RELEASE_NAME}\""
         echo "Created ruleset ${release_id} \"${RELEASE_NAME}\"."
+    fi
+fi
+if $tag_changes; then
+    if [ -n "$tag_id" ]; then
+        write_ruleset "ruleset ${tag_id} \"${TAG_NAME}\"" PUT "repos/${REPO}/rulesets/${tag_id}" \
+            "$work/tag-desired.json" "$work/tag-written.json"
+        echo "Updated ruleset ${tag_id} \"${TAG_NAME}\"."
+    else
+        write_ruleset "new ruleset \"${TAG_NAME}\"" POST "repos/${REPO}/rulesets" \
+            "$work/tag-desired.json" "$work/tag-created.json"
+        tag_id="$(jq -r '.id' "$work/tag-created.json")"
+        [[ "$tag_id" =~ ^[0-9]+$ ]] || die "the create returned no ruleset id"
+        echo "Created ruleset ${tag_id} \"${TAG_NAME}\"."
     fi
 fi
 
@@ -338,4 +434,5 @@ verify() {
 }
 verify "$MAIN_ID" "$work/main-desired.json"
 verify "$release_id" "$work/release-desired.json"
-echo "Verified: both rulesets match."
+verify "$tag_id" "$work/tag-desired.json"
+echo "Verified: all three rulesets match."

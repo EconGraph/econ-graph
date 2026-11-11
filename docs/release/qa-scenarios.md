@@ -80,6 +80,37 @@ the tag (from v4.1). The dump directory is a verified backup (`counts.env`, the 
 refuses the production cluster names, a cluster with a production marker or one it did not
 create, and a dump inside the QA root.
 
+For a candidate from ECO-896 on, the script checks each image's signed build provenance with
+its own copy of `scripts/release/verify-image-provenance.sh` (so `gh` must be logged in)
+before any of the candidate's code runs.
+
+**The candidate is trusted, not sandboxed.** Its code runs as the operator's user, with the
+rootful Docker socket and the `ghcr.io` login it needs to pull its images. So it can tamper
+with anything that user can write, this script and its tools included. A candidate is
+therefore trusted at the level of reviewed `main` plus an rc tag only an admin can push.
+Running one that isn't needs a separate user or VM
+([ECO-926](https://linear.app/econgraph/issue/ECO-926/run-qa-release-candidates-as-a-separate-user-or-in-a-vm)).
+
+The script removes credentials from every process it starts once candidate code can have
+run. That is defence in depth, not a boundary:
+
+- The candidate's scripts get no GitHub token or gh config, SSH agent, session bus (keyring),
+  `XDG_RUNTIME_DIR` or the operator's data home.
+- After the provenance check, and for all of a teardown, the script re-runs itself under
+  `env -i`. It keeps only `PATH`, `LANG`, `LC_ALL`, `TERM`, `USER`, `LOGNAME`, `HOME`,
+  `TMPDIR`, the Docker client settings (`DOCKER_HOST`, `DOCKER_CONFIG`, `DOCKER_TLS_VERIFY`,
+  `DOCKER_CERT_PATH`), `PYTHONPATH`, `VIRTUAL_ENV` and a few values of its own. So nothing it
+  starts from then on gets the variables above, exported shell functions, or any other entry
+  of the operator's environment. The provenance check, which runs first, keeps its
+  credentials.
+- It runs kind and kubectl only as fresh private copies. For kind, the copy's checksum must
+  be the one this checkout's `scripts/deploy/install-kind.sh` pins.
+- It regenerates the kubeconfig with kind each run, and refuses one with an `exec` or
+  `auth-provider` entry.
+- It never runs git inside the candidate's worktree.
+- It reads the candidate's kind version as text, never runs that file, and refuses it unless
+  it sets one `KIND_VERSION="vX.Y.Z"`.
+
 The site is at `http://localhost:PORT`, on 127.0.0.1 only, with sign-in, the backend's issuer
 and CORS moved to that address: a deliberate difference from the candidate's own
 configuration, since `http://localhost` on port 80 is production's gateway on its host. The

@@ -18,6 +18,10 @@ on:
       - 'ci/scripts/check-required-jobs.sh'
       - 'ci/scripts/test-check-required-jobs.sh'
       - 'scripts/github/**'
+      - 'scripts/release/check-release-ref.sh'
+      - 'scripts/release/test-check-release-ref.sh'
+      - 'scripts/release/verify-image-provenance.sh'
+      - 'scripts/release/test-verify-image-provenance.sh'
   # Every PR and merge group, without a path filter: Lint workflows is a
   # required check (docs/development/MERGE_QUEUE.md), and a filtered-out
   # workflow never reports one. The job takes about a minute.
@@ -89,6 +93,15 @@ jobs:
       run: |
         shellcheck scripts/github/apply-rulesets.sh scripts/github/test-apply-rulesets.sh
         scripts/github/test-apply-rulesets.sh
+
+    # The release.yml provenance guards (ECO-896): the reviewed-commit check
+    # against a local origin, and the provenance check against a stub gh.
+    - name: Check the release provenance scripts
+      run: |
+        shellcheck scripts/release/check-release-ref.sh scripts/release/test-check-release-ref.sh \
+          scripts/release/verify-image-provenance.sh scripts/release/test-verify-image-provenance.sh
+        scripts/release/test-check-release-ref.sh
+        scripts/release/test-verify-image-provenance.sh
 
     - name: Run actionlint
       run: |

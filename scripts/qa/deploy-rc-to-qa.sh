@@ -47,7 +47,8 @@
 #      kubeconfig's cluster is the one the control-plane container reports (its
 #      kube-system UID).
 #   4. Loads TAG's release images with the candidate's load-release-images.sh
-#      (--cluster NAME, which verifies the GHCR digests and revision labels); a fresh
+#      (--cluster NAME, which verifies the GHCR digests and revision labels and, for a
+#      candidate from ECO-896 on, each image's signed build provenance with gh); a fresh
 #      cluster has no previous images to keep, so --allow-missing-nodes.
 #   5. Restores the dump's databases and saved Secrets with the candidate's
 #      restore-kind-databases.sh (APP_DATABASE=shared when the dump has no app
@@ -89,13 +90,50 @@
 #
 # Needs: git, python3 with PyYAML, btrfs-progs, the rootful Docker daemon
 # (ECONGRAPH_DOCKER_HOST, default unix:///var/run/docker.sock) and `docker login ghcr.io`.
+# The kind this script runs itself (for a kubeconfig, and on teardown) is a fresh private copy
+# of the operator's install (this checkout's scripts/deploy/install-kind.sh), or of the QA
+# directory's copy, whose checksum must be the one install-kind.sh pins for the version the
+# candidate pins.
+# For a candidate that has scripts/release/verify-image-provenance.sh (ECO-896 on), also gh,
+# logged in (gh auth login, or GH_TOKEN): this checkout's verify-image-provenance.sh checks
+# the candidate's images before anything changes and before any of the candidate's code
+# runs. The candidate's scripts get the verified digests in ECONGRAPH_PROVENANCE_VERIFIED,
+# and its load-release-images.sh skips its own gh check only for exactly those.
+#
+# What this is not: a sandbox. The candidate's code runs as the operator's user with the
+# rootful Docker socket and the ghcr.io login (DOCKER_CONFIG: its load-release-images.sh
+# resolves and pulls the candidate's private images), so it can tamper with anything that
+# user can write, this script and its tools included. A candidate is therefore trusted at the
+# level of reviewed main plus an rc tag only an admin can push (ECO-896); running one that
+# isn't needs a separate user or VM (ECO-926). As defence in depth, not a boundary: once
+# candidate code can have run (after the provenance check, and for all of a teardown), this
+# script re-runs itself under `env -i` with only SCRUB_KEEP and a few values of its own
+# (scrub_environment), so nothing it starts from then on gets a GitHub token or gh config,
+# the SSH agent, the session bus or keyring, XDG_RUNTIME_DIR, an exported function or any
+# other entry of the operator's environment; it runs kind and kubectl only
+# as fresh private copies, never the copies in the QA directory; it regenerates the
+# kubeconfig with kind each run and refuses one with an exec or auth-provider entry; it never
+# runs git inside the candidate's worktree; and it reads the candidate's kind version as
+# text.
 # Exit status: 0 done; 1 a step failed; 2 usage; 3 refused.
 set -euo pipefail
 
 SCRIPT_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# For scrub_environment's re-exec, and what it hands the second pass (internal; never set
+# them yourself). Not exported further.
+ORIGINAL_ARGS=("$@")
+SCRUBBED="${ECONGRAPH_QA_INTERNAL_SCRUBBED:-}"
+VERIFIED_BEFORE_SCRUB="${ECONGRAPH_QA_INTERNAL_PROVENANCE_VERIFIED:-}"
+unset ECONGRAPH_QA_INTERNAL_SCRUBBED ECONGRAPH_QA_INTERNAL_PROVENANCE_VERIFIED
 QA_ROOT="${ECONGRAPH_QA_ROOT:-$HOME/econgraph-qa}"
 REAL_HOME="$HOME"
 REAL_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+# gh's config, where gh itself looks for it, for this script's own provenance check only.
+QA_GH_CONFIG_DIR="${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}"
+# The images release.yml builds (scripts/deploy/lib/release-images.sh RI_NAMES), as this
+# checkout knows them; a candidate image outside the list gets no pre-verified digest.
+QA_IMAGE_NAMES=(backend crawler-worker frontend chart-api)
+PROVENANCE_VERIFIED=""
 export DOCKER_HOST="${ECONGRAPH_DOCKER_HOST:-unix:///var/run/docker.sock}"
 unset DOCKER_CONTEXT
 # Production's cluster names; a QA environment never takes or touches them.
@@ -161,14 +199,86 @@ STORAGE="${QA_DIR}/storage"
 STATE="${QA_DIR}/state.env"
 QA_KUBECTL="${QA_DIR}/cache/econgraph/bin/kubectl"
 QA_KUBECONFIG="${QA_DIR}/cache/econgraph/kubeconfig-${NAME}"
-# The pinned kind the candidate's scripts install (scripts/deploy/lib/kind-version.sh), read
-# from the candidate's worktree when there is one.
-kind_bin() {
-    local version_file="${SRC}/scripts/deploy/lib/kind-version.sh"
-    [ -f "$version_file" ] || version_file="${SCRIPT_REPO}/scripts/deploy/lib/kind-version.sh"
-    (XDG_DATA_HOME="$REAL_DATA_HOME"; HOME="$REAL_HOME"
-     # shellcheck source=scripts/deploy/lib/kind-version.sh
-     source "$version_file"; echo "$KIND_PINNED_BIN")
+# This run's own kind, kubectl and kubeconfig: fresh copies outside the QA directory, which
+# the candidate's code can write.
+PRIVATE_BIN="$(mktemp -d)"
+trap 'rm -rf -- "$PRIVATE_BIN"' EXIT
+
+# scrub_environment: run the rest of this script, and so everything it starts, in an
+# environment of only SCRUB_KEEP (defence in depth once candidate code can have run; see the
+# header). It re-execs the script under `env -i`, which also drops entries no shell variable
+# can name (npm_config_//registry.npmjs.org/:_authToken, say) and exported functions
+# (BASH_FUNC_*); the second pass skips the steps that need credentials (the tag fetch and
+# the provenance check) and takes the verified digests from the first.
+SCRUB_KEEP=(PATH LANG LC_ALL TERM USER LOGNAME HOME TMPDIR DOCKER_HOST DOCKER_CONFIG
+    DOCKER_TLS_VERIFY DOCKER_CERT_PATH PYTHONPATH VIRTUAL_ENV)
+scrub_environment() {
+    [ "$SCRUBBED" != 1 ] || return 0
+    local var keep=()
+    for var in "${SCRUB_KEEP[@]}"; do
+        [ -z "${!var+set}" ] || keep+=("${var}=${!var}")
+    done
+    rm -rf -- "$PRIVATE_BIN"
+    exec env -i "${keep[@]}" \
+        ECONGRAPH_QA_INTERNAL_SCRUBBED=1 ECONGRAPH_QA_INTERNAL_PROVENANCE_VERIFIED="$PROVENANCE_VERIFIED" \
+        ECONGRAPH_QA_ROOT="$QA_ROOT" ECONGRAPH_DOCKER_HOST="$DOCKER_HOST" XDG_DATA_HOME="$REAL_DATA_HOME" \
+        "$BASH" "$0" "${ORIGINAL_ARGS[@]}"
+}
+# A teardown needs no credentials, and candidate code has run in this environment before:
+# scrubbed from the start.
+[ "$TEARDOWN" = false ] || scrub_environment
+# kind_version: the kind version the candidate pins (KIND_VERSION in its
+# scripts/deploy/lib/kind-version.sh), this checkout's when the candidate has none. Read as
+# text, never sourced: exactly one assignment, and it must be KIND_VERSION="vX.Y.Z".
+kind_version() {
+    local file="${SRC}/scripts/deploy/lib/kind-version.sh" text version
+    [ -f "$file" ] && [ ! -L "$file" ] || file="${SCRIPT_REPO}/scripts/deploy/lib/kind-version.sh"
+    text="$(head -c 65536 "$file")"
+    [ "$(grep -cE '(^|[^A-Za-z0-9_])KIND_VERSION[[:space:]]*\+?=' <<<"$text")" = 1 ] ||
+        die "${file} must set KIND_VERSION exactly once"
+    version="$(sed -nE 's/^KIND_VERSION="?(v[0-9]+\.[0-9]+\.[0-9]+)"?[[:space:]]*$/\1/p' <<<"$text")"
+    [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "no KIND_VERSION=\"vX.Y.Z\" line in ${file}"
+    echo "$version"
+}
+
+sha256_of() {
+    if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+
+# trusted_kind_sha256 VERSION: the release checksum this checkout's install-kind.sh pins for
+# VERSION on this platform, or nothing.
+trusted_kind_sha256() {
+    local os arch
+    case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) return 0 ;; esac
+    case "$(uname -m)" in x86_64 | amd64) arch=amd64 ;; aarch64 | arm64) arch=arm64 ;; *) return 0 ;; esac
+    sed -nE "s/^[[:space:]]*${1//./\\.}\/${os}-${arch}\) echo ([0-9a-f]{64}) ;;$/\1/p" \
+        "${SCRIPT_REPO}/scripts/deploy/install-kind.sh" 2>/dev/null | head -1
+}
+
+# trusted_kind: a kind this script may run itself (for a kubeconfig, and on teardown): a
+# fresh copy in PRIVATE_BIN of the operator's install
+# (${XDG_DATA_HOME:-~/.local/share}/econgraph/bin/kind-VERSION, from install-kind.sh), or
+# else of the QA directory's copy, hashed after copying, and run only when the copy's
+# checksum is the one this checkout's install-kind.sh pins. So what runs is what was hashed.
+trusted_kind() {
+    local version expected source copy
+    version="$(kind_version)" || exit "$EXIT_FAILED"
+    expected="$(trusted_kind_sha256 "$version")"
+    [ -n "$expected" ] ||
+        die "this checkout's scripts/deploy/install-kind.sh pins no checksum for kind ${version} on this platform"
+    copy="${PRIVATE_BIN}/kind-${version}"
+    for source in "${REAL_DATA_HOME}/econgraph/bin/kind-${version}" "${QA_DIR}/data/econgraph/bin/kind-${version}"; do
+        [ -f "$source" ] || continue
+        rm -f -- "$copy"
+        cp -- "$source" "$copy" 2>/dev/null || continue
+        chmod 700 "$copy"
+        if [ "$(sha256_of "$copy")" = "$expected" ]; then
+            echo "$copy"
+            return
+        fi
+    done
+    rm -f -- "$copy"
+    die "no kind ${version} with the checksum this checkout's scripts/deploy/install-kind.sh pins: run it to install one"
 }
 
 # The QA directory and its storage are the script's own: real directories, not symlinks, at
@@ -210,6 +320,13 @@ os.replace(tmp, path)
 PY
 }
 
+# worktree_head REPO PATH: the commit REPO's worktree at PATH is on, from REPO's own list
+# (never git inside PATH), or nothing when REPO has no worktree there.
+worktree_head() {
+    git -C "$1" worktree list --porcelain 2>/dev/null |
+        awk -v want="worktree $2" '$0 == want { found = 1; next } found && /^HEAD / { print $2; exit } /^$/ { found = 0 }'
+}
+
 # The cluster's own view, read in its control-plane container (no kubeconfig involved).
 cluster_exists() {
     [ -n "$(docker ps -a --filter "label=io.x-k8s.kind.cluster=${NAME}" --format '{{.Names}}')" ]
@@ -231,49 +348,90 @@ owner_id() {
 }
 # qk ARGS: the cluster's kubectl on its own kubeconfig and context, after checking that
 # they reach the cluster whose control-plane container this environment owns.
+# This run's kubectl (copied from the control-plane node) and kubeconfig (from a trusted kind,
+# refused with an exec or auth-provider entry), fresh in PRIVATE_BIN; the QA directory gets
+# copies of both for the candidate's scripts, and nothing there is read back.
 QK_CHECKED=false
+QK_KUBECTL="${PRIVATE_BIN}/kubectl"
+QK_KUBECONFIG="${PRIVATE_BIN}/kubeconfig"
 qk() {
     if [ "$QK_CHECKED" = false ]; then
-        # The cluster's own kubectl and a kubeconfig from kind, kept in the QA directory.
-        mkdir -p "$(dirname "$QA_KUBECTL")"
-        if [ ! -x "$QA_KUBECTL" ]; then
-            if ! { docker cp -q -L "${CONTROL_PLANE}:/usr/bin/kubectl" "${QA_KUBECTL}.new" &&
-                chmod 0755 "${QA_KUBECTL}.new" && mv -f "${QA_KUBECTL}.new" "$QA_KUBECTL"; }; then
-                die "could not copy kubectl from ${CONTROL_PLANE}"
-            fi
-        fi
-        if [ ! -s "$QA_KUBECONFIG" ]; then
-            if ! { (umask 077; "$(kind_bin)" get kubeconfig --name "$NAME" >"${QA_KUBECONFIG}.new") &&
-                mv -f "${QA_KUBECONFIG}.new" "$QA_KUBECONFIG"; }; then
-                die "could not get ${NAME}'s kubeconfig"
-            fi
-        fi
-        local via_kubeconfig via_node
-        via_kubeconfig="$("$QA_KUBECTL" --kubeconfig "$QA_KUBECONFIG" --context "$CONTEXT" \
+        local kind via_kubeconfig via_node
+        rm -f -- "$QK_KUBECTL" "$QK_KUBECONFIG"
+        { docker cp -q -L "${CONTROL_PLANE}:/usr/bin/kubectl" "$QK_KUBECTL" && chmod 0700 "$QK_KUBECTL"; } ||
+            die "could not copy kubectl from ${CONTROL_PLANE}"
+        kind="$(trusted_kind)" || exit "$EXIT_FAILED"
+        (umask 077; "$kind" get kubeconfig --name "$NAME" >"$QK_KUBECONFIG") ||
+            die "could not get ${NAME}'s kubeconfig"
+        python3 - "$QK_KUBECONFIG" <<'PY' || refuse "${NAME}'s kubeconfig has an exec or auth-provider entry, or can't be read"
+import sys
+import yaml
+try:
+    config = yaml.safe_load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+users = config.get('users') if isinstance(config, dict) else None
+if users is None:
+    users = []
+if not isinstance(users, list):
+    sys.exit(1)
+for entry in users:
+    user = (entry or {}).get('user') if isinstance(entry, dict) else None
+    if user is None:
+        continue
+    if not isinstance(user, dict) or 'exec' in user or 'auth-provider' in user:
+        sys.exit(1)
+PY
+        mkdir -p "$(dirname "$QA_KUBECTL")" "$(dirname "$QA_KUBECONFIG")"
+        rm -f -- "$QA_KUBECTL" "$QA_KUBECONFIG"
+        { cp -- "$QK_KUBECTL" "$QA_KUBECTL" && chmod 0755 "$QA_KUBECTL"; } ||
+            die "could not copy kubectl to ${QA_KUBECTL}"
+        (umask 077; cp -- "$QK_KUBECONFIG" "$QA_KUBECONFIG") || die "could not write ${QA_KUBECONFIG}"
+        via_kubeconfig="$("$QK_KUBECTL" --kubeconfig "$QK_KUBECONFIG" --context "$CONTEXT" \
             get namespace kube-system -o 'jsonpath={.metadata.uid}')" || die "${CONTEXT} does not answer"
         via_node="$(node_uid)" || die "could not read ${NAME}'s kube-system UID"
         [ -n "$via_node" ] && [ "$via_kubeconfig" = "$via_node" ] ||
-            refuse "${QA_KUBECONFIG} context ${CONTEXT} reaches another cluster than ${CONTROL_PLANE}"
+            refuse "${NAME}'s kubeconfig context ${CONTEXT} reaches another cluster than ${CONTROL_PLANE}"
         QK_CHECKED=true
     fi
-    "$QA_KUBECTL" --kubeconfig "$QA_KUBECONFIG" --context "$CONTEXT" "$@"
+    "$QK_KUBECTL" --kubeconfig "$QK_KUBECONFIG" --context "$CONTEXT" "$@"
+}
+
+# stage_kind: copy (never link) the operator's kind, at the version the candidate pins, into
+# the QA directory's own data home, so the candidate's scripts find it without writing the
+# operator's ~/.local/share (where a planted binary would later run as the operator's kind).
+stage_kind() {
+    local version src dest="${QA_DIR}/data/econgraph/bin"
+    version="$(kind_version)" || exit "$EXIT_FAILED"
+    src="${REAL_DATA_HOME}/econgraph/bin/kind-${version}"
+    mkdir -p "$dest"
+    # Without one, the candidate's own scripts say how to install it.
+    [ -f "$src" ] || return 0
+    # Removed first, so a symlink planted at the destination is replaced, never followed.
+    rm -f -- "${dest}/kind-${version}"
+    cp -- "$src" "${dest}/kind-${version}"
+    chmod 755 "${dest}/kind-${version}"
 }
 
 # rc ARGS: run one of the candidate's scripts from src/, with every default path of theirs
 # inside the QA directory and no upstream API key or production kubeconfig in reach.
 # Its environment starts empty: only the variables below, so nothing of the operator's shell
-# (API keys, a tunnel token, KUBECONFIG, DRY_RUN, NAMESPACE, ...) reaches it. The cluster's own
-# kubectl and kubeconfig are named (KUBECTL, KUBECONFIG), so no script looks for production's.
+# (API keys, a tunnel token, KUBECONFIG, DRY_RUN, NAMESPACE, a GitHub token, the SSH agent,
+# the session bus and keyring, ...) reaches it. The cluster's own kubectl and kubeconfig are
+# named (KUBECTL, KUBECONFIG), so no script looks for production's. DOCKER_CONFIG is passed
+# because the candidate's load-release-images.sh resolves and pulls its private ghcr.io
+# images. This limits what reaches the candidate; it is not a sandbox (see the header).
 rc() {
+    stage_kind
     (
         cd "$SRC"
         env -i PATH="$PATH" LANG="${LANG:-C.UTF-8}" TERM="${TERM:-dumb}" USER="${USER:-}" \
-            LOGNAME="${LOGNAME:-}" SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
-            DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" \
+            LOGNAME="${LOGNAME:-}" \
             KUBECTL="$QA_KUBECTL" KUBECONFIG="$QA_KUBECONFIG" \
             DOCKER_HOST="$DOCKER_HOST" ECONGRAPH_DOCKER_HOST="$DOCKER_HOST" \
             HOME="${QA_DIR}/home" DOCKER_CONFIG="${DOCKER_CONFIG:-${REAL_HOME}/.docker}" \
-            XDG_DATA_HOME="$REAL_DATA_HOME" XDG_CACHE_HOME="${QA_DIR}/cache" \
+            ECONGRAPH_PROVENANCE_VERIFIED="$PROVENANCE_VERIFIED" \
+            XDG_DATA_HOME="${QA_DIR}/data" XDG_CACHE_HOME="${QA_DIR}/cache" \
             XDG_CONFIG_HOME="${QA_DIR}/home/.config" XDG_STATE_HOME="${QA_DIR}/home/.local/state" \
             KIND_CLUSTER="$NAME" ECONGRAPH_SCRATCH_STORAGE="$STORAGE" \
             ECONGRAPH_BACKUP_ROOT="${QA_DIR}/backups" ECONGRAPH_RELEASES_DIR="${QA_DIR}/releases" \
@@ -301,6 +459,9 @@ check_contained
 
 # --- Teardown ------------------------------------------------------------------------------
 if [ "$TEARDOWN" = true ]; then
+    # Candidate code has run in this environment before: nothing started from here on gets the
+    # operator's credentials (defence in depth; see the header).
+    scrub_environment
     [ -d "$QA_DIR" ] || cluster_exists || { echo "nothing to tear down for ${NAME}"; exit 0; }
     if cluster_exists; then
         refuse_production_marker
@@ -326,7 +487,8 @@ if [ "$TEARDOWN" = true ]; then
     if cluster_exists; then
         log "Deleting kind cluster ${NAME}"
         mkdir -p "${QA_DIR}/cache/econgraph"
-        "$(kind_bin)" delete cluster --name "$NAME" --kubeconfig "${QA_DIR}/cache/econgraph/kind-delete.kubeconfig"
+        kind="$(trusted_kind)" || exit "$EXIT_FAILED"
+        "$kind" delete cluster --name "$NAME" --kubeconfig "${QA_DIR}/cache/econgraph/kind-delete.kubeconfig"
     fi
     for volume in data-plane app-prod; do
         [ -d "${STORAGE}/${volume}" ] || continue
@@ -341,9 +503,16 @@ if [ "$TEARDOWN" = true ]; then
         btrfs subvolume delete "${STORAGE}/${volume}" >/dev/null
     done
     if [ -e "$SRC" ]; then
-        # Through the repository the worktree belongs to, whichever clone runs this.
-        common="$(git -C "$SRC" rev-parse --path-format=absolute --git-common-dir)"
-        git --git-dir="$common" worktree remove --force "$SRC"
+        # Through the repository the worktree belongs to, whichever clone runs this, without
+        # running git inside the worktree (its .git is the candidate's to write): this
+        # checkout's when it lists the worktree, else the one SRC/.git names.
+        if [ -n "$(worktree_head "$SCRIPT_REPO" "$SRC")" ]; then
+            git -C "$SCRIPT_REPO" worktree remove --force "$SRC"
+        else
+            gitdir="$(sed -n 's/^gitdir: //p' "${SRC}/.git" 2>/dev/null | head -1)"
+            [[ "$gitdir" == /*/worktrees/* ]] || refuse "${SRC}/.git does not name a worktree of a repository"
+            git --git-dir="${gitdir%/worktrees/*}" worktree remove --force "$SRC"
+        fi
     fi
     rm -rf -- "$QA_DIR"
     echo "Removed QA environment ${NAME}. The dump directory was not touched."
@@ -370,7 +539,8 @@ recorded_tag="$(state_get TAG)"
     refuse "${NAME} runs ${recorded_tag}; tear it down or choose another --name for ${TAG}"
 DUMP_BEFORE="$(dump_fingerprint "$DUMP_DIR")"
 
-git -C "$SCRIPT_REPO" fetch --quiet --tags origin || die "git fetch --tags failed"
+# The first pass fetched; the scrubbed second pass has no credentials to fetch with.
+[ "$SCRUBBED" = 1 ] || git -C "$SCRIPT_REPO" fetch --quiet --tags origin || die "git fetch --tags failed"
 COMMIT="$(git -C "$SCRIPT_REPO" rev-parse --verify --quiet "refs/tags/${TAG}^{commit}")" ||
     refuse "no tag ${TAG}"
 for required in scripts/deploy/recreate-kind-cluster.sh scripts/deploy/load-release-images.sh \
@@ -380,6 +550,44 @@ for required in scripts/deploy/recreate-kind-cluster.sh scripts/deploy/load-rele
     git -C "$SCRIPT_REPO" cat-file -e "${COMMIT}:${required}" 2>/dev/null ||
         refuse "${TAG} has no ${required}; this script deploys release candidates from v4.1"
 done
+# Provenance (ECO-896), for a candidate from ECO-896 on: this checkout's
+# verify-image-provenance.sh checks each image's sha-<commit> digest, before anything
+# changes and before any of the candidate's code runs. It runs in an environment as bare
+# as rc()'s, plus only what gh and the registry need (the operator's gh config or
+# GH_TOKEN, and DOCKER_CONFIG). The candidate gets the verified refs, never a credential.
+if [ "$SCRUBBED" = 1 ]; then
+    # The second pass (scrub_environment): checked by the first, with its credentials.
+    PROVENANCE_VERIFIED="$VERIFIED_BEFORE_SCRUB"
+elif git -C "$SCRIPT_REPO" cat-file -e "${COMMIT}:scripts/release/verify-image-provenance.sh" 2>/dev/null; then
+    command -v gh >/dev/null 2>&1 || refuse "${TAG}'s images need a provenance check with gh; install gh"
+    verified=()
+    for image in "${QA_IMAGE_NAMES[@]}"; do
+        ref="ghcr.io/econgraph/econ-graph-${image}:sha-${COMMIT}"
+        digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' |
+            python3 -c 'import json, sys; print(json.load(sys.stdin).get("digest", ""))')" ||
+            refuse "could not resolve ${ref} (not built, or no docker login ghcr.io?)"
+        [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || refuse "${ref} resolved to '${digest}', not a digest"
+        verified+=("ghcr.io/econgraph/econ-graph-${image}@${digest}")
+    done
+    provenance_rc=0
+    env -i PATH="$PATH" LANG="${LANG:-C.UTF-8}" HOME="$REAL_HOME" \
+        DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" \
+        GH_CONFIG_DIR="$QA_GH_CONFIG_DIR" ${GH_TOKEN:+"GH_TOKEN=$GH_TOKEN"} \
+        DOCKER_CONFIG="${DOCKER_CONFIG:-${REAL_HOME}/.docker}" \
+        "$SCRIPT_REPO/scripts/release/verify-image-provenance.sh" --commit "$COMMIT" "${verified[@]}" ||
+        provenance_rc=$?
+    case "$provenance_rc" in
+        0) PROVENANCE_VERIFIED="${verified[*]}" ;;
+        1) refuse "the provenance check refused an image of ${TAG} for ${COMMIT} (see its message above)" ;;
+        3) refuse "the provenance check of ${TAG}'s images could not run (gh not logged in: gh auth login or GH_TOKEN; or a GitHub or registry error); fix that and re-run" ;;
+        *) refuse "the provenance check of ${TAG}'s images failed unexpectedly (exit ${provenance_rc})" ;;
+    esac
+fi
+
+# The provenance check was the last step that needs the operator's credentials. From here on
+# the QA directory (and on a rerun, a previous candidate's code) is in play, so nothing this
+# script starts gets them (defence in depth; see the header).
+scrub_environment
 
 if cluster_exists; then
     refuse_production_marker
@@ -422,7 +630,8 @@ state_set TAG "$TAG"
 state_set DUMP_DIR "$DUMP_DIR"
 QA_ID="$(state_get QA_ID)"
 if [ -e "$SRC" ]; then
-    [ "$(git -C "$SRC" rev-parse HEAD)" = "$COMMIT" ] || refuse "${SRC} is not at ${TAG}"
+    [ "$(worktree_head "$SCRIPT_REPO" "$SRC")" = "$COMMIT" ] ||
+        refuse "${SRC} is not this checkout's worktree at ${TAG}; tear it down first"
 else
     log "Worktree ${SRC} at ${TAG}"
     git -C "$SCRIPT_REPO" worktree add --detach "$SRC" "$COMMIT" >/dev/null

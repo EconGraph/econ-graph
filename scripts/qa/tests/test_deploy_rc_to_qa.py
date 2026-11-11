@@ -19,6 +19,8 @@ import stat
 import subprocess
 import tempfile
 import textwrap
+import hashlib
+import platform
 import unittest
 
 import yaml
@@ -46,8 +48,9 @@ LOCAL_IMAGES = sorted({c['image'] for f in ('backend-deployment.yaml', 'crawler-
 STUB = r'''#!/usr/bin/env python3
 import json, os, pathlib, sys
 # Settings beside the stub, not in the environment: the script runs the candidate's scripts
-# with an empty one.
-STUB_DIR = pathlib.Path(__file__).resolve().parent
+# with an empty one. The directory is written in by the test (STUB_DIR_PATH), since the QA
+# script runs a copy of the stub as the candidate's pinned kind.
+STUB_DIR = pathlib.Path(STUB_DIR_PATH)
 CONFIG = json.loads((STUB_DIR / 'stub-env.json').read_text())
 PRODUCTION_KEYCLOAK = CONFIG['production_keycloak']
 prog = pathlib.Path(sys.argv[0]).name
@@ -59,10 +62,13 @@ reads_stdin = prog == 'kubectl' and ('-i' in args or args[-2:] == ['-f', '-'])
 stdin = sys.stdin.read() if reads_stdin and not sys.stdin.isatty() else ''
 keep = ('HOME', 'KIND_CLUSTER', 'ECONGRAPH_SCRATCH_STORAGE', 'XDG_CACHE_HOME', 'ECONGRAPH_BACKUP_ROOT',
         'ECONGRAPH_RELEASES_DIR', 'ECONGRAPH_DEPLOY_ENV', 'PUBLIC_HOST', 'APP_DATABASE', 'DOCKER_HOST',
-        'FRED_API_KEY', 'KUBECONFIG', 'KUBECTL', 'TMPDIR', 'CLOUDFLARE_TUNNEL_TOKEN', 'DRY_RUN', 'NAMESPACE')
+        'FRED_API_KEY', 'KUBECONFIG', 'KUBECTL', 'TMPDIR', 'CLOUDFLARE_TUNNEL_TOKEN', 'DRY_RUN', 'NAMESPACE',
+        'GH_CONFIG_DIR', 'GH_TOKEN', 'ECONGRAPH_PROVENANCE_VERIFIED', 'SSH_AUTH_SOCK',
+        'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XDG_DATA_HOME')
 with open(CONFIG['calls'], 'a') as log:
     log.write(json.dumps({'prog': prog, 'args': args, 'cwd': os.getcwd(),
-                          'env': {k: os.environ.get(k) for k in keep}, 'stdin': stdin}) + '\n')
+                          'env': {k: os.environ.get(k) for k in keep}, 'envkeys': sorted(os.environ),
+                          'stdin': stdin}) + '\n')
 def save():
     state_path.write_text(json.dumps(state))
 name = CONFIG['name']
@@ -84,6 +90,9 @@ if prog == 'docker':
         elif 'create configmap econgraph-qa-owner' in text:
             state['owner'] = next(a.split('=', 2)[2] for a in cmd if a.startswith('--from-literal=id='))
             save()
+    elif args[:3] == ['buildx', 'imagetools', 'inspect']:
+        image = args[3].rsplit('/', 1)[-1].split(':', 1)[0]
+        out = json.dumps({'digest': 'sha256:' + format(sum(map(ord, image)) % 16, 'x') * 64}) + '\n'
     elif args[0] == 'port':
         out = '127.0.0.1:%s\n' % state.get('port', '')
     elif args[0] == 'cp':
@@ -105,6 +114,14 @@ if prog == 'docker':
 elif prog == 'kind':
     if args[:2] == ['get', 'kubeconfig']:
         out = 'apiVersion: v1\nkind: Config\n'
+        style = state.get('kubeconfig_exec')
+        if style == 'flow':
+            out = '{apiVersion: v1, kind: Config, users: [{name: x, user: {exec: {command: /tmp/steal}}}]}\n'
+        elif style == 'json':
+            out = json.dumps({'apiVersion': 'v1', 'kind': 'Config',
+                              'users': [{'name': 'x', 'user': {'auth-provider': {'name': 'gcp'}}}]}) + '\n'
+        elif style:
+            out += 'users:\n- name: x\n  user:\n    exec:\n      command: /tmp/steal\n'
     elif args[:2] == ['delete', 'cluster']:
         state.update(cluster=False, owner='')
         save()
@@ -184,6 +201,16 @@ elif prog in ('load-release-images.sh',):
         state.setdefault('daemon_images', {})[image] = 'sha256:candidate'
     save()
     code = state.get('load_status', 3)
+elif prog == 'gh':
+    # `gh auth status`: logged in unless the state says otherwise. `gh attestation verify`:
+    # passes unless state['no_provenance'].
+    if args[:2] == ['auth', 'status']:
+        code = 0 if state.get('gh_logged_in', True) else 1
+    elif args[:2] == ['attestation', 'verify']:
+        if state.get('no_provenance'):
+            out, code = 'Error: failed to fetch attestations: HTTP 404: Not Found\n', 1
+    else:
+        code = 1
 elif prog == 'deploy.sh':
     import yaml
     docs = [d for d in yaml.safe_load_all(open('k8s/manifests/crawler-worker.yaml')) if d]
@@ -208,19 +235,20 @@ class DeployRcToQaTest(unittest.TestCase):
         self.bin = self.work / 'bin'
         self.bin.mkdir()
         stub = self.bin / 'stub.py'
-        stub.write_text(STUB)
+        stub.write_text(STUB.replace('pathlib.Path(STUB_DIR_PATH)', f'pathlib.Path({str(self.bin)!r})'))
         self.state = self.work / 'state.json'
         self.calls = self.work / 'calls.jsonl'
         (self.bin / 'stub-env.json').write_text(json.dumps({
             'state': str(self.state), 'calls': str(self.calls), 'name': NAME,
             'production_keycloak': PRODUCTION_KEYCLOAK, 'local_images': LOCAL_IMAGES}))
         stub.chmod(0o755)
-        for prog in ('docker', 'kind', 'btrfs'):
+        for prog in ('docker', 'kind', 'btrfs', 'gh'):
             (self.bin / prog).symlink_to(stub)
         self.data_home = self.work / 'data'
         kind_dir = self.data_home / 'econgraph/bin'
         kind_dir.mkdir(parents=True)
         (kind_dir / 'kind-v0.33.0').symlink_to(stub)
+        self.stub_sha256 = hashlib.sha256(stub.read_bytes()).hexdigest()
         # The candidate: a repository with the script, stub deploy scripts and the real
         # kind config and realm-import Job, tagged and pushed to a local origin.
         origin = self.work / 'origin.git'
@@ -246,6 +274,7 @@ class DeployRcToQaTest(unittest.TestCase):
             target = self.repo / 'scripts/deploy' / script
             target.parent.mkdir(parents=True, exist_ok=True)
             target.symlink_to(stub)
+        self.pin_kind(self.stub_sha256)
         git = ['git', '-C', str(self.repo), '-c', 'user.name=t', '-c', 'user.email=t@t']
         run(git + ['add', '-A'])
         run(git + ['commit', '-q', '-m', 'candidate'])
@@ -261,6 +290,15 @@ class DeployRcToQaTest(unittest.TestCase):
         self.dump_before = self.fingerprint(self.dump)
         self.qa_root = self.work / 'qa'
         self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}})
+
+    def pin_kind(self, digest):
+        # This checkout's install-kind.sh, pinning DIGEST for kind v0.33.0 on this platform.
+        os_name = {'Linux': 'linux', 'Darwin': 'darwin'}[platform.system()]
+        arch = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}[platform.machine()]
+        install = self.repo / 'scripts/deploy/install-kind.sh'
+        install.parent.mkdir(parents=True, exist_ok=True)
+        install.write_text(f'pinned_sha256() {{\n    case "$1" in\n'
+                           f'        v0.33.0/{os_name}-{arch}) echo {digest} ;;\n    esac\n}}\n')
 
     def fingerprint(self, path):
         return sorted((str(p), p.stat().st_size, p.stat().st_mtime_ns) for p in path.rglob('*'))
@@ -280,8 +318,14 @@ class DeployRcToQaTest(unittest.TestCase):
         env = dict(os.environ, PATH=f'{self.bin}{os.pathsep}{os.environ["PATH"]}',
                    ECONGRAPH_QA_ROOT=str(self.qa_root), XDG_DATA_HOME=str(self.data_home),
                    FRED_API_KEY='production-fred-key', CLOUDFLARE_TUNNEL_TOKEN='production-tunnel-token',
-                   DRY_RUN='false', NAMESPACE='econ-graph-prod', KUBECONFIG=str(self.work / 'operator-kubeconfig'))
+                   DRY_RUN='false', NAMESPACE='econ-graph-prod', KUBECONFIG=str(self.work / 'operator-kubeconfig'),
+                   GH_CONFIG_DIR=str(self.work / 'gh-config'),
+                   # What an operator's desktop session has: none of it may reach a candidate.
+                   SSH_AUTH_SOCK=str(self.work / 'ssh-agent.sock'),
+                   DBUS_SESSION_BUS_ADDRESS='unix:path=/run/user/1000/bus',
+                   XDG_RUNTIME_DIR=str(self.work / 'runtime'))
         env.pop('ECONGRAPH_DOCKER_HOST', None)
+        env.pop('GH_TOKEN', None)
         env.update(extra)
         return env
 
@@ -300,6 +344,11 @@ class DeployRcToQaTest(unittest.TestCase):
         for call in self.logged():
             if call['prog'] == 'btrfs-subvolume-uuid.py':
                 self.assertEqual(call['args'][0], '--check')
+                continue
+            if call['prog'] == 'gh':
+                self.assertIn(call['args'][:2], (['auth', 'status'], ['attestation', 'verify']), call)
+                continue
+            if call['prog'] == 'docker' and call['args'][:3] == ['buildx', 'imagetools', 'inspect']:
                 continue
             self.assertEqual(call['prog'], 'docker', call)
             self.assertIn(call['args'][0], ('ps', 'exec', 'info'), call)
@@ -360,6 +409,68 @@ class DeployRcToQaTest(unittest.TestCase):
         result = self.deploy('--tag', 'v4.0.1-rc.2', '--dump-dir', str(self.dump))
         self.assertEqual(result.returncode, 3, result.stdout)
         self.assertIn('has no scripts/deploy/restore-kind-databases.sh', result.stdout)
+
+    def provenance_candidate(self, tag='v4.2.0-rc.1'):
+        # ECO-896: a candidate with verify-image-provenance.sh; this checkout's copy checks it.
+        git = ['git', '-C', str(self.repo), '-c', 'user.name=t', '-c', 'user.email=t@t']
+        target = self.repo / 'scripts/release/verify-image-provenance.sh'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / 'scripts/release/verify-image-provenance.sh', target)
+        run(git + ['add', '-A'])
+        run(git + ['commit', '-q', '-m', 'provenance'])
+        run(git + ['tag', tag])
+        run(git + ['push', '-q', 'origin', '--tags'])
+        return tag, run(git + ['rev-parse', 'HEAD']).stdout.strip()
+
+    def test_a_candidate_that_checks_provenance_needs_gh_logged_in(self):
+        tag, _ = self.provenance_candidate()
+        self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}, 'gh_logged_in': False})
+        result = self.deploy('--tag', tag, '--dump-dir', str(self.dump), '--name', NAME)
+        self.assert_refused(result, 'could not run')
+        self.assertFalse((self.qa_root / NAME).exists())
+        self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}})
+        result = self.deploy('--tag', tag, '--dump-dir', str(self.dump), '--name', NAME, '--dry-run')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn(['auth', 'status'], [c['args'] for c in self.logged() if c['prog'] == 'gh'])
+
+    def test_an_image_without_provenance_is_refused_before_the_candidate_runs(self):
+        tag, _ = self.provenance_candidate()
+        self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}, 'no_provenance': True})
+        result = self.deploy('--tag', tag, '--dump-dir', str(self.dump), '--name', NAME)
+        self.assert_refused(result, 'the provenance check refused an image')
+        self.assertFalse(any(c['prog'].endswith('.sh') for c in self.logged()))
+
+    def test_the_candidate_gets_verified_digests_never_a_github_credential(self):
+        tag, commit = self.provenance_candidate()
+        result = self.deploy('--tag', tag, '--dump-dir', str(self.dump), '--name', NAME,
+                             GH_TOKEN='operator-admin-token')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        verify = [c for c in self.logged() if c['prog'] == 'gh' and c['args'][:2] == ['attestation', 'verify']]
+        self.assertEqual(len(verify), 4)
+        for call in verify:
+            self.assertIn('--source-digest', call['args'])
+            self.assertEqual(call['args'][call['args'].index('--source-digest') + 1], commit)
+            # This checkout's script ran it, with the operator's token, outside the candidate.
+            self.assertEqual(call['env']['GH_TOKEN'], 'operator-admin-token')
+            self.assertNotEqual(Path(call['cwd']), self.qa_root / NAME / 'src')
+        scripts = [c for c in self.logged() if c['prog'].endswith('.sh')]
+        self.assertTrue(scripts)
+        first_script = self.logged().index(scripts[0])
+        self.assertTrue(all(self.logged().index(c) < first_script for c in verify))
+        for call in scripts:
+            self.assertIsNone(call['env']['GH_TOKEN'], call['prog'])
+            self.assertIsNone(call['env']['GH_CONFIG_DIR'], call['prog'])
+        load, = [c for c in scripts if c['prog'] == 'load-release-images.sh']
+        refs = load['env']['ECONGRAPH_PROVENANCE_VERIFIED'].split()
+        self.assertEqual(sorted(r.split('@')[0] for r in refs),
+                         sorted('ghcr.io/econgraph/econ-graph-' + n for n in
+                                ('backend', 'crawler-worker', 'frontend', 'chart-api')))
+        self.assertEqual(sorted(refs), sorted(c['args'][2].removeprefix('oci://') for c in verify))
+
+    def test_a_candidate_without_the_provenance_check_never_runs_gh(self):
+        result = self.deploy('--tag', TAG, '--dump-dir', str(self.dump), '--dry-run')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(any(c['prog'] == 'gh' for c in self.logged()))
 
     def test_dry_run_creates_nothing(self):
         result = self.deploy('--tag', TAG, '--dump-dir', str(self.dump), '--dry-run')
@@ -441,6 +552,16 @@ class DeployRcToQaTest(unittest.TestCase):
             self.assertEqual(env['KUBECONFIG'], str(qa / f'cache/econgraph/kubeconfig-{NAME}'))
             self.assertEqual(env['KUBECTL'], str(qa / 'cache/econgraph/bin/kubectl'))
             self.assertEqual(env['DOCKER_HOST'], 'unix:///var/run/docker.sock')
+            # No GitHub credential, SSH agent, session bus (keyring) or the operator's data
+            # home reaches the candidate's code (ECO-896).
+            for withheld in ('GH_CONFIG_DIR', 'GH_TOKEN', 'SSH_AUTH_SOCK', 'DBUS_SESSION_BUS_ADDRESS',
+                             'XDG_RUNTIME_DIR'):
+                self.assertIsNone(env[withheld], withheld)
+            self.assertEqual(env['XDG_DATA_HOME'], str(qa / 'data'))
+        # The pinned kind is a copy in the QA directory, not a link to the operator's.
+        staged = qa / 'data/econgraph/bin/kind-v0.33.0'
+        self.assertTrue(staged.is_file())
+        self.assertFalse(staged.is_symlink())
         # The candidate's deploy never starts a crawler.
         self.assertEqual(state['deployed_crawler_replicas'], 0)
         self.assertEqual(rc[1]['args'], ['--tag', TAG, '--cluster', NAME, '--allow-missing-nodes'])
@@ -459,8 +580,10 @@ class DeployRcToQaTest(unittest.TestCase):
         # Every kubectl call is on the QA kubeconfig and context; nothing names production.
         kubectl = [c for c in self.logged() if c['prog'] == 'kubectl']
         for call in kubectl:
-            self.assertEqual(call['args'][:4], ['--kubeconfig', str(qa / f'cache/econgraph/kubeconfig-{NAME}'),
-                                                '--context', f'kind-{NAME}'])
+            self.assertEqual(call['args'][0], '--kubeconfig')
+            self.assertEqual(Path(call['args'][1]).name, 'kubeconfig')
+            self.assertNotIn(str(qa), call['args'][1])
+            self.assertEqual(call['args'][2:4], ['--context', f'kind-{NAME}'])
         texts = [' '.join(c['args']) for c in kubectl]
         self.assertTrue(any('delete secret crawler-api-keys' in t for t in texts))
         self.assertTrue(any('delete secret grafana-admin monitoring-auth' in t for t in texts))
@@ -637,6 +760,138 @@ class DeployRcToQaTest(unittest.TestCase):
         result = self.deploy('--tag', TAG, '--teardown')
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertFalse(self.read_state()['cluster'])
+
+
+    # --- kind: the candidate's files never run here; only a trusted kind runs here (ECO-896) ------
+
+    def test_the_candidates_kind_version_file_is_read_never_run(self):
+        marker = self.work / 'kind-version-ran'
+        leak = self.work / 'kind-version-leak'
+        git = ['git', '-C', str(self.repo), '-c', 'user.name=t', '-c', 'user.email=t@t']
+        (self.repo / 'scripts/deploy/lib/kind-version.sh').write_text(
+            f'touch {marker}\necho "$GH_TOKEN $SSH_AUTH_SOCK" >{leak}\n'
+            'KIND_VERSION="v0.33.0"\nKIND_PINNED_BIN=/bin/false\n')
+        run(git + ['commit', '-q', '-am', 'kind-version with side effects'])
+        run(git + ['tag', 'v4.1.0-rc.2'])
+        run(git + ['push', '-q', 'origin', '--tags'])
+        result = self.deploy('--tag', 'v4.1.0-rc.2', '--dump-dir', str(self.dump), '--name', NAME,
+                             GH_TOKEN='operator-admin-token')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        result = self.deploy('--tag', 'v4.1.0-rc.2', '--teardown', '--name', NAME)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(marker.exists(), 'the candidate\'s kind-version.sh ran')
+        self.assertFalse(leak.exists(), 'the candidate\'s kind-version.sh ran')
+        # The version came from the file's text; KIND_PINNED_BIN was not taken from it.
+        self.assertTrue(any(c['prog'] == 'kind' and c['args'][:2] == ['delete', 'cluster'] for c in self.logged()))
+
+    def test_a_kind_version_that_is_not_vxyz_is_refused(self):
+        git = ['git', '-C', str(self.repo), '-c', 'user.name=t', '-c', 'user.email=t@t']
+        (self.repo / 'scripts/deploy/lib/kind-version.sh').write_text('KIND_VERSION="../../../bin/sh"\n')
+        run(git + ['commit', '-q', '-am', 'bad kind version'])
+        run(git + ['tag', 'v4.1.0-rc.3'])
+        run(git + ['push', '-q', 'origin', '--tags'])
+        result = self.deploy('--tag', 'v4.1.0-rc.3', '--dump-dir', str(self.dump), '--name', NAME)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('no KIND_VERSION="vX.Y.Z" line', result.stdout)
+
+    def remove_operator_kind(self):
+        (self.data_home / 'econgraph/bin/kind-v0.33.0').unlink()
+
+    def test_teardown_without_an_operator_kind_never_runs_an_unverified_copy(self):
+        self.assertEqual(self.deploy().returncode, 0)
+        self.remove_operator_kind()
+        # The QA directory's copy, changed after staging: its checksum is not the pinned one.
+        staged = self.qa_root / NAME / 'data/econgraph/bin/kind-v0.33.0'
+        staged.write_bytes(staged.read_bytes() + b'\n# planted\n')
+        self.calls.write_text('')
+        result = self.deploy('--tag', TAG, '--teardown')
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('no kind v0.33.0 with the checksum', result.stdout)
+        self.assertFalse(any(c['prog'] == 'kind' for c in self.logged()))
+        self.assertTrue(self.read_state()['cluster'])
+
+    def test_teardown_without_an_operator_kind_runs_a_checksum_verified_copy(self):
+        self.assertEqual(self.deploy().returncode, 0)
+        self.remove_operator_kind()
+        staged = self.qa_root / NAME / 'data/econgraph/bin/kind-v0.33.0'
+        digest = hashlib.sha256(staged.read_bytes()).hexdigest()
+        os_name = {'Linux': 'linux', 'Darwin': 'darwin'}[platform.system()]
+        arch = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}[platform.machine()]
+        # This checkout's install-kind.sh pins the staged copy's checksum.
+        install = self.repo / 'scripts/deploy/install-kind.sh'
+        install.write_text(f'pinned_sha256() {{\n    case "$1" in\n'
+                           f'        v0.33.0/{os_name}-{arch}) echo {digest} ;;\n    esac\n}}\n')
+        self.calls.write_text('')
+        result = self.deploy('--tag', TAG, '--teardown')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(self.read_state()['cluster'])
+        self.assertTrue(any(c['prog'] == 'kind' and c['args'][:2] == ['delete', 'cluster'] for c in self.logged()))
+
+
+    def test_a_tampered_operator_kind_is_never_run(self):
+        self.assertEqual(self.deploy().returncode, 0)
+        operator = self.data_home / 'econgraph/bin/kind-v0.33.0'
+        tampered = operator.read_bytes() + b'\n# planted\n'
+        operator.unlink()
+        operator.write_bytes(tampered)
+        operator.chmod(0o755)
+        (self.qa_root / NAME / 'data/econgraph/bin/kind-v0.33.0').unlink()
+        self.calls.write_text('')
+        result = self.deploy('--tag', TAG, '--teardown')
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('no kind v0.33.0 with the checksum', result.stdout)
+        self.assertFalse(any(c['prog'] == 'kind' for c in self.logged()))
+
+    def test_a_kind_version_set_twice_is_refused(self):
+        git = ['git', '-C', str(self.repo), '-c', 'user.name=t', '-c', 'user.email=t@t']
+        (self.repo / 'scripts/deploy/lib/kind-version.sh').write_text(
+            'KIND_VERSION="v0.33.0"\nKIND_VERSION="v9.9.9"\n')
+        run(git + ['commit', '-q', '-am', 'kind version twice'])
+        run(git + ['tag', 'v4.1.0-rc.4'])
+        run(git + ['push', '-q', 'origin', '--tags'])
+        result = self.deploy('--tag', 'v4.1.0-rc.4', '--dump-dir', str(self.dump), '--name', NAME)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('must set KIND_VERSION exactly once', result.stdout)
+
+    def test_a_kubeconfig_with_an_exec_entry_is_refused(self):
+        # Block style, flow style and JSON: parsed, not matched line by line.
+        for style in ('block', 'flow', 'json'):
+            with self.subTest(style=style):
+                self.qa_root = self.work / f'qa-{style}'
+                self.calls.write_text('')
+                self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}, 'kubeconfig_exec': style})
+                result = self.deploy()
+                self.assertEqual(result.returncode, 3, result.stdout)
+                self.assertIn('has an exec or auth-provider entry', result.stdout)
+                self.assertFalse(any(c['prog'] == 'kubectl' for c in self.logged()))
+
+    def test_no_command_after_candidate_code_gets_the_operators_credentials(self):
+        tag, _ = self.provenance_candidate()
+        # Entries no shell variable can name, and an exported function, as an operator's
+        # environment can hold them.
+        odd = {'npm_config_//registry.npmjs.org/:_authToken': 'operator-npm-token',
+               'BASH_FUNC_evil%%': '() {  echo planted\n}'}
+        result = self.deploy('--tag', tag, '--dump-dir', str(self.dump), '--name', NAME,
+                             GH_TOKEN='operator-admin-token', **odd)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        calls = self.logged()
+        # The provenance check, before any candidate code, keeps the token.
+        self.assertTrue(any(c['prog'] == 'gh' and c['env']['GH_TOKEN'] == 'operator-admin-token' for c in calls))
+        first_candidate = next(i for i, c in enumerate(calls) if c['prog'].endswith('.sh'))
+        last_gh = max(i for i, c in enumerate(calls) if c['prog'] == 'gh')
+        self.assertLess(last_gh, first_candidate)
+        self.calls.write_text('')
+        result = self.deploy('--tag', tag, '--teardown', '--name', NAME, GH_TOKEN='operator-admin-token', **odd)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        after = calls[last_gh + 1:] + self.logged()
+        for call in after:
+            for key in odd:
+                self.assertNotIn(key, call['envkeys'], (call['prog'], call['args'][:3]))
+        self.assertTrue(any(c['prog'] in ('kind', 'kubectl', 'docker') for c in after))
+        for call in after:
+            for withheld in ('GH_TOKEN', 'GH_CONFIG_DIR', 'SSH_AUTH_SOCK', 'DBUS_SESSION_BUS_ADDRESS',
+                             'XDG_RUNTIME_DIR', 'FRED_API_KEY', 'CLOUDFLARE_TUNNEL_TOKEN'):
+                self.assertIsNone(call['env'][withheld], (withheld, call['prog'], call['args'][:3]))
 
 
 if __name__ == '__main__':

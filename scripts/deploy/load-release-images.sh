@@ -31,7 +31,16 @@
 #      the tag to its commit.
 #   2. The refs release.yml pushes: ghcr.io/econgraph/econ-graph-{backend,
 #      crawler-worker,frontend,chart-api}:sha-<full commit>, and :<tag> on the same
-#      digest. Both must resolve to one digest on GHCR.
+#      digest. Both must resolve to one digest on GHCR, and that digest must
+#      carry a signed build provenance attestation from release.yml run on
+#      main, a release/<name> branch or an rc tag, for the tag's commit
+#      (scripts/release/verify-image-provenance.sh, which needs gh logged in);
+#      an image without one, or signed by anything else, stops the script
+#      before anything is pulled, in a dry run too. When the check cannot
+#      run (gh not logged in, a GitHub or registry error) the script says so
+#      and stops: re-run once that is fixed. Images built before ECO-896
+#      have no attestation, so this script refuses every v4.0/v4.1 image: load
+#      an old tag with that tag's own checkout of this script.
 #   3. Decide what to keep for each image: the image its Deployment's running
 #      pods use now (with none running, the one the manifests' name points at on
 #      the nodes). When an earlier load of the same tag is on record, its first
@@ -77,7 +86,7 @@
 #
 # Running it again with the same tag is safe: an image that already carries the
 # name is not retagged, pre-<tag> is kept as it is, and kind skips nodes that
-# already have the image. Needs jq, and the pinned kind that
+# already have the image. Needs jq, gh (logged in, for the provenance check), and the pinned kind that
 # scripts/deploy/install-kind.sh installs (`kind load` stops without it). Other
 # environment: ECONGRAPH_DOCKER_HOST, KUBECTL, KUBECONFIG (default: the kind
 # cluster's copies in ~/.cache/econgraph, as lib/cluster-role.sh picks them).
@@ -163,6 +172,31 @@ for name in "${RI_NAMES[@]}"; do
     echo "  ${SHA_REF[$name]}"
     echo "    = ${repo}:${TAG} = ${PIN_REF[$name]} -> ${LOCAL[$name]}"
 done
+# Signed by release.yml from a reviewed ref, for this commit, or nothing is pulled.
+pin_refs=()
+for name in "${RI_NAMES[@]}"; do pin_refs+=("${PIN_REF[$name]}"); done
+# ECONGRAPH_PROVENANCE_VERIFIED: refs a trusted caller already verified for this commit with
+# its own copy of verify-image-provenance.sh (scripts/qa/deploy-rc-to-qa.sh does, so the
+# candidate's code never gets a GitHub credential). When it is set, every ref here must be
+# in it, digest for digest, or the script stops: the tag moved since the caller's check.
+# Unset, the check runs here as usual. scripts/deploy/release-deploy.sh refuses to run with
+# it set.
+provenance_rc=0
+if [ -n "${ECONGRAPH_PROVENANCE_VERIFIED:-}" ]; then
+    for ref in "${pin_refs[@]}"; do
+        [[ " ${ECONGRAPH_PROVENANCE_VERIFIED} " == *" ${ref} "* ]] ||
+            ri_die "${ref} is not in the caller's verified list ECONGRAPH_PROVENANCE_VERIFIED (did the tag move since the check?); refusing"
+    done
+    echo "provenance of ${TAG}'s images already verified by the caller (ECONGRAPH_PROVENANCE_VERIFIED)"
+else
+    "$PROJECT_ROOT/scripts/release/verify-image-provenance.sh" --commit "$COMMIT" "${pin_refs[@]}" || provenance_rc=$?
+fi
+case "$provenance_rc" in
+    0) ;;
+    1) ri_die "the provenance check refused an image of ${TAG} for ${COMMIT} (see its message above); refusing" ;;
+    3) ri_die "the provenance check of ${TAG}'s images could not run (gh not logged in, or a GitHub or registry error; see above); fix that and re-run. Nothing about the images is known yet" ;;
+    *) ri_die "the provenance check of ${TAG}'s images failed unexpectedly (verify-image-provenance.sh exit ${provenance_rc}); refusing" ;;
+esac
 
 # 3. What to keep, and every check, before anything changes.
 FIRST_RECORD="$(ri_first_record "$TAG")"
