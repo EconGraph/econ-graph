@@ -148,6 +148,13 @@ class ReleaseArtifactsTest(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         for call in calls:
             self.assertIn('--commit', call, call)
+        # The rc tag goes on the digests this run verified, never on a re-read sha tag.
+        rc_tag, = [s for s in jobs['build']['steps'] if s.get('name') == 'Point the rc tag at the verified digests']
+        self.assertNotIn('imagetools inspect', rc_tag['run'])
+        for name in self.names:
+            key = name.replace('-', '_')
+            self.assertIn('${{ steps.build-' + name + '.outputs.digest }}', rc_tag['env'].values())
+            self.assertIn('${{ steps.check.outputs.econ_graph_' + key + '_digest }}', rc_tag['env'].values())
         check, = [s for s in self.steps if s.get('id') == 'check']
         self.assertIn('scripts/release/verify-image-provenance.sh', check['run'])
         digests, = [s for s in self.steps if s.get('id') == 'digests']

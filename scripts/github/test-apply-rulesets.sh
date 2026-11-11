@@ -287,10 +287,7 @@ fi
 
 tag_file="$(tag_files)"
 if [ "$(wc -w <<<"$tag_file" | tr -d ' ')" = 1 ]; then
-    # The file's bypass actors and main's live ones (here the same org admins).
-    jq --argjson main "$live_main" '.bypass_actors += $main.bypass_actors | .bypass_actors |= unique' \
-        "$tag_rules" >"$WORK/doc-tag.json"
-    same_ruleset "first apply: the tag ruleset is tag-ruleset.json plus main's bypass actors" "$WORK/doc-tag.json" "$tag_file"
+    same_ruleset "first apply: the tag ruleset is tag-ruleset.json, bypass actors included" "$tag_rules" "$tag_file"
 else
     fail "first apply: one tag ruleset" "$tag_file"
 fi
@@ -357,7 +354,7 @@ tag_id="$(jq -r .id "$tag_file")"
 jq '.enforcement = "evaluate"
     | .rules |= map(select(.type != "deletion")) | .rules += [{"type": "required_signatures"}]
     | .conditions.ref_name.include += ["refs/tags/hotfix-*"]
-    | .bypass_actors += [{"actor_id": 99, "actor_type": "Integration", "bypass_mode": "always"}]' \
+    | .conditions.ref_name.exclude += ["refs/tags/foo-*"]' \
     "$tag_file" >"$WORK/t.json"
 cp "$WORK/t.json" "$tag_file"
 : >"$STUB_STATE/writes.log"
@@ -367,7 +364,9 @@ if [ "$rc" -eq 0 ] && [ "$(cat "$STUB_STATE/writes.log")" = "PUT repos/EconGraph
     jq -e '.enforcement == "active"
            and ([.rules[].type] | index("deletion") and index("required_signatures"))
            and (.conditions.ref_name.include | index("refs/tags/hotfix-*") and index("refs/tags/v*"))
-           and any(.bypass_actors[]; .actor_id == 99)' "$tag_file" >/dev/null; then
+           and .conditions.ref_name.exclude == ["refs/tags/foo-*"]
+           and .bypass_actors == [{"actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]' \
+    "$tag_file" >/dev/null; then
     ok "a changed tag ruleset is updated in place, keeping its live extras"
 else
     fail "tag update (exit $rc)" "$out"$'\n'"$(cat "$STUB_STATE/writes.log")"$'\n'"$(jq -c . "$tag_file")"
@@ -463,6 +462,43 @@ for id in 601 602; do
     jq --argjson id "$id" '. + {id: $id}' "$tag_rules" >"$STUB_STATE/rulesets/$id.json"
 done
 expect_refusal "refuses two tag rulesets of the same name" "2 tag rulesets are named" --yes
+
+# A live tag ruleset that would leave release tags unprotected is refused, not merged.
+for exclude in "refs/tags/v1*" "refs/tags/*" "refs/tags/t*" "refs/tags/train-5" "~ALL"; do
+    reset
+    jq --arg e "$exclude" '. + {id: 601} | .conditions.ref_name.exclude = [$e]' "$tag_rules" \
+        >"$STUB_STATE/rulesets/601.json"
+    expect_refusal "refuses a live tag ruleset that excludes ${exclude}" "it excludes ${exclude}" --dry-run
+done
+reset
+jq '. + {id: 601} | .bypass_actors += [{"actor_id": 4, "actor_type": "RepositoryRole", "bypass_mode": "always"}]' \
+    "$tag_rules" >"$STUB_STATE/rulesets/601.json"
+expect_refusal "refuses a live tag ruleset with a bypass actor the file doesn't list" \
+    "it lets RepositoryRole 4 bypass (always)" --yes
+# Main's bypass actors are never inherited by the tag ruleset.
+reset "$(jq '.bypass_actors += [{"actor_id": 4, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"}]' <<<"$live_main")"
+run --yes
+if [ "$rc" -eq 0 ] && jq -e '.bypass_actors == [{"actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]' \
+    "$(tag_files)" >/dev/null; then
+    ok "the tag ruleset does not inherit main's bypass actors"
+else
+    fail "tag bypass actors from main (exit $rc)" "$out"$'\n'"$(jq -c .bypass_actors "$(tag_files)" 2>/dev/null)"
+fi
+# A pull_request-mode actor in tag-ruleset.json is dropped.
+mkdir -p "$WORK/prmode"
+cp "${SCRIPT_DIR}/apply-rulesets.sh" "$rules" "$WORK/prmode/"
+jq '.bypass_actors += [{"actor_id": 7, "actor_type": "Team", "bypass_mode": "pull_request"}]' "$tag_rules" \
+    >"$WORK/prmode/tag-ruleset.json"
+reset
+real_script="$script"
+script="$WORK/prmode/apply-rulesets.sh"
+run --yes
+script="$real_script"
+if [ "$rc" -eq 0 ] && jq -e '[.bypass_actors[].bypass_mode] | index("pull_request") | not' "$(tag_files)" >/dev/null; then
+    ok "pull_request-mode bypass actors are dropped from the tag ruleset"
+else
+    fail "pull_request-mode tag actor (exit $rc)" "$out"
+fi
 
 # A tag-ruleset.json that is not a tag ruleset, beside a copy of the script.
 mkdir -p "$WORK/broken"

@@ -91,10 +91,11 @@ for ref in "$@"; do
     fi
     printf '%s\n' "$out" >&2
     # What gh prints when it looked and the image failed: no attestation for
-    # the digest (HTTP 404), or attestations that don't pass the policy.
-    # Anything else (401/403, 5xx, rate limits, network, registry) means the
-    # check itself failed, which says nothing about the image.
-    if grep -qiE 'no attestations found|HTTP 404|verification failed|failed to verify|none of the attestations|expected .* to (be|match)|does not match' <<<"$out"; then
+    # the digest (the attestations API's 404), or attestations that don't pass
+    # the policy ("Verification failed", "expected <field> to be ..."). Anything
+    # else (401/403, 5xx, rate limits, network, a registry 404 for the image
+    # itself) means the check failed, which says nothing about the image.
+    if grep -qiE 'no attestations found|fetch(ing)? attestations[^[:cntrl:]]*HTTP 404|verification failed|expected [[:alnum:]_.]+ to (be|match)' <<<"$out"; then
         no_provenance "${ref} has no valid build provenance from release.yml on main, release/<name> or an rc tag for commit ${commit}; refusing it"
     fi
     cannot_check "could not check the provenance of ${ref} (see gh's output above); nothing is known about the image; fix the cause and re-run"

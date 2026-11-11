@@ -60,7 +60,7 @@ stdin = sys.stdin.read() if reads_stdin and not sys.stdin.isatty() else ''
 keep = ('HOME', 'KIND_CLUSTER', 'ECONGRAPH_SCRATCH_STORAGE', 'XDG_CACHE_HOME', 'ECONGRAPH_BACKUP_ROOT',
         'ECONGRAPH_RELEASES_DIR', 'ECONGRAPH_DEPLOY_ENV', 'PUBLIC_HOST', 'APP_DATABASE', 'DOCKER_HOST',
         'FRED_API_KEY', 'KUBECONFIG', 'KUBECTL', 'TMPDIR', 'CLOUDFLARE_TUNNEL_TOKEN', 'DRY_RUN', 'NAMESPACE',
-        'GH_CONFIG_DIR', 'GH_TOKEN')
+        'GH_CONFIG_DIR', 'GH_TOKEN', 'ECONGRAPH_PROVENANCE_VERIFIED')
 with open(CONFIG['calls'], 'a') as log:
     log.write(json.dumps({'prog': prog, 'args': args, 'cwd': os.getcwd(),
                           'env': {k: os.environ.get(k) for k in keep}, 'stdin': stdin}) + '\n')
@@ -85,6 +85,9 @@ if prog == 'docker':
         elif 'create configmap econgraph-qa-owner' in text:
             state['owner'] = next(a.split('=', 2)[2] for a in cmd if a.startswith('--from-literal=id='))
             save()
+    elif args[:3] == ['buildx', 'imagetools', 'inspect']:
+        image = args[3].rsplit('/', 1)[-1].split(':', 1)[0]
+        out = json.dumps({'digest': 'sha256:' + format(sum(map(ord, image)) % 16, 'x') * 64}) + '\n'
     elif args[0] == 'port':
         out = '127.0.0.1:%s\n' % state.get('port', '')
     elif args[0] == 'cp':
@@ -186,8 +189,15 @@ elif prog in ('load-release-images.sh',):
     save()
     code = state.get('load_status', 3)
 elif prog == 'gh':
-    # Only `gh auth status`: logged in unless the state says otherwise.
-    code = 0 if args[:2] == ['auth', 'status'] and state.get('gh_logged_in', True) else 1
+    # `gh auth status`: logged in unless the state says otherwise. `gh attestation verify`:
+    # passes unless state['no_provenance'].
+    if args[:2] == ['auth', 'status']:
+        code = 0 if state.get('gh_logged_in', True) else 1
+    elif args[:2] == ['attestation', 'verify']:
+        if state.get('no_provenance'):
+            out, code = 'Error: failed to fetch attestations: HTTP 404: Not Found\n', 1
+    else:
+        code = 1
 elif prog == 'deploy.sh':
     import yaml
     docs = [d for d in yaml.safe_load_all(open('k8s/manifests/crawler-worker.yaml')) if d]
@@ -308,7 +318,9 @@ class DeployRcToQaTest(unittest.TestCase):
                 self.assertEqual(call['args'][0], '--check')
                 continue
             if call['prog'] == 'gh':
-                self.assertEqual(call['args'], ['auth', 'status'], call)
+                self.assertIn(call['args'][:2], (['auth', 'status'], ['attestation', 'verify']), call)
+                continue
+            if call['prog'] == 'docker' and call['args'][:3] == ['buildx', 'imagetools', 'inspect']:
                 continue
             self.assertEqual(call['prog'], 'docker', call)
             self.assertIn(call['args'][0], ('ps', 'exec', 'info'), call)
@@ -370,24 +382,62 @@ class DeployRcToQaTest(unittest.TestCase):
         self.assertEqual(result.returncode, 3, result.stdout)
         self.assertIn('has no scripts/deploy/restore-kind-databases.sh', result.stdout)
 
-    def test_a_candidate_that_checks_provenance_needs_gh_logged_in(self):
-        # ECO-896: a candidate with verify-image-provenance.sh runs gh in load-release-images.sh.
+    def provenance_candidate(self, tag='v4.2.0-rc.1'):
+        # ECO-896: a candidate with verify-image-provenance.sh; this checkout's copy checks it.
         git = ['git', '-C', str(self.repo), '-c', 'user.name=t', '-c', 'user.email=t@t']
         target = self.repo / 'scripts/release/verify-image-provenance.sh'
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / 'scripts/release/verify-image-provenance.sh', target)
         run(git + ['add', '-A'])
         run(git + ['commit', '-q', '-m', 'provenance'])
-        run(git + ['tag', 'v4.2.0-rc.1'])
+        run(git + ['tag', tag])
         run(git + ['push', '-q', 'origin', '--tags'])
+        return tag, run(git + ['rev-parse', 'HEAD']).stdout.strip()
+
+    def test_a_candidate_that_checks_provenance_needs_gh_logged_in(self):
+        tag, _ = self.provenance_candidate()
         self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}, 'gh_logged_in': False})
-        result = self.deploy('--tag', 'v4.2.0-rc.1', '--dump-dir', str(self.dump), '--name', NAME)
-        self.assert_refused(result, 'gh is not logged in')
+        result = self.deploy('--tag', tag, '--dump-dir', str(self.dump), '--name', NAME)
+        self.assert_refused(result, 'could not run')
         self.assertFalse((self.qa_root / NAME).exists())
         self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}})
-        result = self.deploy('--tag', 'v4.2.0-rc.1', '--dump-dir', str(self.dump), '--name', NAME, '--dry-run')
+        result = self.deploy('--tag', tag, '--dump-dir', str(self.dump), '--name', NAME, '--dry-run')
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(['auth', 'status'], [c['args'] for c in self.logged() if c['prog'] == 'gh'])
+
+    def test_an_image_without_provenance_is_refused_before_the_candidate_runs(self):
+        tag, _ = self.provenance_candidate()
+        self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}, 'no_provenance': True})
+        result = self.deploy('--tag', tag, '--dump-dir', str(self.dump), '--name', NAME)
+        self.assert_refused(result, 'has no valid release provenance')
+        self.assertFalse(any(c['prog'].endswith('.sh') for c in self.logged()))
+
+    def test_the_candidate_gets_verified_digests_never_a_github_credential(self):
+        tag, commit = self.provenance_candidate()
+        result = self.deploy('--tag', tag, '--dump-dir', str(self.dump), '--name', NAME,
+                             GH_TOKEN='operator-admin-token')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        verify = [c for c in self.logged() if c['prog'] == 'gh' and c['args'][:2] == ['attestation', 'verify']]
+        self.assertEqual(len(verify), 4)
+        for call in verify:
+            self.assertIn('--source-digest', call['args'])
+            self.assertEqual(call['args'][call['args'].index('--source-digest') + 1], commit)
+            # This checkout's script ran it, with the operator's token, outside the candidate.
+            self.assertEqual(call['env']['GH_TOKEN'], 'operator-admin-token')
+            self.assertNotEqual(Path(call['cwd']), self.qa_root / NAME / 'src')
+        scripts = [c for c in self.logged() if c['prog'].endswith('.sh')]
+        self.assertTrue(scripts)
+        first_script = self.logged().index(scripts[0])
+        self.assertTrue(all(self.logged().index(c) < first_script for c in verify))
+        for call in scripts:
+            self.assertIsNone(call['env']['GH_TOKEN'], call['prog'])
+            self.assertIsNone(call['env']['GH_CONFIG_DIR'], call['prog'])
+        load, = [c for c in scripts if c['prog'] == 'load-release-images.sh']
+        refs = load['env']['ECONGRAPH_PROVENANCE_VERIFIED'].split()
+        self.assertEqual(sorted(r.split('@')[0] for r in refs),
+                         sorted('ghcr.io/econgraph/econ-graph-' + n for n in
+                                ('backend', 'crawler-worker', 'frontend', 'chart-api')))
+        self.assertEqual(sorted(refs), sorted(c['args'][2].removeprefix('oci://') for c in verify))
 
     def test_a_candidate_without_the_provenance_check_never_runs_gh(self):
         result = self.deploy('--tag', TAG, '--dump-dir', str(self.dump), '--dry-run')
@@ -474,8 +524,8 @@ class DeployRcToQaTest(unittest.TestCase):
             self.assertEqual(env['KUBECONFIG'], str(qa / f'cache/econgraph/kubeconfig-{NAME}'))
             self.assertEqual(env['KUBECTL'], str(qa / 'cache/econgraph/bin/kubectl'))
             self.assertEqual(env['DOCKER_HOST'], 'unix:///var/run/docker.sock')
-            # gh's config by name (the candidate's HOME is the QA directory's); no GH_TOKEN when unset.
-            self.assertEqual(env['GH_CONFIG_DIR'], str(self.work / 'gh-config'))
+            # No GitHub credential ever reaches the candidate's code (ECO-896).
+            self.assertIsNone(env['GH_CONFIG_DIR'])
             self.assertIsNone(env['GH_TOKEN'])
         # The candidate's deploy never starts a crawler.
         self.assertEqual(state['deployed_crawler_replicas'], 0)

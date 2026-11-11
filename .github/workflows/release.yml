@@ -198,6 +198,8 @@ jobs:
             fi
             echo "${ref} already exists with release provenance; will not rebuild it."
             echo "${key}=true" >> "$GITHUB_OUTPUT"
+            # The digest just verified: the rc tag goes on it, not on the sha tag.
+            echo "${key}_digest=${digest}" >> "$GITHUB_OUTPUT"
           elif echo "${inspect_err}" | grep -qiE 'manifest unknown|not found'; then
             echo "${ref} doesn't exist yet; will build it."
             echo "${key}=false" >> "$GITHUB_OUTPUT"
@@ -374,20 +376,34 @@ jobs:
     # Apply the rc tag itself here (only for a tag push, not workflow_dispatch:
     # the Actions UI lets a manual run be started "from" a tag, which must
     # never cause the tag to be re-pointed). Runs whether each image was just
-    # built above or already existed, so either way the rc tag ends up on the
-    # sha-tagged digest - never on a mutable tag, so this can't silently move
-    # if something retags `sha-<commit>` later.
-    - name: Point the rc tag at the sha-tagged digests
+    # built above or already existed, and tags the digest this run verified:
+    # the one it built and attested, or the adopted one the check step
+    # verified. It never re-reads the mutable `sha-<commit>` tag, so a retag
+    # of that tag in between can't move the rc tag.
+    - name: Point the rc tag at the verified digests
       if: github.event_name == 'push'
+      env:
+        BUILT_BACKEND: ${{ steps.build-backend.outputs.digest }}
+        BUILT_CRAWLER_WORKER: ${{ steps.build-crawler-worker.outputs.digest }}
+        BUILT_FRONTEND: ${{ steps.build-frontend.outputs.digest }}
+        BUILT_CHART_API: ${{ steps.build-chart-api.outputs.digest }}
+        ADOPTED_BACKEND: ${{ steps.check.outputs.econ_graph_backend_digest }}
+        ADOPTED_CRAWLER_WORKER: ${{ steps.check.outputs.econ_graph_crawler_worker_digest }}
+        ADOPTED_FRONTEND: ${{ steps.check.outputs.econ_graph_frontend_digest }}
+        ADOPTED_CHART_API: ${{ steps.check.outputs.econ_graph_chart_api_digest }}
       run: |
         set -euo pipefail
         owner="${{ steps.owner.outputs.owner }}"
-        sha_tag="sha-${{ steps.sha.outputs.sha }}"
+        declare -A verified=(
+          [econ-graph-backend]="${BUILT_BACKEND:-${ADOPTED_BACKEND}}"
+          [econ-graph-crawler-worker]="${BUILT_CRAWLER_WORKER:-${ADOPTED_CRAWLER_WORKER}}"
+          [econ-graph-frontend]="${BUILT_FRONTEND:-${ADOPTED_FRONTEND}}"
+          [econ-graph-chart-api]="${BUILT_CHART_API:-${ADOPTED_CHART_API}}"
+        )
         for image in econ-graph-backend econ-graph-crawler-worker econ-graph-frontend econ-graph-chart-api; do
-          src="${REGISTRY}/${owner}/${image}:${sha_tag}"
-          digest="$(docker buildx imagetools inspect "${src}" --format '{{json .Manifest}}' | jq -r '.digest')"
-          if [ -z "${digest}" ] || [ "${digest}" = "null" ]; then
-            echo "release.yml: couldn't resolve a digest for ${src} to apply the rc tag" >&2
+          digest="${verified[$image]}"
+          if ! [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "release.yml: no verified digest for ${image} ('${digest}') to apply the rc tag" >&2
             exit 1
           fi
           echo "Tagging ${REGISTRY}/${owner}/${image}@${digest} as ${GITHUB_REF_NAME}"

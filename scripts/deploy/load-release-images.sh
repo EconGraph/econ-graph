@@ -175,12 +175,25 @@ done
 # Signed by release.yml from a reviewed ref, for this commit, or nothing is pulled.
 pin_refs=()
 for name in "${RI_NAMES[@]}"; do pin_refs+=("${PIN_REF[$name]}"); done
+# ECONGRAPH_PROVENANCE_VERIFIED: refs a trusted caller already verified for this commit with
+# its own copy of verify-image-provenance.sh (scripts/qa/deploy-rc-to-qa.sh does, so the
+# candidate's code never gets a GitHub credential). The check is skipped only when every
+# ref here is in it, digest for digest; otherwise it runs as usual.
+preverified=true
+for ref in "${pin_refs[@]}"; do
+    [[ " ${ECONGRAPH_PROVENANCE_VERIFIED:-} " == *" ${ref} "* ]] || preverified=false
+done
 provenance_rc=0
-"$PROJECT_ROOT/scripts/release/verify-image-provenance.sh" --commit "$COMMIT" "${pin_refs[@]}" || provenance_rc=$?
+if [ "$preverified" = true ]; then
+    echo "provenance of ${TAG}'s images already verified by the caller (ECONGRAPH_PROVENANCE_VERIFIED)"
+else
+    "$PROJECT_ROOT/scripts/release/verify-image-provenance.sh" --commit "$COMMIT" "${pin_refs[@]}" || provenance_rc=$?
+fi
 case "$provenance_rc" in
     0) ;;
+    1) ri_die "an image of ${TAG} has no valid release provenance for ${COMMIT}; refusing" ;;
     3) ri_die "the provenance check of ${TAG}'s images could not run (gh not logged in, or a GitHub or registry error; see above); fix that and re-run. Nothing about the images is known yet" ;;
-    *) ri_die "an image of ${TAG} has no valid release provenance for ${COMMIT}; refusing" ;;
+    *) ri_die "the provenance check of ${TAG}'s images failed unexpectedly (verify-image-provenance.sh exit ${provenance_rc}); refusing" ;;
 esac
 
 # 3. What to keep, and every check, before anything changes.

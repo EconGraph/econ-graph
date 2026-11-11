@@ -15,9 +15,13 @@
 #     since release.yml and verify-image-provenance.sh trust every one
 #     (ECO-896);
 #   - create, or update, the tag ruleset in tag-ruleset.json (`release tags
-#     by admins only`), with main's live `bypass_actors` added to the file's:
-#     only they may create, move or delete v* and train-* tags, so release.yml
-#     only ever sees release tags an admin pushed (ECO-896).
+#     by admins only`): only the file's bypass actors (organization admins)
+#     may create, move or delete v* and train-* tags, so release.yml only ever
+#     sees release tags an admin pushed (ECO-896). Bypass actors are never
+#     inherited from main, and pull_request-mode actors are dropped (they mean
+#     nothing for tags). A live tag ruleset with another bypass actor, or an
+#     exclude pattern that could match a v* or train-* tag, is refused before
+#     anything is written.
 #
 # Usage: scripts/github/apply-rulesets.sh [--dry-run] [--yes]
 #
@@ -213,6 +217,24 @@ else
     echo null >"$work/tag-live.json"
 fi
 
+# A live tag ruleset must not quietly leave release tags unprotected: no exclude
+# pattern that could match a v* or train-* tag (~ALL, or a refs/tags/ pattern whose
+# literal prefix is compatible with "v" or "train-"), and no bypass actor that
+# tag-ruleset.json doesn't list. Fixing either is a decision for an admin.
+tag_problem="$(jq -r --slurpfile f "$TAG_FILE" '
+  def lit: sub("^refs/tags/"; "") | capture("^(?<l>[^*?\\[]*)").l;
+  def overlaps: . == "~ALL"
+    or (startswith("refs/tags/") and (lit as $l | any("v", "train-"; . as $t | ($t | startswith($l)) or ($l | startswith($t)))));
+  if . == null then "" else
+    ([(.conditions.ref_name.exclude // [])[] | select(overlaps) | "it excludes \(.)"]
+     + [(.bypass_actors // [])[] | . as $a
+         | select(any($f[0].bypass_actors[]; .actor_type == $a.actor_type and .actor_id == $a.actor_id) | not)
+         | "it lets \(.actor_type) \(.actor_id // "null") bypass (\(.bypass_mode))"])
+    | join("; ")
+  end' "$work/tag-live.json")"
+[ -z "$tag_problem" ] ||
+    die "the live tag ruleset ${tag_id} \"${TAG_NAME}\" would leave release tags unprotected (${tag_problem}); fix it in the repository settings, or list the actor in ${TAG_FILE}, and re-run"
+
 # --- Desired rulesets --------------------------------------------------------
 
 # No merge queue on the release ruleset: GitHub rejects (HTTP 422) a merge
@@ -245,19 +267,19 @@ jq -n "$JQ_LIB"'
     --slurpfile new "$work/release-new-rules.json" >"$work/release-desired.json"
 
 # The tag ruleset: tag-ruleset.json as it is when none exists; otherwise the
-# live one with the file's enforcement, its refs added, and its rules merged
-# in. Either way main's live bypass actors are added to the file's, so the
-# actor ids are ones GitHub already accepted.
+# live one (checked above) with the file's enforcement, its refs added, and its
+# rules merged in. Bypass actors are the file's only, never main's, and never
+# in pull_request mode.
 jq -n "$JQ_LIB"'
   $file[0] as $f
-  | ($live[0] | if . == null then $f | writable else writable end)
+  | [$f.bypass_actors[] | select(.bypass_mode != "pull_request")] as $actors
+  | ($live[0] | if . == null then $f | writable | .bypass_actors = [] else writable end)
   | .enforcement = $f.enforcement
   | .conditions.ref_name.include |= ((. // []) as $i | $i + [$f.conditions.ref_name.include[] | select(. as $r | $i | index($r) | not)])
   | .conditions.ref_name.exclude |= (. // [])
-  | .bypass_actors |= union_actors($f.bypass_actors + $main[0].bypass_actors)
+  | .bypass_actors |= ([(. // [])[] | select(.bypass_mode != "pull_request")] | union_actors($actors))
   | .rules |= merge_rules($f.rules)' \
-    --slurpfile file "$TAG_FILE" --slurpfile live "$work/tag-live.json" \
-    --slurpfile main "$work/main-live.json" >"$work/tag-desired.json"
+    --slurpfile file "$TAG_FILE" --slurpfile live "$work/tag-live.json" >"$work/tag-desired.json"
 
 # --- Diff --------------------------------------------------------------------
 

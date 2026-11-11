@@ -47,6 +47,8 @@ case "$3" in
             policy) printf '%s\n' "Verification failed" "Error: expected SourceRepositoryDigest to be abc, got def" ;;
             api) echo "Error: failed to fetch attestations from EconGraph/econ-graph: HTTP 503: Service Unavailable" ;;
             unauthorized) echo "Error: failed to fetch attestations from EconGraph/econ-graph: HTTP 401: Bad credentials" ;;
+            registry404) echo "Error: failed to fetch manifest for ghcr.io/econgraph/econ-graph-backend: HTTP 404: Not Found" ;;
+            mismatch) echo "Error: digest does not match the registry's" ;;
         esac
         exit 1 ;;
 esac
@@ -106,7 +108,7 @@ for mode in missing policy; do
         "could not check" --commit "$commit" "$backend" "$frontend"
     [ "$(verifies)" = 1 ] || fail "a ${mode} attestation stops before the next image" "$(cat "$STUB_LOG")"
 done
-for mode in api unauthorized; do
+for mode in api unauthorized registry404 mismatch; do
     export STUB_FAIL_AS=$mode
     expect "an ${mode} error exits 3, not 'no provenance'" 3 "could not check the provenance of ${backend}" \
         "$bad" --commit "$commit" "$backend"

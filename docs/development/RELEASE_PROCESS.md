@@ -23,6 +23,10 @@ git fetch origin main
 git push origin origin/main:refs/heads/release/v4.0
 ```
 
+Once the release ruleset's `creation` rule is applied (ECO-896; see [Merge queue](MERGE_QUEUE.md)),
+only organization admins can create a `release/<name>` branch, so an admin does this push.
+The release workflow and its provenance check trust every `release/<name>` branch as reviewed.
+
 After the cut, `main` can take work for later releases, including flag and experimental
 changes the release must not ship.
 
