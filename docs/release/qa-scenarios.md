@@ -96,9 +96,13 @@ run. That is defence in depth, not a boundary:
 
 - The candidate's scripts get no GitHub token or gh config, SSH agent, session bus (keyring),
   `XDG_RUNTIME_DIR` or the operator's data home.
-- After the provenance check, and throughout a teardown, the script strips its own
-  environment, so nothing it starts gets those either, or any other variable of the
-  operator's shell.
+- After the provenance check, and for all of a teardown, the script re-runs itself under
+  `env -i`. It keeps only `PATH`, `LANG`, `LC_ALL`, `TERM`, `USER`, `LOGNAME`, `HOME`,
+  `TMPDIR`, the Docker client settings (`DOCKER_HOST`, `DOCKER_CONFIG`, `DOCKER_TLS_VERIFY`,
+  `DOCKER_CERT_PATH`), `PYTHONPATH`, `VIRTUAL_ENV` and a few values of its own. So nothing it
+  starts from then on gets the variables above, exported shell functions, or any other entry
+  of the operator's environment. The provenance check, which runs first, keeps its
+  credentials.
 - It runs kind and kubectl only as fresh private copies. For kind, the copy's checksum must
   be the one this checkout's `scripts/deploy/install-kind.sh` pins.
 - It regenerates the kubeconfig with kind each run, and refuses one with an `exec` or

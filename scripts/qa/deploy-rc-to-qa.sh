@@ -106,10 +106,11 @@
 # user can write, this script and its tools included. A candidate is therefore trusted at the
 # level of reviewed main plus an rc tag only an admin can push (ECO-896); running one that
 # isn't needs a separate user or VM (ECO-926). As defence in depth, not a boundary: once
-# candidate code can have run (after the provenance check, and throughout a teardown), this
-# script strips its own environment to SCRUB_KEEP (scrub_environment), so nothing it starts
-# from then on gets a GitHub token or gh config, the SSH agent, the session bus or keyring,
-# XDG_RUNTIME_DIR or any other variable of the operator's shell; it runs kind and kubectl only
+# candidate code can have run (after the provenance check, and for all of a teardown), this
+# script re-runs itself under `env -i` with only SCRUB_KEEP and a few values of its own
+# (scrub_environment), so nothing it starts from then on gets a GitHub token or gh config,
+# the SSH agent, the session bus or keyring, XDG_RUNTIME_DIR, an exported function or any
+# other entry of the operator's environment; it runs kind and kubectl only
 # as fresh private copies, never the copies in the QA directory; it regenerates the
 # kubeconfig with kind each run and refuses one with an exec or auth-provider entry; it never
 # runs git inside the candidate's worktree; and it reads the candidate's kind version as
@@ -118,6 +119,12 @@
 set -euo pipefail
 
 SCRIPT_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# For scrub_environment's re-exec, and what it hands the second pass (internal; never set
+# them yourself). Not exported further.
+ORIGINAL_ARGS=("$@")
+SCRUBBED="${ECONGRAPH_QA_INTERNAL_SCRUBBED:-}"
+VERIFIED_BEFORE_SCRUB="${ECONGRAPH_QA_INTERNAL_PROVENANCE_VERIFIED:-}"
+unset ECONGRAPH_QA_INTERNAL_SCRUBBED ECONGRAPH_QA_INTERNAL_PROVENANCE_VERIFIED
 QA_ROOT="${ECONGRAPH_QA_ROOT:-$HOME/econgraph-qa}"
 REAL_HOME="$HOME"
 REAL_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -197,16 +204,25 @@ QA_KUBECONFIG="${QA_DIR}/cache/econgraph/kubeconfig-${NAME}"
 PRIVATE_BIN="$(mktemp -d)"
 trap 'rm -rf -- "$PRIVATE_BIN"' EXIT
 
-# scrub_environment: from here on, every command this script starts sees only SCRUB_KEEP
-# (defence in depth once candidate code can have run; see the header).
-SCRUB_KEEP=" PATH LANG LC_ALL TERM USER LOGNAME HOME TMPDIR DOCKER_HOST DOCKER_CONFIG "
-# Un-exported rather than unset: the script's own variables (DRY_RUN, say, when the operator's
-# shell exported one) keep their values; the commands it starts just don't inherit them.
+# scrub_environment: run the rest of this script, and so everything it starts, in an
+# environment of only SCRUB_KEEP (defence in depth once candidate code can have run; see the
+# header). It re-execs the script under `env -i`, which also drops entries no shell variable
+# can name (npm_config_//registry.npmjs.org/:_authToken, say) and exported functions
+# (BASH_FUNC_*); the second pass skips the steps that need credentials (the tag fetch and
+# the provenance check) and takes the verified digests from the first.
+SCRUB_KEEP=(PATH LANG LC_ALL TERM USER LOGNAME HOME TMPDIR DOCKER_HOST DOCKER_CONFIG
+    DOCKER_TLS_VERIFY DOCKER_CERT_PATH PYTHONPATH VIRTUAL_ENV)
 scrub_environment() {
-    local var
-    for var in $(compgen -e); do
-        [[ "$SCRUB_KEEP" == *" ${var} "* ]] || export -n "${var?}" 2>/dev/null || true
+    [ "$SCRUBBED" != 1 ] || return 0
+    local var keep=()
+    for var in "${SCRUB_KEEP[@]}"; do
+        [ -z "${!var+set}" ] || keep+=("${var}=${!var}")
     done
+    rm -rf -- "$PRIVATE_BIN"
+    exec env -i "${keep[@]}" \
+        ECONGRAPH_QA_INTERNAL_SCRUBBED=1 ECONGRAPH_QA_INTERNAL_PROVENANCE_VERIFIED="$PROVENANCE_VERIFIED" \
+        ECONGRAPH_QA_ROOT="$QA_ROOT" ECONGRAPH_DOCKER_HOST="$DOCKER_HOST" XDG_DATA_HOME="$REAL_DATA_HOME" \
+        "$BASH" "$0" "${ORIGINAL_ARGS[@]}"
 }
 # A teardown needs no credentials, and candidate code has run in this environment before:
 # scrubbed from the start.
@@ -347,8 +363,25 @@ qk() {
         kind="$(trusted_kind)" || exit "$EXIT_FAILED"
         (umask 077; "$kind" get kubeconfig --name "$NAME" >"$QK_KUBECONFIG") ||
             die "could not get ${NAME}'s kubeconfig"
-        ! grep -qE '^[[:space:]-]*(exec|auth-provider):' "$QK_KUBECONFIG" ||
-            refuse "${NAME}'s kubeconfig has an exec or auth-provider entry"
+        python3 - "$QK_KUBECONFIG" <<'PY' || refuse "${NAME}'s kubeconfig has an exec or auth-provider entry, or can't be read"
+import sys
+import yaml
+try:
+    config = yaml.safe_load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+users = config.get('users') if isinstance(config, dict) else None
+if users is None:
+    users = []
+if not isinstance(users, list):
+    sys.exit(1)
+for entry in users:
+    user = (entry or {}).get('user') if isinstance(entry, dict) else None
+    if user is None:
+        continue
+    if not isinstance(user, dict) or 'exec' in user or 'auth-provider' in user:
+        sys.exit(1)
+PY
         mkdir -p "$(dirname "$QA_KUBECTL")" "$(dirname "$QA_KUBECONFIG")"
         rm -f -- "$QA_KUBECTL" "$QA_KUBECONFIG"
         { cp -- "$QK_KUBECTL" "$QA_KUBECTL" && chmod 0755 "$QA_KUBECTL"; } ||
@@ -506,7 +539,8 @@ recorded_tag="$(state_get TAG)"
     refuse "${NAME} runs ${recorded_tag}; tear it down or choose another --name for ${TAG}"
 DUMP_BEFORE="$(dump_fingerprint "$DUMP_DIR")"
 
-git -C "$SCRIPT_REPO" fetch --quiet --tags origin || die "git fetch --tags failed"
+# The first pass fetched; the scrubbed second pass has no credentials to fetch with.
+[ "$SCRUBBED" = 1 ] || git -C "$SCRIPT_REPO" fetch --quiet --tags origin || die "git fetch --tags failed"
 COMMIT="$(git -C "$SCRIPT_REPO" rev-parse --verify --quiet "refs/tags/${TAG}^{commit}")" ||
     refuse "no tag ${TAG}"
 for required in scripts/deploy/recreate-kind-cluster.sh scripts/deploy/load-release-images.sh \
@@ -521,7 +555,10 @@ done
 # changes and before any of the candidate's code runs. It runs in an environment as bare
 # as rc()'s, plus only what gh and the registry need (the operator's gh config or
 # GH_TOKEN, and DOCKER_CONFIG). The candidate gets the verified refs, never a credential.
-if git -C "$SCRIPT_REPO" cat-file -e "${COMMIT}:scripts/release/verify-image-provenance.sh" 2>/dev/null; then
+if [ "$SCRUBBED" = 1 ]; then
+    # The second pass (scrub_environment): checked by the first, with its credentials.
+    PROVENANCE_VERIFIED="$VERIFIED_BEFORE_SCRUB"
+elif git -C "$SCRIPT_REPO" cat-file -e "${COMMIT}:scripts/release/verify-image-provenance.sh" 2>/dev/null; then
     command -v gh >/dev/null 2>&1 || refuse "${TAG}'s images need a provenance check with gh; install gh"
     verified=()
     for image in "${QA_IMAGE_NAMES[@]}"; do

@@ -67,7 +67,8 @@ keep = ('HOME', 'KIND_CLUSTER', 'ECONGRAPH_SCRATCH_STORAGE', 'XDG_CACHE_HOME', '
         'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XDG_DATA_HOME')
 with open(CONFIG['calls'], 'a') as log:
     log.write(json.dumps({'prog': prog, 'args': args, 'cwd': os.getcwd(),
-                          'env': {k: os.environ.get(k) for k in keep}, 'stdin': stdin}) + '\n')
+                          'env': {k: os.environ.get(k) for k in keep}, 'envkeys': sorted(os.environ),
+                          'stdin': stdin}) + '\n')
 def save():
     state_path.write_text(json.dumps(state))
 name = CONFIG['name']
@@ -113,7 +114,13 @@ if prog == 'docker':
 elif prog == 'kind':
     if args[:2] == ['get', 'kubeconfig']:
         out = 'apiVersion: v1\nkind: Config\n'
-        if state.get('kubeconfig_exec'):
+        style = state.get('kubeconfig_exec')
+        if style == 'flow':
+            out = '{apiVersion: v1, kind: Config, users: [{name: x, user: {exec: {command: /tmp/steal}}}]}\n'
+        elif style == 'json':
+            out = json.dumps({'apiVersion': 'v1', 'kind': 'Config',
+                              'users': [{'name': 'x', 'user': {'auth-provider': {'name': 'gcp'}}}]}) + '\n'
+        elif style:
             out += 'users:\n- name: x\n  user:\n    exec:\n      command: /tmp/steal\n'
     elif args[:2] == ['delete', 'cluster']:
         state.update(cluster=False, owner='')
@@ -847,16 +854,25 @@ class DeployRcToQaTest(unittest.TestCase):
         self.assertIn('must set KIND_VERSION exactly once', result.stdout)
 
     def test_a_kubeconfig_with_an_exec_entry_is_refused(self):
-        self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}, 'kubeconfig_exec': True})
-        result = self.deploy()
-        self.assertEqual(result.returncode, 3, result.stdout)
-        self.assertIn('has an exec or auth-provider entry', result.stdout)
-        self.assertFalse(any(c['prog'] == 'kubectl' for c in self.logged()))
+        # Block style, flow style and JSON: parsed, not matched line by line.
+        for style in ('block', 'flow', 'json'):
+            with self.subTest(style=style):
+                self.qa_root = self.work / f'qa-{style}'
+                self.calls.write_text('')
+                self.write_state({'daemon_images': {LOCAL_IMAGES[0]: 'sha256:production'}, 'kubeconfig_exec': style})
+                result = self.deploy()
+                self.assertEqual(result.returncode, 3, result.stdout)
+                self.assertIn('has an exec or auth-provider entry', result.stdout)
+                self.assertFalse(any(c['prog'] == 'kubectl' for c in self.logged()))
 
     def test_no_command_after_candidate_code_gets_the_operators_credentials(self):
         tag, _ = self.provenance_candidate()
+        # Entries no shell variable can name, and an exported function, as an operator's
+        # environment can hold them.
+        odd = {'npm_config_//registry.npmjs.org/:_authToken': 'operator-npm-token',
+               'BASH_FUNC_evil%%': '() {  echo planted\n}'}
         result = self.deploy('--tag', tag, '--dump-dir', str(self.dump), '--name', NAME,
-                             GH_TOKEN='operator-admin-token')
+                             GH_TOKEN='operator-admin-token', **odd)
         self.assertEqual(result.returncode, 0, result.stdout)
         calls = self.logged()
         # The provenance check, before any candidate code, keeps the token.
@@ -865,9 +881,12 @@ class DeployRcToQaTest(unittest.TestCase):
         last_gh = max(i for i, c in enumerate(calls) if c['prog'] == 'gh')
         self.assertLess(last_gh, first_candidate)
         self.calls.write_text('')
-        result = self.deploy('--tag', tag, '--teardown', '--name', NAME, GH_TOKEN='operator-admin-token')
+        result = self.deploy('--tag', tag, '--teardown', '--name', NAME, GH_TOKEN='operator-admin-token', **odd)
         self.assertEqual(result.returncode, 0, result.stdout)
         after = calls[last_gh + 1:] + self.logged()
+        for call in after:
+            for key in odd:
+                self.assertNotIn(key, call['envkeys'], (call['prog'], call['args'][:3]))
         self.assertTrue(any(c['prog'] in ('kind', 'kubectl', 'docker') for c in after))
         for call in after:
             for withheld in ('GH_TOKEN', 'GH_CONFIG_DIR', 'SSH_AUTH_SOCK', 'DBUS_SESSION_BUS_ADDRESS',
